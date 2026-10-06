@@ -259,3 +259,28 @@ def test_reply_to_surviving_message_keeps_expired_root_thread(replicas):
     assert rows[-1]["thread_id"] == rows[-2]["thread_id"]
     assert rows[-1]["thread"] == root["seq"]
     assert rows[-1]["reply_to"] == parent["seq"]
+
+
+@pytest.mark.redteam
+def test_legacy_reply_rewiring_is_refused_without_changing_row_digest(replicas):
+    left, right = replicas
+    left.ws.send(left.owner, "#shared", "note", "root")
+    left.ws.send(left.owner, "#shared", "note", "second")
+    payload = left.ws.board.export_graph(left.owner)
+    from ml_stack.workspace.board_graph import identifier
+    from ml_stack.workspace.chain import GENESIS, _digest
+
+    previous = GENESIS
+    for event in payload["events"]:
+        row = event["row"]
+        for key in ("event_id", "origin", "thread_id", "reply_id"):
+            row.pop(key)
+        row["prev"] = previous
+        row["hash"] = _digest(previous, row)
+        previous = row["hash"]
+        event["id"] = identifier(payload["workspace"], "bus", row["hash"])
+        event["origin"] = "legacy:" + payload["workspace"]
+    payload["events"][-1]["thread_id"] = payload["events"][0]["id"]
+    with pytest.raises(ValueError, match="legacy reply"):
+        right.ws.board.combine_graph(right.owner, payload)
+    assert right.ws.bus.log.rows() == []

@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from uuid import uuid4
 
-from ml_stack.workspace.board_evidence import checkpoints, seal, verified
+from ml_stack.workspace.board_evidence import audience, checkpoints, seal, verified
 from ml_stack.workspace.board_graph import BoardGraph
 from ml_stack.workspace.chain import GENESIS, ChainBroken, Verdict, _digest
 
@@ -127,6 +127,7 @@ class GraphLog:
                     "seq": event["row"]["seq"],
                     "hash": event["row"]["hash"],
                     "projection": event["projection"],
+                    "audience": audience(event["row"]),
                 }
                 bases[event["origin"]] = {"seq": event["row"]["seq"], "hash": event["row"]["hash"]}
                 graph.drop([event["id"], event["id"] + ":message"], force=True)

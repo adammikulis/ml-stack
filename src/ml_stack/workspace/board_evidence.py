@@ -14,6 +14,15 @@ def envelope(event):
     ).hexdigest()
 
 
+def audience(row):
+    scope = (
+        ["board", row["to"]]
+        if row["to"].startswith("#")
+        else ["dm", *sorted({row["from"], row["to"]})]
+    )
+    return envelope(scope)
+
+
 def events(graph, stream):
     return sorted(
         (node for node in graph.nodes("board-event") if node["stream"] == stream),

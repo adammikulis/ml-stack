@@ -6,7 +6,7 @@ import json
 import math
 import re
 
-from ml_stack.workspace.board_evidence import checkpoints, verified
+from ml_stack.workspace.board_evidence import audience, checkpoints, verified
 from ml_stack.workspace.board_graph import MAX_BYTES, MAX_EVENTS, identifier
 from ml_stack.workspace.chain import GENESIS
 
@@ -137,10 +137,32 @@ def valid_event(event, workspace):
         raise ValueError("message hash does not bind its immutable identity")
 
 
-def same_audience(left, right):
-    if left["to"].startswith("#") or right["to"].startswith("#"):
-        return left["to"] == right["to"]
-    return {left["from"], left["to"]} == {right["from"], right["to"]}
+def validate_references(incoming, known, retired, workspace):
+    by_sequence = {(event["origin"], event["row"]["seq"]): event["id"] for event in known.values()}
+    by_sequence.update({(event["origin"], event["seq"]): key for key, event in retired.items()})
+    for event in incoming:
+        row = event["row"]
+        for field in ("thread_id", "reply_id"):
+            target = event[field]
+            if event["origin"] == "legacy:" + workspace:
+                sequence = (
+                    row.get("thread", 0)
+                    if field == "thread_id"
+                    else row.get("reply_to") or row.get("thread", 0)
+                )
+                expected = by_sequence.get((event["origin"], sequence), "") if sequence else ""
+                if target != expected or (sequence and not expected):
+                    raise ValueError(
+                        "legacy reply identity disagrees with original sequence evidence"
+                    )
+            if target:
+                target_audience = (
+                    retired[target]["audience"]
+                    if target in retired
+                    else (audience(known[target]["row"]) if target in known else "")
+                )
+                if target_audience != audience(row):
+                    raise ValueError("reply target is absent or addresses another audience")
 
 
 def authorized_boards(boards, descriptors):
@@ -202,18 +224,7 @@ def combine(graph_store, payload):
             raise ValueError("imported origin chain is damaged")
         known_events = {event["id"]: event for event in existing} | incoming
         retired = graph.get_doc("retired-events:bus") or {}
-        for event in events:
-            for field in ("thread_id", "reply_id"):
-                target = event[field]
-                if (
-                    target
-                    and target not in retired
-                    and (
-                        target not in known_events
-                        or not same_audience(event["row"], known_events[target]["row"])
-                    )
-                ):
-                    raise ValueError("reply target is absent or addresses another audience")
+        validate_references(events, known_events, retired, workspace)
         count = 0
         seen = {event["id"] for event in existing} | set(retired)
         remaining = list(events)
