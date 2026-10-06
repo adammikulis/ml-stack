@@ -1,0 +1,54 @@
+"""Snapshot selection for Hub pulls."""
+
+import pytest
+
+from ml_stack.hub import transfer
+from ml_stack.hub.remote import NotFound, RemoteFile
+
+
+@pytest.fixture
+def listed(monkeypatch):
+    files = [RemoteFile(name, 1) for name in (
+        "config.json", "tokenizer.json", "model-00001-of-00002.safetensors",
+        "model-00002-of-00002.safetensors", "weights.bin", ".gitattributes")]
+    monkeypatch.setattr(transfer.remote, "listing", lambda *args: files)
+    calls = []
+    monkeypatch.setattr(transfer, "_bring", lambda *args: calls.append(args))
+    return files, calls
+
+
+@pytest.mark.parametrize("ref", ["hf:maker/model", "hf:maker/model/model-00001-of-00002.safetensors"])
+def test_safetensors_pull_downloads_snapshot(ref, listed, tmp_path):
+    files, calls = listed
+    callback = lambda progress: None
+    cancel = transfer.CancelToken()
+    assert transfer.pull(ref, tmp_path, callback, cancel, peers=False) == tmp_path
+    parsed, chosen, folder, run = calls[0]
+    assert parsed.repo == "maker/model"
+    assert chosen == files[:4]
+    assert folder == tmp_path
+    assert run.report is callback and run.cancel is cancel and run.peers is False
+
+
+@pytest.mark.parametrize("ref", ["hf:maker/model/missing.safetensors", "hf:maker/model:Q4_K_M", "hf:maker/model/missing.gguf"])
+def test_missing_explicit_reference_is_not_replaced_by_snapshot(ref, listed, tmp_path):
+    with pytest.raises(NotFound):
+        transfer.pull(ref, tmp_path)
+    assert listed[1] == []
+
+
+def test_snapshot_keeps_safe_files_without_model_configuration(listed, tmp_path):
+    files, calls = listed
+    files[:] = [RemoteFile("tokenizer.json", 1), RemoteFile("weights.bin", 1)]
+    assert transfer.snapshot("maker/model", revision="release", dest=tmp_path) == tmp_path
+    assert calls[0][0].revision == "release"
+    assert calls[0][1] == files[:1]
+    assert calls[0][2] == tmp_path
+
+
+def test_repo_pull_requires_model_configuration(listed, tmp_path):
+    files, calls = listed
+    files[:] = [RemoteFile("model.safetensors", 1)]
+    with pytest.raises(NotFound):
+        transfer.pull("hf:maker/model", tmp_path)
+    assert calls == []

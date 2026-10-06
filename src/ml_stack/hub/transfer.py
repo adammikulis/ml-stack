@@ -1,7 +1,8 @@
 """Downloading a model from a Hugging Face endpoint, resumably, with progress.
 
 ``pull`` takes ``hf:owner/repo/file.gguf`` (every shard of that build comes down),
-``hf:owner/repo:Q4_K_M`` or a folder-less file reference, and returns the path to serve.
+``hf:owner/repo:Q4_K_M`` or a folder-less file reference. Safetensors references
+retrieve the complete snapshot folder; GGUF references return the first file.
 A transfer interrupted by a cancel, a dropped connection or a crash continues from the
 bytes already on disk.
 """
@@ -241,7 +242,7 @@ def _space(folder: Path, need: int) -> None:
 
 def pull(ref: str, dest: str | Path | None = None, on_progress: Report | None = None,
          cancel: CancelToken | None = None, *, peers: bool | None = None) -> Path:
-    """Download ``ref`` into ``dest`` and return the path of its first file.
+    """Download ``ref`` into ``dest`` and return its GGUF file or safetensors folder.
 
     ``dest`` defaults to ``<store>/models/owner/repo``. Every shard of a sharded build comes
     down; files already complete are kept. Raises `NotFound`, `GatedRepo` (with how to
@@ -252,7 +253,23 @@ def pull(ref: str, dest: str | Path | None = None, on_progress: Report | None = 
     Paired devices are asked first (``peers=False`` skips them; `ml_stack.hub.peers`): their
     bytes count only if they hash to the Hub's own digest, else the Hub is used.
     """
-    parsed, chosen = plan(ref)
+    parsed = remote.parse(ref)
+    if parsed.file.lower().endswith(".safetensors"):
+        files = remote.listing(parsed.repo, parsed.revision)
+        if parsed.file not in {one.path for one in files}:
+            raise NotFound(f"{parsed.repo} has no {parsed.file}")
+        return _snapshot_files(parsed, files, dest, on_progress, cancel, peers)
+    try:
+        parsed, chosen = plan(ref)
+    except NotFound:
+        if parsed.quant or parsed.file:
+            raise
+        files = remote.listing(parsed.repo, parsed.revision)
+        names = {one.path for one in files}
+        if "config.json" not in names or not any(name.lower().endswith(".safetensors")
+                                                   for name in names):
+            raise
+        return _snapshot_files(parsed, files, dest, on_progress, cancel, peers)
     folder = destination(dest, parsed)
     _bring(parsed, chosen, folder, _Run(on_progress, cancel, peers))
     return folder / chosen[0].path
@@ -288,15 +305,23 @@ PICKLES = (".bin", ".pt", ".pth", ".ckpt", ".pkl", ".pickle", ".h5", ".msgpack",
 
 
 def snapshot(repo: str, revision: str = "main", on_progress: Report | None = None,
-             cancel: CancelToken | None = None, *, peers: bool | None = None) -> Path:
+             cancel: CancelToken | None = None, *, peers: bool | None = None,
+             dest: str | Path | None = None) -> Path:
     """Every file of ``repo`` but its pickle-based weights, in ``<store>/models/owner/repo``;
     returns that folder. For a repository that holds safetensors."""
     parsed = remote.Ref(repo, "", "", revision)
-    chosen = [f for f in remote.listing(repo, revision)
+    return _snapshot_files(parsed, remote.listing(repo, revision), dest,
+                           on_progress, cancel, peers)
+
+
+def _snapshot_files(parsed: remote.Ref, files: list[RemoteFile], dest: str | Path | None,
+                    on_progress: Report | None, cancel: CancelToken | None,
+                    peers: bool | None) -> Path:
+    chosen = [f for f in files
               if not f.path.lower().endswith(PICKLES) and not f.name.startswith(".git")]
     if not chosen:
-        raise NotFound(f"{repo} has no files")
-    folder = destination(None, parsed)
+        raise NotFound(f"{parsed.repo} has no files")
+    folder = destination(dest, parsed)
     _bring(parsed, chosen, folder, _Run(on_progress, cancel, peers))
     return folder
 
