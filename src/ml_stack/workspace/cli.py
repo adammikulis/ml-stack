@@ -674,7 +674,7 @@ def _runner(handler: Handler) -> Callable[[argparse.Namespace], int]:
                                     _token(args), request_id=args.request_id)
         else:
             ws, token = _context(args)
-            if isinstance(ws, Workspace):
+            if isinstance(ws, Workspace) and handler is not _init:
                 ws.registry._record_device(ws.auth(token).id, onboard.device_metadata.current())
             result = handler(args, ws, token)
         _show(args, result)

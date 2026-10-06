@@ -33,9 +33,18 @@ def ledger(tmp_path):
     held.sealed.close()
 
 
+def completed_review(board, token, ident, decision):
+    result = board.board.review(token, ident, decision)
+    if result['accepted']:
+        with GraphStore(board.base / 'coordination.db') as graph:
+            node = next(node for node in graph.nodes('task') if node['id'] == ident)
+            graph.upsert_node({**node, 'attrs': {**node['attrs'], 'state': 'completed'}})
+    return result
+
+
 def reviewed(board, decision=None):
     proposal = proposed(board)
-    result = board.board.review(board.parent, board.task['id'], decision or accepted())
+    result = completed_review(board, board.parent, board.task['id'], decision or accepted())
     return proposal, result
 
 
@@ -175,7 +184,7 @@ def test_canonical_awards_follow_verified_model_family_not_device_or_worker_labe
     board.board.submit(token, task['id'], {'artifacts': {'next.json': 'b' * 64},
                         'checks': [{'name': 'Worker claims tests', 'passed': True}],
                         'provenance': {'model': 'forged-qwen-label', 'runtime': 'Codex'}})
-    board.board.review(board.parent, task['id'], accepted())
+    completed_review(board, board.parent, task['id'], accepted())
     task_credit.verify_task(board.ws, board.parent, task['id'], ledger=ledger)
     row = work_reputation.standings(board.ws, token, ledger=ledger)['own']
     members = balance // 10
@@ -207,7 +216,7 @@ def test_designated_peer_review_awards_with_live_person_grant_and_revocation_is_
     board.board.claim(board.child, task['id'], allocation['allocation_id'])
     board.board.submit(board.child, task['id'], {'artifacts': {'reviewed.json': 'd' * 64},
                       'checks': [{'name': 'Worker claims acceptance', 'passed': True}]})
-    board.board.review(peer, task['id'], accepted())
+    completed_review(board, peer, task['id'], accepted())
     result = task_credit.verify_task(board.ws, peer, task['id'], ledger=ledger)
     assert result['credited'] and result['verifier'] == 'review-peer'
     board.ws.registry.set_project(board.ws.auth(board.owner), 'review-peer', {'root': '/different/project'})
@@ -224,7 +233,7 @@ def test_same_device_parent_cannot_review_through_another_worker_seat(board, led
     device_agent.bind_worker(board.ws, board.owner, 'parent-worker')
     proposed(board)
     with pytest.raises(Denied, match='different enrolled device'):
-        board.board.review(board.parent, board.task['id'], accepted())
+        completed_review(board, board.parent, board.task['id'], accepted())
     board.board.review(board.owner, board.task['id'], accepted())
     with pytest.raises(Denied, match='different enrolled device'):
         task_credit.verify_task(board.ws, board.parent, board.task['id'], ledger=ledger)
@@ -249,7 +258,7 @@ def test_model_switch_binds_live_family_without_moving_historical_awards(board, 
     assert pending['family_id'] == 'qwen' and pending['economy']['balance'] == 0
     board.board.submit(board.child, board.task['id'], {'artifacts': {'replay.json': 'a' * 64},
                       'checks': [{'name': 'Worker claim', 'passed': True}]})
-    board.board.review(board.parent, board.task['id'], accepted())
+    completed_review(board, board.parent, board.task['id'], accepted())
     award = task_credit.verify_task(board.ws, board.parent, board.task['id'], ledger=ledger)
     board.now[0] += 30
     runner = replace(localagent.load(board.ws, 'native-worker'), model='gemma', model_name='gemma')
@@ -265,3 +274,12 @@ def test_model_switch_binds_live_family_without_moving_historical_awards(board, 
     assert qwen['economy']['balance'] == 10 and qwen['evidence'][0]['id'] == award['id']
     assert qwen['evidence'][0]['provenance']['model'] == 'qwen'
     assert len(ledger.sealed.graph().nodes('work_award')) == 1
+
+
+@pytest.mark.redteam
+def test_accepted_native_task_earns_nothing_before_integration_completes(board, ledger):
+    proposed(board)
+    board.board.review(board.parent, board.task['id'], accepted())
+    with pytest.raises(Denied, match='completed canonical task'):
+        task_credit.verify_task(board.ws, board.parent, board.task['id'], ledger=ledger)
+    assert ledger.standings(work_reputation.scope(board.ws)) == []
