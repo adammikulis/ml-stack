@@ -7,6 +7,7 @@ import json
 import threading
 import time
 from collections.abc import Iterator
+from dataclasses import replace
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any
@@ -241,11 +242,11 @@ class UI:
             with self.join_guard():
                 if options.action is not None:
                     cluster_action(options.action, passphrase, group, self.cluster_key_path,
-                                   options=JoinOptions(mode=options.mode, port=self.discovery_port))
+                                   options=replace(options, port=options.port if options.port is not None else self.discovery_port))
                 else:
                     joiner = join_existing if options.existing else join_by_passphrase
                     joiner(passphrase, group, self.cluster_key_path,
-                           options=JoinOptions(mode=options.mode, port=self.discovery_port))
+                           options=replace(options, port=options.port if options.port is not None else self.discovery_port))
                 recovery.remember(passphrase, group, self.cluster_key_path)
         except DiscoveryError:
             self.throttle.failed(source)

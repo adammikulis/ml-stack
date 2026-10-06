@@ -53,9 +53,11 @@ def test_passphrase_enrollment_preserves_selected_mode(isolated_join, monkeypatc
     monkeypatch.setattr(joining, "join_by_passphrase", lambda *a, **kw: asked.append((a, kw)))
     monkeypatch.setattr(joining, "memberships", lambda path: [])
     joined = joining.join_machine(root=tmp_path, passphrase="quince larch marlow",
-                                  group="orchard", mode=mode, start=lambda *a: 42,
+                                  group="orchard", mode=mode, timeout_s=.25, discovery_port=1234, start=lambda *a: 42,
                                   say=lambda text: None)
     assert asked[0][1]["options"].mode == mode
+    assert asked[0][1]["options"].timeout_s == .25
+    assert asked[0][1]["options"].port == 1234
     assert joined.mode == expected
 
 

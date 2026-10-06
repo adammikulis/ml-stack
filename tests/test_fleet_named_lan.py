@@ -38,10 +38,12 @@ def test_native_named_hint_then_authenticated_join(tmp_path, monkeypatch):
 
 
 def test_selected_missing_cluster_never_creates_membership(tmp_path, monkeypatch):
-    monkeypatch.setattr(joining, "find_joiners", lambda *args, **kwargs: [])
+    asked = []
+    monkeypatch.setattr(joining, "find_joiners", lambda *args, **kwargs: asked.append(kwargs) or [])
     client = UI(name="desk", cluster_key_path=tmp_path / "client.key")
     with pytest.raises(discovery.DiscoveryError, match="no longer available"):
-        client.join(WORDS, "Cedar lab", "local", options=joining.JoinOptions(existing=True))
+        client.join(WORDS, "Cedar lab", "local", options=joining.JoinOptions(existing=True, timeout_s=.17, port=1234))
+    assert asked == [{"timeout_s": .17, "port": 1234}]
     assert not discovery.memberships(client.cluster_key_path)
 
 

@@ -467,7 +467,7 @@ def join_machine(*, name: str = "", passphrase: str = "", group: str = "",
                 port, words, g, mode)))(passphrase, group)
         else:
             join_by_passphrase(passphrase, group, cluster_key_path,
-                               options=JoinOptions(mode=mode))
+                               options=JoinOptions(mode=mode, timeout_s=timeout_s, port=discovery_port))
         enrolled = next((m for m in memberships(cluster_key_path) if m.group == group), None)
         joined.mode = enrolled.mode if enrolled else mode or cluster_modes.PRODUCTION
         say(f"joined cluster '{group}'")

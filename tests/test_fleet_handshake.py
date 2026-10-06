@@ -46,7 +46,7 @@ class Machine:
     def __init__(self, tmp_path, udp: int) -> None:
         self.keyfile = tmp_path / "a" / "cluster.key"
         self.keyfile.parent.mkdir()
-        self.member = mint_cluster("lab", self.keyfile, join=join_secret(WORDS, "lab"))
+        self.member = mint_cluster("lab", self.keyfile, join=join_secret(WORDS, "lab"), mode="prod")
         root = tmp_path / "a" / "traind"
         (root / "files").mkdir(parents=True)
         self.runner = JobRunner(root)
@@ -55,8 +55,8 @@ class Machine:
         self.joining = Joining(lambda: memberships(self.keyfile), log=self.logged.append)
         handle = self.joining.handle
 
-        def record(path, body, source):
-            status, answer = handle(path, body, source)
+        def record(path, body, source, *, transport_tls=False):
+            status, answer = handle(path, body, source, transport_tls=transport_tls)
             self.captured.append((path, body, answer))
             return status, answer
 
@@ -67,7 +67,10 @@ class Machine:
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
         self.port = self.httpd.server_port
         self.advertiser = Advertiser(Beacon(name="a", port=self.port), self.member.key,
-                                     port=udp, cluster="lab", interval_s=0.2).start()
+                                     port=udp, cluster="lab", interval_s=0.2)
+        self.advertiser.mode = self.member.mode
+        self.advertiser.joinable = True
+        self.advertiser.start()
 
     def stop(self) -> None:
         self.advertiser.stop()
