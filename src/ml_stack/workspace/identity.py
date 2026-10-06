@@ -403,6 +403,18 @@ class Registry:
             entry["revoked"] = True
             self._save(agents)
 
+    def revoke_self(self, token: str, cleanup: Callable[[Identity], None]) -> Identity:
+        """Revoke the current agent capability and clean its resources under the identity lock."""
+        with held(self.path.with_name("agents.lock")):
+            who = self.authenticate(token)
+            if who.role != AGENT:
+                raise Denied("self revocation requires an agent capability")
+            agents = self._load()
+            agents[who.id]["revoked"] = True
+            self._save(agents)
+            cleanup(who)
+            return who
+
     def delegate(self, by: Identity, name: str, ttl_s: float, can: tuple[str, ...],
                  most: int) -> str:
         """A token for ``by``'s child ``by.id/name``: it holds at most ``by``'s rights, lasts no

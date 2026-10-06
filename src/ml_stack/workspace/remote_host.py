@@ -10,6 +10,7 @@ from typing import Any
 from ml_stack.files import read_json
 from ml_stack.workspace import onboard, tokens
 from ml_stack.workspace.boards import ANNOUNCE
+from ml_stack.workspace.chain import held
 from ml_stack.workspace.claims import Conflict, normal
 from ml_stack.workspace.identity import AGENT, Denied
 from ml_stack.workspace.integration_git import git
@@ -172,13 +173,15 @@ class WorkspaceHost:
             raise Denied("agent capability has no read permission")
         if operation in {"native.reserve", "native.release"}:
             ws._may(who, "claim")
-            result = self._native_claims(ws, who, project_id, (token, operation, args, kwargs))
+            with held(ws.registry.path.with_name("agents.lock")):
+                current = ws.registry.authenticate(token)
+                result = self._native_claims(ws, current, project_id, (token, operation, args, kwargs))
         elif operation == "delegate":
             result = self._delegate(ws, who, project_id, args, kwargs)
         elif operation == "revoke_self":
             if args or kwargs:
                 raise ValueError("self revocation takes no target")
-            ws.registry.revoke(who, who.id)
+            ws.registry.revoke_self(token, lambda actor: self._release_owned_claims(ws, actor))
             ws.audit("remote.revoke_self", who.id, project_id=project_id)
             result = {"id": who.id, "revoked": True}
         elif operation == "whoami":
@@ -196,7 +199,7 @@ class WorkspaceHost:
             kind, key = args
             mapped = self._native_resource(project_id, kind, key)
             row = ws.who_owns(kind, mapped)
-            result = {**row, "key": key} if row else None
+            result = self._public_claim(project_id, row) if row else None
         elif operation in METHODS:
             owner, name = (ws.board, operation[6:]) if operation.startswith("board.") else (ws, operation)
             method = getattr(owner, name)
@@ -226,6 +229,11 @@ class WorkspaceHost:
         ws.audit("remote.delegate", who.id, child=child, project_id=project_id)
         return {"id": child, "token": made, "project_id": project_id,
                   "expires": ws.registry.info(child)["expires"]}
+
+    def _release_owned_claims(self, ws, who):
+        with held(ws.claims.lock):
+            claims = ws.claims._load()
+            ws.claims._save({key: row for key, row in claims.items() if row["owner"] != who.id})
 
     def _public_claim(self, project_id, row):
         row = {key: row[key] for key in ("kind", "key", "owner", "pid", "since", "expires", "note") if key in row}

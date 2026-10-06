@@ -152,3 +152,20 @@ def test_native_reservations_are_atomic_project_scoped_and_return_relative_keys(
     for branch in ("feature/", "feature.lock", "feature//child"):
         assert request(first, "native.reserve", [["branch", branch]])[0] == 400
     assert request(first, "native.reserve", [["branch", "valid"]], pid=9999)[0] == 400
+
+
+def test_self_revocation_cleans_exact_claims_and_refuses_replaced_generation(enrollment):
+    host, _, body = enrollment
+    _, parent = host.enroll(PROJECT, body, cluster="dev", cluster_id="c" * 64)
+    ws = host.workspace(PROJECT)
+    actor = ws.auth(parent["token"])
+    old = ws.registry.delegate(actor, "native", 300, actor.can, 8)
+    child = ws.auth(old)
+    ws.claims.reserve(child, [("branch", "child-work")])
+    ws.claims.reserve(actor, [("branch", "parent-work")])
+    ws.registry.revoke_self(old, lambda who: host._release_owned_claims(ws, who))
+    assert {row["owner"] for row in ws.claims.listing()} == {actor.id}
+    replacement = ws.registry.delegate(actor, "native", 300, actor.can, 8)
+    with pytest.raises(Denied, match="recognised"):
+        ws.registry.revoke_self(old, lambda who: host._release_owned_claims(ws, who))
+    assert ws.auth(replacement).id == child.id
