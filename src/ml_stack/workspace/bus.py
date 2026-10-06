@@ -7,9 +7,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from ml_stack.files import read_json, write_json
 from ml_stack.workspace import wake
-from ml_stack.workspace.chain import ChainLog, held
+from ml_stack.workspace.graphlog import GraphLog
 
 __all__ = ["BROADCAST", "CALL_TYPES", "TYPES", "Bus", "mentions_me"]
 
@@ -52,7 +51,7 @@ class Bus:
     def __init__(self, base: Path, clock: Callable[[], float] = time.time) -> None:
         self.base = base
         self.clock = clock
-        self.log = ChainLog(base / "bus.jsonl", clock)
+        self.log = GraphLog(base, "bus", clock)
         self._index = _Index()
 
     def append(self, row: dict[str, Any]) -> dict[str, Any]:
@@ -70,22 +69,13 @@ class Bus:
         found = self.log.after(seq - 1)[:1]
         return found[0] if found and found[0]["seq"] == seq else None
 
-    def _cursor_file(self, me: str) -> Path:
-        return self.base / "cursors" / f"{me}.json"
-
     def cursor(self, me: str) -> int:
         """The highest sequence number ``me`` acknowledged."""
-        data = read_json(self._cursor_file(me), {})
-        return int(data.get("seq", 0)) if isinstance(data, dict) else 0
+        return self.log.graph.cursor(me, "inbox")
 
     def ack(self, me: str, seq: int) -> int:
         """Record that ``me`` has handled everything up to ``seq``; never moves backwards."""
-        path = self._cursor_file(me)
-        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        with held(path.with_name(path.name + ".lock")):
-            now = max(self.cursor(me), seq)
-            write_json(path, {"version": VERSION, "seq": now})
-        return now
+        return self.log.graph.cursor(me, "inbox", seq)
 
     def inbox(self, me: str, after: int | None = None, limit: int = 50) -> list[dict[str, Any]]:
         """Live messages for ``me`` after ``after`` (default: after the acknowledged cursor)."""

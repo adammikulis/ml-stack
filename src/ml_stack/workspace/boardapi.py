@@ -8,7 +8,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from ml_stack.workspace import plain
+from ml_stack.workspace import board_graph_merge, plain
 from ml_stack.workspace.boards import ANNOUNCE, ANNOUNCE_MARK, GENERAL, MODES, STYPES, Boards
 from ml_stack.workspace.bus import TYPES
 from ml_stack.workspace.identity import AGENT, HUMAN, Denied, Identity, valid_id
@@ -61,6 +61,22 @@ class BoardApi:
     def __init__(self, ws: Workspace) -> None:
         self.ws = ws
         self.store = Boards(ws.base, ws.clock)
+
+    def export_graph(self, token: str) -> dict[str, Any]:
+        """Export this authority's message graph for an authorized replica."""
+        who = self._who(token)
+        if who.role != HUMAN or who.parent:
+            raise Denied("only the workspace person exports the board graph")
+        return board_graph_merge.export(self.store.log.graph)
+
+    def combine_graph(self, token: str, payload: dict[str, Any]) -> int:
+        """Combine same-authority messages without importing memberships or credentials."""
+        who = self._who(token)
+        if who.role != HUMAN or who.parent:
+            raise Denied("only the workspace person combines board graphs")
+        count = board_graph_merge.combine(self.store.log.graph, payload)
+        self.ws.audit("board.graph.combine", who.id, messages=count)
+        return count
 
     # -- who may --------------------------------------------------------------------------
     def _who(self, token: str) -> Identity:
@@ -602,10 +618,11 @@ class BoardApi:
                           and not r["to"].startswith("#") and r["to"] != "*")
 
     def _thread_access(self, who: Identity, rows: list[dict[str, Any]]) -> None:
-        if rows[0]["to"].startswith("#"):
-            self.require_read(who, rows[0]["to"])
-        elif who.role == AGENT:
-            self._pair_ok(who, rows[0]["from"], rows[0]["to"])
+        for row in rows:
+            if row["to"].startswith("#"):
+                self.require_read(who, row["to"])
+            elif who.role == AGENT:
+                self._pair_ok(who, row["from"], row["to"])
 
     # -- digests --------------------------------------------------------------------------
     def digest(self, token: str, ack: bool = False, thread: int = 0) -> dict[str, Any]:

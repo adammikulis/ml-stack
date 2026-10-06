@@ -1,4 +1,4 @@
-"""Boards, their members and each identity's subscriptions, replayed from ``boards.jsonl``."""
+"""Boards, memberships, subscriptions and read cursors in GraphStore."""
 
 from __future__ import annotations
 
@@ -9,9 +9,9 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from ml_stack.files import read_json, write_json
 from ml_stack.workspace import plain
-from ml_stack.workspace.chain import ChainLog, held
+from ml_stack.workspace.chain import held
+from ml_stack.workspace.graphlog import GraphLog
 
 __all__ = ["ANNOUNCE", "ANNOUNCE_KINDS", "ANNOUNCE_MARK", "GENERAL", "MODES", "STYPES", "Boards",
            "project_board_name"]
@@ -32,57 +32,24 @@ def project_board_name(project: dict[str, str]) -> str:
 
 
 class Boards:
-    """The board events of one workspace: every state is a replay of the chained log."""
+    """Relational board state for one workspace."""
 
     def __init__(self, base: Path, clock: Callable[[], float] = time.time) -> None:
         self.base = base
         self.clock = clock
-        self.log = ChainLog(base / "boards.jsonl", clock)
+        self.log = GraphLog(base, "boards", clock)
         self.guard = base / "boards.lock"
 
     def state(self) -> tuple[dict[str, dict[str, Any]], dict[str, dict[tuple[str, str], str]]]:
         """``(boards, subscriptions)``: boards by name with ``members``, subscriptions by
         identity mapping ``(type, target)`` to a delivery mode."""
-        boards: dict[str, dict[str, Any]] = {GENERAL: {
-            "by": "", "open": True, "project": "", "title": "everyone", "members": set(),
-            "created": 0.0},
-            ANNOUNCE: {"by": "", "open": True, "project": "", "title": "terse one-line progress",
-                       "members": set(), "created": 0.0}}
-        subs: dict[str, dict[tuple[str, str], str]] = {}
-        for r in self.log.rows():
-            op, name, who = r.get("op"), r.get("name", ""), r.get("who", "")
-            if r.get("kind") == "board":
-                if op == "create" and name not in boards:
-                    boards[name] = {"by": r["by"], "open": bool(r["open"]),
-                                    "project": r.get("project", ""), "title": r.get("title", ""),
-                                    "members": {r["by"]} if r["by"] else set(),
-                                    "created": r["ts"]}
-                elif op == "join" and name in boards:
-                    boards[name]["members"].add(who)
-                elif op == "leave" and name in boards:
-                    boards[name]["members"].discard(who)
-            elif r.get("kind") == "sub":
-                mine = subs.setdefault(who, {})
-                key = (r["stype"], r["target"])
-                if op == "set":
-                    mine[key] = r["mode"]
-                else:
-                    mine.pop(key, None)
+        boards, subs, _ = self.log.graph.state()
         return boards, subs
 
     def sinces(self) -> dict[str, dict[tuple[str, str], int]]:
         """Per identity, the message sequence number each subscription was made at: a
         subscription delivers only what arrives after it."""
-        found: dict[str, dict[tuple[str, str], int]] = {}
-        for r in self.log.rows():
-            if r.get("kind") == "sub":
-                mine = found.setdefault(r.get("who", ""), {})
-                key = (r["stype"], r["target"])
-                if r.get("op") == "set":
-                    mine[key] = int(r.get("since", 0))
-                else:
-                    mine.pop(key, None)
-        return found
+        return self.log.graph.state()[2]
 
     def append(self, row: dict[str, Any]) -> dict[str, Any]:
         """Add one event row."""
@@ -109,20 +76,10 @@ class Boards:
                          "project": key, "title": plain.line(project.get("name", ""), 60)})
             return name
 
-    def _marks_file(self, who: str) -> Path:
-        return self.base / "cursors" / f"{who.replace('/', '~')}.marks.json"
-
     def marks(self, who: str) -> dict[str, int]:
         """What ``who`` has read: the highest sequence number seen per board, DM or digest."""
-        data = read_json(self._marks_file(who), {})
-        found = data.get("marks", {}) if isinstance(data, dict) else {}
-        return {str(k): int(v) for k, v in found.items()}
+        return self.log.graph.marks(who)
 
     def mark(self, who: str, key: str, seq: int) -> None:
         """Record that ``who`` has read ``key`` up to ``seq``; never moves backwards."""
-        path = self._marks_file(who)
-        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        with held(path.with_name(path.name + ".lock")):
-            now = self.marks(who)
-            now[key] = max(now.get(key, 0), seq)
-            write_json(path, {"version": VERSION, "marks": now})
+        self.log.graph.cursor(who, key, seq)
