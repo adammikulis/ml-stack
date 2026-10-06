@@ -40,3 +40,12 @@ def test_custom_runtime_preserves_explicit_cache(tmp_path, monkeypatch):
     configure(tmp_path / "preview")
     assert home.home() == tmp_path / "preview" / "state"
     assert home.cache() == tmp_path / "cache"
+
+
+def test_empty_root_overrides_route_to_custom_runtime(tmp_path, monkeypatch):
+    monkeypatch.setenv(home.ROOT_ENV, "")
+    monkeypatch.setenv(home.CACHE_ENV, "")
+    monkeypatch.setattr(home, "user_home", lambda: tmp_path / "account")
+    configure(tmp_path / "preview")
+    assert home.home() == tmp_path / "preview" / "state"
+    assert home.cache() == tmp_path / "preview" / "state" / "cache"
