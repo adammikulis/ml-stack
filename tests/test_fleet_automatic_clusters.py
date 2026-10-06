@@ -138,3 +138,32 @@ def test_production_membership_never_attempts_automatic_discovery(tmp_path, monk
 
     monkeypatch.setattr(automatic, "offers", unexpected)
     assert automatic.ensure(path) == member
+
+
+def test_production_advertiser_answers_manual_join_discovery(monkeypatch):
+    import json
+
+    advertiser = discovery.Advertiser(discovery.Beacon(name="device", port=8770), KEY,
+                                      cluster="production")
+    advertiser.mode = "prod"
+    advertiser.joinable = True
+    packet = json.dumps({"v": discovery.PROTOCOL, "kind": "join?", "group": "production",
+                         "nonce": NONCE}).encode()
+
+    class Socket:
+        reads = 0
+
+        def settimeout(self, timeout):
+            pass
+
+        def recvfrom(self, size):
+            self.reads += 1
+            if self.reads == 1:
+                return packet, ("127.0.0.1", 8771)
+            raise OSError("closed")
+
+    answered = []
+    monkeypatch.setattr(discovery, "_socket", lambda **kwargs: Socket())
+    monkeypatch.setattr(advertiser, "_tell_join", lambda sock, nonce, address: answered.append(nonce))
+    advertiser._serve()
+    assert answered == [NONCE]
