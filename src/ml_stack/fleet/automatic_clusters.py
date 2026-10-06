@@ -74,7 +74,7 @@ def converge(stop: threading.Event, changed: Callable[[], None],
         if not before or before[0].mode != "dev":
             continue
         try:
-            member = ensure(path, mode="dev")
+            ensure(path, mode="dev")
             changed()
         except (OSError, discovery.DiscoveryError):
             continue

@@ -163,7 +163,7 @@ class Membership:
         from .cluster_modes import validate
         require_name(self.group)
         validate(self.mode)
-        if not isinstance(self.key, bytes) or len(base64.b64decode(
+        if not isinstance(self.key, bytes) or len(self.key) != 43 or len(base64.b64decode(
                 self.key + b"=" * (-len(self.key) % 4), altchars=b"-_", validate=True)) != 32:
             raise ValueError("cluster key must contain 256 bits")
         if not isinstance(self.join, str):
