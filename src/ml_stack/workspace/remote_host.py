@@ -220,7 +220,13 @@ class WorkspaceHost:
                 raise ValueError("native release takes a resource kind and relative key")
             kind, key = args
             mapped = self._native_resource(project_id, kind, key)
-            return {**ws.release(token, kind, mapped), "key": key}
+            try:
+                gone = ws.release(token, kind, mapped)
+            except Denied as exc:
+                raise Denied("project resource belongs to another worker") from exc
+            except ValueError as exc:
+                raise ValueError("project resource is not claimed") from exc
+            return {**gone, "key": key}
         if len(args) != 1 or not isinstance(args[0], list) or not 1 <= len(args[0]) <= 128:
             raise ValueError("native reservation takes 1-128 resource pairs")
         if set(kwargs) - {"label"}:

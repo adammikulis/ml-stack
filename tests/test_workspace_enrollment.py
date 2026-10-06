@@ -3,6 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
 import pytest
+from test_project_source import repository  # noqa: F401
 
 from ml_stack.workspace.identity import AGENT, Denied, Registry
 from ml_stack.workspace.remote_host import WorkspaceHost
@@ -120,3 +121,27 @@ def test_native_parent_delegation_is_bounded(enrollment):
         assert host.answer(PROJECT, "board", request, cluster="dev", cluster_id="c" * 64)[0] == 200
     request["args"] = ["overflow"]
     assert host.answer(PROJECT, "board", request, cluster="dev", cluster_id="c" * 64)[0] == 403
+
+
+def test_native_reservations_are_atomic_project_scoped_and_return_relative_keys(enrollment, repository):  # noqa: F811
+    host, project, body = enrollment
+    project.root = str(repository)
+    _, first = host.enroll(PROJECT, body, cluster="dev", cluster_id="c" * 64)
+    _, second = host.enroll(PROJECT, {**body, "name": "other"}, cluster="dev", cluster_id="c" * 64)
+    def request(agent, operation, *args, **kwargs):
+        return host.answer(PROJECT, "board", {"agent_token": agent["token"], "operation": operation,
+                           "args": list(args), "kwargs": kwargs}, cluster="dev", cluster_id="c" * 64)
+    code, reply = request(first, "native.reserve", [["area", "src/item.py"], ["branch", "feature"]], label="native")
+    assert code == 200, reply
+    assert {row["key"] for row in reply["result"]} == {"src/item.py", "feature"}
+    assert all(row["pid"] == 0 and row["owner"] == first["id"] for row in reply["result"])
+    code, reply = request(second, "native.reserve", [["branch", "other"], ["area", "src"]])
+    assert code == 409 and str(repository) not in str(reply)
+    assert not any(row["key"] == "other" for row in host.workspace(PROJECT).claims.listing())
+    code, reply = request(second, "native.release", "area", "src/item.py")
+    assert code == 403 and str(repository) not in str(reply)
+    assert request(first, "native.release", "area", "src/item.py")[0] == 200
+    for path in ("../outside", "/absolute", "src/../item", "src\\item", "src//item"):
+        assert request(first, "native.reserve", [["area", path]])[0] == 400
+    assert request(first, "native.reserve", [["port", "8000"]])[0] == 400
+    assert request(first, "native.reserve", [["branch", "valid"]], pid=9999)[0] == 400
