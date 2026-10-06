@@ -12,12 +12,24 @@ from typing import Any
 
 from ml_stack.files import read_json, write_json
 from ml_stack.workspace.identity import AGENT, Denied, Identity
+from ml_stack.workspace.windows_tokens import restrict
 
 __all__ = ["Scratch", "inside"]
 
 NAME = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 META = ".scratch.json"
 VERSION = 1
+
+
+def _linked(path: Path) -> bool:
+    return path.is_symlink() or (os.name == "nt" and path.is_junction())
+
+
+def _private(path: Path) -> None:
+    if os.name == "nt":
+        restrict(path)
+    else:
+        path.chmod(0o700)
 
 
 def inside(root: Path, candidate: Path) -> bool:
@@ -29,7 +41,8 @@ def inside(root: Path, candidate: Path) -> bool:
 
 def _size(folder: Path) -> int:
     total = 0
-    for here, _, files in os.walk(folder):
+    for here, directories, files in os.walk(folder):
+        directories[:] = [name for name in directories if not _linked(Path(here) / name)]
         for name in files:
             try:
                 total += (Path(here) / name).lstat().st_size
@@ -48,10 +61,11 @@ class Scratch:
 
     def _agent_dir(self, owner: str, create: bool = False) -> Path:
         path = self.root / owner
+        if _linked(self.root) or _linked(path) or (path.exists() and not inside(self.root, path)):
+            raise Denied(f"{owner}'s scratch directory is not a plain directory")
         if create:
             path.mkdir(parents=True, exist_ok=True, mode=0o700)
-        if path.is_symlink() or (path.exists() and not inside(self.root, path)):
-            raise Denied(f"{owner}'s scratch directory is not a plain directory")
+            _private(path)
         return path
 
     def _may_touch(self, who: Identity, owner: str) -> None:
@@ -69,10 +83,10 @@ class Scratch:
         if used > self.max_bytes:
             raise ValueError(f"{who.id}'s scratch folders hold {used} bytes, over the limit")
         folder = mine / name
-        if folder.is_symlink():
+        if _linked(folder):
             raise Denied(f"{name} is a link, not a folder")
         folder.mkdir(mode=0o700, exist_ok=True)
-        folder.chmod(0o700)
+        _private(folder)
         now = self.clock()
         write_json(folder / META, {"version": VERSION, "created": now,
                                    "expires": now + (ttl_s or self.ttl_s),
@@ -87,7 +101,7 @@ class Scratch:
             raise Denied("the path is outside the scratch folder")
         folder = self._agent_dir(owner) / name
         target = folder / relative
-        if folder.is_symlink() or not inside(folder, target):
+        if _linked(folder) or not inside(folder, target):
             raise Denied("the path is outside the scratch folder")
         return target
 
@@ -95,11 +109,11 @@ class Scratch:
         """``owner``'s folders (default: ``who``'s) with size, limit and expiry."""
         owner = owner or who.id
         self._may_touch(who, owner)
-        mine = self.root / owner
-        if not mine.is_dir() or mine.is_symlink():
+        mine = self._agent_dir(owner)
+        if not mine.is_dir():
             return []
         out = []
-        for folder in sorted(p for p in mine.iterdir() if p.is_dir() and not p.is_symlink()):
+        for folder in sorted(p for p in mine.iterdir() if p.is_dir() and not _linked(p)):
             meta = read_json(folder / META, {})
             used = _size(folder)
             out.append({"owner": owner, "name": folder.name, "path": str(folder), "bytes": used,
@@ -112,7 +126,7 @@ class Scratch:
     def remove(self, who: Identity, name: str, owner: str = "") -> bool:
         """Delete one folder; returns whether it existed. Never follows a link out."""
         folder = self.resolve(who, name, "", owner)
-        if not folder.is_dir() or folder.is_symlink():
+        if not folder.is_dir() or _linked(folder):
             return False
         shutil.rmtree(folder)
         return True
@@ -121,7 +135,7 @@ class Scratch:
         """Remove every expired folder of every agent; returns their paths."""
         gone = []
         for owner in (sorted(p.name for p in self.root.iterdir()) if self.root.is_dir() else []):
-            if (self.root / owner).is_symlink():
+            if _linked(self.root / owner):
                 continue
             for item in self.listing(Identity(owner, AGENT)):
                 if item["expired"]:
