@@ -78,3 +78,31 @@ def test_no_argument_terminal_does_not_prompt_or_read_stdin(monkeypatch, tmp_pat
     assert joining.main(["--root", str(tmp_path), "join"]) == 0
     assert asked[0]["passphrase"] == "" and asked[0]["group"] == ""
     assert asked[0]["mode"] is None
+
+
+def test_automatic_admission_finishes_before_first_daemon_start(isolated_join, monkeypatch,
+                                                               tmp_path):
+    from ml_stack.fleet import automatic_clusters
+
+    events = []
+    monkeypatch.setattr(joining, "already_running", lambda port: None)
+    monkeypatch.setattr(joining, "wait_for_health", lambda *a, **kw: {})
+    monkeypatch.setattr(automatic_clusters, "ensure", lambda *a, **kw:
+                        events.append("admitted") or SimpleNamespace(group="orchard", mode="dev"))
+    joined = joining.join_machine(root=tmp_path, say=lambda text: None,
+                                  start=lambda *a: events.append("started") or 42)
+    assert events == ["admitted", "started"]
+    assert joined.started and joined.daemon_pid == 42
+
+
+def test_automatic_admission_failure_does_not_start_daemon(isolated_join, monkeypatch, tmp_path):
+    from ml_stack.fleet import automatic_clusters
+    from ml_stack.fleet.discovery import DiscoveryError
+
+    def refuse(*a, **kw):
+        raise DiscoveryError("Production mode needs an explicitly admitted Production cluster")
+
+    monkeypatch.setattr(automatic_clusters, "ensure", refuse)
+    with pytest.raises(DiscoveryError, match="explicitly admitted"):
+        joining.join_machine(root=tmp_path, mode="prod", say=lambda text: None,
+                             start=lambda *a: pytest.fail("started before admission"))
