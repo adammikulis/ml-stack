@@ -108,3 +108,25 @@ def test_claim_reservation_waits_for_recovery_lock(inactive):
         assert not finished.wait(0.05)
     worker.join(2)
     assert finished.is_set()
+
+
+def test_existing_legacy_reserved_checkout_keeps_its_baseline(inactive):
+    from ml_stack import worktreerules
+    from ml_stack.workspace import integration_git as repo
+
+    kit = inactive
+    kit.board.resume(kit.parent, kit.task['id'], 'Prepare existing legacy reservation')
+    primary = worktreerules.checkouts(kit.source)[1]
+    target = Path(kit.allocation['project'])
+    moved = primary.parent / 'legacy-task-checkout'
+    repo.git(primary, 'worktree', 'move', str(target), str(moved))
+    with GraphStore(kit.base / 'coordination.db') as graph:
+        scope = record(graph, 'task-worktree:' + kit.task['id'].split(':')[1], 'task-worktree')
+        graph.upsert_node({'id': scope['id'], 'kind': 'task-worktree',
+                           'attrs': {**scope, 'state': 'reserved', 'project': str(moved)}})
+    (primary / 'code.py').write_text('updated = True\n')
+    repo.git(primary, 'add', '--', 'code.py')
+    repo.git(primary, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-m', 'fix: advance baseline')
+    prepared = task_worktrees.prepare(kit.ws, kit.parent, kit.worker_id, kit.task['id'])
+    assert prepared['project'] == str(moved)
+    assert prepared['baseline_commit'] == scope['baseline_commit']
