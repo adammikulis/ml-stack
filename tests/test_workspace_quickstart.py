@@ -49,6 +49,67 @@ def ws(base):
     return Workspace(base)
 
 
+def test_agent_connect_initializes_without_person_identity(base, ws, monkeypatch, tmp_path):
+    monkeypatch.setenv("ML_STACK_NONINTERACTIVE", "1")
+    monkeypatch.setattr(human, "require_person", lambda *a, **k: pytest.fail("person flow"))
+    found = project.describe(str(tmp_path))
+    connected = guide.agent_connect(ws, "worker", found)
+    assert connected["id"] == "worker" and connected["state"] == "connected"
+    assert ws.registry.ids() == ["worker"]
+    assert ws.registry.info("worker")["role"] == "agent"
+    assert not (tokens.directory(base) / tokens.OWNER_FILE).exists()
+    before = tokens.load(base, "worker")
+    assert guide.agent_connect(ws, "worker", found) == connected
+    assert tokens.load(base, "worker") == before
+
+
+@pytest.mark.parametrize("failure", ["missing", "expired", "wrong"])
+def test_agent_connect_recovers_own_session(base, ws, tmp_path, failure):
+    found = project.describe(str(tmp_path))
+    guide.agent_connect(ws, "worker", found)
+    before = tokens.load(base, "worker")
+    ws.registry.record_model("worker", "test-model", "test-harness", "claimed")
+    if failure == "missing":
+        (tokens.directory(base) / "worker").unlink()
+    elif failure == "expired":
+        agents = ws.registry._load()
+        agents["worker"]["expires"] = 1
+        ws.registry._save(agents)
+    else:
+        tokens.store(base, "worker", "mlws1.worker.wrong")
+    guide.agent_connect(ws, "worker", found)
+    assert tokens.load(base, "worker") != before
+    assert ws.auth(tokens.load(base, "worker")).role == "agent"
+    assert ws.registry.info("worker")["model_state"] == "claimed"
+
+
+def test_agent_connect_preserves_revocation_and_project_scope(base, ws, tmp_path):
+    found = project.describe(str(tmp_path))
+    guide.agent_connect(ws, "worker", found)
+    other = {"key": "other-project", "name": "other-project"}
+    with pytest.raises(Denied, match="not authorized"):
+        guide.agent_connect(ws, "worker", other)
+    ws.registry.revoke(ws.auth(tokens.load(base, "worker")), "worker")
+    with pytest.raises(Denied, match="active top-level"):
+        guide.agent_connect(ws, "worker", found)
+    assert ws.registry.info("worker")["revoked"]
+
+
+def test_person_initialization_after_agent_bootstrap(base, ws, tmp_path):
+    guide.agent_connect(ws, "worker", project.describe(str(tmp_path)))
+    token = ws.registry.init("person", env={})
+    assert ws.auth(token).role == "human"
+    with pytest.raises(Denied, match="initialised"):
+        ws.registry.init("second-person", env={})
+
+
+def test_cli_first_command_initializes_agent_automatically(base, ws, tmp_path):
+    result = child(["inbox", "--agent", "worker"], base, ML_STACK_NONINTERACTIVE="1")
+    assert result.returncode == 0, result.stderr
+    assert ws.registry.info("worker")["role"] == "agent"
+    assert not (tokens.directory(base) / tokens.OWNER_FILE).exists()
+
+
 def secrets_of(base: Path) -> list[str]:
     folder = base / "tokens"
     return [p.read_text().strip() for p in folder.iterdir()] if folder.exists() else []

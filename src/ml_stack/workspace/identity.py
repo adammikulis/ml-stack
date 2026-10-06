@@ -306,16 +306,39 @@ class Registry:
                       if e.get("parent") == parent and self._live(agents, e))
 
     def init(self, name: str, env: Mapping[str, str] | None = None, ttl_s: float = 0.0) -> str:
-        """Register the first, human identity and return its token. Refused when an agent
-        started this process or when an identity exists already."""
+        """Register the first human identity; refuse agent processes and existing humans."""
         environment = os.environ if env is None else env
         found = [m for m in AGENT_MARKERS if environment.get(m)]
         if found:
             raise Denied(f"init needs a person at a terminal; {found[0]} says an agent started this")
         with held(self.path.with_name("agents.lock")):
-            if self._load():
+            if any(entry.get("role") == HUMAN for entry in self._load().values()):
                 raise Denied("the workspace is initialised already")
             return self._add(HUMAN, name, HUMAN, ttl_s)
+
+    def bootstrap_agent(self, name: str, project: dict[str, str], limits: tuple[int, int]) -> str:
+        """Create or recover a local standard agent for one project and return its token."""
+        if not project.get("key"):
+            raise Denied("local agent initialization needs a project")
+        with held(self.path.with_name("agents.lock")):
+            agents = self._load()
+            entry = agents.get(name)
+            if not self._live(agents, entry):
+                self.within(str((entry or {}).get("minted_by", "local-account")), *limits)
+            if entry:
+                if entry.get("role") != AGENT or entry.get("parent") or entry.get("revoked"):
+                    raise Denied("local recovery needs an active top-level standard agent")
+                if entry.get("project", {}).get("key") != project["key"]:
+                    raise Denied("this identity belongs to another project")
+                secret = secrets.token_urlsafe(32)
+                entry.update(hash=_hash(secret), expires=0.0)
+                self._save(agents)
+                return f"{PREFIX}{name}.{secret}"
+            token = self._add("local-account", name, AGENT, 0.0)
+            agents = self._load()
+            agents[name]["project"] = dict(project)
+            self._save(agents)
+            return token
 
     def _add(self, minter: str, name: str, role: str, ttl_s: float) -> str:
         if not valid_name(name):

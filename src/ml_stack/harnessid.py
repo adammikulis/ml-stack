@@ -1,10 +1,4 @@
-"""The workspace identity of a coding-harness session: minted by the launcher, placed on the
-project's board, announced, and revoked when the session ends.
-
-A person-started launcher mints the identity the way ``ml-stack-workspace setup`` does: the
-standard agent role, a token file readable by this user only, nothing printed and no invite code.
-An agent-started launcher delegates a private child identity under its authenticated parent.
-"""
+"""Persistent local project identities and parent-delegated coding-harness sessions."""
 
 from __future__ import annotations
 
@@ -15,10 +9,9 @@ import subprocess
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from ml_stack.person import HumanRequired
-from ml_stack.workspace import Denied, Workspace, onboard, tokens
+from ml_stack.workspace import Denied, Workspace, guide, tokens
 from ml_stack.workspace.harness_seat import Seat
-from ml_stack.workspace.identity import valid_name
+from ml_stack.workspace.identity import AGENT_MARKERS, valid_name
 from ml_stack.workspace.project import describe
 
 __all__ = ["Seat", "agent_name", "announce", "brief", "invite"]
@@ -54,31 +47,29 @@ def brief(name: str, alias: str, harness: str, parent: str, orders_from: Sequenc
 
 
 def invite(name: str, project_dir: Path, parent: str, say: Callable[[str], None]) -> Seat:
-    """Mint ``name``, place it on its project's board with the quiet subscriptions and return its
-    seat; an agent-started launcher gets a weaker private child of ``parent``."""
+    """Connect a persistent local project agent or a private child of ``parent``."""
     if not valid_name(name):
         say(f"error: {name!r} is not a usable agent id (a-z, 0-9, . _ -; up to {LONGEST})")
         raise ValueError("the coding agent needs a usable workspace identity")
     try:
         ws = Workspace()
-        try:
-            onboard.setup(ws, [name], [name] if ws.registry.role_of(name) else [], onboard.TOKEN_S)
-        except HumanRequired:
-            token = tokens.resolve(ws.base, agent=parent)
-            who = ws.auth(token)
+        if parent and any(os.environ.get(marker) for marker in AGENT_MARKERS) and parent in ws.registry.ids():
+            try:
+                token = tokens.resolve(ws.base, agent=parent)
+                who = ws.auth(token)
+            except Denied:
+                guide.agent_connect(ws, parent, describe(str(project_dir)))
+                token = tokens.load(ws.base, parent)
+                who = ws.auth(token)
             child = ws.delegate(token, name)
             found = describe(str(project_dir))
             ws.board.place(child["id"], found)
             return Seat(child["id"], minted=True, base=ws.base, issuer=who)
-        found = describe(str(project_dir))
-        if found:
-            ws.registry.set_project(onboard.SETUP, name, found)
-        ws.board.place(name, found)
+        guide.agent_connect(ws, name, describe(str(project_dir)))
     except (Denied, ValueError, OSError) as why:
-        say(f"not minted: {why}. Run `ml-stack-workspace setup --agents {name}` yourself, or pass "
-            f"--as {parent} to act as that agent")
+        say(f"workspace connection refused: {why}")
         raise ValueError(f"a workspace identity could not be created for {name}: {why}") from why
-    return Seat(name, minted=True, base=ws.base)
+    return Seat(name, base=ws.base, persistent=True)
 
 
 def announce(seat: Seat, text: str, say: Callable[[str], None]) -> bool:

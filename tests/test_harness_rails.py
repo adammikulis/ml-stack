@@ -340,7 +340,7 @@ class TestSeat:
         assert len(harnessid.agent_name("x" * 80, "codex")) <= 48
         assert harnessid.agent_name("m", "codex", "mine") == "mine"
 
-    def test_a_person_started_launcher_mints_places_and_revokes_without_printing_a_token(self, person, tmp_path):
+    def test_a_launcher_connects_a_persistent_agent_without_printing_a_token(self, person, tmp_path):
         from ml_stack.workspace import Workspace, tokens
 
         said = []
@@ -348,16 +348,15 @@ class TestSeat:
         project.mkdir()
         seat = harnessid.invite("local-test-codex", project, "claude-code", said.append)
         ws = Workspace()
-        assert seat.minted and ws.registry.role_of("local-test-codex") == "agent"
+        assert seat.persistent and not seat.minted and ws.registry.role_of("local-test-codex") == "agent"
         token_file = tokens.directory(ws.base) / "local-test-codex"
         assert token_file.stat().st_mode & 0o777 == 0o600
         secret = token_file.read_text().strip()
         assert secret not in "".join(said) and seat.flags() == ["--agent", "local-test-codex"]
-        assert seat.revoke() is True and not token_file.exists()
-        from ml_stack.workspace import Denied
-
-        with pytest.raises(Denied):
-            ws.auth(secret)
+        assert seat.revoke() is False and token_file.exists()
+        assert ws.auth(secret).id == "local-test-codex"
+        again = harnessid.invite("local-test-codex", project, "claude-code", said.append)
+        assert again.persistent and tokens.load(ws.base, again.name) == secret
 
     def test_the_seat_is_on_the_project_board_with_the_quiet_defaults(self, person, tmp_path):
         from ml_stack.workspace import Workspace
@@ -369,17 +368,18 @@ class TestSeat:
         assert any("local-test-codex" in b["members"] for k, b in boards.items() if k != "#general")
         assert not subs.get("local-test-codex")
 
-    def test_a_person_started_launcher_records_the_verified_model_and_an_agent_one_does_not(self, person, monkeypatch, tmp_path):
+    def test_a_launcher_records_its_model_as_claimed(self, person, monkeypatch, tmp_path):
         from ml_stack.workspace import Workspace
 
         seat = harnessid.invite("local-test-codex", tmp_path, "claude-code", lambda _: None)
         assert seat.record_model("qwen-27b", "codex") is True
         assert "qwen-27b" in json.dumps(Workspace(seat.base).registry.info("local-test-codex"))
+        assert Workspace(seat.base).registry.info(seat.name)["model_state"] == "claimed"
         monkeypatch.setenv("CLAUDECODE", "1")
-        assert seat.record_model("other", "codex") is False
+        assert seat.record_model("other", "codex") is True
         assert harnessid.Seat("x", "p").record_model("m", "codex") is False
 
-    def test_ending_the_session_revokes_the_identity_and_removes_the_files(self, person, monkeypatch, tmp_path):
+    def test_ending_the_session_keeps_identity_and_removes_harness_files(self, person, monkeypatch, tmp_path):
         from ml_stack.workspace import Denied, Workspace, tokens
 
         seen = {}
@@ -399,15 +399,14 @@ class TestSeat:
 
         assert codex.launch(["--codex", str(binary), "--project", str(tmp_path / "proj")], say=lambda _: None,
                             run_codex=run) == 0
-        with pytest.raises(Denied):
-            Workspace().auth(seen["token"])
-        assert not (tokens.directory(Workspace().base) / "local-qwen-codex").exists()
+        assert Workspace().auth(seen["token"]).id == "local-qwen-codex"
+        assert (tokens.directory(Workspace().base) / "local-qwen-codex").exists()
         assert not seen["home"].exists()
 
-    def test_an_agent_launcher_requires_an_authenticated_parent_instead_of_using_a_label(self, monkeypatch, tmp_path):
+    def test_an_agent_launcher_initializes_itself_without_a_parent_credential(self, monkeypatch, tmp_path):
         monkeypatch.setenv("CLAUDECODE", "1")
-        with pytest.raises(ValueError, match="workspace identity could not be created"):
-            harnessid.invite("local-test-codex", tmp_path, "claude-code", lambda _: None)
+        seat = harnessid.invite("local-test-codex", tmp_path, "claude-code", lambda _: None)
+        assert seat.name == "local-test-codex" and seat.persistent
 
     def test_a_fake_endpoint_cannot_verify_a_delegated_agents_model(self, monkeypatch, tmp_path):
         from ml_stack.testing import FakeLlamaServer, Served

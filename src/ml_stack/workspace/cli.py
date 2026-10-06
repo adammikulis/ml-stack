@@ -81,7 +81,18 @@ def _label(args: argparse.Namespace) -> str:
 
 
 def _token(args: argparse.Namespace) -> str:
-    return tokens.resolve(limits.root(), token_file=args.token_file, agent=args.agent)
+    base = limits.root()
+    agent = args.agent or os.environ.get(tokens.AGENT_ENV, "")
+    remote = coordinator_client.client(base)
+    if agent and not args.token_file and remote:
+        args.agent = remote.ensure(base, agent, project=project.describe())
+    elif agent and not args.token_file and not project_connection.selected():
+        ws = Workspace(base)
+        try:
+            ws.auth(tokens.load(base, agent))
+        except Denied:
+            guide.agent_connect(ws, agent, project.describe())
+    return tokens.resolve(base, token_file=args.token_file, agent=args.agent)
 
 
 def _context(args: argparse.Namespace):
@@ -295,6 +306,19 @@ def _setup(args: argparse.Namespace, ws: Workspace) -> int:
 
 
 def _connect(args: argparse.Namespace, ws: Workspace) -> int:
+    agent = args.agent or os.environ.get(tokens.AGENT_ENV, "")
+    if agent:
+        if args.no_project or args.one_agent or args.remote or args.code_only or args.name:
+            raise Denied("agent connect takes --agent and --project; invite options need a person")
+        found = project.describe(args.project)
+        remote = coordinator_client.client(ws.base)
+        if remote:
+            name = remote.ensure(ws.base, agent, project=found)
+            result = {"id": name, "project": found.get("name", ""), "state": "connected"}
+        else:
+            result = guide.agent_connect(ws, agent, found)
+        _show(args, result)
+        return 0
     plan = guide.Plan([args.name] if args.name else [], 0.0 if args.no_live else args.live_seconds,
                       args.wait_seconds, shared=not args.one_agent,
                       project=project.describe(args.project, none=args.no_project),
@@ -455,7 +479,7 @@ LIVE = [flag("--no-live", action="store_true", help="skip the live check"),
         flag("--live-seconds", type=float, default=120.0, help="how long the live check waits"),
         flag("--wait-seconds", type=float, default=600.0, help="how long to wait for a join")]
 BARE: tuple[tuple[str, str, list[Any], Callable[[argparse.Namespace, Workspace], int]], ...] = (
-    ("connect", "ONE command for the person: copy a paste block, wait for the agent, check it",
+    ("connect", "initialize or reconnect --agent ID; without an agent, share a person-approved invite",
      [flag("--name", default="", help="a suggested id for the agent; it may pick its own"),
       flag("--project", default="", help="the project folder (default: the git root you are in)"),
       flag("--no-project", action="store_true", help="connect without naming a project"),
@@ -463,6 +487,7 @@ BARE: tuple[tuple[str, str, list[Any], Callable[[argparse.Namespace, Workspace],
            help="a single-use code (default: one paste for up to 10 agents, one hour)"),
       flag("--remote", action="store_true", help="require an active shared host and include its authority"),
       flag("--code-only", action="store_true", help="print and copy the invite, then exit without waiting"),
+      flag("--label", default="", help="the helper label under this agent identity"),
       *LIVE], _connect),
     ("join", "an agent redeems an invite code and saves its private token", [
         flag("code"), flag("--name", default="", help="a short id for yourself, e.g. codex"),
@@ -708,6 +733,10 @@ COMMANDS.add("remote", _guarded(_remote), help="attach and use one shared projec
              options=remote_cli.OPTIONS)
 def _bare(handler: Callable[[argparse.Namespace, Workspace], int]) -> Callable[[argparse.Namespace], int]:
     def run(args):
+        if handler is _connect and (args.agent or os.environ.get(tokens.AGENT_ENV, "")):
+            if project_connection.selected() is not None:
+                raise Denied("agent sessions on canonical boards use the existing project connection")
+            return handler(args, Workspace())
         if coordinator_client.client(limits.root()) and handler is not _join:
             raise Denied('this is a local-only operation; this device uses a shared coordinator')
         if project_connection.selected() is not None:

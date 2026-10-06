@@ -7,7 +7,19 @@ The workspace refuses token directories on Windows-mounted paths such as `/mnt/c
 there does not establish the Windows account permissions this check requires. If
 `ML_STACK_WORKSPACE_HOME` points there, unset it before joining.
 
-Run one command, paste once, done:
+Local coding agents connect automatically when their launcher starts or their first workspace
+command names the agent. They can also run:
+
+    ml-stack-workspace connect --agent codex
+
+The workspace creates a standard agent for the current project under the current OS account
+and maintains its private session credentials internally. Restarting a session, losing a saved
+credential or letting it expire requires no token copying or person command. Recovery preserves
+the identity's project, rights and model history; revoked identities remain refused. It never
+creates or reads a person's identity. Remote access still requires independently authorized
+device and project trust.
+
+For an explicit person-approved invitation, run:
 
     ml-stack-workspace connect
 
@@ -125,7 +137,7 @@ refused. The joiner becomes a child of the issuer: the standard agent role (neve
 `parent` set, rights at most the issuer's (taken again at redemption), the quiet defaults, its
 model recorded as claimed. A child sends against its parent's window, cannot delegate, mint or
 use notes and scratch, and cannot invite unless the person raises the depth limit. Only a joined
-agent invites; the person uses `connect`, whose shared reusable code stays person-only.
+agent invites; the person uses `connect` without `--agent`, whose shared reusable code stays person-only.
 
 Limits, all in the owner's `limits.json` (an agent cannot change them; a refusal names the number
 and the key):
@@ -162,9 +174,7 @@ A local message bus, shared notes, per-agent scratch folders and an ownership re
 separate agent processes and a lead session coordinate through ml-stack instead of through a
 person relaying text and instead of colliding on scratch files, ports, branches and servers.
 
-    ml-stack workspace init                         # a person, at a terminal, once (setup does this)
-    ml-stack workspace mint lead-1 --role lead      # prints that agent's token once
-    export ML_STACK_WORKSPACE_TOKEN=...             # per agent process (or --agent NAME)
+    ml-stack workspace connect --agent codex        # establishes the local agent session
     ml-stack workspace send reviewer task "check the lease tests"
     ml-stack workspace watch --once --timeout 600   # run in the background; exits on a message
     ml-stack workspace claim port 8081 --pid $$     # released when this shell exits
@@ -268,7 +278,7 @@ not allowed, 4 rate limited, 5 claim conflict, 6 a log is damaged.
 
 | Area | Commands |
 | --- | --- |
-| quickstart | `connect [--name HINT] [--project PATH] [--no-project]`, `join CODE [--name ID]`, `setup [NAMES] [--yes] [--rotate NAME]`, `doctor`, `hello NAME`, `snippet NAME`, `brief NAME --agent ME`, `delegate NAME [--ttl] [--can]`, `invite [--name HINT] [--ttl 10m] [--uses 1]` (a joined agent) |
+| quickstart | `connect --agent ID [--project PATH]`, person invites: `connect [--name HINT] [--project PATH] [--no-project]`, `join CODE [--name ID]`, `setup [NAMES] [--yes] [--rotate NAME]`, `doctor`, `hello NAME`, `snippet NAME`, `brief NAME --agent ME`, `delegate NAME [--ttl] [--can]`, `invite [--name HINT] [--ttl 10m] [--uses 1]` (a joined agent) |
 | identity | `init`, `mint NAME [--role agent\|lead\|human] [--ttl-hours H]`, `revoke NAME [--tree]`, `whoami` |
 | messages | `send TO TYPE BODY [--subject S] [--reply-to SEQ] [--ttl SECONDS]`, `inbox [--ack] [--raw]`, `wait --timeout S`, `watch [--once] [--timeout S]`, `outbox`, `ack SEQ`, `thread ROOT` |
 | notes | `notes-add KIND TITLE BODY [--source --tags --supersedes --verify-cmd --ttl-days]`, `notes-search QUERY [--kind] [--all]`, `notes-get ID`, `notes-verify ID --cwd DIR` |
@@ -555,8 +565,8 @@ agent processes, 2000 messages, send p99 58 ms, nothing refused. Every limit bel
 | Unread inbox | 500 per recipient (`inbox_pending`), 100 from any one sender (`unread_per_sender`) | the sender is refused with "N has 500 unread messages" (`why: inbox-full`) or "already has 100 unread messages waiting for N" (`why: sender-share`); broadcasts and board posts are not counted | `inbox`, `status` (`fullest_inboxes`) |
 | Message and note size | 16 KiB body, 200 character subject, 8 KiB note, 500 notes per agent | `Refused`, exit 3 | the refusal text |
 | Retention | 7 days of messages (`retention_s`) | `gc` drops the oldest rows; the chain continues from the last dropped row; readers re-read the file | `audit-verify` (rows, head) |
-| Claim TTL | 15 minutes, renewed by `heartbeat`; one renewal adds at most 1 hour and no claim lives past 8 hours from when it was taken | the claim is released the next time anyone reads the registry and audited as `claim.expired` or `claim.dead-pid`; another agent that takes it is audited as `claim.stolen` with the previous owner | `claims` lists `expires_in_s` and `expiring_soon` (true in the last 5 minutes or a third of the TTL, whichever is shorter) |
-| Token TTL | 24 hours (`token_ttl_s`) | the token stops authenticating; mint a new one | `whoami` |
+| Claim lifetime | 15 minutes, renewed by `heartbeat`; one renewal adds at most 1 hour and no claim lives past 8 hours from when it was taken | the claim is released the next time anyone reads the registry and audited as `claim.expired` or `claim.dead-pid`; another agent that takes it is audited as `claim.stolen` with the previous owner | `claims` lists `expires_in_s` and `expiring_soon` (true in the last 5 minutes or a third of the TTL, whichever is shorter) |
+| Session credentials | Local persistent agents recover automatically; ordinary issued credentials follow `token_ttl_s` | the local account or trusted device reconnects the agent internally; identity revocation remains enforced | `whoami` |
 | Delegation | a human mints anyone, a lead mints `agent` tokens, an agent mints nothing; a lead or agent that mints holds at most 16 live identities (`mints_per_identity`) and the workspace at most 64 (`agents_live`) | the mint is refused (`Denied`) | `status` (agents) |
 | Keystore reads | 600 per hour per user, backoff from 480 | `KeystoreBusy` naming the hour | `ml-stack-security keystore` |
 | Keystore creates, deletes, retries after a refusal | 5 per hour per user | `KeystoreBusy`; a refusal also latches for 10 minutes | `ml-stack-security keystore` |
