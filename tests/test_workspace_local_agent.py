@@ -455,14 +455,18 @@ def test_a_token_in_a_header_starts_nothing(served, kit):
 def test_the_page_start_list_and_stop_round_trip_with_hostile_input_refused(served, kit):
     status, body = request(served.port, "GET", "/agents/list")
     assert status == 200 and json.loads(body)["roles"] == la.role_choices()
-    ok = post(served, "start", {"role": roles.DEFAULT, "effort": "low", "max_effort": "high", "name": "local-r"})
+    ok = post(served, "start", {"role": roles.DEFAULT, "effort": "low", "max_effort": "high", "name": "local-r", "max_output_tokens": 23456})
     assert ok[0] == 200 and json.loads(ok[1])["name"] == "local-r"
     from ml_stack.workspace.device_accounts import account_for
     assert account_for(kit.ws, "local-r")["base_id"].startswith("local-device-")
     listed = json.loads(request(served.port, "GET", "/agents/list")[1])["agents"]
     assert [a["name"] for a in listed] == ["local-r"] and "token" not in json.dumps(listed)
+    assert listed[0]["max_output_tokens"] == 23456
+    saved = json.loads(request(served.port, "GET", "/agents/list")[1])["saved"]
+    assert saved[0]["max_output_tokens"] == 23456
     for bad in ({"name": "../x"}, {"role": "root"}, {"project": "/nonexistent"}, {"extra": 1},
-                {"effort": "extreme"}, {"max_effort": "auto"}, {"effort": 3}, {"name": 5}):
+                {"effort": "extreme"}, {"max_effort": "auto"}, {"effort": 3}, {"name": 5},
+                {"max_output_tokens": 0}, {"max_output_tokens": True}, {"max_output_tokens": 2.5}):
         assert post(served, "start", bad)[0] == 400, bad
     assert post(served, "stop", {"name": "local-r"})[0] == 200
     assert json.loads(request(served.port, "GET", "/agents/list")[1])["agents"][0]["state"] == "stopped"
