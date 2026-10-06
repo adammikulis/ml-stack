@@ -131,3 +131,12 @@ def test_the_installer_is_for_a_person(tmp_path):
     out = cli(tmp_path / "ws", "", "install-hooks", "--settings", str(tmp_path / "s.json"),
               env_extra={"CLAUDECODE": "1"})
     assert out.returncode == 3 and not (tmp_path / "s.json").exists()
+
+
+def test_the_stamp_file_name_needs_no_posix_uid(monkeypatch):
+    import os
+
+    from ml_stack.workspace import nudge
+
+    monkeypatch.delattr(os, "getuid", raising=False)
+    assert nudge._stamp("ml-stack-nudge").name.startswith("ml-stack-nudge.")

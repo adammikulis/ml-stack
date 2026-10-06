@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+import getpass
 import json
-import os
 import re
 import tempfile
 from dataclasses import dataclass
@@ -74,7 +74,7 @@ def age_text(seconds: float) -> str:
 
 
 def _stamp(name: str) -> Path:
-    return Path(tempfile.gettempdir()) / f"{name}.{os.getuid()}"
+    return Path(tempfile.gettempdir()) / f"{name}.{getpass.getuser()}"
 
 
 def _read_int(path: Path) -> int:
