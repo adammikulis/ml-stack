@@ -72,10 +72,11 @@ def test_agent_connect_selects_explicit_project_instead_of_current_board(tmp_pat
 
 
 @pytest.mark.parametrize("owned", [False, True])
-def test_foreign_credential_recovery_requires_owned_local_identity(tmp_path, owned):
+def test_foreign_credential_recovery_requires_owned_local_identity(tmp_path, monkeypatch, owned):
     from ml_stack.workspace import guide, tokens
     from ml_stack.workspace.identity import Denied
     from ml_stack.workspace.service import Workspace
+    monkeypatch.setattr(guide.coordinator_bootstrap, "ensure_host", lambda ws, token: None)
     ws = Workspace(tmp_path / "private-workspace")
     found = {"key": "project", "name": "project"}
     guide.agent_connect(ws, "worker", found)
@@ -92,6 +93,24 @@ def test_foreign_credential_recovery_requires_owned_local_identity(tmp_path, own
         with pytest.raises(Denied, match="another agent"):
             guide.agent_connect(ws, "worker", found)
         assert ws.registry.path.read_bytes() == before
+
+
+def test_own_agent_connect_hosts_local_workspace_automatically(tmp_path, monkeypatch):
+    from ml_stack.workspace import guide, tokens
+    from ml_stack.workspace.service import Workspace
+    ws = Workspace(tmp_path / "private-workspace")
+    hosted = []
+    def ensure(workspace, token):
+        assert workspace is ws
+        who = ws.auth(token)
+        assert who.id == "worker" and who.role == "agent"
+        boards, _ = ws.board.store.state()
+        assert any("worker" in row["members"] for row in boards.values())
+        hosted.append(token)
+    monkeypatch.setattr(guide.coordinator_bootstrap, "ensure_host", ensure)
+    found = {"key": "project", "name": "project"}
+    assert guide.agent_connect(ws, "worker", found)["id"] == "worker"
+    assert hosted == [tokens.load(ws.base, "worker")]
 
 
 def test_local_runner_discovers_authority_once(monkeypatch):

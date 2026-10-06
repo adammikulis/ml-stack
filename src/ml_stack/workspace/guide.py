@@ -14,7 +14,7 @@ from pathlib import Path
 from ml_stack.files import read_json, write_json
 from ml_stack.log import say
 from ml_stack.sentinel import human
-from ml_stack.workspace import coordinator_client, coordinator_config, onboard, tokens
+from ml_stack.workspace import coordinator_bootstrap, coordinator_client, coordinator_config, onboard, tokens
 from ml_stack.workspace.chain import held
 from ml_stack.workspace.identity import AGENT, HUMAN, Denied
 from ml_stack.workspace.service import Workspace
@@ -228,6 +228,9 @@ def agent_connect(ws: Workspace, name: str, found: dict[str, str]) -> dict[str, 
         if not any(board["project"] == found["key"] and (who.parent or who.id) in board["members"]
                    for board in boards.values()):
             raise Denied("this identity has no membership in the project board")
+        entry = ws.registry._load().get(who.id, {})
+        if entry.get("minted_by") == "local-account" and not entry.get("session_device"):
+            coordinator_bootstrap.ensure_host(ws, token)
         return {"id": who.id, "project": scope["name"], "state": "connected"}
 
 
