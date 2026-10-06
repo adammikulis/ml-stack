@@ -68,9 +68,9 @@ def record_run(run: Run, artifact: Path | None = None) -> bool:
     tree = run.tree or tree_hash(root)
     words = [w for w in run.command if not w.startswith("--junitxml") and not w.startswith("-n")]
     digest = hashlib.sha256(" ".join(words).encode()).hexdigest()[:16]
-    said: Said = dict(subject=f"tree:{tree[:12]}", outcome="pass" if exit_code == 0 else "fail",
-        refs={"tree": tree, "command": digest, "tier": tier},
-        meta={**counts, "seconds": round(run.seconds, 1), "exit": exit_code})
+    said: Said = {"subject": f"tree:{tree[:12]}", "outcome": "pass" if exit_code == 0 else "fail",
+                  "refs": {"tree": tree, "command": digest, "tier": tier},
+                  "meta": {**counts, "seconds": round(run.seconds, 1), "exit": exit_code}}
     if artifact is not None:
         payload = build("test.result", ts=time.time(), actor="system",
                         session=f"test-{os.getpid()}", **said)

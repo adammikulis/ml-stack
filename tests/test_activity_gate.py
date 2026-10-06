@@ -6,12 +6,11 @@ import importlib.machinery
 import importlib.util
 import json
 import os
-
-import psutil
 import subprocess
 import sys
 from pathlib import Path
 
+import psutil
 import pytest
 
 from ml_stack.activity import gate
