@@ -34,10 +34,11 @@ def test_enrollment_bootstraps_only_project_agents_and_places_board(enrollment):
     assert ws.registry.info(first["id"])["project"] == SCOPE
     assert ws.registry.info(first["id"])["model_state"] == "claimed"
     payload = {"agent_token": first["token"], "operation": "board.list"}
-    code, reply = host.answer(PROJECT, "board", payload, cluster="dev", cluster_id="c" * 64)
+    code, reply = host.answer(PROJECT, "board", payload, cluster="dev", cluster_id="c" * 64, dev_admission=True)
     assert code == 200 and any(row["project"] == PROJECT for row in reply["result"])
     assert host.answer(PROJECT, "board", payload, cluster="prod")[0] == 403
     assert host.answer(PROJECT, "board", payload, cluster="dev", cluster_id="d" * 64)[0] == 403
+    assert host.answer(PROJECT, "board", payload, cluster="dev", cluster_id="c" * 64)[0] == 403
     assert host.answer(PROJECT, "board", payload)[0] == 403
     assert not (ws.base / "tokens" / ".owner").exists()
 
@@ -91,7 +92,7 @@ def test_native_child_delegation_inherits_scope_and_self_revocation(enrollment):
     host, _, body = enrollment
     _, parent = host.enroll(PROJECT, body, cluster="dev", cluster_id="c" * 64)
     request = {"agent_token": parent["token"], "operation": "delegate", "args": ["native"]}
-    code, reply = host.answer(PROJECT, "board", request, cluster="dev", cluster_id="c" * 64)
+    code, reply = host.answer(PROJECT, "board", request, cluster="dev", cluster_id="c" * 64, dev_admission=True)
     assert code == 200, reply
     child = reply["result"]
     ws = host.workspace(PROJECT)
@@ -100,14 +101,14 @@ def test_native_child_delegation_inherits_scope_and_self_revocation(enrollment):
     assert identity.can == ws.auth(parent["token"]).can
     assert ws.registry.info(identity.id)["expires"] <= ws.registry.info(parent["id"])["expires"]
     request = {"agent_token": child["token"], "operation": "board.list"}
-    code, reply = host.answer(PROJECT, "board", request, cluster="dev", cluster_id="c" * 64)
+    code, reply = host.answer(PROJECT, "board", request, cluster="dev", cluster_id="c" * 64, dev_admission=True)
     assert code == 200 and any(row["project"] == PROJECT for row in reply["result"])
     request["operation"], request["args"] = "delegate", ["another"]
-    assert host.answer(PROJECT, "board", request, cluster="dev", cluster_id="c" * 64)[0] == 403
+    assert host.answer(PROJECT, "board", request, cluster="dev", cluster_id="c" * 64, dev_admission=True)[0] == 403
     request["operation"], request["args"] = "revoke_self", [parent["id"]]
-    assert host.answer(PROJECT, "board", request, cluster="dev", cluster_id="c" * 64)[0] == 400
+    assert host.answer(PROJECT, "board", request, cluster="dev", cluster_id="c" * 64, dev_admission=True)[0] == 400
     request["args"] = []
-    assert host.answer(PROJECT, "board", request, cluster="dev", cluster_id="c" * 64)[0] == 200
+    assert host.answer(PROJECT, "board", request, cluster="dev", cluster_id="c" * 64, dev_admission=True)[0] == 200
     with pytest.raises(Denied, match="revoked"):
         ws.auth(child["token"])
     assert ws.auth(parent["token"]).id == parent["id"]
@@ -118,9 +119,9 @@ def test_native_parent_delegation_is_bounded(enrollment):
     _, parent = host.enroll(PROJECT, body, cluster="dev", cluster_id="c" * 64)
     for index in range(8):
         request = {"agent_token": parent["token"], "operation": "delegate", "args": [f"native-{index}"]}
-        assert host.answer(PROJECT, "board", request, cluster="dev", cluster_id="c" * 64)[0] == 200
+        assert host.answer(PROJECT, "board", request, cluster="dev", cluster_id="c" * 64, dev_admission=True)[0] == 200
     request["args"] = ["overflow"]
-    assert host.answer(PROJECT, "board", request, cluster="dev", cluster_id="c" * 64)[0] == 403
+    assert host.answer(PROJECT, "board", request, cluster="dev", cluster_id="c" * 64, dev_admission=True)[0] == 403
 
 
 def test_native_reservations_are_atomic_project_scoped_and_return_relative_keys(enrollment, repository):  # noqa: F811
@@ -130,11 +131,15 @@ def test_native_reservations_are_atomic_project_scoped_and_return_relative_keys(
     _, second = host.enroll(PROJECT, {**body, "name": "other"}, cluster="dev", cluster_id="c" * 64)
     def request(agent, operation, *args, **kwargs):
         return host.answer(PROJECT, "board", {"agent_token": agent["token"], "operation": operation,
-                           "args": list(args), "kwargs": kwargs}, cluster="dev", cluster_id="c" * 64)
+                           "args": list(args), "kwargs": kwargs}, cluster="dev", cluster_id="c" * 64, dev_admission=True)
     code, reply = request(first, "native.reserve", [["area", "src/item.py"], ["branch", "feature"]], label="native")
     assert code == 200, reply
     assert {row["key"] for row in reply["result"]} == {"src/item.py", "feature"}
     assert all(row["pid"] == 0 and row["owner"] == first["id"] for row in reply["result"])
+    code, listed = request(first, "claims")
+    assert code == 200 and "src/item.py" in {row["key"] for row in listed["result"]}
+    assert str(repository) not in str(listed)
+    assert request(first, "who", "area", "src/item.py")[1]["result"]["key"] == "src/item.py"
     code, reply = request(second, "native.reserve", [["branch", "other"], ["area", "src"]])
     assert code == 409 and str(repository) not in str(reply)
     assert not any(row["key"] == "other" for row in host.workspace(PROJECT).claims.listing())

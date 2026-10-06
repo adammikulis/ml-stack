@@ -127,7 +127,7 @@ class WorkspaceHost:
         except (ValueError, TypeError) as exc:
             return 400, {"error": str(exc)}
 
-    def answer(self, project_id: str, action: str, body: dict, *, cluster: str = "", cluster_id: str = "") -> tuple[int, dict]:
+    def answer(self, project_id: str, action: str, body: dict, *, cluster: str = "", cluster_id: str = "", dev_admission: bool = False) -> tuple[int, dict]:
         try:
             if len(json.dumps(body).encode()) > 32 * 1024:
                 return 413, {"error": "workspace operation exceeds the size limit"}
@@ -138,13 +138,13 @@ class WorkspaceHost:
                                     claim=(str(body.get("model") or ""),
                                            str(body.get("harness") or "")))
                 token = tokens.load(ws.base, name)
-                self._identity(ws, project_id, token, cluster=cluster, cluster_id=cluster_id)
+                self._identity(ws, project_id, token, cluster=cluster, cluster_id=cluster_id, dev_admission=dev_admission)
                 ws.audit("remote.seen", name, project_id=project_id)
                 return 201, {"id": name, "token": token, "project_id": project_id}
             if action != "board":
                 return 404, {"error": "no such workspace operation"}
             token = str(body.get("agent_token") or "")
-            who = self._identity(ws, project_id, token, cluster=cluster, cluster_id=cluster_id)
+            who = self._identity(ws, project_id, token, cluster=cluster, cluster_id=cluster_id, dev_admission=dev_admission)
             ws.audit("remote.seen", who.id, project_id=project_id)
             operation = str(body.get("operation") or "")
             args, kwargs = body.get("args", []), body.get("kwargs", {})
@@ -219,6 +219,7 @@ class WorkspaceHost:
             return 400, {"error": str(exc)}
 
     def _public_claim(self, project_id, row):
+        row = {key: row[key] for key in ("kind", "key", "owner", "pid", "since", "expires", "note") if key in row}
         if row["kind"] == "branch":
             return row
         if row["kind"] != "area":
@@ -279,12 +280,14 @@ class WorkspaceHost:
             raise Denied("native area escapes its project")
         return str(target)
 
-    def _identity(self, ws: Workspace, project_id: str, token: str, *, cluster: str = "", cluster_id: str = "") -> Any:
+    def _identity(self, ws: Workspace, project_id: str, token: str, *, cluster: str = "", cluster_id: str = "", dev_admission: bool = False) -> Any:
         who = ws.auth(token)
         if who.role != AGENT:
             raise Denied("remote workspace access requires a project agent capability")
         name = ws.registry.root_of(who.id)
         scope = ws.registry.info(name)["project"]
+        if scope.get("cluster_id") and not dev_admission:
+            raise Denied("automatic agent access requires active authenticated Dev admission")
         if scope.get("cluster") and (scope["cluster"] != cluster or scope.get("cluster_id") != cluster_id):
             raise Denied("agent capability belongs to another cluster")
         if scope.get("key") != project_id:
