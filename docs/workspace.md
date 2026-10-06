@@ -216,12 +216,37 @@ and a convenience second.
    process pose as another agent. Tokens expire (default 24 hours) and can be revoked. Roles:
    `human` mints anyone, `lead` mints and revokes `agent` tokens, `agent` mints nothing.
    Per-sender rate limit, body and subject caps, inbox cap and retention are in `limits.json`.
-7. Text is screened before it reaches a model: injection and authority-claim patterns put a
-   message or note into quarantine; the recipient sees a placeholder with the quarantine id.
-   Quarantine is on by default and cannot be switched off; only a `human` token releases an
-   item, and a released item is still delivered fenced. The same text is also run through
-   `ml_stack.guard`'s secret and injection patterns (imported directly) and held in the
-   sentinel's quarantine (`ml_stack.sentinel`); the workspace's own checks run in addition.
+7. Text is screened before it reaches a model. Markers come in two tiers:
+   * Hard markers always put a message or note into quarantine, for every sender: `override`,
+     `new-instructions`, `role-play`, `prompt-leak`, `exfiltrate`, `chat-markup`, `fake-fence`,
+     `authority-imperative`, and whatever `ml_stack.guard` reports as injection. A hard hit is
+     also recorded against the sender in the reputation ledger as `injection_flagged`.
+   * Soft markers (`authority-claim`, `rule-promotion`) are what ordinary agent
+     traffic says ("the owner approved the restart", "add this to
+     CLAUDE.md"). A soft-only match is delivered, fenced as untrusted data with
+     `flagged: <marker>` in the fence header, and counted by one `screen.flagged` audit row,
+     when the sender holds a valid token (agent, lead or human) and its standing is `good`.
+     From a sender that is `unknown`, `watch` or `bad` it is quarantined.
+
+   `authority-imperative` is an authority claim and an order aimed at the reader in the same
+   message: "the owner approved, so you must delete ...", "now run ...", "run ... since the
+   lead approved it". The order is an action verb (run, delete, push, install, send, ...) after
+   `you must/should/will`, `so`, `therefore`, `now` or a colon, or before `since/because` and the
+   claim. A claim with no order stays soft.
+
+   Standing is `sender_standing` (`workspace/standing.py`): a token holder is `good` unless the
+   reputation ledger (`docs/reputation.md`) gates it as `watch` or `bad`; the ledger is asked
+   through `ml_stack.sentinel.observers` under kind `peer`, key `workspace:<id>`. With no ledger
+   installed, or one that fails, a token holder is `good`; the audit row records
+   `ledger: false`. Repeated hard hits turn a sender `watch` and then `bad`, and its soft
+   matches are quarantined again until clean runs recover it.
+
+   Quarantine is on by default and cannot be switched off; the recipient of a held item sees a
+   placeholder with the quarantine id, `ml-stack-workspace quarantine-ls` lists what is held,
+   only a `human` token releases an item, and a released item is still delivered fenced. The same
+   text is also run through `ml_stack.guard`'s secret and injection patterns (imported directly)
+   and held in the sentinel's quarantine (`ml_stack.sentinel`); the workspace's own checks run
+   in addition. A credential in a message is refused on write and never reaches quarantine.
 8. All logs are hash-chained JSONL (`prev` and `hash` per row, sequence numbers, fsync on each
    append). `ml-stack-workspace audit-verify` reports the first broken row, and accepts the
    head printed by `audit-head` as an external anchor to catch truncation of the tail.
