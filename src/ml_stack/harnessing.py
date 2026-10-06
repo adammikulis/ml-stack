@@ -158,6 +158,8 @@ def config_for(found: str, want: Want, say: Callable[[str], None]):
     if isinstance(requested, bool) or not isinstance(requested, int) or requested < 0:
         raise ValueError("context must be 0 (automatic) or a positive token count")
     if not requested:
+        if slots != 1:
+            raise ValueError("automatic context supports one slot; specify context for multiple slots")
         fit = suggest.suggest(found, goal="long-context", max_verdict="yellow")
         requested = fit.context
         if requested <= 0 or fit.verdict not in {"green", "yellow"}:
