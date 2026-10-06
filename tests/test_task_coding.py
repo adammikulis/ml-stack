@@ -24,7 +24,7 @@ def test_native_turn_and_output_limits_preserve_authority(monkeypatch):
     manager._process(None, ['claude', '--print'], {'AUTHORITY': 'unchanged'}, context)
     assert seen['command'][-2:] == ['--max-turns', '60']
     assert seen['command'][seen['command'].index('--system-prompt') + 1] == task_coding.BOOTSTRAP
-    assert seen['command'][seen['command'].index('--tools') + 1] == 'Read,Edit,Write,Bash,Glob,Grep'
+    assert seen['command'][seen['command'].index('--tools') + 1] == 'Read,Edit,Write,Bash,Glob,Grep,Agent'
     assert '--dangerously-skip-permissions' not in seen['command']
     assert 'CLAUDE_CODE_MAX_OUTPUT_TOKENS' not in seen['environment']
     assert seen['environment']['CLAUDE_CODE_EFFORT_LEVEL'] == 'low'
