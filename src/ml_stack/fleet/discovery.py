@@ -159,6 +159,16 @@ class Membership:
 
     mode: str = "dev"
 
+    def __post_init__(self) -> None:
+        from .cluster_modes import validate
+        require_name(self.group)
+        validate(self.mode)
+        if not isinstance(self.key, bytes) or len(base64.b64decode(
+                self.key + b"=" * (-len(self.key) % 4), altchars=b"-_", validate=True)) != 32:
+            raise ValueError("cluster key must contain 256 bits")
+        if not isinstance(self.join, str):
+            raise ValueError("cluster join secret must be text")
+
     def public(self) -> dict[str, Any]:
         return {"group": self.group, "mode": self.mode}
 
@@ -182,12 +192,13 @@ def memberships(path: Path | str | None = None) -> list[Membership]:
         return _adopt_single(path)
     for row in raw if isinstance(raw, list) else []:
         try:
-            group, key, join = str(row["group"]), str(row["key"]).encode(), str(row.get("join") or "")
-        except (KeyError, TypeError, AttributeError):
+            group, key, join = row["group"], row["key"].encode("ascii"), row.get("join", "")
+            member = Membership(group=group, key=key, join=join, mode=row.get("mode", "prod"))
+        except (KeyError, TypeError, AttributeError, ValueError, DiscoveryError):
             continue
         if key and group not in seen:
             seen.add(group)
-            out.append(Membership(group=group, key=key, join=join, mode=row.get("mode", "dev")))
+            out.append(member)
     return out
 
 
@@ -586,7 +597,7 @@ class Advertiser:
                 continue
             except OSError:
                 break
-            if self.cluster and self.mode == "dev" and (nonce := _join_nonce(raw, self.cluster)) is not None:
+            if self.cluster and (nonce := _join_nonce(raw, self.cluster)) is not None:
                 self._tell_join(sock, nonce, addr)
                 continue
             msg = _verify(self.key, raw, kind="who")
