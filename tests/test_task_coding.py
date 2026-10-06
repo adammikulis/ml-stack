@@ -145,7 +145,7 @@ def test_canonical_pi_launcher_receives_independent_budget_and_clamped_effort(tm
         seen.update(options)
         return 0
     monkeypatch.setattr(coding, 'launch_coding_agent', launch)
-    agent = localagent.Agent('worker', 'qwen', harness='pi', max_output_tokens=32000)
+    agent = localagent.Agent('worker', 'qwen', profile='coding', harness='pi', max_output_tokens=32000)
     manager = task_coding.TaskManager(store, SimpleNamespace(base=None), agent)
     manager._run(task_coding.Turn(conversation.id), conversation, 'Implement a queue')
     assert seen['max_output_tokens'] == 32000
