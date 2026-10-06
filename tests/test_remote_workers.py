@@ -9,7 +9,7 @@ from urllib.parse import urlsplit
 import pytest
 
 from ml_stack import http
-from ml_stack.fleet import api, project_enrollment, tls
+from ml_stack.fleet import api, discovery, project_enrollment, tls
 from ml_stack.fleet.discovery import (
     Beacon,
     Membership,
@@ -38,7 +38,7 @@ def _server(root, machine, projects):
     daemon = api.Daemon(runner, files, lambda: derive_token(memberships()[0].key))
     daemon.projects, daemon.workspaces = projects, WorkspaceHost(projects)
     ident = tls.identity(root / machine / 'tls', machine)
-    server = LimitedServer(('127.0.0.1', 0), api.make_handler(daemon), tls=tls.server_context(ident))
+    server = LimitedServer(('0.0.0.0', 0), api.make_handler(daemon), tls=tls.server_context(ident))
     threading.Thread(target=server.serve_forever, daemon=True).start()
     beacon = Beacon(name=machine, machine=machine, host='127.0.0.1', port=server.server_port, cert=ident.beacon)
     peer = Peer(beacon.base_url, derive_token(KEY), beacon=beacon)
@@ -59,6 +59,7 @@ def devices(tmp_path, monkeypatch):
     monkeypatch.setenv('ML_STACK_CLUSTER_KEY', str(_membership(tmp_path)))
     monkeypatch.setattr('ml_stack.home.state', lambda *parts: tmp_path / 'device-a' / 'state' / '/'.join(parts))
     monkeypatch.setattr('ml_stack.home.device_id', lambda: 'device-b')
+    monkeypatch.setattr('ml_stack.home.machine_id', lambda: remote_workers.home.device_id())
     monkeypatch.setattr(guide.coordinator_bootstrap, 'ensure_host', lambda *args: None)
     roots, servers, runners, peers, spawned = {}, [], [], [], []
     project = SimpleNamespace(name='sample', authority_machine='device-a', board_host='', root='')
@@ -112,7 +113,7 @@ def devices(tmp_path, monkeypatch):
                 'name': 'local-qwen', 'ctx': 32768, 'max_output_tokens': 1234}
         yield SimpleNamespace(caller=caller, token=caller_token, target=target, body=body,
                               local=local, authority=authority, target_projects=target_projects,
-                              spawned=spawned, roots=roots, peers=peers, keyfile=tmp_path / 'cluster.key')
+                              spawned=spawned, roots=roots, peers=peers, project=project, keyfile=tmp_path / 'cluster.key')
     finally:
         for server in servers:
             server.shutdown()
@@ -401,3 +402,87 @@ def test_running_worker_cannot_adopt_another_board_certificate_during_rekey(devi
     devices.peers[0].beacon.cert = devices.peers[1].beacon.cert
     with pytest.raises(PermissionError, match='cannot switch'):
         worker.auth(worker.token)
+
+
+def test_self_lan_authority_uses_the_signed_loopback_certificate(devices, monkeypatch):
+    state = devices
+    monkeypatch.setattr(remote_workers.home, 'machine_id', lambda: 'device-a')
+    authority_peer = state.peers[0]
+    lan_host = f'https://{discovery.primary_ip()}:{authority_peer.beacon.port}'
+    state.project.board_host = lan_host
+    caller = RemoteWorkspace(lan_host, PROJECT, cluster=CLUSTER)
+    assert caller.authority_machine == 'device-a'
+    assert caller.device_cert == authority_peer.beacon.cert
+    assert caller.call('whoami', state.token)['id'] == 'test-caller'
+    result = caller._request('worker', state.body)
+    assert result['identity'].startswith('lan-device-a-')
+    assert len(state.spawned) == 1
+    http.pin(urlsplit(lan_host).netloc, None)
+
+
+@pytest.mark.redteam
+@pytest.mark.parametrize('wrong', ['machine', 'certificate', 'port', 'address'])
+def test_self_lan_alias_rejects_unbound_endpoints(devices, monkeypatch, wrong):
+    state = devices
+    monkeypatch.setattr(remote_workers.home, 'machine_id', lambda: 'device-a')
+    node = state.peers[0]
+    cert = node.beacon.cert if wrong != 'certificate' else ''
+    beacon = SimpleNamespace(machine='other-node' if wrong == 'machine' else 'device-a', cert=cert)
+    observed = SimpleNamespace(base_url=node.base_url, beacon=beacon)
+    monkeypatch.setattr(Peer, 'discover', lambda **kwargs: [observed])
+    host = '192.168.99.99' if wrong == 'address' else discovery.primary_ip()
+    port = node.beacon.port + (1 if wrong == 'port' else 0)
+    with pytest.raises(PermissionError, match='authenticated'):
+        RemoteWorkspace(f'https://{host}:{port}', PROJECT, cluster=CLUSTER)
+
+
+@pytest.mark.redteam
+def test_cli_excludes_own_logical_node_with_a_distinct_physical_identity(devices, monkeypatch):
+    state = devices
+    monkeypatch.setattr(remote_workers.home, 'machine_id', lambda: 'device-a')
+    monkeypatch.setattr(remote_workers.home, 'device_id', lambda: 'f' * 64)
+    monkeypatch.setattr(remote_workers, 'selected', lambda root:
+                        {'host': state.caller.host, 'project_id': PROJECT, 'cluster': CLUSTER})
+    args = SimpleNamespace(project=str(state.roots['device-a']), device='device-a', agent='')
+    with pytest.raises(PermissionError, match='select one discovered remote device'):
+        remote_workers.run(args)
+    assert not state.spawned
+
+
+@pytest.mark.redteam
+def test_self_lan_alias_transport_refuses_another_signed_certificate(devices, monkeypatch):
+    state = devices
+    monkeypatch.setattr(remote_workers.home, 'machine_id', lambda: 'device-a')
+    node = state.peers[0]
+    forged = SimpleNamespace(base_url=node.base_url,
+                             beacon=SimpleNamespace(machine='device-a', cert=state.peers[1].beacon.cert))
+    monkeypatch.setattr(Peer, 'discover', lambda **kwargs: [forged])
+    host = f'https://{discovery.primary_ip()}:{node.beacon.port}'
+    try:
+        caller = RemoteWorkspace(host, PROJECT, cluster=CLUSTER)
+        with pytest.raises(PermissionError, match='CERTIFICATE_VERIFY_FAILED'):
+            caller.call('whoami', state.token)
+        assert not state.spawned
+    finally:
+        http.pin(urlsplit(host).netloc, None)
+
+
+@pytest.mark.redteam
+@pytest.mark.parametrize('binding', ['absent', 'certificate', 'machine', 'userinfo', 'path'])
+def test_exact_endpoint_requires_a_signed_device_origin(devices, binding):
+    from ml_stack.fleet.remote import device_address
+    node = devices.peers[0]
+    beacon = SimpleNamespace(machine=node.beacon.machine, cert=node.beacon.cert)
+    host = node.base_url
+    if binding == 'absent':
+        beacon = None
+    elif binding == 'certificate':
+        beacon.cert = ''
+    elif binding == 'machine':
+        beacon.machine = ''
+    elif binding == 'userinfo':
+        host = host.replace('https://', 'https://other@')
+    else:
+        host += '/unrelated'
+    observed = SimpleNamespace(base_url=host, beacon=beacon)
+    assert not device_address(observed, host)

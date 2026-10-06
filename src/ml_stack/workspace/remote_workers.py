@@ -278,7 +278,7 @@ def run(args):
     remote = RemoteWorkspace(connection['host'], connection['project_id'],
                              cluster=members[0].group, cluster_key=cluster_key)
     peers = Peer.discover(key=members[0].key, group=members[0].group)
-    targets = [peer for peer in peers if peer.beacon and peer.beacon.machine != home.device_id()
+    targets = [peer for peer in peers if peer.beacon and peer.beacon.machine != home.machine_id()
                and (not args.device or peer.name == args.device or peer.beacon.machine == args.device)]
     if len(targets) != 1:
         raise Denied('select one discovered remote device with --device NAME; found: ' + ', '.join(p.name for p in targets))

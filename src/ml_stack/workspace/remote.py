@@ -9,10 +9,11 @@ import re
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from ml_stack import home, sealing
+from ml_stack import home, http, sealing
+from ml_stack.fleet import tls
 from ml_stack.fleet.discovery import derive_token, load_cluster_key, memberships
 from ml_stack.fleet.onboard.lan import require_local_url
-from ml_stack.fleet.remote import Peer
+from ml_stack.fleet.remote import Peer, device_address
 from ml_stack.graph.store import GraphStore
 from ml_stack.http import ServerError, open_stream
 from ml_stack.workspace import coordinator_client, tokens
@@ -53,11 +54,13 @@ class RemoteWorkspace:
         self.authority_machine = ""
         if parts.scheme == "https":
             peers = Peer.discover(key=key, timeout_s=2)
-            matched = [peer for peer in peers if peer.base_url.rstrip("/") == self.host]
+            matched = [peer for peer in peers if device_address(peer, self.host)]
             if len(matched) != 1:
                 raise Denied("the project host was not authenticated by cluster discovery; check its address and cluster")
             self.device_cert = matched[0].beacon.cert if matched[0].beacon else ""
             self.authority_machine = getattr(matched[0].beacon, "machine", "")
+            if self.device_cert:
+                http.pin(parts.netloc, tls.pinned_context(self.device_cert))
         label = hashlib.sha256(f"{self.host}/{project_id}".encode()).hexdigest()
         self.base = home.state("workspace-remote", label)
 

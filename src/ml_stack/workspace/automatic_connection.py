@@ -1,7 +1,6 @@
 """Automatic Dev project discovery and canonical Board attachment."""
 
 import hashlib
-import ipaddress
 import os
 import time
 from pathlib import Path
@@ -9,12 +8,12 @@ from urllib.parse import urlsplit
 
 from ml_stack import person, worktreerules
 from ml_stack.fleet import automatic_clusters
-from ml_stack.fleet.discovery import memberships, primary_ip
+from ml_stack.fleet.discovery import memberships
 from ml_stack.fleet.launch import HTTP_PORT
 from ml_stack.fleet.project_client import catalogue, register_local
 from ml_stack.fleet.project_source import ProjectError
 from ml_stack.fleet.projects import identity
-from ml_stack.fleet.remote import Peer
+from ml_stack.fleet.remote import Peer, device_address
 from ml_stack.workspace import device_agent, tokens
 from ml_stack.workspace.harness_seat import Seat
 from ml_stack.workspace.identity import AGENT, Denied
@@ -24,22 +23,6 @@ from ml_stack.workspace.remote import RemoteWorkspace
 MAX_PEERS = 8
 DISCOVERY_SECONDS = 10.0
 ADMISSION_SECONDS = 25.0
-
-
-def _device_address(peer, declared):
-    """Whether a Board origin names its authenticated discovery endpoint."""
-    if declared == peer.base_url:
-        return True
-    try:
-        observed, named = urlsplit(peer.base_url), urlsplit(declared)
-        if (named.scheme != "https" or observed.scheme != "https" or named.port != observed.port
-                or named.username or named.password or named.path not in ("", "/")
-                or named.query or named.fragment):
-            return False
-        return (ipaddress.ip_address(observed.hostname).is_loopback
-                and named.hostname == primary_ip())
-    except ValueError:
-        return False
 
 
 def settle(member, cluster_key=None, port=None):
@@ -170,7 +153,7 @@ def discover(root: Path, *, cluster_key=None, cluster="", port=None):
         peer, row = hosts[0]
         declared = {candidate["board_host"] for _, candidate in found
                     if candidate["authority_machine"] == authority and candidate["board_host"]}
-        if len(declared) != 1 or not _device_address(peer, next(iter(declared))):
+        if len(declared) != 1 or not device_address(peer, next(iter(declared))):
             raise Denied("the canonical Board address does not match its authenticated device")
     else:
         peer, row = min(found, key=lambda item: (item[1]["machine"], item[0].base_url))
