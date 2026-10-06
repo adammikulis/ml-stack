@@ -107,6 +107,8 @@ def machine_looks_fine(monkeypatch):
         Finding(name="memory a model may use", good=True, said="96G of 128G (75%)"),
         Finding(name="models on this machine", good=True, said="2 file(s)")])
     monkeypatch.setattr(joining, "_server_here", lambda: "/opt/fake/bin/llama-server")
+    monkeypatch.setattr(joining.automatic_clusters, "ensure",
+                        lambda path, **kw: memberships(path)[0])
 
 
 @pytest.fixture
