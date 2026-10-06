@@ -94,6 +94,7 @@ def serve_forever(root: Path | str | None = None,
                   lan: bool = False, ui_from_lan: bool = False,
                   name: str = "", announce: bool = True,
                   cluster_key_path: Path | str | None = None,
+                  cluster_mode: str | None = None,
                   device_report: Callable[[], dict[str, Any]] | None = None,
                   slots: int = 1, labels: Iterable[str] = (),
                   fetch_slots: int = 2, web: bool = True,
@@ -117,6 +118,12 @@ def serve_forever(root: Path | str | None = None,
     live_token: list[str] = [""]
     files_root = root / "files"
     files_root.mkdir(exist_ok=True)
+    from . import automatic_clusters, cluster_modes
+    selected = memberships(cluster_key_path)
+    effective_mode = cluster_modes.validate(cluster_mode or (selected[0].mode if selected else "dev"))
+    say(cluster_modes.notice(effective_mode))
+    if announce:
+        automatic_clusters.ensure(cluster_key_path, mode=effective_mode)
     key = load_cluster_key(cluster_key_path)
     token = load_or_create_token(root, key)
     live_token[0] = token
@@ -302,7 +309,8 @@ def serve_forever(root: Path | str | None = None,
 
         for group, member in joined.items():
             if group in advertisers:
-                advertisers[group].joinable = bool(member.join)
+                advertisers[group].mode = member.mode
+                advertisers[group].joinable = member.mode == "dev" or bool(member.join)
                 continue
             try:
                 offered = served_cert()
@@ -316,7 +324,8 @@ def serve_forever(root: Path | str | None = None,
                 # Not group=: that is the multicast address every cluster shares.
                 # Clusters are told apart by the key their beacons are signed with.
                 tell = Advertiser(beacon, member.key, cluster=group, refresh=refresh)
-                tell.joinable = bool(member.join)
+                tell.mode = member.mode
+                tell.joinable = member.mode == "dev" or bool(member.join)
                 advertisers[group] = tell.start()
             except DiscoveryError as exc:
                 say(f"  discovery OFF for {group}: {exc}")
@@ -508,6 +517,8 @@ def run(argv: list[str] | None = None, *,
                          "(default: $ML_STACK_PEER_NAME, else the hostname)")
     ap.add_argument("--cluster-key", default=None,
                     help="path to the cluster key (default: ~/.ml-stack/cluster.key)")
+    ap.add_argument("--mode", choices=("dev", "prod"), default=None,
+                    help="cluster admission mode (default: existing cluster mode, otherwise dev)")
     ap.add_argument("--no-announce", action="store_true",
                     help="serve, but stay invisible to peer discovery")
     ap.add_argument("--busy", action="append", default=[], metavar="WHEN",
@@ -580,7 +591,7 @@ def run(argv: list[str] | None = None, *,
         return out
 
     serve_forever(a.root, a.host, a.port, name=a.name, lan=a.lan, ui_from_lan=a.ui_from_lan,
-                  announce=not a.no_announce, cluster_key_path=a.cluster_key,
+                  announce=not a.no_announce, cluster_key_path=a.cluster_key, cluster_mode=a.mode,
                   slots=a.slots, device_report=report if probes else None,
                   labels=a.label or os.environ.get("ML_STACK_LABELS", "").split(","),
                   fetch_slots=a.fetch_slots, web=not a.no_web,

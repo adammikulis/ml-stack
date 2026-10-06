@@ -408,7 +408,10 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
                 sched = schedule.public() if schedule is not None else None
                 if sched is not None and not sched["available"]:
                     status = {**status, "free": 0}
-                self._send(200, {"ok": True, "name": self._name(), **status, **report(),
+                from .discovery import memberships
+                joined = memberships(cluster_key_path)
+                self._send(200, {"ok": True, "name": self._name(),
+                                 "cluster_mode": joined[0].mode if joined else "dev", **status, **report(),
                                  **({"availability": sched} if sched else {}),
                                  **({"serving": serving.public()} if serving is not None
                                     else {})})

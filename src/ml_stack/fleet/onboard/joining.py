@@ -7,6 +7,7 @@ import hashlib
 import hmac
 import http.client
 import json
+import re
 import secrets
 import threading
 import time
@@ -105,6 +106,8 @@ class Joining:
     def handle(self, path: str, body: dict[str, Any], source: str) -> tuple[int, dict[str, Any]]:
         """The status and body answering ``POST`` to ``path`` under `API`."""
         try:
+            if path == f"{API}/automatic":
+                return 200, self._automatic(body, source)
             if path == f"{API}/start":
                 return 200, self._start(body, source)
             if path == f"{API}/finish":
@@ -112,6 +115,24 @@ class Joining:
         except Refusal as why:
             return why.status, {"error": why.reason}
         return 404, {"error": "no such route"}
+
+    def _automatic(self, body: dict[str, Any], source: str) -> dict[str, Any]:
+        group = disc.require_name(body.get("group"))
+        member = next((row for row in self.groups() if row.group == group), None)
+        if member is None or member.mode != "dev":
+            raise Refusal(403, "this cluster requires explicit admission")
+        if self.fingerprint() == PLAIN:
+            raise Refusal(403, "automatic cluster admission requires TLS")
+        if self.lockout.locked(source) or self.everyone.locked("automatic"):
+            raise Refusal(429, "too many automatic joins; retry shortly")
+        nonce = body.get("nonce")
+        if not isinstance(nonce, str) or not re.fullmatch("[0-9a-f]{32}", nonce):
+            raise Refusal(400, "automatic join needs a request nonce")
+        self.lockout.failed(source)
+        self.everyone.failed("automatic")
+        self._note(source, group, "joined development cluster")
+        return {"group": group, "key": member.key.decode(), "mode": member.mode,
+                "cluster_id": hashlib.sha256(member.key).hexdigest(), "nonce": nonce}
 
     def _note(self, source: str, group: str, outcome: str) -> None:
         self.attempts.append((time.time(), source, group, outcome))

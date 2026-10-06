@@ -78,11 +78,11 @@ def key_path(path: Path | str | None = None) -> Path:
     return home.expand(env) if env else home.state("cluster.key")
 
 
-def mint_cluster(group: str, path: Path | str | None = None, *, join: str = "") -> Membership:
+def mint_cluster(group: str, path: Path | str | None = None, *, join: str = "", mode: str = "dev") -> Membership:
     """Make a cluster of a fresh random 256-bit key, replacing one of the same name."""
     group = require_name(group)
     key = base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=")
-    return adopt(Membership(group=group, key=key, join=join), path)
+    return adopt(Membership(group=group, key=key, join=join, mode=mode), path)
 
 
 def create_cluster_key(path: Path | str | None = None, *,
@@ -157,8 +157,10 @@ class Membership:
     """What the join handshake takes as the passphrase (`onboard.joining.join_secret`); empty
     on a machine that does not know the passphrase."""
 
+    mode: str = "dev"
+
     def public(self) -> dict[str, Any]:
-        return {"group": self.group}
+        return {"group": self.group, "mode": self.mode}
 
 
 def clusters_path(path: Path | str | None = None) -> Path:
@@ -185,7 +187,7 @@ def memberships(path: Path | str | None = None) -> list[Membership]:
             continue
         if key and group not in seen:
             seen.add(group)
-            out.append(Membership(group=group, key=key, join=join))
+            out.append(Membership(group=group, key=key, join=join, mode=row.get("mode", "dev")))
     return out
 
 
@@ -211,7 +213,7 @@ def _write_memberships(rows: list[Membership],
                        path: Path | str | None = None) -> None:
     """Record the list this machine belongs to."""
     listed = clusters_path(path)
-    write_json(listed, [{"group": m.group, "key": m.key.decode(), "join": m.join} for m in rows])
+    write_json(listed, [{"group": m.group, "key": m.key.decode(), "join": m.join, "mode": m.mode} for m in rows])
     private_file(listed)
 
 
@@ -496,6 +498,7 @@ class Advertiser:
         self._said: set[str] = set()
         self.cluster = cluster
         self.joinable = False
+        self.mode = "dev"
         """The cluster's name; a machine that asks to join it is told where to shake hands."""
 
     # -- lifecycle --
@@ -583,7 +586,7 @@ class Advertiser:
                 continue
             except OSError:
                 break
-            if self.cluster and (nonce := _join_nonce(raw, self.cluster)) is not None:
+            if self.cluster and self.mode == "dev" and (nonce := _join_nonce(raw, self.cluster)) is not None:
                 self._tell_join(sock, nonce, addr)
                 continue
             msg = _verify(self.key, raw, kind="who")
@@ -602,7 +605,9 @@ class Advertiser:
         """Answer a machine asking to join this cluster: the port and scheme to shake hands on."""
         reply = _canonical({"v": PROTOCOL, "kind": "join", "group": self.cluster, "nonce": nonce,
                             "name": self.beacon.name, "port": self.beacon.port, "tls": bool(self.beacon.cert),
-                            "method": "passphrase" if self.joinable else "recovery"})
+                            "method": "automatic" if self.mode == "dev" else "passphrase" if self.joinable else "recovery",
+                            "mode": self.mode, "cluster_id": hashlib.sha256(self.key).hexdigest(),
+                            "fingerprint": hashlib.sha256(base64.b64decode(self.beacon.cert)).hexdigest() if self.beacon.cert else ""})
         with contextlib.suppress(OSError):
             sock.sendto(reply, addr)
 
