@@ -87,11 +87,22 @@ def _token(args: argparse.Namespace) -> str:
     if connection is not None:
         return _context(args, connection)[1]
     base = limits.root()
-    agent = args.agent or os.environ.get(tokens.AGENT_ENV, "")
     remote = coordinator_client.client(base)
-    if agent and not args.token_file and remote:
+    return _coordinator_token(args, remote) if remote else _local_token(args)
+
+
+def _coordinator_token(args: argparse.Namespace, remote) -> str:
+    base = limits.root()
+    agent = args.agent or os.environ.get(tokens.AGENT_ENV, "")
+    if agent and not args.token_file:
         args.agent = remote.ensure(base, agent, project=project.authoritative())
-    elif agent and not args.token_file:
+    return tokens.resolve(base, token_file=args.token_file, agent=args.agent)
+
+
+def _local_token(args: argparse.Namespace) -> str:
+    base = limits.root()
+    agent = args.agent or os.environ.get(tokens.AGENT_ENV, "")
+    if agent and not args.token_file:
         ws = Workspace(base)
         try:
             ws.auth(tokens.load(base, agent))
@@ -104,12 +115,14 @@ def _project_connection(cwd: Path | None = None):
     return project_connection.selected(cwd) or project_connection.auto_attach(cwd)
 
 
-def _context(args: argparse.Namespace, connection=None):
-    connection = connection or _project_connection()
+_CONNECTION_UNSET = object()
+
+
+def _context(args: argparse.Namespace, connection=_CONNECTION_UNSET):
+    if connection is _CONNECTION_UNSET:
+        connection = _project_connection()
     if connection is None:
-        connection = project_connection.auto_attach()
-        if connection is None:
-            return Workspace(), _token(args)
+        return Workspace(), _local_token(args)
     remote = project_connection.RemoteWorkspace(connection["host"], connection["project_id"],
                                                 cluster=connection.get("cluster", ""),
                                                 cluster_key=Path(connection["cluster_key"])
@@ -733,7 +746,7 @@ def _runner(handler: Handler) -> Callable[[argparse.Namespace], int]:
                 if getattr(args, field, '') == '-':
                     setattr(args, field, _body('-'))
             result = remote.command(coordinator_client.argv_for(args, [*COMMON, *options]),
-                                    _token(args), request_id=args.request_id)
+                                    _coordinator_token(args, remote), request_id=args.request_id)
         else:
             ws, token = _context(args, connection)
             if isinstance(ws, Workspace) and handler is not _init:
