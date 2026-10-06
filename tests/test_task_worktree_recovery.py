@@ -43,9 +43,15 @@ def test_dematerialization_preserves_blockage_and_checkpoints_and_can_rematerial
 
 
 @pytest.mark.parametrize('kind', ['worker', 'holder', 'scheduler', 'lease', 'claim', 'area', 'file', 'assignment', 'dirty', 'ignored', 'commit', 'authority'])
-def test_recovery_refuses_live_or_unique_work(inactive, monkeypatch, kind):
+@pytest.mark.parametrize('legacy', [False, True])
+def test_recovery_refuses_live_or_unique_work(inactive, monkeypatch, kind, legacy):
     kit = inactive
     target = Path(kit.allocation['project'])
+    if legacy:
+        with GraphStore(kit.base / 'coordination.db') as graph:
+            scope = record(graph, 'task-worktree:' + kit.task['id'].split(':')[1], 'task-worktree')
+            scope.pop('state')
+            graph.upsert_node({'id': scope['id'], 'kind': 'task-worktree', 'attrs': scope})
     if kind in ('worker', 'holder', 'scheduler'):
         pid = {'worker': 555, 'holder': 555, 'scheduler': kit.allocation['scheduler_pid']}[kind]
         monkeypatch.setattr(recovery, 'pid_exists', lambda value: value == pid)
@@ -88,6 +94,37 @@ def test_failed_cleanup_restores_exact_prior_claims(inactive):
     with pytest.raises(Denied):
         recovery.dematerialize(kit.ws, kit.parent, kit.task['id'], 'Preserve pending files')
     assert kit.ws.claims._load() == before
+
+
+def test_registered_legacy_scope_without_state_recovers_through_checked_lifecycle(inactive):
+    kit = inactive
+    with GraphStore(kit.base / 'coordination.db') as graph:
+        scope = record(graph, 'task-worktree:' + kit.task['id'].split(':')[1], 'task-worktree')
+        scope.pop('state')
+        graph.upsert_node({'id': scope['id'], 'kind': 'task-worktree', 'attrs': scope})
+    result = recovery.dematerialize(kit.ws, kit.parent, kit.task['id'], 'Recover verified legacy checkout')
+    assert result['cleanup_verified'] and result['state'] == 'blocked'
+    with GraphStore(kit.base / 'coordination.db') as graph:
+        recovered = record(graph, scope['id'], 'task-worktree')
+    assert recovered['state'] == 'reserved' and not Path(scope['project']).exists()
+
+
+def test_missing_legacy_checkout_preserves_pending_history(inactive):
+    from ml_stack import worktreerules
+    from ml_stack.workspace import integration_git as repo
+
+    kit = inactive
+    with GraphStore(kit.base / 'coordination.db') as graph:
+        scope = record(graph, 'task-worktree:' + kit.task['id'].split(':')[1], 'task-worktree')
+        scope.pop('state')
+        graph.upsert_node({'id': scope['id'], 'kind': 'task-worktree', 'attrs': scope})
+    before = kit.board.get(kit.parent, kit.task['id'])
+    primary = worktreerules.checkouts(kit.source)[1]
+    repo.remove_merged(primary, Path(scope['project']), scope['branch'], repo.git(primary, 'rev-parse', 'HEAD'))
+    with pytest.raises(Denied, match='registered checkout'):
+        recovery.dematerialize(kit.ws, kit.parent, kit.task['id'], 'Missing legacy checkout')
+    after = kit.board.get(kit.parent, kit.task['id'])
+    assert after['state'] == before['state'] and after['checkpoints'] == before['checkpoints']
 
 
 def test_claim_reservation_waits_for_recovery_lock(inactive):

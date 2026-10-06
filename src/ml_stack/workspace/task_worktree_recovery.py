@@ -43,7 +43,8 @@ def dematerialize(ws, token: str, ident: str, reason: str) -> dict:
     with board._store() as graph:
         task = board._task(graph, ident)
         scope = record(graph, 'task-worktree:' + ident.removeprefix('task:'), 'task-worktree')
-        if scope['task'] != ident or scope['state'] not in ('active', 'reserved'):
+        state = scope.get('state')
+        if scope['task'] != ident or state not in ('active', 'reserved', None):
             raise Denied('the task has no recoverable canonical checkout')
         parent = ws.registry.info(scope['worker']).get('parent')
         if who.role != HUMAN and not (who.id == scope['owner'] == parent):
@@ -55,6 +56,8 @@ def dematerialize(ws, token: str, ident: str, reason: str) -> dict:
             raise Denied('the canonical source repository changed')
         primary = checkout[1]
         with ws.claims.inactive_worktree(who, scope):
+            if state is None and not target.is_dir():
+                raise Denied('the legacy task requires its registered checkout for verified recovery')
             if target.exists():
                 trees = worktreerules.checkouts(target)
                 if not trees or trees != (target.resolve(), primary) or target.resolve() == primary:
