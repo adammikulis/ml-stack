@@ -1,5 +1,6 @@
 """Automatic Dev project discovery and canonical Board attachment."""
 
+import time
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -10,6 +11,9 @@ from ml_stack.fleet.remote import Peer
 from ml_stack.workspace.identity import Denied
 from ml_stack.workspace.project_connection import bind, selected
 from ml_stack.workspace.remote import RemoteWorkspace
+
+MAX_PEERS = 8
+DISCOVERY_SECONDS = 10.0
 
 
 def _boards(peer, document, project_id):
@@ -45,13 +49,18 @@ def discover(root: Path, *, cluster_key=None, cluster="", port=None):
     if len(members) != 1:
         raise Denied("select this project's Dev cluster with --cluster NAME")
     member = members[0]
-    peers = Peer.discover(key=member.key, group=member.group,
+    deadline = time.monotonic() + DISCOVERY_SECONDS
+    peers = Peer.discover(key=member.key, group=member.group, timeout=2,
                           cluster_key_path=cluster_key, timeout_s=2, port=port)
+    if len(peers) > MAX_PEERS:
+        raise Denied("project discovery exceeds the device limit")
     found = []
     for peer in peers:
         if urlsplit(peer.base_url).scheme != "https":
             continue
-        document = catalogue(peer)
+        if time.monotonic() >= deadline:
+            raise Denied("project discovery exceeded its time limit")
+        document = catalogue(peer, deadline=deadline)
         if not peer.beacon or document["machine"] != peer.beacon.machine:
             raise Denied("the project catalogue does not match its authenticated device")
         found.extend(_boards(peer, document, project_id))

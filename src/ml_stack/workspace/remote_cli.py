@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from ml_stack.command import flag, option
+from ml_stack.workspace.automatic_connection import connect
 from ml_stack.workspace.project_connection import bind
 from ml_stack.workspace.remote import RemoteWorkspace
 
@@ -21,7 +22,6 @@ OPTIONS = [option("json"), flag("action", choices=("connect", "join", "whoami", 
 def run(args):
     """Run a project-scoped remote operation."""
     if args.action == "connect":
-        from ml_stack.workspace.automatic_connection import connect
         if args.arguments or args.host or args.project_id:
             raise ValueError("connect discovers this project on its Dev cluster")
         return connect(Path(args.project_root), args.name or args.agent,

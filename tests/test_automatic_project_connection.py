@@ -25,7 +25,7 @@ def found(monkeypatch):
     monkeypatch.setattr(automatic, "memberships", lambda path: [
         SimpleNamespace(group="development", key=b"key", mode="dev")])
     monkeypatch.setattr(automatic.Peer, "discover", lambda **kwargs: nodes)
-    monkeypatch.setattr(automatic, "catalogue", lambda node: node.document)
+    monkeypatch.setattr(automatic, "catalogue", lambda node, **kwargs: node.document)
     return nodes
 
 
@@ -97,3 +97,18 @@ def test_enrollment_binds_returned_agent_identity(found, tmp_path, monkeypatch):
     assert result["agent"] == "worker-1"
     assert events == [("worker", {"model": "test-model", "harness": "codex",
                                   "authority_machine": "node-a"})]
+
+
+@pytest.mark.redteam
+def test_discovery_bounds_authenticated_candidates(found, tmp_path):
+    found.extend(peer(f"node-{number}") for number in range(automatic.MAX_PEERS + 1))
+    with pytest.raises(Denied, match="device limit"):
+        automatic.discover(tmp_path)
+
+
+def test_discovery_refuses_elapsed_budget(found, tmp_path, monkeypatch):
+    found.append(peer("node-a"))
+    times = iter((0.0, automatic.DISCOVERY_SECONDS + 1))
+    monkeypatch.setattr(automatic.time, "monotonic", lambda: next(times))
+    with pytest.raises(Denied, match="time limit"):
+        automatic.discover(tmp_path)

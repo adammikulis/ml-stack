@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import time
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -18,7 +19,7 @@ from .project_source import MAX_ARCHIVE, MAX_FILES, MAX_SOURCE, ProjectError, ch
 from .remote import Peer
 
 
-def read(peer: Peer, path: str, limit: int) -> bytes:
+def read(peer: Peer, path: str, limit: int, *, deadline: float | None = None) -> bytes:
     """Read one bounded signed and sealed project response."""
     endpoint = peer.base_url + path
 
@@ -29,11 +30,28 @@ def read(peer: Peer, path: str, limit: int) -> bytes:
         return url
 
     wire_limit = limit + sealing.NONCE_BYTES + 16
+    timeout = min(30, peer.timeout)
+    if deadline is not None:
+        timeout = min(timeout, deadline - time.monotonic())
+        if timeout <= 0:
+            raise ProjectError("Project discovery exceeded its time limit")
     with open_stream(guard(endpoint), token=peer.token, guard=guard,
-                     headers={sealing.HEADER: "2"}, timeout=30) as response:
+                     headers={sealing.HEADER: "2"}, timeout=timeout) as response:
         if not response.headers.get(sealing.HEADER):
             raise ProjectError("Project response was not authenticated and sealed")
-        data = response.read(wire_limit + 1)
+        if deadline is None:
+            data = response.read(wire_limit + 1)
+        else:
+            chunks, size = [], 0
+            while size <= wire_limit:
+                if time.monotonic() >= deadline:
+                    raise ProjectError("Project discovery exceeded its time limit")
+                chunk = response.read1(min(8192, wire_limit + 1 - size))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                size += len(chunk)
+            data = b"".join(chunks)
         if len(data) > wire_limit:
             raise ProjectError("Project response exceeds its size limit")
         opened = getattr(response, "sealed", Sealed()).open(response.status, response.headers, data)
@@ -42,8 +60,8 @@ def read(peer: Peer, path: str, limit: int) -> bytes:
         return opened
 
 
-def catalogue(peer: Peer) -> dict:
-    result = json.loads(read(peer, "/workspace/v1/projects", 1 << 20))
+def catalogue(peer: Peer, *, deadline: float | None = None) -> dict:
+    result = json.loads(read(peer, "/workspace/v1/projects", 1 << 20, deadline=deadline))
     if (not isinstance(result, dict) or not isinstance(result.get("projects"), list)
             or not isinstance(result.get("machine"), str) or not 0 < len(result["machine"]) <= 256
             or len(result["projects"]) > 1000):
