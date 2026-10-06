@@ -89,3 +89,27 @@ def test_person_saves_and_removes_a_credential_in_settings(server, playwright):
         panel.get_by_role("button", name="Remove credential", exact=True).click()
         expect(panel.get_by_text("OPENAI_API_KEY · credentials file", exact=False)).to_have_count(0)
         assert credentials.get("OPENAI_API_KEY") is None
+
+
+@pytest.mark.redteam
+@pytest.mark.parametrize("method", ["POST", "DELETE"])
+@pytest.mark.parametrize("access", ["token-session", "authorization", "token-header"])
+def test_agent_access_cannot_change_person_credentials(server, method, access):
+    credentials.set("HF_TOKEN", "isolated-person-secret")
+    before = credentials.file_path().read_bytes()
+    cookie = ""
+    headers = {}
+    if access == "token-session":
+        session = server.ui.sessions.open("token")
+        cookie = server.ui.sessions.cookie_header(session).split(";", 1)[0]
+    elif access == "authorization":
+        headers["Authorization"] = "Bearer isolated-agent-token"
+    else:
+        headers["X-ML-Stack-Token"] = "isolated-agent-token"
+    body = {"name": "HF_TOKEN"}
+    if method == "POST":
+        body["value"] = "isolated-agent-secret"
+    status, result, _ = server.call("/ui/credentials", method=method,
+                                   body=body, cookie=cookie, headers=headers)
+    assert status == 403 and "person" in result["error"]
+    assert credentials.file_path().read_bytes() == before
