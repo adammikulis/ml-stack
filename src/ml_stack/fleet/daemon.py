@@ -18,6 +18,7 @@ import socket
 import threading
 from collections.abc import Callable, Iterable
 from pathlib import Path
+from importlib.metadata import entry_points
 from typing import Any
 
 from ml_stack import home, macauth, sentinel
@@ -88,6 +89,16 @@ def load_or_create_token(root: Path, cluster_key: bytes | None = None) -> str:
     if not p.exists() or p.read_text().strip() != tok:
         write_text(p, tok)
     return tok
+
+
+def workspace_host(projects: ProjectRegistry, factory: Callable[[ProjectRegistry], Any] | None = None) -> Any:
+    """Create project hosting from the injected or installed provider."""
+    if factory is None:
+        providers = tuple(entry_points(group="ml_stack.workspace_hosts", name="default"))
+        if len(providers) != 1:
+            raise RuntimeError("install one ml-stack default workspace hosting provider")
+        factory = providers[0].load()
+    return factory(projects)
 
 
 def serve_forever(root: Path | str | None = None,
@@ -224,7 +235,7 @@ def serve_forever(root: Path | str | None = None,
 
     projects = ProjectRegistry(root, bench_host[0].machine,
                                (Path(__file__).resolve().parents[3], Path.cwd()), lan_host(port))
-    workspaces = workspace_factory(projects) if workspace_factory else None
+    workspaces = workspace_host(projects, workspace_factory)
     handler = make_handler(Daemon(
         runner, files_root, lambda: live_token[0],
         name=lambda: live_name[0], report=report, fetcher=fetcher,
