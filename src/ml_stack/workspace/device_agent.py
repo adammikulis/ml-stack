@@ -7,7 +7,7 @@ from ml_stack.workspace.device_accounts import account_for, account_in
 from ml_stack.workspace.identity import AGENT, HUMAN, Denied
 from ml_stack.workspace.onboard import TOKEN_S
 
-__all__ = ["account_for", "bind_owned_worker", "bind_worker", "enroll"]
+__all__ = ["account_for", "bind_owned_worker", "bind_worker", "enroll", "owned_local"]
 
 
 def _graph(ws):
@@ -79,10 +79,17 @@ def _owned_parent(ws, token, device):
     existing = account_for(ws, parent.id)
     if existing and existing['device_id'] != device:
         raise Denied('the launcher belongs to another installed device')
+    if existing and ws.registry.info(existing['base_id'])['revoked']:
+        raise Denied('the installed device account was revoked')
     if entry.get('minted_by') != 'local-account' and not (
             existing and existing['device_id'] == device):
         raise Denied('the launcher has no trusted local device registration')
     return parent, entry
+
+
+def owned_local(ws, token):
+    """Authenticate this OS account's saved local agent session."""
+    return _owned_parent(ws, token, device_id())[0]
 
 
 def bind_owned_worker(ws, token, name):

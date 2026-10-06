@@ -1,0 +1,94 @@
+"""Installed device trust selects existing workspace authority without person credentials."""
+
+import pytest
+from workspace_kit import Kit
+
+from ml_stack import home
+from ml_stack.fleet import daemon, tls
+from ml_stack.fleet.onboard import cli as onboard
+from ml_stack.workspace import coordinator_client, coordinator_config, coordinator_routes, device_agent, tokens
+from ml_stack.workspace.identity import AGENT, Denied
+
+
+@pytest.fixture(autouse=True)
+def installed_device(monkeypatch):
+    monkeypatch.setattr(device_agent, 'device_id', lambda: '1234567890abcdef')
+
+
+def own(kit):
+    token = kit.ws.registry._add('local-account', 'launcher', AGENT, 0)
+    tokens.store(kit.base, 'launcher', token)
+    return token
+
+
+def test_own_local_session_hosts_without_reading_person_token(tmp_path, monkeypatch):
+    kit = Kit(tmp_path / 'workspace')
+    token = own(kit)
+    monkeypatch.setattr(coordinator_client, 'client', lambda base: None)
+    read = tokens.read_file
+    def agent_only(path):
+        assert path.name != tokens.OWNER_FILE
+        return read(path)
+    monkeypatch.setattr(tokens, 'read_file', agent_only)
+    result = coordinator_routes.ensure_host(kit.ws, token)
+    assert result['mode'] == 'host'
+    assert coordinator_routes.ensure_host(kit.ws, token) == result
+
+
+@pytest.mark.redteam
+@pytest.mark.parametrize('kind', ['foreign', 'network', 'child', 'revoked'])
+def test_only_protected_own_local_identity_selects_authority(tmp_path, monkeypatch, kind):
+    kit = Kit(tmp_path / 'workspace')
+    token = own(kit)
+    if kind == 'foreign':
+        token = kit.agent('other')
+        tokens.store(kit.base, 'other', token)
+    elif kind == 'network':
+        rows = kit.ws.registry._load()
+        rows['launcher']['session_device'] = 'a' * 64
+        kit.ws.registry._save(rows)
+    elif kind == 'child':
+        child = kit.ws.delegate(token, 'worker')
+        token = tokens.load(kit.base, child['id'])
+    else:
+        kit.ws.revoke(kit.owner, 'launcher')
+    with pytest.raises(Denied):
+        coordinator_routes.change(kit.ws, token, {'action': 'host'})
+    assert coordinator_config.load(kit.base) == {}
+
+
+@pytest.mark.redteam
+def test_remote_and_unavailable_shared_authority_never_becomes_local_host(tmp_path, monkeypatch):
+    kit = Kit(tmp_path / 'workspace')
+    token = own(kit)
+    config = coordinator_config.save(kit.base, {'mode': 'remote', 'workspace': 'workspace:foreign',
+                                               'endpoint': 'https://example.invalid:8784'})
+    with pytest.raises(Denied):
+        coordinator_routes.ensure_host(kit.ws, token)
+    assert coordinator_config.load(kit.base) == config
+    (kit.base / 'coordinator.json').unlink()
+    def unavailable(base):
+        raise Denied('the enrolled workspace coordinator is unavailable')
+    monkeypatch.setattr(coordinator_client, 'client', unavailable)
+    with pytest.raises(Denied, match='unavailable'):
+        coordinator_routes.ensure_host(kit.ws, token)
+    assert coordinator_config.load(kit.base) == {}
+
+
+def test_own_agent_connect_preserves_existing_authority(tmp_path, monkeypatch):
+    kit = Kit(tmp_path / 'workspace')
+    token = own(kit)
+    config = coordinator_config.save(kit.base, {'mode': 'host', 'workspace': 'workspace:existing'})
+    monkeypatch.setattr(coordinator_client, 'connect', lambda *args: pytest.fail('authority replacement'))
+    with pytest.raises(Denied, match='cannot be replaced'):
+        coordinator_routes.change(kit.ws, token, {'action': 'connect', 'name': 'another'})
+    assert coordinator_config.load(kit.base) == config
+
+
+def test_production_daemon_reuses_pairing_certificate_and_isolated_roots_stay_separate(tmp_path, monkeypatch):
+    monkeypatch.setenv('ML_STACK_HOME', str(tmp_path / 'installation'))
+    paired = onboard._identity(home.state('onboard'))
+    serving = tls.identity(daemon.identity_directory(daemon.default_root()), 'daemon')
+    assert serving.beacon == paired.beacon
+    isolated = tmp_path / 'isolated-daemon'
+    assert daemon.identity_directory(isolated) == isolated / 'tls'

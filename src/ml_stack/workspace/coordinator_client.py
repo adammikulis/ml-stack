@@ -124,9 +124,11 @@ def connect(base, name):
         raise Denied('select one advertised coordinator by its Fleet name; none or several matched')
     peer, info = candidates[0]
     coordinator_config.validate_endpoint(peer.base_url)
-    return coordinator_config.save(base, {'mode': 'remote', 'workspace': info['workspace'],
-                                         'name': peer.name, 'endpoint': peer.base_url,
-                                         'cert': peer.beacon.cert if peer.beacon else ''})
+    selected = {'mode': 'remote', 'workspace': info['workspace'],
+                'name': peer.name, 'endpoint': peer.base_url,
+                'cert': peer.beacon.cert if peer.beacon else ''}
+    _device_peer(selected)
+    return coordinator_config.save(base, selected)
 
 
 def argv_for(args, declarations):
