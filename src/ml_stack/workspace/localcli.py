@@ -46,6 +46,8 @@ OPTIONS = [
          help="how much the model thinks (off is fastest); auto picks per task; default: %(default)s"),
     flag("--max-effort", default=le.DEFAULT_MAX, choices=list(le.LEVELS),
          help="the most effort the model may give itself with set_effort; default: %(default)s"),
+    flag("--max-output-tokens", type=int, default=8192,
+         help="maximum generated tokens per response; independent of reasoning effort; default: %(default)s"),
     flag("--orders-from", default=",".join(la.DEFAULT_ORDERS_FROM), metavar="NAMES",
          help="agents it takes tasks from besides the person and any lead (comma list)"),
     flag("--profile", default="chat", choices=["chat", "coding"],
@@ -96,7 +98,7 @@ def _start(args: argparse.Namespace, ws: Workspace) -> int:
     say(f"model: {pick.name} ({pick.note})")
     try:
         got = ls.start(ws, ls.Ask(args.model, args.name, args.role, args.effort, args.max_effort,
-                                  args.profile, selected_context, args.project, la.check_orders(args.orders_from.split(",")), args.harness), pick=pick,
+                                  args.profile, selected_context, args.project, la.check_orders(args.orders_from.split(",")), args.harness, args.max_output_tokens), pick=pick,
                        person_token=tokens.read_file(tokens.directory(ws.base) / tokens.OWNER_FILE))
     except ls.Unavailable as err:
         warn(str(err))
