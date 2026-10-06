@@ -10996,9 +10996,9 @@
    "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
   },
   {
-   "id": "spawn:worktreerules.py:checkouts",
+   "id": "spawn:worktreerules.py:_branch",
    "kind": "spawn",
-   "source": "worktreerules.py:checkouts",
+   "source": "worktreerules.py:_branch",
    "trust": "arguments built from model output, peer messages or file names",
    "attacker": "attacker text becomes a command line, environment or working directory",
    "status": "covered",
@@ -11008,9 +11008,9 @@
    "note": "git is run with argv only; the paths come from a tool call and are one argument each"
   },
   {
-   "id": "spawn:worktreerules.py:commit_refusal",
+   "id": "spawn:worktreerules.py:checkouts",
    "kind": "spawn",
-   "source": "worktreerules.py:commit_refusal",
+   "source": "worktreerules.py:checkouts",
    "trust": "arguments built from model output, peer messages or file names",
    "attacker": "attacker text becomes a command line, environment or working directory",
    "status": "covered",

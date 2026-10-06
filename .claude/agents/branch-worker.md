@@ -24,7 +24,7 @@ Rules:
   and conflicts require separate sibling worktrees and branches. Preserve unrelated work.
 - Never `pip install -e`; run your tree's code with `PYTHONPATH=src`.
 - Add files by name; never `git add -A`, `.` or `-u`.
-- Never push, tag or merge. Commit on your own branch by named files before you report.
+- Never push, tag or merge. Commit named files on the claimed branch before you report.
 - Test your own changes with reviewed explicit affected selectors through `scripts/test`.
   Report your results. The main agent handles shared gates, full end-to-end checks and
   background suites once per consolidated integration batch.
