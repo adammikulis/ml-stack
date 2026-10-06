@@ -14,6 +14,7 @@ from typing import Any
 from ml_stack import net
 from ml_stack.http import ServerError
 from ml_stack.hub.probe import machine_memory
+from ml_stack.lock import only_one
 from ml_stack.safenames import Unsafe, unpack
 from ml_stack.serve.backend import devices_of
 from ml_stack.tar_libraries import unpack as unpack_libraries
@@ -140,6 +141,13 @@ def _first_with_a_build(releases: list[dict[str, Any]]) -> dict[str, Any] | None
 
 def ensure_server(root: Path | str, *, on_progress: Any = None,
                   repo: str = REPO, sources: str | None = None) -> Path:
+    """Install a server under its shared build-directory mutation lease."""
+    with only_one(cache_dir(root).parent / ".llama-install.lock"):
+        return _ensure_server(root, on_progress=on_progress, repo=repo, sources=sources)
+
+
+def _ensure_server(root: Path | str, *, on_progress: Any = None,
+                   repo: str = REPO, sources: str | None = None) -> Path:
     """The llama-server binary, downloading it if this machine has none."""
     vendor = cache_dir(root)
     found = find_server(vendor)

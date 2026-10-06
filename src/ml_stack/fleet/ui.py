@@ -119,7 +119,8 @@ class UI:
         self.throttle = Throttle()
         self._join_lock = threading.Lock()
         self._peers: tuple[float, list[dict[str, Any]]] = (0.0, [])
-        self.server_install: dict[str, Any] = {"state": "idle", "note": ""}
+        self.setup_jobs = None
+        self._setup_jobs_lock = threading.Lock()
 
     # -- guards ----------------------------------------------------------
     def host_ok(self, host_header: str) -> bool:

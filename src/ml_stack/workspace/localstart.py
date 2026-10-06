@@ -13,7 +13,7 @@ from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
-from ml_stack import jobs, roles
+from ml_stack import agent_dependency, jobs, roles
 from ml_stack.serve import broker_wire
 from ml_stack.serve.process import pid_exists, started_at
 from ml_stack.workspace import (
@@ -178,6 +178,10 @@ def _start(ws: Workspace, ask: Ask, *, pick: localmodel.Pick | None = None,
     folder_ = la.check_project(ask.project, ws.base)
     orders = la.check_orders(list(ask.orders_from))
     prof = lp.profile(ask.profile)
+    if prof.name == "chat":
+        problem = agent_dependency.problem()
+        if problem:
+            raise Unavailable(problem, "pip install 'ml-stack[agents]'")
     ctx = ask.ctx or prof.ctx
     if parent_token and prof.name == 'coding' and (not folder_ or
             ws.registry.info(ws.auth(parent_token).id).get('project') != projects.describe(folder_)):

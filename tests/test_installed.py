@@ -36,7 +36,7 @@ def test_every_extra_a_full_install_asks_for_is_one_pip_can_install():
 def test_the_module_each_extra_is_read_by_is_one_that_extra_installs():
     """Each capability import is provided by a distribution declared in its extra."""
     have = offered()
-    distributions = {"agents": "openai-agents"}
+    distributions = {"agents": "openai-agents", "machineid": "py-machineid"}
     for one in STANDARD:
         named = {canonicalize_name(Requirement(req).name) for req in have[one.extra]}
         package = canonicalize_name(distributions.get(one.module, one.module))

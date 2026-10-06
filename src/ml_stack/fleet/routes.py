@@ -9,7 +9,6 @@ from importlib.util import find_spec
 from pathlib import Path
 from typing import Any
 
-from ml_stack.log import say
 from ml_stack.ui import assets as ui_assets
 
 from . import (
@@ -365,6 +364,10 @@ class SettingsRoutes:
     """Settings, the libraries this machine has, and taking the install off it."""
 
     def route(self) -> bool:
+        if self.path == "/ui/setup/jobs" and self.method == "GET":
+            from .setup_jobs import jobs
+            self.send(200, {"jobs": jobs(self.ui).all() if self.ui.root else []})
+            return True
         if self.path == "/ui/settings":
             return self._settings()
         if self.path == "/ui/credentials":
@@ -403,7 +406,8 @@ class SettingsRoutes:
         report = ui.report() if callable(ui.report) else {}
         vendor = str(report.get("vendor") or "cpu")
         if self.method == "GET":
-            self.send(200, ui.environment.state(vendor))
+            from .setup_jobs import jobs
+            self.send(200, {**ui.environment.state(vendor), "jobs": jobs(ui).all() if ui.root else []})
             return True
         if self.method == "POST":
             return self._change_libraries(vendor)
@@ -417,16 +421,17 @@ class SettingsRoutes:
             self.send(409, {"error": "Installing training libraries requires Internet only or Both download sources."})
             return True
         drop = [str(s) for s in req.get("remove") or []]
-        out: dict[str, Any] = {}
-        try:
-            if drop:
-                out.update(self.ui.environment.uninstall(drop))
-            if add:
-                out.update(self.ui.environment.install(add))
-        except OSError as exc:
-            self.send(400, {"error": str(exc)})
+        if self.ui.root is None:
+            self.send(501, {"error": "this daemon does not know where to keep setup jobs"})
             return True
-        self.send(200, {"changed": out, **self.ui.environment.state(vendor)})
+        from .setup_jobs import jobs, libraries, provenance
+        try:
+            job = jobs(self.ui).start("libraries", {"install": add, "remove": drop},
+                                      lambda progress: libraries(self.ui, vendor, add, drop, progress), provenance=provenance(self))
+        except ValueError as exc:
+            self.send(429, {"error": str(exc)})
+            return True
+        self.send(202, {"ok": True, "job": job})
         return True
 
     def _uninstall(self) -> bool:
@@ -466,7 +471,9 @@ class ModelRoutes:
             return self._models()
         if self.path == "/ui/serving/install":
             if self.method == "GET":
-                self.send(200, self.ui.server_install)
+                from .setup_jobs import jobs
+                rows = [row for row in jobs(self.ui).all() if row["kind"] == "server"] if self.ui.root else []
+                self.send(200, rows[-1] if rows else {"state": "idle", "note": ""})
                 return True
             if self.method == "POST":
                 return self._install_server()
@@ -598,22 +605,13 @@ class ModelRoutes:
             self.send(501, {"error": "this install cannot run a model itself; a machine "
                                      "on your network can serve one instead"})
             return True
-        from .llama import LlamaError, ensure_server
-        ui.server_install = {"state": "installing", "note": "Preparing the model server"}
-
-        def progress(note: str) -> None:
-            ui.server_install = {"state": "installing", "note": note}
-            say(f"  {note}")
-
+        from .setup_jobs import jobs, provenance, server
         try:
-            got = ensure_server(ui.root, on_progress=progress,
-                                sources=ui.settings.download_sources if ui.settings else "both")
-        except LlamaError as exc:
-            ui.server_install = {"state": "failed", "note": str(exc)}
-            self.send(400, {"error": str(exc)})
+            job = jobs(ui).start("server", {}, lambda progress: server(ui, progress), provenance=provenance(self))
+        except ValueError as exc:
+            self.send(429, {"error": str(exc)})
             return True
-        ui.server_install = {"state": "done", "note": "Model server and GPU runtime ready"}
-        self.send(200, {"ok": True, "server": str(got)})
+        self.send(202, {"ok": True, "job": job})
         return True
 
     def _serving(self) -> bool:

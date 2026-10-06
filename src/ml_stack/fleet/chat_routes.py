@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from ml_stack import agent_dependency
+
 from .chat import find, reply_parts, targets
 from .conversation_routes import ConversationRoutes
 from .discovery import derive_token, load_cluster_key
@@ -23,7 +25,9 @@ class ChatRoutes(ConversationRoutes):
         available = targets(ui.peers() if key is not None else [], ui.serving,
                             derive_token(key) if key else "")
         if self.method == "GET":
-            self.send(200, {"models": [t.public() for t in available]})
+            problem = agent_dependency.problem()
+            self.send(200, {"models": [t.public() for t in available], "runtime_ready": not problem,
+                            "runtime_error": problem})
             return True
         if self.method == "POST":
             return self._say(available)

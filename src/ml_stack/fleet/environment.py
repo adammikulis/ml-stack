@@ -24,6 +24,7 @@ from ml_stack import net
 from ml_stack.files import promote
 from ml_stack.http import ServerError
 from ml_stack.httpguard import Refused
+from ml_stack.lock import only_one
 
 __all__ = ["CATALOG", "Environment", "Library", "catalog_for"]
 
@@ -368,7 +369,20 @@ class Environment:
                 "python": str(target.python) if target.exists else ""}
 
     # -- changing it ----------------------------------------------------
+    @contextlib.contextmanager
+    def _mutation(self, names):
+        targets = sorted({self.for_library(lib).path for lib in CATALOG if lib.name in names})
+        with contextlib.ExitStack() as stack:
+            for target in targets:
+                stack.enter_context(only_one(target.parent / ".env-install.lock"))
+            yield
+
     def install(self, names: list[str], *, on_progress: Any = None) -> dict[str, Any]:
+        """Install libraries under shared target-environment mutation leases."""
+        with self._mutation(names):
+            return self._install(names, on_progress=on_progress)
+
+    def _install(self, names: list[str], *, on_progress: Any = None) -> dict[str, Any]:
         """Install the named libraries. Returns what happened, per library."""
         wanted = {lib.name: lib for lib in CATALOG}
         done: dict[str, Any] = {}
@@ -403,6 +417,10 @@ class Environment:
         return done
 
     def uninstall(self, names: list[str]) -> dict[str, Any]:
+        with self._mutation(names):
+            return self._uninstall(names)
+
+    def _uninstall(self, names: list[str]) -> dict[str, Any]:
         wanted = {lib.name: lib for lib in CATALOG}
         done: dict[str, Any] = {}
         for name in names:
