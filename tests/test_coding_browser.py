@@ -51,6 +51,13 @@ def test_shared_composer_saves_coding_settings_and_resumes_native_session(coding
     page.get_by_label("Project directory", exact=True).fill(str(project))
     page.get_by_label("Project directory", exact=True).press("Tab")
     expect(page.locator("chat-view #model")).to_have_value("test-model")
+    page.locator("chat-view #chat-options summary").click()
+    output_tokens = page.get_by_label("Maximum output tokens", exact=True)
+    expect(output_tokens).to_be_visible()
+    expect(output_tokens).to_have_value("8192")
+    output_tokens.fill("23456")
+    output_tokens.press("Tab")
+    page.locator("chat-view #chat-options summary").click()
     composer = page.get_by_role("textbox", name="Message", exact=True)
     composer.fill("inspect the brakes")
     composer.press("Enter")
@@ -64,9 +71,14 @@ def test_shared_composer_saves_coding_settings_and_resumes_native_session(coding
     assert saved.settings["project"] == str(project)
     assert saved.settings["harness"] == "codex"
     assert saved.settings["role"] == "read-only"
+    assert saved.settings["max_output_tokens"] == 23456
     page.reload()
     expect(page.get_by_label("Mode", exact=True)).to_have_value("coding")
     expect(page.get_by_label("Project directory", exact=True)).to_have_value(str(project))
+    page.locator("chat-view #chat-options summary").click()
+    expect(output_tokens).to_be_visible()
+    expect(output_tokens).to_have_value("23456")
+    page.locator("chat-view #chat-options summary").click()
     composer.fill("inspect the sensors")
     composer.press("Enter")
     expect(page.locator("chat-view #chat-messages")).to_contain_text("Inspected: inspect the sensors")
