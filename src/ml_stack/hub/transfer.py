@@ -285,6 +285,12 @@ class _Run:
 
 
 def _bring(parsed: remote.Ref, chosen: list[RemoteFile], folder: Path, run: _Run) -> None:
+    root = folder.resolve()
+    for one in chosen:
+        relative = Path(one.path)
+        if (relative.is_absolute() or ".." in relative.parts
+                or not (folder / relative).resolve().is_relative_to(root)):
+            raise ValueError(f"Unsafe model file path: {one.path}")
     _space(folder, sum(_remaining(parsed, folder / f.path, f) for f in chosen))
     meter = _Meter(parsed.text, sum(f.size for f in chosen), len(chosen), run.report)
     meter.cancel = run.cancel

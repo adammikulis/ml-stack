@@ -52,3 +52,17 @@ def test_repo_pull_requires_model_configuration(listed, tmp_path):
     with pytest.raises(NotFound):
         transfer.pull("hf:maker/model", tmp_path)
     assert calls == []
+
+
+@pytest.mark.parametrize("name", ["../escaped.json", "/escaped.json", "linked/escaped.json"])
+def test_download_rejects_paths_outside_destination(name, tmp_path, monkeypatch):
+    folder = tmp_path / "model"
+    folder.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (folder / "linked").symlink_to(outside, target_is_directory=True)
+    monkeypatch.setattr(transfer, "_space", lambda *args: pytest.fail("disk checked before validation"))
+    with pytest.raises(ValueError, match="Unsafe model file path"):
+        transfer._bring(transfer.remote.Ref("maker/model", "", "", "main"),
+                        [RemoteFile(name, 1)], folder, transfer._Run())
+    assert list(outside.iterdir()) == []
