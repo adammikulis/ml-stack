@@ -195,8 +195,12 @@ class Shapes:
         if len(words) < 2:
             return None
         known = {p.casefold(): p for p in self.products}
+        phrase = " ".join(words).casefold()
+        for product, label in known.items():
+            if " " in product and phrase == product:
+                return f"context_product: {label}"
         for word in words:
-            if word.casefold() in known:
+            if word.casefold() in known and " " not in word:
                 return f"context_product: {known[word.casefold()]}"
         return None
 
@@ -547,7 +551,8 @@ def main(argv: list[str] | None = None, *, env: Mapping[str, str] | None = None,
               file=out)
     if engine is None:
         print("pre-commit: presidio is not installed, so a name it has never seen is not "
-              "refused. Install it: pip install -e '.[privacy]' && "
+              "refused. Activate the project environment, then run: python -m pip install "
+              "'.[privacy]' && "
               "python -m spacy download en_core_web_sm", file=out)
         return 1
     return 1 if bad else 0
