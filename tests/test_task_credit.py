@@ -2,6 +2,7 @@
 
 import hashlib
 import shutil
+from dataclasses import replace
 
 import pytest
 from taskboard_kit import accepted, board as _board_fixture, proposed
@@ -32,9 +33,18 @@ def ledger(tmp_path):
     held.sealed.close()
 
 
+def completed_review(board, token, ident, decision):
+    result = board.board.review(token, ident, decision)
+    if result['accepted']:
+        with GraphStore(board.base / 'coordination.db') as graph:
+            node = next(node for node in graph.nodes('task') if node['id'] == ident)
+            graph.upsert_node({**node, 'attrs': {**node['attrs'], 'state': 'completed'}})
+    return result
+
+
 def reviewed(board, decision=None):
     proposal = proposed(board)
-    result = board.board.review(board.parent, board.task['id'], decision or accepted())
+    result = completed_review(board, board.parent, board.task['id'], decision or accepted())
     return proposal, result
 
 
@@ -145,7 +155,8 @@ def test_concurrent_canonical_award_and_outcome_record_once(board, ledger):
     assert row['economy']['balance'] == 10 and row['work_reputation']['outcomes']['accepted'] == 1
 
 
-def test_canonical_tasks_from_different_workers_and_models_share_device_balance(board, ledger):
+@pytest.mark.parametrize('model, balance', [('Qwen3.8-27B', 20), ('gemma', 10)])
+def test_canonical_awards_follow_verified_model_family_not_device_or_worker_label(board, ledger, model, balance, monkeypatch):
     from pathlib import Path
 
     from ml_stack.workspace import (
@@ -159,10 +170,12 @@ def test_canonical_tasks_from_different_workers_and_models_share_device_balance(
     task_credit.verify_task(board.ws, board.parent, board.task['id'], ledger=ledger)
     delegated = board.ws.delegate(board.parent, 'second-model')
     second, token = delegated['id'], tokens.read_file(Path(delegated['token_file']))
-    localagent.save(board.ws, localagent.Agent('second-model', 'gemma', identity=second,
+    localagent.save(board.ws, localagent.Agent('second-model', model, identity=second,
                                               profile='coding', project=str(board.source), pid=555, process_started=42))
+    monkeypatch.setattr(device_agent, 'device_id', lambda: 'second-device')
+    monkeypatch.setattr(resources, 'device_id', lambda: 'second-device')
     device_agent.bind_worker(board.ws, board.owner, 'second-model')
-    board.status['servers'][0]['model'] = 'gemma'
+    board.status['servers'][0]['model'] = model
     board.status['servers'][0]['pid'] = 1001
     task = board.board.create(board.parent, {**board.spec, 'source_key': 'repo:demo/sim:issue:43'})
     board.prepare(task['id'], second)
@@ -170,14 +183,22 @@ def test_canonical_tasks_from_different_workers_and_models_share_device_balance(
     board.board.claim(token, task['id'], allocation['allocation_id'])
     board.board.submit(token, task['id'], {'artifacts': {'next.json': 'b' * 64},
                         'checks': [{'name': 'Worker claims tests', 'passed': True}],
-                        'provenance': {'model': 'gemma', 'runtime': 'Codex'}})
-    board.board.review(board.parent, task['id'], accepted())
+                        'provenance': {'model': 'forged-qwen-label', 'runtime': 'Codex'}})
+    completed_review(board, board.parent, task['id'], accepted())
     task_credit.verify_task(board.ws, board.parent, task['id'], ledger=ledger)
     row = work_reputation.standings(board.ws, token, ledger=ledger)['own']
-    assert row['economy']['balance'] == 20 and row['verified_tasks'] == 2
-    assert {board.worker_id, second} <= set(row['members'])
-    assert {item['provenance']['model'] for item in row['evidence']} == {'qwen', 'gemma'}
-    assert row['work_reputation']['reliability_samples'] == 2
+    members = balance // 10
+    assert row['economy']['balance'] == balance and row['verified_tasks'] == members
+    assert len(row['members']) == members and second in row['members']
+    assert model in {item['provenance']['model'] for item in row['evidence']}
+    assert row['account_type'] == 'model_family'
+    team = work_reputation.standings(board.ws, board.parent, ledger=ledger)['team']
+    qwen = next(item for item in team if item['family_id'] == 'qwen')
+    assert qwen['economy']['balance'] == (20 if members == 2 else 10)
+    if members == 2:
+        assert set(qwen['devices']) == {'1234567890abcdef', 'second-device'}
+    assert sum(item['economy']['balance'] for item in team) == 20
+    assert len(ledger.sealed.graph().nodes('work_award')) == 2
 
 
 @pytest.mark.redteam
@@ -195,7 +216,7 @@ def test_designated_peer_review_awards_with_live_person_grant_and_revocation_is_
     board.board.claim(board.child, task['id'], allocation['allocation_id'])
     board.board.submit(board.child, task['id'], {'artifacts': {'reviewed.json': 'd' * 64},
                       'checks': [{'name': 'Worker claims acceptance', 'passed': True}]})
-    board.board.review(peer, task['id'], accepted())
+    completed_review(board, peer, task['id'], accepted())
     result = task_credit.verify_task(board.ws, peer, task['id'], ledger=ledger)
     assert result['credited'] and result['verifier'] == 'review-peer'
     board.ws.registry.set_project(board.ws.auth(board.owner), 'review-peer', {'root': '/different/project'})
@@ -212,7 +233,7 @@ def test_same_device_parent_cannot_review_through_another_worker_seat(board, led
     device_agent.bind_worker(board.ws, board.owner, 'parent-worker')
     proposed(board)
     with pytest.raises(Denied, match='different enrolled device'):
-        board.board.review(board.parent, board.task['id'], accepted())
+        completed_review(board, board.parent, board.task['id'], accepted())
     board.board.review(board.owner, board.task['id'], accepted())
     with pytest.raises(Denied, match='different enrolled device'):
         task_credit.verify_task(board.ws, board.parent, board.task['id'], ledger=ledger)
@@ -227,3 +248,38 @@ def test_same_device_parent_still_recovers_expired_worker_lease(board):
     board.now[0] += 121
     recovered = board.board.recover(board.parent, board.task['id'], 'Recover expired owned worker.')
     assert recovered['state'] == 'queued'
+
+
+def test_model_switch_binds_live_family_without_moving_historical_awards(board, ledger):
+    from ml_stack.workspace import resource_allocations as resources
+
+    board.board.claim(board.child, board.task['id'], board.allocation['allocation_id'])
+    pending = work_reputation.standings(board.ws, board.child, ledger=ledger)['own']
+    assert pending['family_id'] == 'qwen' and pending['economy']['balance'] == 0
+    board.board.submit(board.child, board.task['id'], {'artifacts': {'replay.json': 'a' * 64},
+                      'checks': [{'name': 'Worker claim', 'passed': True}]})
+    completed_review(board, board.parent, board.task['id'], accepted())
+    award = task_credit.verify_task(board.ws, board.parent, board.task['id'], ledger=ledger)
+    board.now[0] += 30
+    runner = replace(localagent.load(board.ws, 'native-worker'), model='gemma', model_name='gemma')
+    localagent.save(board.ws, runner)
+    board.status['servers'][0]['model'] = 'gemma'
+    task = board.board.create(board.parent, {**board.spec, 'source_key': 'model-switch'})
+    board.prepare(task['id'])
+    allocation = resources.assign(board.ws, board.parent, board.worker_id, task['id'], 'native-grant')
+    board.board.claim(board.child, task['id'], allocation['allocation_id'])
+    result = work_reputation.standings(board.ws, board.child, ledger=ledger)
+    assert result['own']['family_id'] == 'gemma' and result['own']['economy']['balance'] == 0
+    qwen = next(row for row in result['team'] if row['family_id'] == 'qwen')
+    assert qwen['economy']['balance'] == 10 and qwen['evidence'][0]['id'] == award['id']
+    assert qwen['evidence'][0]['provenance']['model'] == 'qwen'
+    assert len(ledger.sealed.graph().nodes('work_award')) == 1
+
+
+@pytest.mark.redteam
+def test_accepted_native_task_earns_nothing_before_integration_completes(board, ledger):
+    proposed(board)
+    board.board.review(board.parent, board.task['id'], accepted())
+    with pytest.raises(Denied, match='completed canonical task'):
+        task_credit.verify_task(board.ws, board.parent, board.task['id'], ledger=ledger)
+    assert ledger.standings(work_reputation.scope(board.ws)) == []

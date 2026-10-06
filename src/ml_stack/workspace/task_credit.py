@@ -47,6 +47,8 @@ def verify_task(ws, token, task_id, *, ledger=None):
     if outcome != 'accepted' and proof.get('quality'):
         raise Denied('an unaccepted contribution cannot earn quality bonuses')
     evidence = {**proof, 'award': economy.assessment(proof)}
+    if proposal.get('family_account'):
+        evidence['family_account'] = proposal['family_account']
     if proposal.get('provenance'):
         evidence['provenance'] = proposal['provenance']
     data = {**evidence, 'agent': worker, 'verifier': who.id,

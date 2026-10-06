@@ -76,3 +76,28 @@ def test_history_credits_without_recent_actions_and_review_evidence(tmp_path, pl
             page.screenshot(path="/private/tmp/ml-stack-history-credit-mobile.png", full_page=True)
     finally:
         server.close()
+
+
+def test_history_groups_family_credits_across_devices_without_per_model_balances(tmp_path, playwright, standings):
+    from playwright.sync_api import expect
+
+    row = standings['team'][0]
+    row.update(agent='family-qwen', label='Qwen', family_id='qwen', account_type='model_family',
+               devices=['a' * 64, 'b' * 64])
+    server = Serving(tmp_path)
+    server.ui.settings.setup_done = True
+    try:
+        with playwright.chromium.launch(headless=True) as browser:
+            page = browser.new_page()
+            page.route('**/ui/history/events', lambda route: route.fulfill(json={'events': []}))
+            page.route('**/ui/work-reputation/standings', lambda route: route.fulfill(json=standings))
+            page.goto(f'http://127.0.0.1:{server.port}/ui/#history')
+            viewer = page.locator('history-view')
+            viewer.get_by_text('Qwen · 35 credits', exact=True).click()
+            expect(viewer.get_by_text('Account identity: family-qwen · Model family across devices')).to_be_visible()
+            viewer.get_by_text('2 contributing devices', exact=True).click()
+            expect(viewer.get_by_text('a' * 64, exact=True)).to_be_visible()
+            expect(viewer.get_by_text('Workers: worker-a, worker-b', exact=True)).to_be_visible()
+            assert viewer.get_by_text('Qwen · 35 credits', exact=True).count() == 1
+    finally:
+        server.close()

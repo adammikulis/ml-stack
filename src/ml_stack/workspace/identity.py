@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack.files import read_json, write_json
+from ml_stack.workspace import device_metadata
 from ml_stack.workspace.chain import held
 from ml_stack.workspace.modelid import (
     CLAIMED,
@@ -119,6 +120,7 @@ class Registry:
                 "strikes": int(entry.get("strikes", 0)),
                 "model": str(entry.get("model", "")), "harness": str(entry.get("harness", "")),
                 "model_state": str(entry.get("model_state", "")),
+                "device": dict(entry.get("device", {})),
                 "models": list(entry.get("models", [])),
                 "label_models": dict(entry.get("label_models", {}))}
 
@@ -137,6 +139,25 @@ class Registry:
         if parent.get("model") and (label or "/" in name):
             return str(parent["model"]), INHERITED
         return "", ""
+
+    def record_device_claim(self, token: str, metadata: dict) -> None:
+        """Record an authenticated actor's device report without granting device authority."""
+        who = self.authenticate(token)
+        if not isinstance(metadata, dict):
+            raise ValueError('device metadata is an object')
+        self._record_device(who.id, {**metadata, 'verification': 'agent-reported',
+                                    'source': 'agent-report', 'peer_id': None})
+
+    def _record_device(self, name: str, metadata: dict) -> None:
+        """Persist normalized device provenance supplied by the trusted registration adapter."""
+        device = device_metadata.normalize(metadata)
+        with held(self.path.with_name('agents.lock')):
+            agents = self._load()
+            if not self._live(agents, agents.get(name)):
+                raise Denied('device provenance requires a live registered actor')
+            if agents[name].get('device') != device:
+                agents[name]['device'] = device
+                self._save(agents)
 
     def record_model(self, name: str, model: str, harness: str, state: str, *,
                      label: str = "") -> tuple[str, str]:
@@ -326,7 +347,8 @@ class Registry:
         secret = secrets.token_urlsafe(32)
         now = self.clock()
         agents[name] = {"role": role, "hash": _hash(secret), "created": now, "minted_by": minter,
-                        "expires": now + ttl_s if ttl_s else 0.0, "revoked": False}
+                        "expires": now + ttl_s if ttl_s else 0.0, "revoked": False,
+                        "device": device_metadata.current() if minter == HUMAN else dict(agents.get(minter, {}).get("device", {}))}
         self._save(agents)
         return f"{PREFIX}{name}.{secret}"
 
@@ -376,7 +398,7 @@ class Registry:
             agents[child] = {"role": AGENT, "hash": _hash(secret), "created": now,
                              "minted_by": by.id, "parent": by.id, "can": list(wanted),
                              "expires": min(now + ttl_s, stop) if stop else now + ttl_s,
-                             "revoked": False}
+                             "revoked": False, "device": dict(agents[by.id].get("device", {}))}
             self._save(agents)
         return f"{PREFIX}{child}.{secret}"
 
