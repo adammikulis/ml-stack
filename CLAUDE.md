@@ -317,6 +317,10 @@ claimed authorized project.
 
 ## Worktrees
 
+Keep stash snapshots and superseded recovery histories out of the published development branch's
+ancestry. Preserve them in external Git bundles, verify each bundle's complete history and saved
+tips, and integrate useful source changes through reviewed commits on the development history.
+
 Every agent works in its own worktree on its own branch — the main session as much as any
 subagent it spawns; "I am the one driving" is not an exemption. Nobody edits the primary
 checkout, and no two agents share a branch. Branch from the development branch the primary
