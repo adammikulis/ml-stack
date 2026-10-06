@@ -107,6 +107,8 @@ def test_conversation_settings_and_model_survive_reopening(store, tmp_path):
     assert again.settings["temperature"] == .3
     assert again.settings["effort"] == "low"
     assert again.settings["max_effort"] == "high"
+    assert again.settings["harness"] == "pi"
+    assert again.settings["context"] == 0
     assert [message.content for message in again.messages] == ["Review the brakes"]
 
 

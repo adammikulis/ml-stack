@@ -10,9 +10,8 @@ import os
 import re
 import urllib.parse
 from dataclasses import dataclass, replace
-from pathlib import Path
 
-from ml_stack import home, http, net
+from ml_stack import credentials, http, net
 from ml_stack.httpguard import Refused
 from ml_stack.hub.naming import _SHARD, QUANT, aside
 from ml_stack.net.untrusted import clean_text
@@ -42,19 +41,15 @@ def endpoint() -> str:
 
 
 def token() -> str:
-    """The access token: ``$HF_TOKEN``, then the file ``huggingface-cli login`` writes."""
+    """The Hugging Face access token from ml-stack's credential sources."""
     for name in TOKEN_VARIABLES:
         if os.environ.get(name):
             return os.environ[name].strip()
-    named = os.environ.get("HF_TOKEN_PATH")
-    base = os.environ.get("HF_HOME")
-    where = (Path(named) if named else
-             (home.expand(base) if base else home.user_home() / ".cache" / "huggingface")
-             / "token")
     try:
-        return where.read_text(encoding="utf-8").strip()
-    except OSError:
+        found = credentials.get("HF_TOKEN")
+    except credentials.CredentialError:
         return ""
+    return str(found or "")
 
 
 def hint(repo: str, status: int) -> str:

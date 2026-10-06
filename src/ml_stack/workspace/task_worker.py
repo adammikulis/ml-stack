@@ -32,8 +32,8 @@ def run(ws, name):
             agent = la.load(ws, name)
             if agent is None:
                 raise ValueError('the registered local worker is missing')
-            if agent.harness != 'claude':
-                raise ValueError('canonical coding requires the bounded Claude harness')
+            if agent.harness not in ('pi', 'claude'):
+                raise ValueError('canonical coding needs a supported coding harness')
             identity = agent.identity or agent.name
             if held is None:
                 held = localloop.lease_model(agent)

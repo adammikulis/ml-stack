@@ -34,6 +34,16 @@ def test_settings_update_preserves_title_and_messages(conversation_api):
     assert updated["messages"][0]["content"] == "Review this code"
 
 
+def test_defaults_endpoint_exposes_the_persisted_settings_source(conversation_api):
+    served = conversation_api
+    status, response, _ = served.call("/ui/conversations/defaults")
+    assert status == 200
+    assert response["settings"]["harness"] == "pi"
+    assert response["settings"]["context"] == 0
+    assert served.call("/ui/conversations/defaults", ui_header=False)[0] == 403
+    assert served.call("/ui/conversations/defaults", headers={"Origin": "https://foreign.invalid"})[0] == 403
+
+
 @pytest.mark.parametrize("body", [{"title": "Changed", "settings": {"temperature": True}},
                                   {"settings": {"mode": "unknown"}}, {"settings": []},
                                   {"model": 42}, {"model": None}, {"settings": None}, {"unknown": "field"}, []])

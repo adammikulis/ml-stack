@@ -52,9 +52,17 @@ class TaskManager(Manager):
                     self.checkpoint({'summary': 'Native tool returned successfully',
                                      'progress': str(block.get('tool_use_id', ''))})
 
+    def _max_turns(self):
+        return localloop.caps_of(self.agent).rounds
+
     def _process(self, turn, command, environment, context):
-        if context[1] != 'claude':
-            raise ValueError('canonical coding currently requires the bounded Claude harness')
+        harness = context[1]
+        if harness not in ('pi', 'claude'):
+            raise ValueError('canonical coding needs a supported coding harness')
+        if harness == 'pi':
+            level = localeffort.clamp(self.agent.effort if self.agent.effort != 'auto' else 'low',
+                                      self.agent.max_effort)
+            return super()._process(turn, [*command, '--thinking', level], environment, context)
         command = [*command, '--system-prompt', BOOTSTRAP,
                    '--tools', 'Read,Edit,Write,Bash,Glob,Grep,Agent',
                    '--max-turns', str(localloop.caps_of(self.agent).rounds)]
@@ -135,4 +143,4 @@ def _proposal(agent, task, project, turn, environment):
     return {'summary': turn.text[:2000], 'artifacts': artifacts,
             'checks': [{'name': 'Native harness returned a final answer', 'passed': True}],
             'provenance': {'commit': git.head(project), 'environment': environment,
-                           'model': agent.model_name, 'runtime': f'Claude native; session {turn.session}'}}
+                           'model': agent.model_name, 'runtime': f'{agent.harness} native; session {turn.session}'}}

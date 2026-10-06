@@ -104,7 +104,7 @@ def _write(ws: Workspace, route: str, body: bytes) -> tuple[int, Any]:
                                       data.get("role") or roles.DEFAULT, data.get("effort") or le.DEFAULT,
                                       data.get("max_effort") or le.DEFAULT_MAX,
                                       data.get("profile") or "chat", lp.parse_ctx(data.get("ctx", "")),
-                                      data.get("project", ""), harness=data.get("harness") or "codex"),
+                                      data.get("project", ""), harness=data.get("harness") or "pi"),
                            person_token=tokens.read_file(tokens.directory(ws.base) / tokens.OWNER_FILE))
         except ls.Unavailable as err:
             return 409, {"error": plain.line(err.problem, 300), "hint": plain.line(err.hint, 200)}

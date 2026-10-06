@@ -29,8 +29,10 @@ def test_native_turn_and_output_limits_preserve_authority(monkeypatch):
     assert 'CLAUDE_CODE_MAX_OUTPUT_TOKENS' not in seen['environment']
     assert seen['environment']['CLAUDE_CODE_EFFORT_LEVEL'] == 'low'
     assert seen['environment']['AUTHORITY'] == 'unchanged'
-    with pytest.raises(ValueError, match='bounded Claude'):
-        manager._process(None, ['codex'], {}, (None, 'codex', 'prompt', None))
+    manager._process(None, ['pi', '--mode', 'json'], {'AUTHORITY': 'unchanged'},
+                     (None, 'pi', 'prompt', None))
+    assert seen['command'] == ['pi', '--mode', 'json', '--thinking', 'low']
+    assert seen['environment']['AUTHORITY'] == 'unchanged'
 
 
 @pytest.mark.parametrize('effort, thinking', [('off', False), ('medium', True)])

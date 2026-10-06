@@ -32,9 +32,9 @@
         <label for="chat-temperature">Temperature</label>
         <input id="chat-temperature" type="number" min="0" max="2" step="0.1" placeholder="Model default">
         <p class="hint">Controls sampling randomness. Leave blank to use the model server's default.</p>
-        </div><div data-coding hidden><label for="chat-context">Context length</label>
-          <input id="chat-context" type="number" min="1024" max="1048576" step="1024" value="262144">
-          <p class="hint">Tokens available to the coding agent. Memory admission runs before the model starts.</p>
+        </div><div data-coding hidden><label for="chat-context">Context override (tokens)</label>
+          <input id="chat-context" type="number" min="0" max="1048576" step="1024" value="0" placeholder="Auto for this device">
+          <p class="hint">Leave at 0 to fit the context to the selected model and this device's memory. Memory admission runs before the model starts.</p>
           <label for="chat-draft">Draft model / MTP head</label><input id="chat-draft" value="auto" placeholder="auto, none, or /path/to/head.gguf">
           <p class="hint">Auto uses a matching head when available. Use none to disable, or an explicit installed head path.</p></div>
       </details>
@@ -100,7 +100,8 @@
       this.querySelector("#chat-manage-cancel").onclick = () => this.dialog.close();
       this.open = null;
       this.messages = [];
-      this.savedSettings = { mode: "chat", temperature: null };
+      this.savedSettings = {};
+      this.defaultSettings = {};
       this.searchEpoch = 0;
       this.loadEpoch = 0;
       this.send.onclick = () => this.ask();
@@ -116,7 +117,7 @@
         this.loadEpoch++;
         this.input.value = "";
         this.messages = [];
-        this.savedSettings = { mode: "chat", temperature: null };
+        this.savedSettings = { ...this.defaultSettings };
         this.temperature.value = "";
         this.coding.restore(this.savedSettings);
         this.welcome();
@@ -176,6 +177,11 @@
 
     async draw() {
       try {
+        const defaults = await api("/ui/conversations/defaults");
+        if (M.refused(defaults)) return;
+        if (!defaults.ok) throw new Error(defaults.error || "Could not read conversation settings.");
+        this.defaultSettings = defaults.settings || {};
+        if (!Object.keys(this.savedSettings).length) this.savedSettings = { ...this.defaultSettings };
         const where = await api("/ui/chat");
         if (M.refused(where)) return;
         if (!where.ok) throw new Error(where.error || "Could not read the serving models.");
@@ -312,7 +318,7 @@
         localStorage.setItem("ml-stack.chat.selected", id);
         this.heading.textContent = one.title || "New chat";
         this.messages = one.messages || [];
-        this.savedSettings = one.settings || { mode: "chat", temperature: null };
+        this.savedSettings = one.settings || { ...this.defaultSettings };
         this.temperature.value = this.savedSettings.temperature ?? "";
         await this.coding.restore(this.savedSettings, one.model);
         this.list.replaceChildren();
