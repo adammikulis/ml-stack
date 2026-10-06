@@ -1,3 +1,5 @@
+import pytest
+
 from ml_stack import home
 from ml_stack.fleet.runtime_paths import configure
 
@@ -52,8 +54,6 @@ def test_empty_root_overrides_route_to_custom_runtime(tmp_path, monkeypatch):
 
 
 def test_daemon_routes_roots_before_startup_services(tmp_path, monkeypatch):
-    import pytest
-
     from ml_stack import keystore, sentinel
     from ml_stack.fleet import daemon
     from ml_stack.sentinel.honey import Honey
@@ -79,14 +79,16 @@ def test_daemon_routes_roots_before_startup_services(tmp_path, monkeypatch):
         daemon.serve_forever(root=root, announce=False, web=False)
 
 
-def test_background_startup_does_not_display_token(monkeypatch, capsys):
+@pytest.mark.parametrize("marker", ["", "CLAUDECODE", "ML_STACK_AGENT", "ML_STACK_NONINTERACTIVE"])
+def test_background_startup_does_not_display_token(marker, monkeypatch, capsys):
     from ml_stack import person
     from ml_stack.fleet.runtime_paths import announce_token
 
-    def refuse(_action):
-        raise person.HumanRequired("background process")
-
-    monkeypatch.setattr(person, "require_person", refuse)
+    for name in person.AGENT_MARKERS:
+        monkeypatch.delenv(name, raising=False)
+    if marker:
+        monkeypatch.setenv(marker, "1")
+    monkeypatch.setattr(person, "is_terminal", lambda _stream: bool(marker))
     announce_token("fixture-token")
     assert capsys.readouterr().out == ""
 
@@ -95,6 +97,8 @@ def test_person_startup_displays_token(monkeypatch, capsys):
     from ml_stack import person
     from ml_stack.fleet.runtime_paths import announce_token
 
-    monkeypatch.setattr(person, "require_person", lambda _action: None)
+    for name in person.AGENT_MARKERS:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(person, "is_terminal", lambda _stream: True)
     announce_token("fixture-token")
     assert capsys.readouterr().out == "  token fixture-token\n"
