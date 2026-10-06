@@ -42,7 +42,7 @@ else
   "$UV" venv --python 3.12 "$VENV"
 fi
 "$UV" pip install --python "$VENV/bin/python" "${ROOT}[wsl-dev]" \
-    "ruff==0.13.3" "pyright==1.1.411"
+    "ruff==0.13.3" "pyright==1.1.411" "build>=1.2" 'cuda-toolkit[nvcc]==13.0.3'
 "$UV" pip install --python "$VENV/bin/python" \
     'metadrive-simulator @ git+https://github.com/metadriverse/metadrive.git@85e5dadc6c7436d324348f6e3d8f8e680c06b4db'
 
@@ -57,6 +57,16 @@ case ":$PATH:" in
     *) export PATH="$ML_STACK_DEV_VENV/bin:$PATH" ;;
 esac
 export PYTHON="$ML_STACK_DEV_VENV/bin/python"
+_ml_stack_cuda_home="$ML_STACK_DEV_VENV/lib/python3.12/site-packages/nvidia/cu13"
+if [[ -x "$_ml_stack_cuda_home/bin/nvcc" ]]; then
+    export CUDA_HOME="$_ml_stack_cuda_home"
+    export CUDA_PATH="$_ml_stack_cuda_home"
+    case ":$PATH:" in
+        *":$_ml_stack_cuda_home/bin:"*) ;;
+        *) export PATH="$_ml_stack_cuda_home/bin:$PATH" ;;
+    esac
+fi
+unset _ml_stack_cuda_home
 case ":${PYTHONPATH:-}:" in
     *":$ML_STACK_DEV_ROOT/src:"*) ;;
     *) export PYTHONPATH="$ML_STACK_DEV_ROOT/src${PYTHONPATH:+:$PYTHONPATH}" ;;
