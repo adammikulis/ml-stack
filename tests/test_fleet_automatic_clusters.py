@@ -200,3 +200,22 @@ def test_failed_candidate_does_not_block_next_cluster(tmp_path, monkeypatch):
     monkeypatch.setattr(automatic, "receive", receive)
     assert automatic.ensure(tmp_path / "device.key") == member
     assert calls == [row[0] for row in rows]
+
+
+def test_membership_offer_identifies_the_cluster_key():
+    import hashlib
+    import json
+
+    advertiser = discovery.Advertiser(discovery.Beacon(name="device", port=8770), KEY,
+                                      cluster="development")
+    packets = []
+    class Socket:
+        def sendto(self, packet, address):
+            packets.append((json.loads(packet), address))
+    advertiser._tell_join(Socket(), NONCE, ("127.0.0.1", 8771))
+    assert len(packets) == 1
+    offered, address = packets[0]
+    assert offered["cluster_id"] == hashlib.sha256(KEY).hexdigest()
+    assert offered["mode"] == "dev"
+    assert offered["nonce"] == NONCE
+    assert address == ("127.0.0.1", 8771)

@@ -17,8 +17,8 @@ import secrets
 import socket
 import threading
 from collections.abc import Callable, Iterable
-from pathlib import Path
 from importlib.metadata import entry_points
+from pathlib import Path
 from typing import Any
 
 from ml_stack import home, macauth, sentinel
