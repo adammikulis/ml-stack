@@ -142,8 +142,8 @@ def child(argv, base, **env):
                           timeout=60, check=False)
 
 
-@pytest.mark.parametrize("argv", [["connect"], ["doctor"], ["hello", "x"], ["trust-machine"],
-                                  ["untrust-machine"]])
+@pytest.mark.parametrize("argv", [["setup", "--yes"], ["connect"], ["doctor"], ["hello", "x"],
+                                  ["setup", "--rotate", "x"]])
 def test_person_only_commands_refuse_an_agent_and_no_terminal(base, argv):
     plain = child(argv, base)
     assert plain.returncode == 3 and "terminal" in plain.stderr

@@ -13,7 +13,7 @@ from ml_stack.workspace.identity import PREFIX, TOKEN_ENV, Denied, valid_id
 from ml_stack.workspace.windows_tokens import problem as windows_problem, restrict
 
 __all__ = ["AGENT_ENV", "OWNER_FILE", "directory", "inside_repo", "load", "prepare", "problem",
-           "read_file", "resolve", "store", "write_private"]
+           "read_file", "resolve", "store"]
 
 AGENT_ENV = "ML_STACK_WORKSPACE_AGENT"
 OWNER_FILE = ".owner"
@@ -86,17 +86,13 @@ def store(base: Path, name: str, token: str) -> Path:
     """Write ``token`` to ``name``'s file, atomically and readable by this user only."""
     if name != OWNER_FILE and not valid_id(name):
         raise ValueError(f"{name!r} is not a usable agent id")
-    return write_private(prepare(base) / name.replace("/", "~"), token + "\n")
-
-
-def write_private(target: Path, text: str) -> Path:
-    """Write ``text`` to ``target`` atomically, readable by this user only; returns ``target``."""
+    target = prepare(base) / name.replace("/", "~")
     with writing(target) as tmp:
         if os.name == "nt":
             restrict(tmp)
         else:
             tmp.chmod(0o600)
-        tmp.write_text(text, encoding="utf-8")
+        tmp.write_text(token + "\n", encoding="utf-8")
     return target
 
 

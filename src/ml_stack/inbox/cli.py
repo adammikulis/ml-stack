@@ -30,7 +30,7 @@ def _person(action: str) -> bool:
     found = person.marked()
     if found:
         warn(f"ml-stack-requests: {action} is for a person; this process was started by an agent "
-             f"({found})")
+             f"({found} is set)")
     return not found
 
 
