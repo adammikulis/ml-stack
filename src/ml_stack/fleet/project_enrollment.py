@@ -37,3 +37,12 @@ def admit(connection, opening, path, body) -> bool:
     member = _dev(connection, opening, memberships(path))
     return bool(member and body.get("cluster") == member.group
                 and body.get("cluster_id") == hashlib.sha256(member.key).hexdigest())
+
+
+def local(opening, path, source: str) -> bool:
+    """Whether an authenticated loopback request proves the active Dev membership."""
+    if source not in {"127.0.0.1", "::1"}:
+        return False
+    rows = memberships(path)
+    member = _matched(opening, rows)
+    return bool(rows and member is rows[0] and getattr(member, "mode", "prod") == "dev")

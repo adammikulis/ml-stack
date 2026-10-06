@@ -1,14 +1,17 @@
 """Automatic Dev project discovery and canonical Board attachment."""
 
+import json
 import time
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from ml_stack import person, worktreerules
-from ml_stack.fleet.discovery import memberships
+from ml_stack import person, sealing, worktreerules
+from ml_stack.fleet.discovery import derive_token, memberships
+from ml_stack.fleet.launch import HTTP_PORT
 from ml_stack.fleet.project_client import catalogue
 from ml_stack.fleet.projects import identity
 from ml_stack.fleet.remote import Peer
+from ml_stack.http import ServerError, ServerUnreachable, open_stream
 from ml_stack.workspace.harness_seat import Seat
 from ml_stack.workspace.identity import AGENT, Denied
 from ml_stack.workspace.project_connection import bind, selected
@@ -40,6 +43,32 @@ def _boards(peer, document, project_id):
     return found
 
 
+
+def _register(root, member, project_id):
+    endpoint = f"http://127.0.0.1:{HTTP_PORT}/workspace/v1/local-project"
+    def destination(url):
+        if url != endpoint:
+            raise Denied("local project registration cannot redirect")
+        return url
+    try:
+        with open_stream(endpoint, method="POST", token=derive_token(member.key),
+                         data=json.dumps({"root": str(root.resolve()), "project_id": project_id}).encode(),
+                         headers={"Content-Type": "application/json", sealing.HEADER: "2"},
+                         timeout=2, guard=destination) as response:
+            if not response.headers.get(sealing.HEADER):
+                raise Denied("local project registration was not authenticated and sealed")
+            limit = 65536 + sealing.NONCE_BYTES + 16
+            raw = response.read(limit + 1)
+            if len(raw) > limit:
+                raise Denied("local project registration exceeds its response limit")
+            result = json.loads(response.sealed.open(response.status, response.headers, raw))
+            if not isinstance(result, dict) or result.get("id") != project_id:
+                raise Denied("local project registration returned another project")
+    except ServerUnreachable:
+        return
+    except ServerError as error:
+        raise Denied("local Fleet project registration failed") from error
+
 def discover(root: Path, *, cluster_key=None, cluster="", port=None):
     """Select one authenticated canonical host for this local Git project."""
     project_id = identity(root.resolve())
@@ -52,6 +81,7 @@ def discover(root: Path, *, cluster_key=None, cluster="", port=None):
     if len(members) != 1:
         raise Denied("select this project's Dev cluster with --cluster NAME")
     member = members[0]
+    _register(root, member, project_id)
     deadline = time.monotonic() + DISCOVERY_SECONDS
     peers = Peer.discover(key=member.key, group=member.group, timeout=2,
                           cluster_key_path=cluster_key, timeout_s=2, port=port)

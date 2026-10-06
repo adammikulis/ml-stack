@@ -22,6 +22,7 @@ def peer(machine, authority="", host=""):
 def found(monkeypatch):
     nodes = []
     monkeypatch.setattr(automatic, "identity", lambda root: PROJECT)
+    monkeypatch.setattr(automatic, "_register", lambda *args: None)
     monkeypatch.setattr(automatic, "memberships", lambda path: [
         SimpleNamespace(group="development", key=b"key", mode="dev")])
     monkeypatch.setattr(automatic.Peer, "discover", lambda **kwargs: nodes)

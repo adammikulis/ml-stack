@@ -327,8 +327,6 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
                 return True
             self.send_response(response.status)
             self.send_header("Content-Type", kind)
-            # No Content-Length and close framing: a streamed completion must reach the
-            # caller as it is generated, not after the last token.
             self.send_header("Connection", "close")
             self.end_headers()
             # read1, not read: read(n) blocks until it has n bytes, and a token is
@@ -582,7 +580,7 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
             body = self._unsealed(body)
             if body is None:
                 return
-            if self._extension(body):
+            if self._project_register(body) or self._extension(body):
                 return
             try:
                 if not self._workspace(body or b"{}"):
@@ -599,6 +597,22 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
             if not isinstance(got, dict):
                 raise Malformed(400, "the body is not a JSON object")
             return got
+
+        def _project_register(self, body: bytes) -> bool:
+            if urllib.parse.urlparse(self.path).path != "/workspace/v1/local-project":
+                return False
+            if not project_enrollment.local(self._sealing(), cluster_key_path, self.client_address[0]):
+                self._send(403, {"error": "project registration requires this device's authenticated Dev cluster"})
+            elif daemon.projects is None:
+                self._send(501, {"error": "project registry unavailable"})
+            else:
+                request = self._object(body)
+                try:
+                    self._send(200, daemon.projects.register(Path(request.get("root", "")),
+                                                            request.get("project_id", "")))
+                except (TypeError, ValueError, OSError):
+                    self._send(400, {"error": "project registration requires a matching local Git checkout"})
+            return True
 
         def _workspace(self, body: bytes) -> bool:
             match = re.fullmatch(r"/workspace/v1/projects/([a-f0-9]{32})/(join|board|enroll)",
@@ -686,8 +700,6 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
                 try:
                     job = bench.submit(BenchJob.from_request(self._object(body)))
                 except Refused as e:
-                    # 409: the job is well-formed and this peer will not run it now --
-                    # its code, its lock or its memory says so, and `refused` says which
                     self._send(409, {"error": str(e), "refused": e.kind})
                     return
                 except (DaemonError, ValueError) as e:

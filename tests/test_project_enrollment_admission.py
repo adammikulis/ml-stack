@@ -60,3 +60,14 @@ def test_secondary_dev_does_not_override_primary_prod(scope, monkeypatch):
     monkeypatch.setattr(admission, "memberships", lambda path: [prod, dev])
     assert not admission.visible(Mock(spec=ssl.SSLSocket), opening, None)
     assert not admission.admit(Mock(spec=ssl.SSLSocket), opening, None, body)
+
+
+@pytest.mark.redteam
+def test_native_registration_requires_local_active_dev_proof(scope):
+    member, opening, _ = scope
+    assert admission.local(opening, None, "127.0.0.1")
+    assert admission.local(opening, None, "::1")
+    assert not admission.local(opening, None, "192.168.2.8")
+    assert not admission.local(None, None, "127.0.0.1")
+    member.mode = "prod"
+    assert not admission.local(opening, None, "127.0.0.1")
