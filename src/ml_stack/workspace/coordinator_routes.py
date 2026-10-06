@@ -1,12 +1,21 @@
-"""Person-selected coordinator routing and visible connection health."""
+"""Trusted device coordinator routing and visible connection health."""
 
 import json
 
 from ml_stack.fleet.session import parse_cookie
 from ml_stack.http import ServerError
-from ml_stack.workspace import coordinator_client, coordinator_config, limits, localroute, tokens
+from ml_stack.workspace import (
+    coordinator_client,
+    coordinator_config,
+    device_agent,
+    limits,
+    localroute,
+    tokens,
+)
 from ml_stack.workspace.boardroute import Request
+from ml_stack.workspace.chain import held
 from ml_stack.workspace.coordination import workspace_id
+from ml_stack.workspace.coordinator_bootstrap import ensure_host as ensure_host
 from ml_stack.workspace.identity import HUMAN, Denied
 from ml_stack.workspace.service import Workspace
 
@@ -28,16 +37,24 @@ def status(base):
 
 
 def change(ws, token, document):
+    with held(ws.base / 'coordinator-selection.lock'):
+        return _change(ws, token, document)
+
+
+def _change(ws, token, document):
     if type(document) is not dict:
         raise ValueError('coordinator selection is an object')
-    if ws.auth(token).role != HUMAN:
-        raise Denied('the person selects shared coordinator routing')
+    local_agent = ws.auth(token).role != HUMAN
+    if local_agent:
+        device_agent.owned_local(ws, token)
     if document == {'action': 'host'}:
         if coordinator_config.load(ws.base).get('mode') == 'remote':
             raise Denied('this device already follows a coordinator; it cannot create a second authority')
         return coordinator_config.save(ws.base, {'mode': 'host', 'workspace': workspace_id(ws)})
     if set(document) == {'action', 'name'} and document['action'] == 'connect' and type(document['name']) is str:
-        return coordinator_client.connect(ws.base, document['name'])
+        if local_agent and coordinator_config.load(ws.base):
+            raise Denied('an existing workspace authority cannot be replaced by agent selection')
+        return coordinator_client._connect(ws.base, document['name'], replace=not local_agent)
     raise ValueError('choose host or an advertised coordinator name')
 
 

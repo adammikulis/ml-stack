@@ -110,6 +110,11 @@ def workspace_host(projects: ProjectRegistry, factory: Callable[[ProjectRegistry
     return factory(projects)
 
 
+def identity_directory(root):
+    """Return the installed device identity directory or an isolated daemon root."""
+    return home.state('onboard', 'tls') if root == default_root() else root / 'tls'
+
+
 def serve_forever(root: Path | str | None = None,
                   host: str | None = None, port: int = DEFAULT_PORT, *,
                   lan: bool = False, ui_from_lan: bool = False,
@@ -263,7 +268,7 @@ def serve_forever(root: Path | str | None = None,
         if tls.disabled():
             return None
         if cert[0] is None:
-            cert[0] = tls.identity(root / "tls", live_name[0])
+            cert[0] = tls.identity(identity_directory(root), live_name[0])
         return cert[0]
 
     def served_cert() -> str:

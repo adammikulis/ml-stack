@@ -23,6 +23,41 @@ def _project(projects, requested):
     return {'key': row['id'], 'name': row['name']}
 
 
+def _credential(ws, graph, binding, token):
+    agent, scope, fingerprint = (binding[key] for key in ('agent', 'project', 'device'))
+    with held(ws.registry.path.with_name('agents.lock')):
+        agents = ws.registry._load()
+        entry = agents.get(agent)
+        if entry and (entry.get('revoked') or entry.get('role') != AGENT
+                      or entry.get('session_device') != fingerprint
+                      or entry.get('project') != scope):
+            raise Denied('the registered agent identity is unavailable')
+        credential = ''
+        if token:
+            try:
+                actor = ws.auth(token)
+            except Denied:
+                actor = None
+            if actor and actor.id != agent:
+                raise Denied('the presented session belongs to another agent')
+            if actor:
+                credential = token
+        if not credential:
+            key = 'session:' + hashlib.sha256(f"{fingerprint}:{binding['requested']}".encode()).hexdigest()
+            graph.upsert_node({'id': key, 'kind': 'device-session', 'label': agent, 'attrs': binding})
+            value = secrets.token_urlsafe(32)
+            now = ws.clock()
+            if entry is None:
+                entry = {'role': AGENT, 'created': now, 'minted_by': 'paired-device',
+                         'can': list(CAPS), 'project': scope, 'session_device': fingerprint,
+                         'revoked': False}
+                agents[agent] = entry
+            entry.update(hash=hashlib.sha256(value.encode()).hexdigest(), expires=now + onboard.TOKEN_S)
+            ws.registry._save(agents)
+            credential = f'{PREFIX}{agent}.{value}'
+    return credential
+
+
 def ensure(ws, device, projects, document, token=''):
     if device is None or device.status != 'active':
         raise Denied('agent registration requires an active paired device')
@@ -60,36 +95,7 @@ def ensure(ws, device, projects, document, token=''):
             if agent in ws.registry.ids():
                 raise Denied('this agent identity belongs to another device registration')
             binding = {'device': fingerprint, 'requested': name, 'agent': agent, 'project': scope}
-        with held(ws.registry.path.with_name('agents.lock')):
-            agents = ws.registry._load()
-            entry = agents.get(agent)
-            if entry and (entry.get('revoked') or entry.get('role') != AGENT
-                          or entry.get('session_device') != fingerprint
-                          or entry.get('project') != scope):
-                raise Denied('the registered agent identity is unavailable')
-            credential = ''
-            if token:
-                try:
-                    actor = ws.auth(token)
-                except Denied:
-                    actor = None
-                if actor and actor.id != agent:
-                    raise Denied('the presented session belongs to another agent')
-                if actor:
-                    credential = token
-            if not credential:
-                key = 'session:' + hashlib.sha256(f"{fingerprint}:{binding['requested']}".encode()).hexdigest()
-                graph.upsert_node({'id': key, 'kind': 'device-session', 'label': agent, 'attrs': binding})
-                value = secrets.token_urlsafe(32)
-                now = ws.clock()
-                if entry is None:
-                    entry = {'role': AGENT, 'created': now, 'minted_by': 'paired-device',
-                             'can': list(CAPS), 'project': scope, 'session_device': fingerprint,
-                             'revoked': False}
-                    agents[agent] = entry
-                entry.update(hash=hashlib.sha256(value.encode()).hexdigest(), expires=now + onboard.TOKEN_S)
-                ws.registry._save(agents)
-                credential = f'{PREFIX}{agent}.{value}'
+        credential = _credential(ws, graph, binding, token)
         tokens.store(ws.base, agent, credential)
         ws.board.place(agent, scope)
         if model or harness:

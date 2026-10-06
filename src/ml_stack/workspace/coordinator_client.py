@@ -6,12 +6,12 @@ from urllib.parse import urlsplit
 from uuid import uuid4
 
 from ml_stack import home, http, macauth
+from ml_stack.fleet import tls
+from ml_stack.fleet.discovery import DiscoveryError, load_cluster_key
+from ml_stack.fleet.onboard.requests import Devices
+from ml_stack.fleet.remote import Peer
 from ml_stack.graph.store import GraphStore
 from ml_stack.hub.peerbook import PeerBook
-from ml_stack.fleet import tls
-from ml_stack.fleet.onboard.requests import Devices
-from ml_stack.fleet.discovery import load_cluster_key
-from ml_stack.fleet.remote import Peer
 from ml_stack.workspace import coordinator_config, tokens
 from ml_stack.workspace.chain import held
 from ml_stack.workspace.identity import Denied
@@ -88,6 +88,11 @@ def _device_peer(config):
 
 
 def client(base):
+    with held(base / 'coordinator-selection.lock'):
+        return _client(base)
+
+
+def _client(base):
     config = coordinator_config.load(base)
     if not config and load_cluster_key() is not None:
         candidates = [(peer, info) for peer, info in discover()]
@@ -103,7 +108,24 @@ def client(base):
         config = coordinator_config.save(base, selected)
     if config.get('mode') != 'remote':
         return None
-    return Remote(config, _device_peer(config))
+    try:
+        peer = _device_peer(config)
+    except Denied:
+        try:
+            found = discover()
+        except (DiscoveryError, http.ServerError, OSError) as error:
+            raise Denied('the selected coordinator device proof is unavailable') from error
+        candidates = [(peer, info) for peer, info in found
+                      if info.get('workspace') == config['workspace']
+                      and peer.base_url.rstrip('/') == config['endpoint'].rstrip('/')
+                      and (not config.get('name') or peer.name == config['name'])]
+        if len(candidates) != 1:
+            raise Denied('the selected coordinator has no unique current enrolled device proof') from None
+        advertised, _info = candidates[0]
+        selected = {**config, 'cert': advertised.beacon.cert if advertised.beacon else ''}
+        peer = _device_peer(selected)
+        config = coordinator_config.save(base, selected)
+    return Remote(config, peer)
 
 
 def discover():
@@ -119,14 +141,25 @@ def discover():
 
 
 def connect(base, name):
+    with held(base / 'coordinator-selection.lock'):
+        return _connect(base, name)
+
+
+def _connect(base, name, *, replace=False):
     candidates = [(peer, info) for peer, info in discover() if not name or peer.name == name]
     if len(candidates) != 1:
         raise Denied('select one advertised coordinator by its Fleet name; none or several matched')
     peer, info = candidates[0]
     coordinator_config.validate_endpoint(peer.base_url)
-    return coordinator_config.save(base, {'mode': 'remote', 'workspace': info['workspace'],
-                                         'name': peer.name, 'endpoint': peer.base_url,
-                                         'cert': peer.beacon.cert if peer.beacon else ''})
+    selected = {'mode': 'remote', 'workspace': info['workspace'],
+                'name': peer.name, 'endpoint': peer.base_url,
+                'cert': peer.beacon.cert if peer.beacon else ''}
+    current = coordinator_config.load(base)
+    if current and not replace and any(current.get(key) != selected[key]
+                                      for key in ('mode', 'workspace', 'endpoint')):
+        raise Denied('the selected coordinator cannot replace an existing workspace authority')
+    _device_peer(selected)
+    return coordinator_config.save(base, selected)
 
 
 def argv_for(args, declarations):
