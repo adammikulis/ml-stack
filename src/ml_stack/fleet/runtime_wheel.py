@@ -6,12 +6,15 @@ import base64
 import csv
 import hashlib
 import io
+import re
+import shutil
 import subprocess
 import sys
 import tempfile
 import zipfile
 from pathlib import Path
 
+from ml_stack.files import writing
 from ml_stack.safenames import unpack
 
 ORIGIN = "source-checkout"
@@ -24,6 +27,51 @@ def source_checkout() -> Path | None:
         return None
     source = Path(marker.read_text(encoding="utf-8").strip())
     return source if source.is_absolute() and (source / ".git").exists() else None
+
+
+def cache_wheel(wheel: Path, commit: str, *, prefix: Path | None = None) -> Path:
+    """Retain a stamped runtime wheel in the owning installation prefix."""
+    if not re.fullmatch(r"[0-9a-f]{40}", commit):
+        raise ValueError("runtime wheel cache requires a full commit")
+    if wheel_commit(wheel) != commit:
+        raise ValueError("runtime wheel commit does not match its cache key")
+    target = Path(prefix or sys.prefix) / "ml-stack-wheels" / commit / wheel.name
+    with writing(target) as temporary:
+        shutil.copyfile(wheel, temporary)
+    return target
+
+
+def current_wheel() -> Path | None:
+    """Return the cached wheel matching the imported immutable runtime."""
+    marker = Path(__file__).with_name("built-from")
+    if not marker.is_file():
+        return None
+    commit = marker.read_text(encoding="utf-8").strip()
+    if not re.fullmatch(r"[0-9a-f]{40}", commit):
+        raise OSError("the installed runtime has no full commit provenance")
+    found = list((Path(sys.prefix) / "ml-stack-wheels" / commit).glob("ml_stack-*.whl"))
+    if len(found) != 1:
+        raise OSError("the current runtime wheel is unavailable; update the installed runtime before installing libraries")
+    try:
+        if wheel_commit(found[0]) != commit:
+            raise OSError("the cached wheel does not match the installed runtime")
+    except (UnicodeError, ValueError, zipfile.BadZipFile) as exc:
+        raise OSError("the cached runtime wheel is invalid") from exc
+
+    return found[0]
+
+
+def wheel_commit(wheel: Path) -> str:
+    """Return the wheel's bounded commit marker, or empty for an unstamped wheel."""
+    with zipfile.ZipFile(wheel) as archive:
+        name = "ml_stack/fleet/built-from"
+        try:
+            info = archive.getinfo(name)
+        except KeyError:
+            return ""
+        if info.file_size > 100:
+            raise ValueError("runtime wheel commit marker is too large")
+        return archive.read(name).decode().strip()
 
 
 def stamp(wheel: Path, commit: str, checkout: Path) -> None:
@@ -66,9 +114,10 @@ def install_checkout(checkout: Path, *, timeout: float) -> tuple[int, str]:
             if len(found) != 1:
                 return 1, "source revision must build exactly one ml-stack wheel"
             stamp(found[0], commit, checkout)
-            _run([sys.executable, "-m", "pip", "install", "--upgrade", str(found[0])], timeout)
+            cached = cache_wheel(found[0], commit)
+            _run([sys.executable, "-m", "pip", "install", "--upgrade", str(cached)], timeout)
             said = _run([sys.executable, "-m", "pip", "install", "--force-reinstall",
-                         "--no-deps", str(found[0])], timeout)
+                         "--no-deps", str(cached)], timeout)
             return 0, said[-2000:]
     except (OSError, subprocess.SubprocessError, ValueError) as exc:
         return 1, str(exc)[-2000:]

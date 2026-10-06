@@ -272,6 +272,10 @@ class Environment:
         if getattr(sys, "frozen", False):
             bundled = Path(getattr(sys, "_MEIPASS", "")) / "wheels"
             return bundled if bundled.is_dir() else None
+        from .runtime_wheel import current_wheel
+        cached = current_wheel()
+        if cached is not None:
+            return cached.parent
         for parent in Path(__file__).resolve().parents:
             candidate = parent / "dist"
             if candidate.is_dir() and any(candidate.glob("ml_stack-*.whl")):
@@ -280,12 +284,37 @@ class Environment:
 
     def pip(self, args: list[str], *, timeout: float = 3600.0
             ) -> subprocess.CompletedProcess:
-        found = self.wheels()
-        if found and args and args[0] == "install":
-            args = [args[0], "--find-links", str(found), *args[1:]]
-        return subprocess.run([str(self.python), "-m", "pip", *args],
-                              capture_output=True, text=True, timeout=timeout,
-                              env=self.build_environment() if args and args[0] == "install" else dict(os.environ))
+        installing = bool(args and args[0] == "install")
+        wheel = None
+        found = self.wheels() if installing else None
+        rewritten = [args[0], "--find-links", str(found), *args[1:]] if found else list(args)
+        for index, argument in enumerate(rewritten):
+            if not installing or argument.startswith("-") or argument == "install":
+                continue
+            try:
+                requirement = Requirement(argument)
+            except ValueError:
+                continue
+            if canonicalize_name(requirement.name) == "ml-stack":
+                wheels = list(found.glob("ml_stack-*.whl")) if found else []
+                if len(wheels) != 1:
+                    raise OSError("the current ml-stack wheel is required to install managed libraries")
+                wheel = wheels[0].resolve()
+                extras = f"[{','.join(sorted(requirement.extras))}]" if requirement.extras else ""
+                rewritten[index] = f"ml-stack{extras} @ {wheel.as_uri()}"
+        environment = self.build_environment() if installing else dict(os.environ)
+        output = subprocess.run([str(self.python), "-m", "pip", *rewritten],
+                                capture_output=True, text=True, timeout=timeout, env=environment)
+        if output.returncode == 0 and wheel is not None:
+            refreshed = subprocess.run([str(self.python), "-m", "pip", "install", "--force-reinstall", "--no-deps", str(wheel)],
+                                       capture_output=True, text=True, timeout=timeout, env=environment)
+            if refreshed.returncode:
+                return refreshed
+            from .runtime_wheel import cache_wheel, wheel_commit
+            commit = wheel_commit(wheel)
+            if commit:
+                cache_wheel(wheel, commit, prefix=self.path)
+        return output
 
     def build_environment(self):
         """Use the installed macOS SDK when Bullet needs a native wheel build."""
