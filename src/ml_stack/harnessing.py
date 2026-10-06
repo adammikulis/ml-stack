@@ -150,6 +150,8 @@ def config_for(found: str, want: Want, say: Callable[[str], None]):
     """The `Config` a session serves: the model's measured settings (or bare), ``ctx`` tokens
     over ``slots`` slots, with the admitted automatic cache profile."""
     port, slots, draft = want.port, want.slots, want.draft
+    if isinstance(slots, bool) or not isinstance(slots, int) or slots <= 0:
+        raise ValueError("slots must be a positive integer")
     whole = chat_template.trained_context(found)
     requested = want.ctx
     fit = None
@@ -165,7 +167,11 @@ def config_for(found: str, want: Want, say: Callable[[str], None]):
         if fit.n_gpu_layers != "auto":
             raise ValueError("automatic context requires a full GPU offload fit; specify context explicitly")
         say(f"automatically selected {requested:,} context tokens for this device and model")
-    each = (min(requested, whole) if fit is not None and whole else requested) // max(1, slots)
+    if fit is None and requested % slots:
+        raise ValueError("explicit context must divide evenly across slots")
+    each = (min(requested, whole) if fit is not None and whole else requested) // slots
+    if each <= 0:
+        raise ValueError("context must provide at least one token per slot")
     measured = None if want.no_profile else profile.profile_for(found)
     if measured is not None:
         config = measured.config(port=port, slots=slots, model=found)
