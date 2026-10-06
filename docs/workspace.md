@@ -361,8 +361,13 @@ project, sender, destination and reply relationships. Reads use graph state; imm
 retain per-origin hash-chain evidence.
 
 Existing `bus.jsonl`, `boards.jsonl` and read cursors migrate once after their chains verify.
-Those files remain frozen migration evidence. A legacy writer changing either chain after
-migration causes a refusal; it cannot create a second authoritative Board.
+The verified legacy message file is removed after its graph transaction commits; its digest
+and chain checkpoint remain as content-free evidence. Interrupted removal retries without
+importing messages twice. An incomplete legacy row refuses migration and preserves the source
+for recovery. The board authority file stays frozen; changing it or reintroducing a migrated
+message file causes a refusal. Retention removes expired graph message payloads and advances
+origin checkpoints. Exchanges accept non-genesis checkpoints only when local history already
+authorizes them.
 
 The authenticated workspace person can export and combine message graphs through
 `BoardApi.export_graph` and `BoardApi.combine_graph`. Combining requires the same canonical

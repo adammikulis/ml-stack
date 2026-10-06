@@ -61,7 +61,7 @@ def test_inbox_survives_restart_and_acks_persist(kit):
     assert [m["seq"] for m in later.outbox(kit.owner)] == [1, 2, 3]
 
 
-def test_torn_legacy_line_is_preserved_when_messages_move_to_graph(kit):
+def test_torn_legacy_line_refuses_migration_and_preserves_unverified_bytes(kit):
     reader = kit.agent("reader")
     legacy = ChainLog(kit.base / "bus.jsonl")
     legacy.append({"kind": "msg", "from": "owner", "to": "reader", "type": "task",
@@ -69,10 +69,8 @@ def test_torn_legacy_line_is_preserved_when_messages_move_to_graph(kit):
                    "role": "human", "flags": []})
     with (kit.base / "bus.jsonl").open("ab") as handle:
         handle.write(b'{"v":1,"seq":2,"prev":"abc","body":"half a mess')
-    assert [m["seq"] for m in kit.ws.inbox(reader)] == [1]
-    sent = kit.ws.send(kit.owner, "reader", "task", "after")
-    assert sent["seq"] == 2
-    assert kit.ws.bus.log.verify().ok
+    with pytest.raises(ChainBroken, match="incomplete row"):
+        kit.ws.inbox(reader)
     assert b"half a mess" in (kit.base / "bus.jsonl").read_bytes()
 
 

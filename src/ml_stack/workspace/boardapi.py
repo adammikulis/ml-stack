@@ -618,10 +618,11 @@ class BoardApi:
                           and not r["to"].startswith("#") and r["to"] != "*")
 
     def _thread_access(self, who: Identity, rows: list[dict[str, Any]]) -> None:
-        if rows[0]["to"].startswith("#"):
-            self.require_read(who, rows[0]["to"])
-        elif who.role == AGENT:
-            self._pair_ok(who, rows[0]["from"], rows[0]["to"])
+        for row in rows:
+            if row["to"].startswith("#"):
+                self.require_read(who, row["to"])
+            elif who.role == AGENT:
+                self._pair_ok(who, row["from"], row["to"])
 
     # -- digests --------------------------------------------------------------------------
     def digest(self, token: str, ack: bool = False, thread: int = 0) -> dict[str, Any]:
