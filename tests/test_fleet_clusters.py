@@ -245,10 +245,11 @@ def test_a_terminal_that_types_a_new_name_confirms_the_passphrase(captured, tmp_
     assert any("Again" in p for p in prompts)
 
 
-def test_a_terminal_takes_the_default_name_on_enter_when_none_is_found(captured, tmp_path, monkeypatch, udp):
-    _terminal(monkeypatch, [""], [WORDS, WORDS])
+def test_a_terminal_requires_a_name_after_empty_input_when_none_is_found(captured, tmp_path, monkeypatch, udp):
+    prompts = _terminal(monkeypatch, ["", "attic"], [WORDS, WORDS])
     assert _join(tmp_path, "--mode", "prod") == 0
-    assert captured["group"] == "ml-stack"
+    assert captured["group"] == "attic"
+    assert sum("Cluster name" in prompt for prompt in prompts) == 2
 
 
 def test_group_skips_the_question(captured, tmp_path, monkeypatch, udp):
@@ -278,8 +279,10 @@ def test_a_passphrase_from_the_environment_is_never_asked_for_a_name(captured, t
     monkeypatch.setenv("ML_STACK_PASSPHRASE", WORDS)
     monkeypatch.setattr(sys, "stdin", _Terminal(""))
     monkeypatch.setattr("builtins.input", lambda *_: pytest.fail("asked an install script"))
+    monkeypatch.setenv("ML_STACK_CLUSTER", "attic")
     assert _join(tmp_path) == 0
-    assert captured["group"] == "ml-stack"
+    assert captured["group"] == "attic"
+    assert captured["passphrase"] == WORDS
 
 
 def test_a_bad_group_name_is_refused_with_a_plain_message(tmp_path, capsys, monkeypatch):
@@ -302,3 +305,11 @@ def test_the_clusters_command_says_when_there_is_none(tmp_path, udp, capsys):
     assert fleet_join.main(["--cluster-key", str(tmp_path / "none.key"), "--port", "1",
                             "clusters", "--timeout", "0.5"]) == 1
     assert "no cluster" in capsys.readouterr().out
+
+
+def test_environment_passphrase_requires_explicit_cluster_name(captured, tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("ML_STACK_PASSPHRASE", WORDS)
+    monkeypatch.setattr("builtins.input", lambda *_: pytest.fail("asked an install script"))
+    assert _join(tmp_path) == 2
+    assert "cluster name is required" in capsys.readouterr().err
+    assert not captured

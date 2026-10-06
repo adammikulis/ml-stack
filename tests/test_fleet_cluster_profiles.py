@@ -44,7 +44,7 @@ def test_malformed_profile_is_skipped_without_shadowing_valid_member(tmp_path, f
 def test_recovery_round_trip_preserves_cluster_profile(tmp_path, mode):
     original = tmp_path / "original.key"
     restored = tmp_path / "restored.key"
-    member = discovery.adopt(discovery.Membership("laboratory", KEY, mode=mode), original)
+    member = discovery.adopt(discovery.Membership("laboratory", KEY, mode=mode, selection="manual"), original)
     document = tmp_path / "cluster.recovery"
     recovery.export_recovery(document, "laboratory", original)
     assert recovery.parse_recovery(document.read_text()) == member
@@ -108,5 +108,8 @@ def test_offline_membership_respects_explicit_admission_mode(tmp_path, monkeypat
         with pytest.raises(discovery.DiscoveryError, match="differs from the requested mode"):
             joining.join_by_passphrase("cedar lantern meadow", "laboratory", path, options=options)
     else:
-        assert joining.join_by_passphrase("cedar lantern meadow", "laboratory", path, options=options) == member
+        selected = joining.join_by_passphrase("cedar lantern meadow", "laboratory", path, options=options)
+        assert selected.group == member.group and selected.key == member.key
+        assert selected.mode == member.mode and selected.selection == "manual"
+        member = selected
     assert discovery.memberships(path) == [member]
