@@ -236,9 +236,10 @@ and a convenience second.
   are processes of one user on one machine, so a socket would add a listener and signed requests
   without adding a boundary: the token never crosses a wire. A loopback daemon with `macauth`
   signed requests is the next step if agents ever need to run as another user or in a sandbox.
-* **One ordered bus log.** `bus.jsonl` holds every message with a global sequence number. An
-  agent's inbox is the rows addressed to it or to `*`; its outbox the rows it sent. A per-agent
-  cursor file records what it acknowledged. One log gives one total order and one chain.
+* **One relational Board graph.** `board.db` holds messages, boards, memberships,
+  subscriptions, reply relationships and read cursors in GraphStore transactions.
+  Sequence numbers are local presentation order. Stable workspace and event identities
+  identify messages across replicas; each origin retains its hash-chain evidence.
 * **Token hash, not shared key.** A shared MAC key in a file would let any agent that can read
   it sign as anyone. Hashed per-agent secrets mean an agent can only be the identity whose
   secret it was given.
@@ -282,8 +283,8 @@ Message types are `task`, `status`, `handoff`, `question`, `answer`, `claim`, `r
 `note`. Note kinds are `decision`, `rule`, `fact` and `question`. Claim kinds are `branch`,
 `worktree`, `port`, `file` and `server`.
 
-The state directory holds `agents.json` (token hashes), `bus.jsonl`, `notes.jsonl`,
-`quarantine.jsonl`, `audit.jsonl`, `boards.jsonl` (all chained), `cursors/` (including each identity's board read marks), `claims.json`, `rates/<sender>.txt`,
+The state directory holds `agents.json` (token hashes), `board.db` (the relational Board),
+`notes.jsonl`, `quarantine.jsonl` and `audit.jsonl` (chained), `claims.json`, `rates/<sender>.txt`,
 `scratch/<agent id>/<name>/` and the owner's `limits.json` and `private-terms`.
 
 `limits.json` overrides these defaults: message body 16 KiB, subject 200 characters, note body
@@ -354,10 +355,22 @@ imports is a follow-up.
 
 ## The Board
 
-A board is a named scope for messages on the bus. A message to `#name` is an ordinary bus row
-(so it is chained, screened, quarantined, rate limited and audited like any other); the board
-file `boards.jsonl` holds only who created, joined and left a board and each identity's
-subscriptions, one chained row per event, and every state is a replay of it.
+A board is a named scope in `board.db`. Messages remain screened, quarantined, rate limited
+and audited. Board, identity, project, subscription and message nodes have explicit membership,
+project, sender, destination and reply relationships. Reads use graph state; immutable events
+retain per-origin hash-chain evidence.
+
+Existing `bus.jsonl`, `boards.jsonl` and read cursors migrate once after their chains verify.
+Those files remain frozen migration evidence. A legacy writer changing either chain after
+migration causes a refusal; it cannot create a second authoritative Board.
+
+The authenticated workspace person can export and combine message graphs through
+`BoardApi.export_graph` and `BoardApi.combine_graph`. Combining requires the same canonical
+workspace identity and matching existing board visibility and project scope. Immutable event
+IDs deduplicate repeat imports; conflicting payloads, origin forks and missing reply targets
+are refused. Replies use stable event relationships rather than another replica's sequence
+numbers. Imports grant no memberships, subscriptions, tokens or roles. Existing cluster and
+project authorization still governs who may connect to the Board.
 
 | Board | Who is in it |
 | --- | --- |

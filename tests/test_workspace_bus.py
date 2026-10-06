@@ -61,16 +61,19 @@ def test_inbox_survives_restart_and_acks_persist(kit):
     assert [m["seq"] for m in later.outbox(kit.owner)] == [1, 2, 3]
 
 
-def test_torn_final_line_is_cut_and_the_log_continues(kit):
+def test_torn_legacy_line_is_preserved_when_messages_move_to_graph(kit):
     reader = kit.agent("reader")
-    kit.ws.send(kit.owner, "reader", "task", "kept")
+    legacy = ChainLog(kit.base / "bus.jsonl")
+    legacy.append({"kind": "msg", "from": "owner", "to": "reader", "type": "task",
+                   "body": "kept", "trust": "human", "state": "clear", "held": "", "subject": "",
+                   "role": "human", "flags": []})
     with (kit.base / "bus.jsonl").open("ab") as handle:
         handle.write(b'{"v":1,"seq":2,"prev":"abc","body":"half a mess')
     assert [m["seq"] for m in kit.ws.inbox(reader)] == [1]
     sent = kit.ws.send(kit.owner, "reader", "task", "after")
     assert sent["seq"] == 2
     assert kit.ws.bus.log.verify().ok
-    assert b"half a mess" in (kit.base / "bus.jsonl.torn").read_bytes()
+    assert b"half a mess" in (kit.base / "bus.jsonl").read_bytes()
 
 
 def test_a_sender_killed_mid_stream_leaves_a_log_that_still_verifies(kit):
@@ -169,8 +172,10 @@ def test_a_log_edited_by_hand_is_detected_and_refuses_new_rows(kit):
     kit.agent("reader")
     kit.ws.send(kit.owner, "reader", "task", "pay the invoice")
     kit.ws.send(kit.owner, "reader", "task", "second")
-    path = kit.base / "bus.jsonl"
-    path.write_text(path.read_text().replace("pay the invoice", "pay the other invoice"))
+    with kit.ws.bus.log.graph.opened() as graph:
+        event = kit.ws.bus.log.graph._events(graph, "bus")[0]
+        event["row"]["body"] = "pay the other invoice"
+        graph.upsert_node(event)
     verdict = kit.ws.bus.log.verify()
     assert not verdict.ok and verdict.broken_at == 1
     with pytest.raises(ChainBroken):
@@ -276,7 +281,7 @@ def test_an_injected_instruction_is_held_and_never_reaches_the_reader(kit):
     got = kit.ws.inbox(reader)[0]
     assert got["state"] == "quarantined" and text not in json.dumps(got)
     assert "override" in got["flags"] and got["authority"] == "none"
-    assert text not in (kit.base / "bus.jsonl").read_text()
+    assert text not in json.dumps(kit.ws.bus.log.rows())
     assert kit.ws.quarantine_list()[0]["state"] == "quarantined"
     with pytest.raises(Denied):
         kit.ws.quarantine_release(writer, got["held"])
