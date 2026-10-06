@@ -1,8 +1,10 @@
 """The rails around Claude Code and Codex on a local model: the role policy, the hook, the session files."""
 
 import json
+import base64
 import os
 import subprocess
+import shlex
 import sys
 import threading
 import time
@@ -30,6 +32,10 @@ def _hook(event, payload, *args, env=None):
 
 def _verdict(done):
     return json.loads(done.stdout)["hookSpecificOutput"]
+
+
+def _command_text(command):
+    return base64.b64decode(command.rsplit(" ", 1)[1]).decode("utf-16-le") if os.name == "nt" else command
 
 
 class TestPolicy:
@@ -158,13 +164,24 @@ class TestSessionFiles:
             path = files.write("settings.json", claude.settings(pre, "post-cmd", harnessing.WAIT_S))
             files.lock()
             assert tree not in path.parents and files.path not in (tree, *tree.parents)
-            assert not os.access(path, os.W_OK) and not os.access(files.path, os.W_OK)
+            assert not os.access(path, os.W_OK)
+            if os.name == "nt":
+                assert tokens.problem(files.path) == ""
+                with pytest.raises(PermissionError):
+                    path.write_text("replace protected settings")
+            else:
+                assert not os.access(files.path, os.W_OK)
             text = path.read_text()
             for secret in ("ANTHROPIC", "sk-", "TOKEN", "KEY", "password"):
                 assert secret not in text
             hooks = json.loads(text)["hooks"]
-            assert "ml_stack.harnesshook" in hooks["PreToolUse"][0]["hooks"][0]["command"]
-            assert "--role approve-first" in hooks["PreToolUse"][0]["hooks"][0]["command"]
+            command = hooks["PreToolUse"][0]["hooks"][0]["command"]
+            command = _command_text(command)
+            if os.name == "nt":
+                assert "'--role' 'approve-first'" in command
+            else:
+                assert "--role approve-first" in command
+            assert "ml_stack.harnesshook" in command
             assert "disableAllHooks" not in text
         finally:
             files.release()
@@ -179,7 +196,24 @@ class TestSessionFiles:
     def test_the_hook_command_names_this_interpreter_and_quotes_its_paths(self, tmp_path):
         odd = tmp_path / "a dir"
         cmd = harnessing.hook_command("pre", role="plan-and-go", label="x y", root=odd, protect=["/p q"])
-        assert cmd.startswith(sys.executable) and "'x y'" in cmd and "'/p q'" in cmd
+        if os.name == "nt":
+            script = _command_text(cmd)
+            assert script.startswith("& '" + sys.executable + "'")
+            assert "'x y'" in script and "'/p q'" in script
+        else:
+            args = shlex.split(cmd)
+            assert args[0] == sys.executable and "x y" in args and "/p q" in args
+
+    def test_generated_hook_executes_with_quoted_project_paths(self, tmp_path):
+        odd = tmp_path / "a dir & user's project"
+        odd.mkdir()
+        cmd = harnessing.hook_command("pre", role="read-only", label="x y", root=odd, protect=[])
+        payload = {"tool_name": "Read", "tool_input": {"file_path": str(odd / "source.py")}, "cwd": str(odd)}
+        done = subprocess.run(cmd if os.name == "nt" else shlex.split(cmd), input=json.dumps(payload),
+                              capture_output=True, text=True, timeout=60, check=False,
+                              env={**os.environ, "PYTHONPATH": SRC})
+        assert done.returncode == 0, done.stderr
+        assert _verdict(done)["permissionDecision"] == "allow"
 
 
 class TestAdmission:
@@ -263,7 +297,8 @@ class TestLaunch:
         assert seen["model"] == harnessing.DEFAULT_MODEL and seen["want"].ctx == 262144 and seen["want"].slots == 1
         assert seen["env"]["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] == "262144"
         assert seen["env"]["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] == "262144"
-        assert "--role plan-and-go" in seen["settings"]["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+        command = _command_text(seen["settings"]["hooks"]["PreToolUse"][0]["hooks"][0]["command"])
+        assert ("'--role' 'plan-and-go'" if os.name == "nt" else "--role plan-and-go") in command
         assert not Path(seen["command"][2]).exists() and seen["released"]
 
     def test_codex_gets_its_own_home_with_the_provider_and_the_hook_flag(self, monkeypatch, tmp_path):

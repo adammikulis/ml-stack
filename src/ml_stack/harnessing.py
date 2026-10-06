@@ -8,6 +8,7 @@ under the state root, outside the working tree the model can edit, and are read-
 from __future__ import annotations
 
 import argparse
+import base64
 import contextlib
 import dataclasses
 import importlib.util
@@ -26,6 +27,7 @@ from ml_stack.harnesshook import WAIT_S
 from ml_stack.serve import chat_template, leases, profile, wired
 from ml_stack.serve.recent import note
 from ml_stack.serve.serving import Config, Serving, drafted, served, serving_params
+from ml_stack.workspace.windows_tokens import restrict as restrict_windows
 
 __all__ = [
     "DEFAULT_CTX",
@@ -202,8 +204,11 @@ class SessionFiles:
         return target
 
     def lock(self) -> None:
-        """Take write access away from the directory itself."""
-        self.path.chmod(stat.S_IRUSR | stat.S_IXUSR)
+        """Restrict directory access to its account on Windows and read/execute on POSIX."""
+        if os.name == "nt":
+            restrict_windows(self.path)
+        else:
+            self.path.chmod(stat.S_IRUSR | stat.S_IXUSR)
 
     def release(self) -> None:
         target = self.path.resolve()
@@ -235,6 +240,10 @@ def hook_command(event: str, *, role: str, label: str, root: Path, protect: list
              "--root", str(root), "--wait", str(int(WAIT_S))]
     for each in protect:
         words += ["--protect", each]
+    if os.name == "nt":
+        script = "& " + " ".join("'" + word.replace("'", "''") + "'" for word in words)
+        encoded = base64.b64encode((script + "; exit $LASTEXITCODE").encode("utf-16-le")).decode("ascii")
+        return "powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand " + encoded
     return shlex.join(words)
 
 
