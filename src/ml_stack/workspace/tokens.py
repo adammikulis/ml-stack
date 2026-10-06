@@ -11,7 +11,7 @@ from pathlib import Path
 from ml_stack.files import writing
 from ml_stack.sentinel import human
 from ml_stack.workspace.identity import PREFIX, TOKEN_ENV, Denied, valid_id
-from ml_stack.workspace.windows_tokens import problem as windows_problem, restrict
+from ml_stack.windows_private import problem as windows_problem, restrict
 
 __all__ = ["AGENT_ENV", "OWNER_FILE", "directory", "inside_repo", "load", "prepare", "problem",
            "read_file", "resolve", "store"]

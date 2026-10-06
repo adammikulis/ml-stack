@@ -33,7 +33,7 @@ def test_another_account_grant_refuses_token_reads(tmp_path):
     import win32security
 
     from ml_stack.workspace.identity import Denied
-    from ml_stack.workspace.windows_tokens import restrict
+    from ml_stack.windows_private import restrict
 
     target = tokens.store(tmp_path, "fixture-agent", f"{PREFIX}fixture-agent.private-token")
     descriptor = win32security.GetNamedSecurityInfo(
