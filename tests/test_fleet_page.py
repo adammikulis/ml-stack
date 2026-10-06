@@ -216,6 +216,26 @@ class TestFirstRun:
         assert memberships(daemon.keyfile)[0].selection == "automatic"
         assert not errors
 
+    def test_dev_can_return_to_auto_after_leaving_all_clusters(self, daemon, open_page, monkeypatch):
+        from ml_stack.fleet import automatic_clusters
+        from ml_stack.fleet.discovery import memberships
+
+        monkeypatch.setattr(automatic_clusters, "offers", lambda port=None: [])
+        page, errors = open_page(daemon)
+        page.wait_for_selector("#device-mode")
+        page.click("#first-run button:has-text('Continue')")
+        page.wait_for_selector("#first-run h1:has-text('Clusters')")
+        daemon.ui.setup_finished()
+        page.reload()
+        page.wait_for_selector("#cluster-joined .row")
+        page.click("#cluster-joined button:has-text('Leave')")
+        page.wait_for_selector("#cluster-joined button:has-text('Connect automatically')")
+        assert not memberships(daemon.keyfile)
+        page.click("#cluster-joined button:has-text('Connect automatically')")
+        page.wait_for_selector("#cluster-joined .row")
+        assert memberships(daemon.keyfile)[0].selection == "automatic"
+        assert not errors
+
     def test_background_setup_can_finish_while_server_is_downloading(
             self, daemon, open_page, monkeypatch):
         import threading
