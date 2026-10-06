@@ -26,7 +26,7 @@ def test_cluster_setup_sends_only_the_selected_action(action):
             return request.fulfill(path=str(WEB / "style.css"))
         body, status = {"ok": True}, 200
         if path == "/ui/setup":
-            body = {"needs_setup": True, "name": "test-machine"}
+            body = {"needs_setup": True, "name": "test-machine", "cluster_mode": "prod"}
         elif path == "/ui/clusters":
             body = {"clusters": rows}
         elif path == "/ui/setup/join":
@@ -44,6 +44,7 @@ def test_cluster_setup_sends_only_the_selected_action(action):
         page.route("http://cluster.test/**", route)
         page.goto("http://cluster.test/")
         screen = page.locator("#first-run")
+        screen.get_by_label("Mode", exact=True).select_option("prod")
         screen.get_by_role("button", name="Continue", exact=True).click()
         name = screen.get_by_label("Cluster name (required)", exact=True)
         assert name.input_value() == ("lab" if action == "current-group" else "default")
@@ -66,5 +67,5 @@ def test_cluster_setup_sends_only_the_selected_action(action):
             assert posted == [{"group": "new-lab" if action == "create" else
                                "lab" if action == "current-group" else "default",
                                "passphrase": "quince larch marlow",
-                               "mode": "create" if action == "create" else "join"}]
+                               "mode": "create" if action == "create" else "join", "cluster_mode": "prod"}]
         browser.close()

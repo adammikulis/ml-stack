@@ -308,7 +308,9 @@
           const add = [...want];
           if (add.length) watch(await api("/ui/libraries", { method: "POST",
             body: JSON.stringify({ install: add }) }), "Libraries");
-          this.modelInstall.start().catch((error) => { note.textContent = String(error); });
+          this.modelInstall.start().catch((error) => {
+            this.modelInstall.status.replaceChildren(el("div", { class: "err" }, String(error)));
+          });
           if (st.step === 5) this.go(6);
         } catch (error) { note.textContent = String(error); }
       };

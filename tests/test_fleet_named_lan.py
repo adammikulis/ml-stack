@@ -130,20 +130,26 @@ def test_browser_named_choices_confirmation_refresh_and_manual(serving, password
         page.on("pageerror", lambda error: errors.append(str(error)))
         page.goto(f"http://127.0.0.1:{serving.port}/ui/")
         wizard = page.locator("first-run")
+        wizard.get_by_label("Mode", exact=True).select_option("prod")
         wizard.get_by_role("button", name="Continue", exact=True).click()
+        wizard.get_by_role("button", name="Refresh nearby clusters", exact=True).click()
         expect(wizard.get_by_text("lab", exact=True)).to_be_visible()
         wizard.get_by_role("button", name="Join", exact=True).click()
-        expect(wizard.locator("#g")).to_have_value("lab")
-        assert wizard.locator("#g").get_attribute("readonly") is not None
-        expect(wizard.get_by_role("button", name="Join lab", exact=True)).to_be_disabled()
-        wizard.get_by_role("button", name="Enter a name manually", exact=True).click()
-        wizard.locator("#p1").fill("quince larch marlow")
-        expect(wizard.get_by_role("button", name="Create or join manually", exact=True)).to_be_disabled()
+        named = wizard.locator("#setup-cluster-name")
+        words = wizard.locator("#setup-cluster-passphrase")
+        submit = wizard.get_by_role("button", name="Join existing cluster", exact=True)
+        expect(named).to_have_value("lab")
+        expect(wizard.locator("#setup-cluster-action")).to_have_value("join")
+        expect(submit).to_be_disabled()
+        named.fill("")
+        words.fill("quince larch marlow")
+        expect(submit).to_be_disabled()
+        assert not discovery.memberships(serving.keyfile)
         wizard.get_by_role("button", name="Refresh nearby clusters", exact=True).click()
         wizard.get_by_role("button", name="Join", exact=True).click()
-        wizard.locator("#p1").fill("quince larch marlow")
-        wizard.get_by_role("button", name="Join lab", exact=True).click()
-        expect(wizard.get_by_text("Joined. Use this cluster name and passphrase on your other machines.", exact=True)).to_be_visible()
+        expect(named).to_have_value("lab")
+        submit.click()
+        expect(wizard.get_by_text("Joined cluster 'lab'.", exact=True)).to_be_visible()
         assert discovery.memberships(serving.keyfile)[0].group == "lab"
         assert discovery.load_cluster_key(serving.keyfile) == password_cluster.member.key
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
@@ -179,9 +185,10 @@ def random_cluster(tmp_path, serving, monkeypatch):
         port = probe.getsockname()[1]
     serving.ui.discovery_port = port
     keyfile = tmp_path / "random-host.key"
-    key = discovery.create_cluster_key(keyfile, group="Pine workshop").encode()
+    key = discovery.mint_cluster("Pine workshop", keyfile, mode="prod").key
     tell = discovery.Advertiser(discovery.Beacon(name="tower"), key, port=port)
     tell.cluster = "Pine workshop"
+    tell.mode = "prod"
     exported = tmp_path / "pine.recovery"
     recovery.export_recovery(exported, path=keyfile)
     with tell:
@@ -241,7 +248,9 @@ def test_browser_random_cluster_recovery_picker(serving, random_cluster, playwri
         page = browser.new_page(viewport={"width": 390, "height": 844})
         page.goto(f"http://127.0.0.1:{serving.port}/ui/")
         wizard = page.locator("first-run")
+        wizard.get_by_label("Mode", exact=True).select_option("prod")
         wizard.get_by_role("button", name="Continue", exact=True).click()
+        wizard.get_by_role("button", name="Refresh nearby clusters", exact=True).click()
         wizard.get_by_role("button", name="Join with recovery file", exact=True).click()
         expect(wizard.get_by_role("button", name="Join Pine workshop with recovery file", exact=True)).to_be_disabled()
         wizard.locator("#cluster-recovery-file").set_input_files({

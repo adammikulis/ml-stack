@@ -23,9 +23,10 @@ class Cluster:
     name: str
     machines: tuple[str, ...]
     mine: bool = False
+    method: str = "passphrase"
 
     def public(self) -> dict[str, object]:
-        return {"name": self.name, "machines": list(self.machines), "mine": self.mine}
+        return {"name": self.name, "machines": list(self.machines), "mine": self.mine, "method": self.method}
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,11 +43,16 @@ def known_clusters(cluster_key_path: Path | str | None = None, *, timeout_s: flo
     """Clusters this machine is in, then those other daemons on the network offer to take a machine into."""
     held: dict[str, list[str]] = {m.group: [THIS_MACHINE] for m in disc.memberships(cluster_key_path)}
     mine = set(held)
+    methods: dict[str, str] = {}
     for offer in sorted((finder or find_clusters)(timeout_s=timeout_s, port=port), key=lambda o: (o.group, o.machine)):
         names = held.setdefault(offer.group, [])
+        methods.setdefault(offer.group, offer.method)
+        if offer.method == "passphrase":
+            methods[offer.group] = "passphrase"
         if offer.machine not in names and offer.machine not in self_names:
             names.append(offer.machine)
-    return [Cluster(name, tuple(machines), name in mine) for name, machines in held.items()]
+    return [Cluster(name, tuple(machines), name in mine, methods.get(name, "passphrase"))
+            for name, machines in held.items()]
 
 
 def format_clusters(clusters: list[Cluster]) -> list[str]:
