@@ -1,10 +1,13 @@
 """Metadata-only project registration and canonical authority checks."""
 
+import sys
+from types import SimpleNamespace
+
 import pytest
 
 from ml_stack.files import write_json
 from ml_stack.fleet import project_source as source
-from ml_stack.fleet.projects import ProjectRegistry, identity
+from ml_stack.fleet.projects import ProjectRegistry, answer, identity
 from ml_stack.net import git
 
 
@@ -75,3 +78,24 @@ def test_malformed_checkout_authority_is_not_registered(repository, tmp_path, au
     registry = ProjectRegistry(tmp_path / "registry", "device", (repository,))
     assert registry.boards() == []
     assert registry.candidates() == []
+
+
+@pytest.mark.redteam
+@pytest.mark.parametrize("visible", [False, True])
+def test_catalogue_uses_authenticated_visibility_predicate(repository, tmp_path, monkeypatch, visible):
+    registry = ProjectRegistry(tmp_path / "registry", "device", (repository,))
+    connection, sealing, cluster_path = object(), object(), tmp_path / "cluster-key"
+    checked, responses = [], []
+
+    def predicate(conn, opening, path):
+        checked.append((conn, opening, path))
+        return visible
+
+    monkeypatch.setitem(sys.modules, "ml_stack.fleet.project_enrollment", SimpleNamespace(visible=predicate))
+    handler = SimpleNamespace(connection=connection, _sealing=lambda: sealing,
+                              _send=lambda code, payload: responses.append((code, payload)))
+    assert answer(handler, registry, SimpleNamespace(path="/workspace/v1/projects"),
+                  cluster_key_path=cluster_path)
+    assert checked == [(connection, sealing, cluster_path)]
+    assert bool(responses[0][1]["boards"]) is visible
+    assert responses[0][1]["projects"] == []
