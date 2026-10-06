@@ -71,6 +71,42 @@ def test_agent_connect_selects_explicit_project_instead_of_current_board(tmp_pat
     assert results == ([] if unavailable else [{"id": "worker", "project": "requested-board", "state": "connected"}])
 
 
+def test_local_runner_discovers_authority_once(monkeypatch):
+    discoveries = []
+    def discover():
+        discoveries.append(True)
+        assert len(discoveries) == 1
+        return None
+    local = object()
+    monkeypatch.setattr(cli, "_project_connection", discover)
+    monkeypatch.setattr(cli.coordinator_client, "client", lambda *a: None)
+    monkeypatch.setattr(cli, "Workspace", lambda: local)
+    monkeypatch.setattr(cli, "_local_token", lambda args: "local-session")
+    seen = []
+    assert cli._runner(lambda args, ws, token: seen.append((ws, token)))(SimpleNamespace(json=True)) == 0
+    assert seen == [(local, "local-session")]
+    assert discoveries == [True]
+
+
+def test_coordinator_runner_keeps_selected_authority(monkeypatch):
+    discoveries = []
+    def discover():
+        discoveries.append(True)
+        assert len(discoveries) == 1
+        return None
+    calls = []
+    remote = SimpleNamespace(command=lambda argv, token, request_id: calls.append(token))
+    monkeypatch.setattr(cli, "_project_connection", discover)
+    monkeypatch.setattr(cli.coordinator_client, "client", lambda *a: remote)
+    monkeypatch.setattr(cli.coordinator_client, "argv_for", lambda *a: [])
+    monkeypatch.setattr(cli, "_coordinator_token", lambda args, selected: "coordinator-session"
+                        if selected is remote else pytest.fail("different coordinator"))
+    args = SimpleNamespace(cmd="whoami", json=True, request_id="")
+    assert cli._runner(lambda *a: pytest.fail("local dispatch"))(args) == 0
+    assert calls == ["coordinator-session"]
+    assert discoveries == [True]
+
+
 def test_unavailable_selected_project_cannot_fall_back_to_global_authority(monkeypatch):
     from ml_stack.workspace.identity import Denied
     def selected(*args):
