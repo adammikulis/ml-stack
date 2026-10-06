@@ -8,11 +8,13 @@ import subprocess
 import sys
 import threading
 from pathlib import Path
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 from workspace_kit import Kit, clean_env
 
+from ml_stack import http
 from ml_stack.fleet import projects, tls
 from ml_stack.fleet.api import Daemon, make_handler
 from ml_stack.fleet.discovery import derive_token, mint_cluster
@@ -288,6 +290,47 @@ def test_selected_coordinator_outage_preserves_remote_authority(tmp_path, monkey
         coordinator_client.client(tmp_path)
     assert (tmp_path / 'coordinator.json').read_bytes() == before
     assert not (tmp_path / 'agents.json').exists()
+
+
+def test_coordinator_discovery_without_pairing_does_not_probe_network(monkeypatch):
+    monkeypatch.setattr(coordinator_client, '_paired_rows', lambda: [])
+    monkeypatch.setattr(Peer, 'discover',
+                        classmethod(lambda cls, **kwargs: pytest.fail('unpaired discovery')))
+    assert coordinator_client.discover() == []
+
+
+def test_coordinator_discovery_rejects_unpaired_peer_before_http(monkeypatch):
+    peer = SimpleNamespace(base_url='https://127.0.0.1:8770',
+                           beacon=SimpleNamespace(cert='invented-cert'))
+    monkeypatch.setattr(coordinator_client, '_paired_rows', lambda: [{}])
+    monkeypatch.setattr(Peer, 'discover', classmethod(lambda cls, **kwargs: [peer]))
+
+    def denied(config):
+        raise Denied('no active pairing')
+
+    monkeypatch.setattr(coordinator_client, '_device_peer', denied)
+    assert coordinator_client.discover() == []
+
+
+@pytest.mark.parametrize('response', ['valid', 'timeout', 'list'])
+def test_coordinator_discovery_uses_bounded_device_transport(monkeypatch, response):
+    peer = SimpleNamespace(base_url='https://127.0.0.1:8770',
+                           beacon=SimpleNamespace(cert='invented-cert'))
+    calls = []
+
+    def request(method, path, **kwargs):
+        calls.append((method, path, kwargs))
+        if response == 'timeout':
+            raise ServerError('timeout', status=503)
+        info = {'authority': 'coordinator', 'protocol': 1, 'workspace': 'workspace:' + 'a' * 32}
+        return 200, json.dumps([] if response == 'list' else info).encode(), {}
+
+    monkeypatch.setattr(coordinator_client, '_paired_rows', lambda: [{}])
+    monkeypatch.setattr(Peer, 'discover', classmethod(lambda cls, **kwargs: [peer]))
+    monkeypatch.setattr(coordinator_client, '_device_peer',
+                        lambda config: SimpleNamespace(_request=request))
+    assert bool(coordinator_client.discover()) is (response == 'valid')
+    assert calls == [('GET', '/workspace/v1/info', {'timeout': 2, 'retry': http.ONCE})]
 
 
 def test_missing_selection_for_existing_remote_session_refuses_local_authority(tmp_path, monkeypatch):

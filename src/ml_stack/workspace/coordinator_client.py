@@ -72,13 +72,17 @@ class Remote:
             return result['agent']
 
 
-def _device_peer(config):
+def _paired_rows():
     directory = home.state('onboard')
     active = {device.fingerprint for device in Devices(directory / 'devices.json').all()
               if device.status == 'active'}
-    rows = [row for row in PeerBook(directory / 'peers.json').rows()
+    return [row for row in PeerBook(directory / 'peers.json').rows()
             if row.get('source') == 'pairing' and row.get('fingerprint') in active
-            and row.get('certificate') == config.get('cert') and row.get('device_secret')]
+            and row.get('certificate') and row.get('device_secret')]
+
+
+def _device_peer(config):
+    rows = [row for row in _paired_rows() if row.get('certificate') == config.get('cert')]
     if len(rows) != 1:
         raise Denied('the coordinator has no unique active paired device credential')
     row = rows[0]
@@ -131,13 +135,20 @@ def _client(base):
 
 
 def discover():
+    if not _paired_rows():
+        return []
     candidates = []
-    for peer in Peer.discover(timeout_s=2):
+    for peer in Peer.discover(timeout_s=2, timeout=2):
         try:
-            info = peer._json('GET', '/workspace/v1/info')
-        except http.ServerError:
+            coordinator_config.validate_endpoint(peer.base_url)
+            device = _device_peer({'endpoint': peer.base_url,
+                                   'cert': peer.beacon.cert if peer.beacon else ''})
+            _status, body, _headers = device._request('GET', '/workspace/v1/info',
+                                                     timeout=2, retry=http.ONCE)
+            info = json.loads(body)
+        except (Denied, http.ServerError, ValueError, OSError):
             continue
-        if info.get('authority') == 'coordinator' and info.get('protocol') == 1:
+        if isinstance(info, dict) and info.get('authority') == 'coordinator' and info.get('protocol') == 1:
             candidates.append((peer, info))
     return candidates
 
