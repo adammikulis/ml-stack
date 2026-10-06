@@ -30,7 +30,7 @@ from ml_stack.fleet.files import DIGEST_HEADER, safe_relpath
 from ml_stack.fleet.jobs import DaemonError, JobRunner
 from ml_stack.fleet.remote import Peer, PeerError
 from ml_stack.fleet.settings import Settings
-from ml_stack.http import Server, request_bytes
+from ml_stack.http import Server, ServerError, request_bytes
 from tests.cluster_support import any_command, join_cluster
 
 
@@ -1093,6 +1093,10 @@ def test_job_reads_refuse_unknown_or_traversing_identifiers(daemon, path):
     client, root, _files, token = daemon
     secret = b"private-job-boundary-fixture"
     (root.parent / "private.txt").write_bytes(secret)
-    refused = request_bytes(client.base_url + path, token=token, timeout=2)
-    assert refused.status in (400, 403, 404) and secret not in refused.body
-    assert request_bytes(client.base_url + path, timeout=2).status == 401
+    with pytest.raises(ServerError) as refused:
+        request_bytes(client.base_url + path, token=token, timeout=2)
+    assert refused.value.status in (400, 403, 404)
+    assert secret.decode() not in refused.value.body
+    with pytest.raises(ServerError) as unsigned:
+        request_bytes(client.base_url + path, timeout=2)
+    assert unsigned.value.status == 401
