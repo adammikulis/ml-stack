@@ -41,9 +41,10 @@ def _boards(peer, document, project_id):
 def discover(root: Path, *, cluster_key=None, cluster="", port=None):
     """Select one authenticated canonical host for this local Git project."""
     project_id = identity(root.resolve())
-    members = [member for member in memberships(cluster_key)
-               if getattr(member, "mode", "prod") == "dev"
-               and (not cluster or member.group == cluster)]
+    rows = memberships(cluster_key)
+    members = rows[:1] if rows and getattr(rows[0], "mode", "prod") == "dev" else []
+    if cluster:
+        members = [member for member in members if member.group == cluster]
     if not members:
         return None
     if len(members) != 1:

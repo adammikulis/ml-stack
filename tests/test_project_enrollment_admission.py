@@ -51,3 +51,12 @@ def test_shared_key_alias_cannot_grant_dev_authority(scope, monkeypatch):
     monkeypatch.setattr(admission, "memberships", lambda path: [dev, alias])
     assert admission.authenticated_cluster(opening, None) == ("", "")
     assert not admission.admit(Mock(spec=ssl.SSLSocket), opening, None, body)
+
+
+@pytest.mark.redteam
+def test_secondary_dev_does_not_override_primary_prod(scope, monkeypatch):
+    dev, opening, body = scope
+    prod = SimpleNamespace(group="production", key=b"production-key", mode="prod")
+    monkeypatch.setattr(admission, "memberships", lambda path: [prod, dev])
+    assert not admission.visible(Mock(spec=ssl.SSLSocket), opening, None)
+    assert not admission.admit(Mock(spec=ssl.SSLSocket), opening, None, body)

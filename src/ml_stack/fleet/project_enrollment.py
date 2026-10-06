@@ -22,9 +22,9 @@ def visible(connection, opening, path) -> bool:
     if not isinstance(connection, ssl.SSLSocket):
         return False
     cluster, _ = authenticated_cluster(opening, path)
-    return bool(cluster) and any(
-        member.group == cluster and getattr(member, "mode", "prod") == "dev"
-        for member in memberships(path))
+    rows = memberships(path)
+    return bool(rows and cluster and rows[0].group == cluster
+                and getattr(rows[0], "mode", "prod") == "dev")
 
 
 def admit(connection, opening, path, body) -> bool:
