@@ -25,6 +25,7 @@ from typing import Any
 
 from ml_stack import gate, sealing, sentinel, serverkeys
 from ml_stack.files import promote
+from ml_stack.http import _open
 from ml_stack.macauth import Authenticator, Verdict, parts
 from ml_stack.sentinel.adapters import watch_authenticator
 from ml_stack.speech import service as speech
@@ -303,7 +304,11 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
         def _forward(self, upstream: urllib.request.Request) -> bool:
             """Relay ``upstream`` to the caller as it is generated."""
             try:
-                response = urllib.request.urlopen(upstream, timeout=INFER_TIMEOUT)
+                def destination(url):
+                    if url != upstream.full_url:
+                        raise urllib.error.URLError("the model proxy cannot redirect")
+                    return url
+                response = _open(upstream, INFER_TIMEOUT, destination)
             except urllib.error.HTTPError as exc:
                 raw = exc.read()
                 self._send(exc.code, None, raw=raw,
@@ -414,6 +419,13 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
                                  **({"serving": serving.public()} if serving is not None
                                     else {})})
                 return
+            if path == "/models" or path.startswith("/models/"):
+                return self._read_models(path)
+            if path in {"/availability", "/jobs", "/speech/providers", "/bench", "/bench/export"} or path.startswith("/jobs/"):
+                return self._read_jobs(path, q)
+            return self._read_files(path)
+
+        def _read_models(self, path):
             if path == "/models":
                 if models is None:
                     self._send(501, {"error": "no model store on this daemon"})
@@ -438,6 +450,8 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
                     return
                 self._send_file(found.path, start, end)
                 return
+
+        def _read_jobs(self, path, q):
             if path == "/availability":
                 if schedule is None:
                     self._send(501, {"error": "no schedule on this daemon"})
@@ -498,6 +512,9 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
                             rows.append(json.loads(line))
                 self._send(200, {"metrics": rows, "next": since + len(rows)})
                 return
+            self._send(404, {"error": "no such route"})
+
+        def _read_files(self, path):
             m = re.match(r"^/fetch/([^/]+)$", path)
             if m:
                 if fetcher is None:
@@ -614,6 +631,25 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
             if parsed.path == "/decide":
                 self._decide(body)
                 return
+            routes = {"/speech/transcribe": self._post_speech, "/jobs": self._post_jobs,
+                      "/bench": self._post_jobs, "/models/get": self._post_jobs,
+                      "/availability": self._post_schedule, "/fetch": self._post_fetch,
+                      "/serve": self._post_serve}
+            if route := routes.get(parsed.path):
+                route(body, parsed)
+                return
+            m = re.match(r"^/jobs/([^/]+)/stop$", parsed.path)
+            if m:
+                try:
+                    job = runner.stop(m.group(1))
+                except DaemonError as e:
+                    self._send(404, {"error": str(e)})
+                    return
+                self._send(200, job.public())
+                return
+            self._send(404, {"error": "no such route"})
+
+        def _post_speech(self, body, parsed):
             if parsed.path == "/speech/transcribe":
                 want = urllib.parse.parse_qs(parsed.query)
                 try:
@@ -625,6 +661,8 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
                     return
                 self._send(200, as_json(heard))
                 return
+
+        def _post_jobs(self, body, parsed):
             if parsed.path == "/jobs":
                 try:
                     req = self._object(body)
@@ -672,6 +710,8 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
                     return
                 self._send(200, got.public())
                 return
+
+        def _post_schedule(self, body, parsed):
             if parsed.path == "/availability":
                 if schedule is None:
                     self._send(501, {"error": "no schedule on this daemon"})
@@ -708,6 +748,8 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
                     schedule.save(schedule_path)
                 self._send(200, schedule.public())
                 return
+
+        def _post_fetch(self, body, parsed):
             if parsed.path == "/fetch":
                 if fetcher is None:
                     self._send(501, {"error": "peer-to-peer fetch is not enabled"})
@@ -731,6 +773,8 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
                     return
                 self._send(202, fetch.public())
                 return
+
+        def _post_serve(self, body, parsed):
             if parsed.path == "/serve":
                 if hosting is None or models is None:
                     self._send(501, {"error": "this daemon serves no models"})
@@ -767,16 +811,6 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
                     return
                 self._send(201, served.public())
                 return
-            m = re.match(r"^/jobs/([^/]+)/stop$", parsed.path)
-            if m:
-                try:
-                    job = runner.stop(m.group(1))
-                except DaemonError as e:
-                    self._send(404, {"error": str(e)})
-                    return
-                self._send(200, job.public())
-                return
-            self._send(404, {"error": "no such route"})
 
         def do_DELETE(self) -> None:
             if self._ui():

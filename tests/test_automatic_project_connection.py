@@ -93,7 +93,7 @@ def test_enrollment_binds_returned_agent_identity(found, tmp_path, monkeypatch):
     monkeypatch.setattr(automatic, "RemoteWorkspace", Remote)
     monkeypatch.setattr(automatic, "bind", lambda remote, root, agent, cluster: {
         "host": remote.host, "agent": agent, "cluster": cluster})
-    result = automatic.connect(tmp_path, "worker", model="test-model", harness="codex")
+    result = automatic.connect(tmp_path, "worker", claim=("test-model", "codex"))
     assert result["agent"] == "worker-1"
     assert events == [("worker", {"model": "test-model", "harness": "codex",
                                   "authority_machine": "node-a"})]
@@ -142,11 +142,11 @@ def startup_remote(found, tmp_path, monkeypatch):
 
 
 def test_native_person_start_creates_durable_parent_and_revocable_child(startup_remote, tmp_path):
-    seat = automatic.startup(tmp_path, "worker")
+    seat = automatic.startup(tmp_path, "worker", claim=("test-model", "codex"))
     assert seat.name == "native-parent/worker"
     assert seat.remote is not None
     assert seat.lifecycle_base == seat.remote.base
-    assert startup_remote == [("enroll", "native-worker", "", "", "node-a"),
+    assert startup_remote == [("enroll", "native-worker", "test-model", "codex", "node-a"),
                               ("bind", "native-parent"),
                               ("delegate", "native-parent", "worker")]
 

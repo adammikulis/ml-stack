@@ -25,7 +25,7 @@ def run(args):
         if args.arguments or args.host or args.project_id:
             raise ValueError("connect discovers this project on its Dev cluster")
         return connect(Path(args.project_root), args.name or args.agent,
-                       model=args.model, harness=args.harness, cluster=args.cluster,
+                       claim=(args.model, args.harness), cluster=args.cluster,
                        cluster_key=Path(args.cluster_key) if args.cluster_key else None)
     remote = RemoteWorkspace(args.host, args.project_id,
                              cluster_key=Path(args.cluster_key) if args.cluster_key else None,

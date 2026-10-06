@@ -8,8 +8,8 @@ from pathlib import Path
 from ml_stack.client.health import reported_models
 from ml_stack.workspace import onboard, tokens
 from ml_stack.workspace.identity import AGENT, Denied, Identity
-from ml_stack.workspace.service import Workspace
 from ml_stack.workspace.remote import RemoteWorkspace
+from ml_stack.workspace.service import Workspace
 
 
 @dataclass(slots=True)

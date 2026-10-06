@@ -91,10 +91,9 @@ def discover(root: Path, *, cluster_key=None, cluster="", port=None):
             "cluster_key": str(cluster_key) if cluster_key else ""}
 
 
-def connect(root: Path, name: str, *, model="", harness="", cluster_key=None,
-            cluster="", port=None):
+def connect(root: Path, name: str, *, claim=("", ""), cluster_key=None, cluster=""):
     """Attach this project to its authenticated Dev Board with an agent capability."""
-    choice = discover(root, cluster_key=cluster_key, cluster=cluster, port=port)
+    choice = discover(root, cluster_key=cluster_key, cluster=cluster)
     if choice is None:
         raise Denied("no authenticated Dev device advertises this project's Board")
     prior = selected(root)
@@ -106,12 +105,12 @@ def connect(root: Path, name: str, *, model="", harness="", cluster_key=None,
         return bind(remote, root, prior["agent"], choice["cluster"])
     if not name:
         raise Denied("select your own agent name with --name NAME")
-    joined = remote.enroll(name, model=model, harness=harness,
+    joined = remote.enroll(name, model=claim[0], harness=claim[1],
                            authority_machine=choice["authority_machine"])
     return bind(remote, root, joined["id"], choice["cluster"])
 
 
-def startup(root: Path, name: str, parent: str = "") -> Seat | None:
+def startup(root: Path, name: str, parent: str = "", *, claim=("", "")) -> Seat | None:
     """Acquire a canonical project seat once when a native harness starts."""
     if not worktreerules.checkouts(root):
         return None
@@ -143,7 +142,7 @@ def startup(root: Path, name: str, parent: str = "") -> Seat | None:
                     remote=remote, lifecycle_base=remote.base)
     if agent_started or choice is None:
         raise Denied("this native session has no authenticated project parent")
-    made = remote.enroll(f"native-{name}"[:48], model="", harness="",
+    made = remote.enroll(f"native-{name}"[:48], model=claim[0], harness=claim[1],
                          authority_machine=choice["authority_machine"])
     bind(remote, root, made["id"], choice["cluster"])
     child = remote.delegate(made["id"], name)

@@ -53,13 +53,14 @@ def brief(name: str, alias: str, harness: str, parent: str, orders_from: Sequenc
     return BRIEF.format(name=name, alias=alias, harness=harness, orders=obey)
 
 
-def invite(name: str, project_dir: Path, parent: str, say: Callable[[str], None]) -> Seat:
+def invite(name: str, project_dir: Path, parent: str, say: Callable[[str], None],
+           *, claim: tuple[str, str] = ("", "")) -> Seat:
     """Mint ``name``, place it on its project's board with the quiet subscriptions and return its
     seat; an agent-started launcher gets a weaker private child of ``parent``."""
     if not valid_name(name):
         say(f"error: {name!r} is not a usable agent id (a-z, 0-9, . _ -; up to {LONGEST})")
         raise ValueError("the coding agent needs a usable workspace identity")
-    canonical = automatic_connection.startup(project_dir, name, parent)
+    canonical = automatic_connection.startup(project_dir, name, parent, claim=claim)
     if canonical is not None:
         return canonical
     try:
