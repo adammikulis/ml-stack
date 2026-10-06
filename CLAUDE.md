@@ -367,10 +367,8 @@ requested. Create worktrees beside the primary checkout, never inside it (includ
 preservation checks before removal; an unregistered directory is not proof that it is disposable.
 
 - The primary checkout may receive an independently reviewed, gated development branch through
-  `git merge --ff-only <branch>`. The authenticated task lead may also preserve named primary files through maintained
-  `task-integrate` staging when their exact bytes are already committed and independently
-  reviewed in its isolated candidate. File claims and scoped gates apply before staging;
-  bare primary `git add` remains refused. Primary edits and commits stay in isolated worktrees. Resolve rebases/conflicts in an isolated
+  `git merge --ff-only <branch>`. This is explicitly permitted integration, not permission to
+  edit files, stage changes or create commits there. Resolve rebases/conflicts in an isolated
   integration worktree first. Never merge into `main` without the owner's explicit instruction.
 - Live runtimes use an immutable built wheel or pinned runtime tree with matching distribution
   metadata. Never install an editable checkout or point a running worker at a changing checkout.

@@ -20,8 +20,7 @@ Before any other work:
 Rules:
 
 - Edit, add and commit only in your own worktree. Never edit, `git add`, `git commit` or
-  `git checkout` in the primary checkout. The authenticated task lead may preserve reviewed
-  candidate bytes through maintained `task-integrate` staging under CLAUDE.md.
+  `git checkout` in the primary checkout.
 - Never `pip install -e`; run your tree's code with `PYTHONPATH=src`.
 - Add files by name; never `git add -A`, `.` or `-u`.
 - Never push, tag or merge. Commit on your own branch by named files before you report.

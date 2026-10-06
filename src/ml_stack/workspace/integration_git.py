@@ -23,7 +23,8 @@ class GateFailed(Denied):
 def git(root: Path, *arguments: str, binary: bool = False):
     result = subprocess.run(['git', '-C', str(root), *arguments], capture_output=True,
                             text=not binary, check=False, timeout=120,
-                            env={**os.environ, **({'CLAUDECODE': '1'} if arguments[0] == 'push' else {})})
+                            env={**os.environ, **({'CLAUDECODE': '1'} if arguments[0] == 'push' else {}),
+                                 **({'GIT_OPTIONAL_LOCKS': '0'} if arguments[0] in ('status', 'diff') else {})})
     if result.returncode:
         detail = result.stderr.decode(errors='replace') if binary else result.stderr
         raise RuntimeError(f'Git {arguments[0]} failed (exit {result.returncode}): {redact(detail)[-2000:]}')
@@ -118,7 +119,7 @@ def remote_baseline(root: Path, branch: str, baseline: str) -> None:
         raise Denied('development moved remotely; reconcile the latest remote before integration')
 
 
-def remove_merged(primary: Path, path: Path, branch: str, landed: str) -> None:
+def remove_merged(primary: Path, path: Path, branch: str, landed: str, *, lock_reason: str = '') -> None:
     """Remove a clean merged checkout and branch, preserving unique files and commits."""
     entries = git(primary, 'worktree', 'list', '--porcelain').splitlines()
     listed = any(line.startswith('worktree ') and Path(line[9:]).resolve() == path.resolve()
@@ -136,6 +137,8 @@ def remove_merged(primary: Path, path: Path, branch: str, landed: str) -> None:
             raise Denied(f'{path} contains ignored files requiring preservation: {unknown[:5]}')
         locked = path / git(path, 'rev-parse', '--git-path', 'locked')
         if locked.exists():
+            if not lock_reason or locked.read_text().strip() != lock_reason:
+                raise Denied(f'{path} has a worktree lock owned by another operation')
             git(primary, 'worktree', 'unlock', str(path))
         git(primary, 'worktree', 'remove', str(path))
     elif path.exists():

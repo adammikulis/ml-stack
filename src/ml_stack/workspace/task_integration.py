@@ -113,7 +113,8 @@ class DevelopmentIntegration:
         self.preserved = integration_staging.files(self.primary, self.commit)
         who = ws.auth(token)
         parent = ws.registry.info(self.task["worker"])["parent"]
-        if self.preserved and who.role != HUMAN and who.id != parent:
+        if (self.preserved or integration_staging.merge_state(self.primary, self.commit)) \
+                and who.role != HUMAN and who.id != parent:
             raise Denied("only the authenticated task lead may preserve primary files")
         digest = hashlib.sha256(f'{self.task["workspace"]}:{task_id}:{self.task["review"]["id"]}'.encode()).hexdigest()
         self.ident = 'integration:' + digest
@@ -127,7 +128,7 @@ class DevelopmentIntegration:
                        'candidate': str(self.candidate), 'branch': self.branch,
                        'primary': str(self.primary), 'source': str(self.source),
                        'source_branch': self.worktree['branch'], 'publish_requested': publish,
-                       'policy': 'development-integration-v1'}
+                       'preserved': self.preserved, 'policy': 'development-integration-v1'}
 
     def prepare(self) -> None:
         if integration_staging.files(self.primary, self.commit) != self.preserved:
@@ -155,11 +156,11 @@ class DevelopmentIntegration:
             raise Denied('the prepared task source no longer has its recorded worktree owner')
         if (source_claim['owner'] == self.record['owner'] or self.ws.auth(self.token).role == HUMAN) \
                 and not Path(repo.git(self.source, 'rev-parse', '--git-path', 'locked')).exists():
-            repo.git(self.primary, 'worktree', 'lock', '--reason', 'active reviewed task integration', str(self.source))
+            repo.git(self.primary, 'worktree', 'lock', '--reason', self.ident, str(self.source))
         if self.candidate.exists():
             raise Denied('the owned candidate already exists; inspect its recorded outcome before retrying')
         repo.git(self.primary, 'worktree', 'add', '-b', self.branch, str(self.candidate), self.before)
-        repo.git(self.primary, 'worktree', 'lock', '--reason', 'active reviewed task integration', str(self.candidate))
+        repo.git(self.primary, 'worktree', 'lock', '--reason', self.ident, str(self.candidate))
         repo.git(self.candidate, 'merge', '--no-edit', self.commit)
         tip = repo.git(self.candidate, 'rev-parse', 'HEAD')
         repo.reviewed_files(self.candidate, tip, self.task['proposal']['artifacts'])
@@ -180,7 +181,9 @@ class DevelopmentIntegration:
         tip = repo.git(self.candidate, 'rev-parse', 'HEAD')
         for name in self.preserved:
             self.ws.claim(self.token, 'file', str(self.primary / name))
-        integration_staging.stage(self.primary, tip, self.preserved)
+        integration_staging.verify(self.primary, tip, self.preserved)
+        if integration_staging.merge_state(self.primary, tip):
+            repo.git(self.primary, 'merge', '--quit')
         repo.git(self.primary, 'merge', '--ff-only', tip)
         _event(self.ws, self.record, 'integrated', commit=tip, checks=checks)
         if repo.git(self.primary, 'rev-parse', 'HEAD') != tip:
@@ -201,8 +204,11 @@ class DevelopmentIntegration:
             self.record = _event(self.ws, self.record, 'publication_confirmed', commit=tip,
                                  checks=checks, publication_verified=True)
         _event(self.ws, self.record, 'cleanup_required', commit=tip, checks=checks)
-        repo.remove_merged(self.primary, self.source, self.worktree['branch'], tip)
-        repo.remove_merged(self.primary, self.candidate, self.branch, tip)
+        for path, branch in ((self.source, self.worktree['branch']), (self.candidate, self.branch)):
+            claim = self.ws.who_owns('worktree', str(path))
+            if path.exists() and (not claim or claim['owner'] != self.record['owner']):
+                raise Denied('cleanup requires the live worktree claim of this integration owner')
+            repo.remove_merged(self.primary, path, branch, tip, lock_reason=self.record['id'])
         with held(self.ws.base / 'coordination.lock'), GraphStore(self.ws.base / 'coordination.db') as graph, graph.transaction():
             scope = {**self.worktree, 'state': 'cleaned', 'landed_commit': tip}
             save(graph, 'task-worktree', scope)
@@ -215,7 +221,7 @@ class DevelopmentIntegration:
             claim = self.ws.who_owns(kind, key)
             if claim and claim['owner'] == self.record['owner']:
                 self.ws.release(self.token, kind, key)
-        for name in self.preserved:
+        for name in self.record.get('preserved', []):
             claim = self.ws.who_owns('file', str(self.primary / name))
             if claim and claim['owner'] == self.record['owner']:
                 self.ws.release(self.token, 'file', str(self.primary / name))
