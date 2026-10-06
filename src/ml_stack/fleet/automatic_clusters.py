@@ -4,6 +4,7 @@ import hashlib
 import secrets
 import threading
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 
 from ml_stack.fleet import cluster_modes, discovery
@@ -51,6 +52,8 @@ def ensure(path: Path | str | None = None, *, mode: str | None = None,
         return existing[0]
     if existing and existing[0].mode != "dev":
         raise discovery.DiscoveryError("select an explicitly admitted Development cluster before changing modes")
+    if existing and existing[0].selection == "manual":
+        return existing[0]
     try:
         candidates = offers(port)
     except (OSError, discovery.DiscoveryError):
@@ -66,7 +69,7 @@ def ensure(path: Path | str | None = None, *, mode: str | None = None,
         except (OSError, discovery.DiscoveryError):
             continue
         return discovery.adopt(member, path)
-    return current or discovery.mint_cluster("development", path, mode="dev")
+    return current or discovery.mint_cluster("development", path, mode="dev", selection="automatic")
 
 
 def converge(stop: threading.Event, changed: Callable[[], None],
@@ -81,3 +84,13 @@ def converge(stop: threading.Event, changed: Callable[[], None],
             changed()
         except (OSError, discovery.DiscoveryError):
             continue
+
+
+def select_automatic(path: Path | str | None = None, *, port: int | None = None) -> discovery.Membership:
+    """Select automatic Development cluster convergence."""
+    existing = discovery.memberships(path)
+    if existing:
+        if existing[0].mode != "dev":
+            raise discovery.DiscoveryError("automatic selection requires Development mode")
+        discovery.adopt(replace(existing[0], selection="automatic"), path)
+    return ensure(path, mode="dev", port=port)

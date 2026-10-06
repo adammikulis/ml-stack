@@ -48,6 +48,8 @@ def settle(member, cluster_key=None, port=None):
     deadline = time.monotonic() + ADMISSION_SECONDS
     while True:
         member = automatic_clusters.ensure(cluster_key, mode="dev", port=port)
+        if member.selection == "manual":
+            return member
         offered = automatic_clusters.offers(port)
         cluster_id = hashlib.sha256(member.key).hexdigest()
         if all(row["cluster_id"] == cluster_id for host, row in offered):

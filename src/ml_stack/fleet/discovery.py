@@ -80,11 +80,12 @@ def key_path(path: Path | str | None = None) -> Path:
     return home.expand(env) if env else home.state("cluster.key")
 
 
-def mint_cluster(group: str, path: Path | str | None = None, *, join: str = "", mode: str = "dev") -> Membership:
+def mint_cluster(group: str, path: Path | str | None = None, *, join: str = "", mode: str = "dev",
+                 selection: str = "manual") -> Membership:
     """Make a cluster of a fresh random 256-bit key, replacing one of the same name."""
     group = require_name(group)
     key = base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=")
-    return adopt(Membership(group=group, key=key, join=join, mode=mode), path)
+    return adopt(Membership(group=group, key=key, join=join, mode=mode, selection=selection), path)
 
 
 def create_cluster_key(path: Path | str | None = None, *,
@@ -155,10 +156,13 @@ class Membership:
     on a machine that does not know the passphrase."""
 
     mode: str = "dev"
+    selection: str = "automatic"
 
     def __post_init__(self) -> None:
         require_name(self.group)
         validate(self.mode)
+        if self.selection not in {"automatic", "manual"}:
+            raise ValueError("cluster selection must be automatic or manual")
         if not isinstance(self.key, bytes) or len(self.key) != 43 or len(base64.b64decode(
                 self.key + b"=" * (-len(self.key) % 4), altchars=b"-_", validate=True)) != 32:
             raise ValueError("cluster key must contain 256 bits")
@@ -166,7 +170,7 @@ class Membership:
             raise ValueError("cluster join secret must be text")
 
     def public(self) -> dict[str, Any]:
-        return {"group": self.group, "mode": self.mode}
+        return {"group": self.group, "mode": self.mode, "selection": self.selection}
 
 
 def clusters_path(path: Path | str | None = None) -> Path:
@@ -189,7 +193,8 @@ def memberships(path: Path | str | None = None) -> list[Membership]:
     for row in raw if isinstance(raw, list) else []:
         try:
             group, key, join = row["group"], row["key"].encode("ascii"), row.get("join", "")
-            member = Membership(group=group, key=key, join=join, mode=row["mode"])
+            member = Membership(group=group, key=key, join=join, mode=row["mode"],
+                                selection=row.get("selection", "automatic"))
         except (KeyError, TypeError, AttributeError, ValueError, DiscoveryError):
             continue
         if key and group not in seen:
@@ -202,7 +207,8 @@ def _write_memberships(rows: list[Membership],
                        path: Path | str | None = None) -> None:
     """Record the list this machine belongs to."""
     listed = clusters_path(path)
-    write_json(listed, [{"group": m.group, "key": m.key.decode(), "join": m.join, "mode": m.mode} for m in rows])
+    write_json(listed, [{"group": m.group, "key": m.key.decode(), "join": m.join, "mode": m.mode,
+                          "selection": m.selection} for m in rows])
     private_file(listed)
 
 

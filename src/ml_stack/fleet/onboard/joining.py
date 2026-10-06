@@ -13,7 +13,7 @@ import threading
 import time
 from collections import deque
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -402,7 +402,8 @@ def join_by_passphrase(passphrase: str, group: str,
         held = next((m for m in disc.memberships(path) if m.group == group), None)
         if held is not None and options.mode is not None and held.mode != options.mode:
             raise DiscoveryError("the cluster admission mode differs from the requested mode")
-        return held or disc.mint_cluster(group, path, join=secret, mode=options.mode or "prod")
+        return (disc.adopt(replace(held, selection="manual"), path) if held else
+                disc.mint_cluster(group, path, join=secret, mode=options.mode or "prod"))
     return _accept(joiners, group, secret, path, mode=options.mode)
 
 
@@ -426,7 +427,8 @@ def _accept(joiners: list[Joiner], group: str, secret: str,
             held = _shake(one, group, secret, 10.0)
             if mode is not None and held.mode != mode:
                 raise Declined(403, "the cluster admission mode differs from the requested mode")
-            return disc.adopt(Membership(group=held.group, key=held.key, join=secret, mode=held.mode), path)
+            return disc.adopt(Membership(group=held.group, key=held.key, join=secret, mode=held.mode,
+                                         selection="manual"), path)
         except Declined as why:
             refused.append(why)
         except DiscoveryError as why:
