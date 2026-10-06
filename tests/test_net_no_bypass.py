@@ -50,7 +50,6 @@ ALLOWED: dict[str, str] = {
     "serve/reclaim.py": "a model server's slots on loopback",
     "bench/": "model servers on this machine or network",
     "client/": "model servers the person chose; the chat endpoint is configured, not fetched",
-    "fleet/updates.py": "pip install -e after a fast-forward the person asked to follow",
     "decide/logprob.py": "the decide backend: the model server the person configured "
                          "(ML_STACK_DECIDE_URL: this machine only unless the operator names the host)",
     "decide/router.py": "reachability of that same configured decide server",

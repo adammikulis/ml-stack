@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import csv
+import email
 import hashlib
 import io
 import json
@@ -12,11 +13,14 @@ import shutil
 import subprocess
 import sys
 import zipfile
+from importlib.metadata import distribution
 from pathlib import Path
 
 import pytest
+from packaging.requirements import Requirement
 
 from ml_stack.fleet import runtime_wheel
+from ml_stack.net import packages
 
 COMMIT = "1234567890abcdef1234567890abcdef12345678"
 
@@ -91,6 +95,33 @@ def test_dependency_failure_does_not_replace_the_installed_distribution(tmp_path
     assert not any("--force-reinstall" in argv for argv in calls)
 
 
+def _dependency_wheels(wheel, target):
+    with zipfile.ZipFile(wheel) as archive:
+        meta = next(name for name in archive.namelist() if name.endswith(".dist-info/METADATA"))
+        requirements = email.message_from_bytes(archive.read(meta)).get_all("Requires-Dist", [])
+    pending = [(value, "train") for value in requirements]
+    seen = set()
+    target.mkdir()
+    while pending:
+        value, extra = pending.pop()
+        requirement = Requirement(value)
+        if requirement.marker and not requirement.marker.evaluate({"extra": extra}):
+            continue
+        if requirement.name in seen:
+            continue
+        seen.add(requirement.name)
+        installed = distribution(requirement.name)
+        pending.extend((value, "") for value in installed.requires or [])
+        manifest = email.message_from_string(installed.read_text("WHEEL"))
+        tag = manifest.get_all("Tag")[0]
+        path = target / f"{installed.metadata['Name'].replace('-', '_')}-{installed.version}-{tag}.whl"
+        with zipfile.ZipFile(path, "w") as archive:
+            for entry in installed.files:
+                if ".." not in entry.parts and installed.locate_file(entry).is_file():
+                    archive.write(installed.locate_file(entry), entry.as_posix())
+    return target
+
+
 @pytest.mark.slow
 def test_built_wheel_imports_from_an_immutable_install(tmp_path):
     root = Path(__file__).resolve().parents[1]
@@ -113,7 +144,8 @@ def test_built_wheel_imports_from_an_immutable_install(tmp_path):
     next_cache = prefix / "ml-stack-wheels" / ("f" * 40) / newer.name
     next_cache.parent.mkdir(parents=True)
     shutil.copy2(newer, next_cache)
-    env = {**os.environ, "PYTHONPATH": str(target)}
+    env = {**os.environ, "PYTHONPATH": str(target), "PIP_NO_INDEX": "1",
+           "PIP_FIND_LINKS": str(_dependency_wheels(wheel, tmp_path / "dependency-wheels"))}
     script = ("import json, os, subprocess, sys; from pathlib import Path; from importlib.metadata import version; "
               "from ml_stack.fleet import runtime_wheel as r; from ml_stack.fleet.environment import Environment; "
               f"sys.prefix = {str(prefix)!r}; managed = Environment(Path({str(tmp_path)!r}) / 'managed'); "
@@ -131,7 +163,8 @@ def test_built_wheel_imports_from_an_immutable_install(tmp_path):
               "print(json.dumps([r.__file__, r.source_checkout().as_posix(), "
               "before, version('ml-stack'), old_wheels, loaded.stdout.splitlines(), reloaded.stdout.strip()]))")
     done = subprocess.run([sys.executable, "-c", script], cwd=tmp_path, env=env,
-                          check=True, capture_output=True, text=True)
+                          check=False, capture_output=True, text=True)
+    assert done.returncode == 0, done.stderr
     installed, source, commit, version, wheels, managed_runtime, updated_commit = json.loads(done.stdout)
     assert Path(installed).is_relative_to(target)
     assert source == str(root) and commit == COMMIT
@@ -170,11 +203,11 @@ def test_managed_install_uses_direct_cached_wheel_and_refreshes_same_version(tmp
     def run(argv, **kwargs):
         calls.append(argv)
         return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
-    monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr(packages, "run", lambda python, args, **kwargs: run([str(python), "-m", "pip", *args], **kwargs))
     assert environment.pip(["install", "--upgrade", "ml-stack[train]"]).returncode == 0
     assert calls[0][-1] == f"ml-stack[train] @ {wheel.as_uri()}"
     assert calls[0][4:6] == ["--find-links", str(wheel.parent)]
-    assert calls[1][-4:] == ["install", "--force-reinstall", "--no-deps", str(wheel)]
+    assert calls[1][-5:] == ["install", "--force-reinstall", "--no-deps", "--no-index", str(wheel)]
 
 
 def test_third_party_installs_keep_matching_bundled_wheels(tmp_path, monkeypatch):
@@ -188,6 +221,6 @@ def test_third_party_installs_keep_matching_bundled_wheels(tmp_path, monkeypatch
     def run(argv, **kwargs):
         calls.append(argv)
         return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
-    monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr(packages, "run", lambda python, args, **kwargs: run([str(python), "-m", "pip", *args], **kwargs))
     assert environment.pip(["install", "--no-index", "torch"]).returncode == 0
     assert calls == [[str(environment.python), "-m", "pip", "install", "--find-links", str(bundled), "--no-index", "torch"]]

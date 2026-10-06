@@ -1,16 +1,18 @@
-"""These parts of ml_stack must import with no third-party libraries installed."""
+"""Package imports and the base installation dependency contract."""
 
 from __future__ import annotations
 
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
+from packaging.requirements import Requirement
 
 REPO = Path(__file__).resolve().parent.parent
 
-STDLIB_ONLY = ["contracts", "media", "client", "fleet"]
+STDLIB_ONLY = ["contracts", "fleet"]
 
 
 @pytest.mark.parametrize("name", STDLIB_ONLY)
@@ -31,14 +33,32 @@ def test_it_imports_with_nothing_installed(name):
         f"{done.stderr}")
 
 
-def test_installing_ml_stack_brings_in_nothing():
-    """Installing `ml-stack` has to be enough on a machine that only joins the
-    cluster and passes work about. `packaging` is pure Python and `psutil` is what process
-    control stands on; everything heavier is an extra."""
-    import tomllib
+@pytest.mark.parametrize("name", ["media", "client"])
+def test_device_clients_import_with_only_base_dependencies(name):
+    program = """
+import sys, tomllib
+from importlib.metadata import packages_distributions
+from pathlib import Path
+from packaging.requirements import Requirement
+core = {Requirement(value).name.lower().replace('_', '-') for value in
+        tomllib.loads(Path('pyproject.toml').read_text())['project']['dependencies']}
+allowed = {module for module, distributions in packages_distributions().items()
+           if any(distribution.lower().replace('_', '-') in core for distribution in distributions)}
+""" + f"import ml_stack.{name}\n" + """
+outside = {module.split('.')[0] for module in sys.modules
+           if not module.startswith('_') and module.split('.')[0] not in sys.stdlib_module_names}
+print(sorted(outside - allowed - {'ml_stack'}))
+"""
+    done = subprocess.run([sys.executable, "-c", program], cwd=REPO,
+                          capture_output=True, text=True, check=False)
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.strip() == "[]"
 
+
+def test_base_install_declares_device_security_and_board_dependencies():
     meta = tomllib.load((REPO / "pyproject.toml").open("rb"))["project"]
-    assert [d.split(">")[0] for d in meta["dependencies"]] == ["packaging", "psutil"]
+    dependencies = {Requirement(d).name for d in meta["dependencies"]}
+    assert dependencies == {"cryptography", "ladybug", "packaging", "psutil", "pywin32", "qrcode"}
     assert set(meta["optional-dependencies"]) >= {"train", "all"}
     assert "serve" not in meta["optional-dependencies"]
 

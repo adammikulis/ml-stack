@@ -11,12 +11,39 @@ from urllib.parse import urlsplit
 
 from ml_stack import sealing
 from ml_stack.files import read_json
-from ml_stack.http import Sealed, ServerError, open_stream
+from ml_stack.http import Sealed, ServerError, ServerUnreachable, open_stream
 
-from .discovery import memberships
+from .discovery import derive_token, memberships
 from .onboard.lan import require_local_url
 from .project_source import MAX_ARCHIVE, MAX_FILES, MAX_SOURCE, ProjectError, checkout, project_id
 from .remote import Peer
+
+
+def register_local(root, key, project_id, port):
+    """Register a Git checkout with this device's sealed Fleet endpoint."""
+    endpoint = f"http://127.0.0.1:{port}/workspace/v1/local-project"
+    def destination(url):
+        if url != endpoint:
+            raise ProjectError("local project registration cannot redirect")
+        return url
+    try:
+        with open_stream(endpoint, method="POST", token=derive_token(key),
+                         data=json.dumps({"root": str(root.resolve()), "project_id": project_id}).encode(),
+                         headers={"Content-Type": "application/json", sealing.HEADER: "2"},
+                         timeout=2, guard=destination) as response:
+            if not response.headers.get(sealing.HEADER):
+                raise ProjectError("local project registration was not authenticated and sealed")
+            limit = 65536 + sealing.NONCE_BYTES + 16
+            raw = response.read(limit + 1)
+            if len(raw) > limit:
+                raise ProjectError("local project registration exceeds its response limit")
+            result = json.loads(response.sealed.open(response.status, response.headers, raw))
+            if not isinstance(result, dict) or result.get("id") != project_id:
+                raise ProjectError("local project registration returned another project")
+    except ServerUnreachable:
+        return
+    except ServerError as error:
+        raise ProjectError("local Fleet project registration failed") from error
 
 
 def read(peer: Peer, path: str, limit: int, *, deadline: float | None = None) -> bytes:

@@ -25,6 +25,7 @@ from ml_stack.files import promote
 from ml_stack.http import ServerError
 from ml_stack.httpguard import Refused
 from ml_stack.lock import only_one
+from ml_stack.net import packages
 
 from .runtime_wheel import cache_wheel, current_wheel, wheel_commit
 
@@ -304,11 +305,10 @@ class Environment:
                 extras = f"[{','.join(sorted(requirement.extras))}]" if requirement.extras else ""
                 rewritten[index] = f"ml-stack{extras} @ {wheel.as_uri()}"
         environment = self.build_environment() if installing else dict(os.environ)
-        output = subprocess.run([str(self.python), "-m", "pip", *rewritten],
-                                capture_output=True, text=True, timeout=timeout, env=environment)
+        output = packages.run(self.python, rewritten, timeout=timeout, env=environment)
         if output.returncode == 0 and wheel is not None:
-            refreshed = subprocess.run([str(self.python), "-m", "pip", "install", "--force-reinstall", "--no-deps", str(wheel)],
-                                       capture_output=True, text=True, timeout=timeout, env=environment)
+            refreshed = packages.run(self.python, ["install", "--force-reinstall", "--no-deps", "--no-index", str(wheel)],
+                                     timeout=timeout, env=environment)
             if refreshed.returncode:
                 return refreshed
             commit = wheel_commit(wheel)
