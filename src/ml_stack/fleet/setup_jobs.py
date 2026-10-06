@@ -7,7 +7,7 @@ import uuid
 from pathlib import Path
 
 from ml_stack.graph.store import GraphStore
-from ml_stack.lock import only_one
+from ml_stack.lock import Busy, only_one
 from ml_stack.serve.process import pid_exists, started_at
 
 ACTIVE = {"queued", "installing"}
@@ -46,6 +46,13 @@ class Jobs:
         return any(row["state"] in ACTIVE for row in self.all())
 
     def start(self, kind, request, operation, *, provenance=None):
+        try:
+            with only_one(self.root / "runtime-install.lock", wait=False):
+                return self._enqueue(kind, request, operation, provenance=provenance)
+        except Busy:
+            raise ValueError("A runtime update is in progress; retry the installation shortly.") from None
+
+    def _enqueue(self, kind, request, operation, *, provenance=None):
         with self._mutex, only_one(self.root / "setup-jobs.lock"), self._store() as graph:
             rows = [node["attrs"] for node in graph.nodes("setup-job")]
             existing = next((row for row in rows if row["kind"] == kind and row["request"] == request and row["state"] in ACTIVE), None)
