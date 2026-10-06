@@ -75,7 +75,6 @@ def converge(stop: threading.Event, changed: Callable[[], None],
             continue
         try:
             member = ensure(path, mode="dev")
-            if member != before[0]:
-                changed()
+            changed()
         except (OSError, discovery.DiscoveryError):
             continue

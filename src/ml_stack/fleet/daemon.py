@@ -299,48 +299,51 @@ def serve_forever(root: Path | str | None = None,
         b.device = {**report(), "availability": available,
                     "serving": serving.public(), **models.beacon()}
 
+    announcement_lock = threading.RLock()
+
     def start_announcing() -> None:
         """Advertise on every cluster this machine is in, and stop on any it left."""
         nonlocal advertiser, key
-        if not announce:
-            return
-        joined = {m.group: m for m in memberships(cluster_key_path)}
+        with announcement_lock:
+            if not announce:
+                return
+            joined = {m.group: m for m in memberships(cluster_key_path)}
 
-        for group in [g for g in advertisers if g not in joined]:
-            with contextlib.suppress(Exception):
-                advertisers.pop(group).stop()
+            for group in [g for g in advertisers if g not in joined]:
+                with contextlib.suppress(Exception):
+                    advertisers.pop(group).stop()
 
-        for group, member in joined.items():
-            if group in advertisers and advertisers[group].key != member.key:
-                advertisers.pop(group).stop()
-            if group in advertisers:
-                advertisers[group].mode = member.mode
-                advertisers[group].joinable = member.mode == "dev" or bool(member.join)
-                continue
-            try:
-                offered = served_cert()
-            except tls.TlsUnavailable as exc:
-                say(f"  discovery OFF for {group}: {exc}")
-                continue
-            beacon = Beacon(name=live_name[0], port=port, device=report(), cert=offered,
-                            slots=runner.slots, free=runner.slots,
-                            machine=bench_host[0].machine)
-            try:
-                # Not group=: that is the multicast address every cluster shares.
-                # Clusters are told apart by the key their beacons are signed with.
-                tell = Advertiser(beacon, member.key, cluster=group, refresh=refresh)
-                tell.mode = member.mode
-                tell.joinable = member.mode == "dev" or bool(member.join)
-                advertisers[group] = tell.start()
-            except DiscoveryError as exc:
-                say(f"  discovery OFF for {group}: {exc}")
+            for group, member in joined.items():
+                if group in advertisers and advertisers[group].key != member.key:
+                    advertisers.pop(group).stop()
+                if group in advertisers:
+                    advertisers[group].mode = member.mode
+                    advertisers[group].joinable = member.mode == "dev" or bool(member.join)
+                    continue
+                try:
+                    offered = served_cert()
+                except tls.TlsUnavailable as exc:
+                    say(f"  discovery OFF for {group}: {exc}")
+                    continue
+                beacon = Beacon(name=live_name[0], port=port, device=report(), cert=offered,
+                                slots=runner.slots, free=runner.slots,
+                                machine=bench_host[0].machine)
+                try:
+                    # Not group=: that is the multicast address every cluster shares.
+                    # Clusters are told apart by the key their beacons are signed with.
+                    tell = Advertiser(beacon, member.key, cluster=group, refresh=refresh)
+                    tell.mode = member.mode
+                    tell.joinable = member.mode == "dev" or bool(member.join)
+                    advertisers[group] = tell.start()
+                except DiscoveryError as exc:
+                    say(f"  discovery OFF for {group}: {exc}")
 
-        first = next(iter(joined.values()), None)
-        if first is not None:
-            key = first.key
-            fetcher.key = first.key
-            live_token[0] = load_or_create_token(root, first.key)
-            advertiser = advertisers.get(first.group)
+            first = next(iter(joined.values()), None)
+            if first is not None:
+                key = first.key
+                fetcher.key = first.key
+                live_token[0] = load_or_create_token(root, first.key)
+                advertiser = advertisers.get(first.group)
 
     def rename(called: str) -> str:
         """Give this machine a new name now, on the page and on the network."""
