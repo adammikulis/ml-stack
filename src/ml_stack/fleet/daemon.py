@@ -55,6 +55,7 @@ from .models import Downloads, Models
 from .onboard.joining import PLAIN, Joining
 from .pausing import ADOPT_S, adopt_pause, peer_pause
 from .projects import ProjectRegistry, lan_host
+from .runtime_paths import configure as configure_runtime_paths
 from .serving import Hosting, Serving
 from .settings import Settings
 from .ui import UI
@@ -113,6 +114,7 @@ def serve_forever(root: Path | str | None = None,
     you trust to run unreviewed code -- and it is remembered, so it is asked for once.
     ``off`` turns it back to releases; None leaves whatever the settings hold."""
     root = home.expand(root) if root else default_root()
+    configure_runtime_paths(root)
     root.mkdir(parents=True, exist_ok=True)
     live_token: list[str] = [""]
     files_root = root / "files"
