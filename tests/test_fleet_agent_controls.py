@@ -40,7 +40,8 @@ def served(tmp_path, monkeypatch):
         children.append(job.child)
         return job
     monkeypatch.setattr(localstart.jobs, 'detach', spawn)
-    parent = kit.agent('lead')
+    device_agent.enroll(kit.ws, kit.owner)
+    parent = localstart.launch_parent(kit.ws, str(tmp_path))
     child = kit.ws.delegate(parent, 'worker')
     localagent.save(kit.ws, localagent.Agent('local-worker', PICK.ref, identity=child['id'],
                                            model_name=PICK.name, project=str(tmp_path),
@@ -112,7 +113,7 @@ def test_person_board_controls_reuse_saved_settings_and_enroll_through_maintaine
 def test_auto_model_hints_are_resolved_for_each_work_profile(served, monkeypatch):
     server, _, _, _=served
     monkeypatch.setattr(localmodel,'choose',lambda *args,**kw:replace(PICK,
-        name='Qwen3.8-27B' if kw.get('coding') else 'Qwen3.6-35B-A3B'))
+        name='Qwen3.8-27B' if kw['selection'].coding else 'Qwen3.6-35B-A3B'))
     code,result,_=server.call('/ui/agents/model')
     assert code == 200
     assert result['profiles']['coding']['name'] == 'Qwen3.8-27B'
