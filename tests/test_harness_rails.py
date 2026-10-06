@@ -350,7 +350,7 @@ class TestSeat:
         ws = Workspace()
         assert seat.persistent and not seat.minted and ws.registry.role_of("local-test-codex") == "agent"
         token_file = tokens.directory(ws.base) / "local-test-codex"
-        assert token_file.stat().st_mode & 0o777 == 0o600
+        assert tokens.problem(token_file) == ""
         secret = token_file.read_text().strip()
         assert secret not in "".join(said) and seat.flags() == ["--agent", "local-test-codex"]
         assert seat.revoke() is False and token_file.exists()
@@ -426,6 +426,7 @@ class TestSeat:
         monkeypatch.setattr(harnessid.project_connection, "selected", lambda *a: selected)
         monkeypatch.setattr(harnessid.project_connection, "RemoteWorkspace", lambda *a, **k: remote)
         monkeypatch.setattr(harnessid.coordinator_client, "client", lambda *a: remote)
+        monkeypatch.setattr(harnessid, "authoritative", lambda *a: {"key": "a" * 32, "name": "project"})
         monkeypatch.setattr(harnessid.limits, "root", lambda: tmp_path)
         monkeypatch.setattr(harnessid, "Workspace", lambda *a: pytest.fail("local fallback"))
         seat = harnessid.invite("worker", tmp_path, "", lambda _: None)

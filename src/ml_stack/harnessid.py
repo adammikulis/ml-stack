@@ -12,7 +12,7 @@ from pathlib import Path
 from ml_stack.workspace import Denied, Workspace, coordinator_client, guide, limits, project_connection, tokens
 from ml_stack.workspace.harness_seat import Seat
 from ml_stack.workspace.identity import AGENT_MARKERS, valid_name
-from ml_stack.workspace.project import describe
+from ml_stack.workspace.project import authoritative, describe
 
 __all__ = ["Seat", "agent_name", "announce", "brief", "invite"]
 
@@ -64,7 +64,7 @@ def invite(name: str, project_dir: Path, parent: str, say: Callable[[str], None]
                             "claim_model", remote.token(agent=actual), model, harness))
         coordinator = coordinator_client.client(limits.root())
         if coordinator is not None:
-            found = describe(str(project_dir))
+            found = authoritative(str(project_dir))
             actual = coordinator.ensure(limits.root(), name, project=found)
             return Seat(actual, base=limits.root(), persistent=True,
                         record_claim=lambda model, harness: coordinator.ensure(

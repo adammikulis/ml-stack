@@ -85,7 +85,7 @@ def _token(args: argparse.Namespace) -> str:
     agent = args.agent or os.environ.get(tokens.AGENT_ENV, "")
     remote = coordinator_client.client(base)
     if agent and not args.token_file and remote:
-        args.agent = remote.ensure(base, agent, project=project.describe())
+        args.agent = remote.ensure(base, agent, project=project.authoritative())
     elif agent and not args.token_file and not project_connection.selected():
         ws = Workspace(base)
         try:
@@ -322,6 +322,7 @@ def _connect(args: argparse.Namespace, ws: Workspace) -> int:
         found = project.describe(args.project)
         remote = coordinator_client.client(ws.base)
         if remote:
+            found = project.authoritative(args.project)
             name = remote.ensure(ws.base, agent, project=found)
             result = {"id": name, "project": found.get("name", ""), "state": "connected"}
         else:

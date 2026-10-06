@@ -206,8 +206,14 @@ class SessionFiles:
         self.path.chmod(stat.S_IRUSR | stat.S_IXUSR)
 
     def release(self) -> None:
+        target = self.path.resolve()
+        if target.parent != home.state("harness").resolve() or self.path.is_symlink():
+            raise ValueError("session cleanup needs its owned harness directory")
         self.path.chmod(stat.S_IRWXU)
-        shutil.rmtree(self.path, ignore_errors=True)
+        for child in self.path.iterdir():
+            if child.is_file() and not child.is_symlink():
+                child.chmod(stat.S_IRUSR | stat.S_IWUSR)
+        shutil.rmtree(target)
 
 
 def session_files(cwd: Path) -> SessionFiles:
@@ -260,8 +266,7 @@ class Session:
 @contextlib.contextmanager
 def opened(args: argparse.Namespace, harness: str, served: tuple[str, str, int],
            say: Callable[[str], None]) -> Iterator[Session]:
-    """The session for one run of ``harness``: files outside the working tree, a workspace seat
-    announced as joined, the hook commands. The seat is revoked and the files removed on exit."""
+    """Open a harness session and remove its private files and delegated seat on exit."""
     base_url, alias, _window = served
     cwd = Path(args.project or Path.cwd()).resolve()
     files = session_files(cwd)

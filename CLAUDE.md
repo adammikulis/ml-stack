@@ -60,11 +60,16 @@ not vetoes. A red you can explain is a change; a red you cannot is a bug.
 
 ## Scoped merge gates and background verification
 
-Every development merge requires independent review, the affected tests selected by
-`scripts/test quick` or explicit reviewed selectors, and the structural checks:
-`scripts/budgets`, `scripts/redteam_coverage.py --check`, clean generated references,
-layer and wiring checks, serving-bypass checks, and the human-only floor. Include the relevant
-browser, subprocess and packaging tests when those surfaces change. Record the exact tree,
+Every development integration batch requires independent review of each branch and the affected
+tests selected by `scripts/test quick` or explicit reviewed selectors. Subagents run only the
+checks affected by their changes. The main coordinator assembles the reviewed batch in an
+isolated integration worktree and runs the structural checks against its combined tree:
+`scripts/budgets`, `scripts/redteam_coverage.py --check`, clean generated references, layer and
+wiring checks, serving-bypass checks, and the human-only floor. These gates precede the primary
+checkout's fast-forward integration. Include the relevant browser, subprocess and packaging
+tests when those surfaces change. Repeat affected checks when a subsequent change or remote
+reconciliation changes their surface; run full structural checks and full suites through main
+coordination per batch or schedule, not at every intermediate commit. Record the exact tree,
 commands and results. Documentation-only changes need consistency review and clean diffs, not
 unrelated test runs. Do not raise budgets or weaken guards to clear a gate.
 
@@ -328,13 +333,20 @@ git worktree add -b <branch> ../ml-stack-<branch> "$(git -C ../ml-stack branch -
 
 `main` is the release branch: a commit that arrives there is a commit queued to publish. Work
 lands on the development branch, and promoting that to `main` is the owner's. Whoever made a
-branch finishes it. Fetch before integrating, merge into the development branch, push that
-development branch after its scoped gates pass, then take the worktree and the branch away.
+branch finishes it. Fetch before preparing each integration batch and again immediately before
+pushing. Reconcile upstream advancement in an isolated integration worktree, including conflicts,
+review the resulting changes and run the incremental affected gates before landing its exact
+tree. Push the development branch normally after its batch gates pass. If another device advances
+the remote before the push succeeds, fetch, reconcile and gate the new changes, then retry a normal
+push. Keep development synchronized throughout landing batches and cleanup; report its final
+upstream state. Then take the worktree and the branch away.
 Run removal from outside the worktree being removed:
 
 ```
 git fetch origin
 git merge --ff-only <branch>
+git fetch origin
+git push origin <development-branch>
 git worktree remove ../ml-stack-<branch>
 git branch -d <branch>
 git worktree prune

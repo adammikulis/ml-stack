@@ -17,7 +17,7 @@ from ml_stack.http import ServerError, open_stream
 from ml_stack.graph.store import GraphStore
 from ml_stack.workspace import coordinator_client, tokens
 from ml_stack.workspace.chain import held
-from ml_stack.workspace.identity import Denied
+from ml_stack.workspace.identity import Denied, valid_id
 
 
 class RemoteWorkspace:
@@ -100,24 +100,50 @@ class RemoteWorkspace:
 
     def token(self, *, agent: str = "", token_file: str = "") -> str:
         if token_file:
-            path = Path(token_file).expanduser().resolve()
-            if not path.is_relative_to(tokens.directory(self.base).resolve()) or path.name == tokens.OWNER_FILE:
+            path = Path(token_file).expanduser()
+            self._safe_storage(path)
+            if not path.resolve().is_relative_to(tokens.directory(self.base).resolve()) or path.name == tokens.OWNER_FILE:
                 raise Denied("remote operations use only private project agent capability files")
             return tokens.read_file(path)
         name = agent or os.environ.get(tokens.AGENT_ENV, "")
         if not name:
             raise Denied("select the local agent identity with --agent NAME")
+        if not valid_id(name):
+            raise Denied("select a valid local agent identity")
+        if not self.base.exists() and not self.base.is_symlink():
+            self.base.mkdir(parents=True, mode=0o700)
+            tokens.prepare(self.base)
+        self._safe_storage(self.base)
+        lock = self.base / "remote-sessions.lock"
+        self._safe_storage(lock)
+        with held(lock):
+            return self._session_token(name)
+
+    def _safe_storage(self, path: Path) -> None:
+        for candidate in (self.base, tokens.directory(self.base), path):
+            why = tokens.problem(candidate)
+            if why not in {"", "missing"}:
+                raise Denied(f"project session storage {candidate}: {why}")
+
+    def _session_token(self, name: str) -> str:
         path = self.base / "remote-sessions.db"
         session = {}
+        why = tokens.problem(path)
+        if why not in {"", "missing"} and not why.startswith("mode "):
+            raise Denied(f"project session records {path}: {why}")
         if path.exists():
-            with held(self.base / "remote-sessions.lock"), GraphStore(path) as graph:
+            with GraphStore(path) as graph:
                 session = next((node["attrs"] for node in graph.nodes("remote-session")
                                 if name in (node["attrs"].get("name"), node["attrs"].get("id"))), {})
+        ident = str(session.get("id", name))
+        if not valid_id(ident):
+            raise Denied("project session record holds an invalid agent identity")
         if session:
             self._device_transport()
         try:
-            saved = tokens.load(self.base, str(session.get("id", name)))
+            saved = tokens.load(self.base, ident)
         except Denied:
+            self._safe_storage(tokens.directory(self.base) / ident.replace("/", "~"))
             saved = ""
         if saved:
             try:
@@ -132,7 +158,7 @@ class RemoteWorkspace:
                                          "project": {"key": self.project_id}, "agent_token": saved})
         ident, token = str(result["id"]), str(result["token"])
         tokens.store(self.base, ident, token)
-        with held(self.base / "remote-sessions.lock"), GraphStore(path) as graph:
+        with GraphStore(path) as graph:
             graph.upsert_node({"id": f"session:{name}", "kind": "remote-session", "label": ident,
                                "attrs": {"name": str(session.get("name", name)), "id": ident}})
         return token

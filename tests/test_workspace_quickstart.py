@@ -95,6 +95,19 @@ def test_agent_connect_preserves_revocation_and_project_scope(base, ws, tmp_path
     assert ws.registry.info("worker")["revoked"]
 
 
+def test_local_recovery_cannot_replace_a_device_session(base, ws, tmp_path):
+    found = project.describe(str(tmp_path))
+    guide.agent_connect(ws, "worker", found)
+    agents = ws.registry._load()
+    agents["worker"]["session_device"] = "paired-device-fingerprint"
+    ws.registry._save(agents)
+    before = ws.registry._load()["worker"].copy()
+    (tokens.directory(base) / "worker").unlink()
+    with pytest.raises(Denied, match="enrolled device authority"):
+        guide.agent_connect(ws, "worker", found)
+    assert ws.registry._load()["worker"] == before
+
+
 def test_person_initialization_after_agent_bootstrap(base, ws, tmp_path):
     guide.agent_connect(ws, "worker", project.describe(str(tmp_path)))
     token = ws.registry.init("person", env={})
@@ -108,6 +121,12 @@ def test_cli_first_command_initializes_agent_automatically(base, ws, tmp_path):
     assert result.returncode == 0, result.stderr
     assert ws.registry.info("worker")["role"] == "agent"
     assert not (tokens.directory(base) / tokens.OWNER_FILE).exists()
+
+
+def test_coordinator_project_identity_uses_registered_checkout_id(tmp_path):
+    metadata = {"kind": "project-checkout", "project_id": "a" * 32}
+    (tmp_path / ".ml-stack-project.json").write_text(json.dumps(metadata))
+    assert project.authoritative(str(tmp_path))["key"] == metadata["project_id"]
 
 
 def secrets_of(base: Path) -> list[str]:

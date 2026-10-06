@@ -2,6 +2,7 @@
 
 import socket
 import threading
+from contextlib import contextmanager
 from types import SimpleNamespace
 
 import pytest
@@ -17,7 +18,7 @@ from ml_stack.fleet.jobs import JobRunner
 from ml_stack.fleet.projects import ProjectRegistry
 from ml_stack.fleet.remote import Peer
 from ml_stack.http import Server, ServerError, request_json
-from ml_stack.workspace import cli, project_connection, tokens
+from ml_stack.workspace import cli, project_connection, remote as remote_module, tokens
 from ml_stack.workspace.identity import AGENT, HUMAN, LEAD
 from ml_stack.workspace.remote import RemoteWorkspace
 from ml_stack.workspace.remote_host import WorkspaceHost
@@ -28,7 +29,7 @@ OTHER = "b" * 32
 
 def test_canonical_client_recovers_and_remembers_device_scoped_identity(tmp_path, monkeypatch):
     remote = RemoteWorkspace.__new__(RemoteWorkspace)
-    remote.base, remote.project_id = tmp_path, PROJECT
+    remote.base, remote.project_id = tmp_path / "sessions", PROJECT
     requests = []
     transports = []
     monkeypatch.setattr(remote, "_device_transport", lambda: transports.append("device"))
@@ -44,7 +45,7 @@ def test_canonical_client_recovers_and_remembers_device_scoped_identity(tmp_path
     assert requests[0][1]["agent_token"] == ""
     assert remote.token(agent="worker-peer") == token
     assert len(requests) == 1 and len(transports) == 2
-    (tokens.directory(tmp_path) / "worker-peer").unlink()
+    (tokens.directory(remote.base) / "worker-peer").unlink()
     assert remote.token(agent="worker") == token
     assert requests[-1][1]["name"] == "worker"
 
@@ -52,8 +53,8 @@ def test_canonical_client_recovers_and_remembers_device_scoped_identity(tmp_path
 @pytest.mark.parametrize("status, recovered", [(403, True), (503, False)])
 def test_canonical_client_recovers_expiry_and_preserves_outage_failure(tmp_path, monkeypatch, status, recovered):
     remote = RemoteWorkspace.__new__(RemoteWorkspace)
-    remote.base, remote.project_id = tmp_path, PROJECT
-    tokens.store(tmp_path, "worker", "mlws1.worker.saved")
+    remote.base, remote.project_id = tmp_path / "sessions", PROJECT
+    tokens.store(remote.base, "worker", "mlws1.worker.saved")
     requests = []
     monkeypatch.setattr(remote, "_device_transport", lambda: None)
     def call(operation, token):
@@ -70,6 +71,71 @@ def test_canonical_client_recovers_expiry_and_preserves_outage_failure(tmp_path,
         with pytest.raises(Denied, match="unavailable"):
             remote.token(agent="worker")
         assert requests == []
+
+
+@pytest.mark.parametrize("unsafe", ["is a symlink or Windows reparse point", "belongs to another user",
+                                     "mode 644 lets others read it"])
+def test_canonical_recovery_refuses_unsafe_credential_storage(tmp_path, monkeypatch, unsafe):
+    remote = RemoteWorkspace.__new__(RemoteWorkspace)
+    remote.base, remote.project_id = tmp_path / "sessions", PROJECT
+    credential = tokens.store(remote.base, "worker", "mlws1.worker.saved")
+    original = tokens.problem
+    monkeypatch.setattr(tokens, "problem", lambda path: unsafe if path == credential else original(path))
+    monkeypatch.setattr(remote, "_device_transport", lambda: None)
+    monkeypatch.setattr(remote, "_request", lambda *a: pytest.fail("unsafe storage recovery"))
+    from ml_stack.workspace.identity import Denied
+    with pytest.raises(Denied, match="project session storage"):
+        remote.token(agent="worker")
+
+
+def test_canonical_recovery_serializes_read_ensure_and_store(tmp_path, monkeypatch):
+    first, second = RemoteWorkspace.__new__(RemoteWorkspace), RemoteWorkspace.__new__(RemoteWorkspace)
+    for remote in (first, second):
+        remote.base, remote.project_id = tmp_path / "sessions", PROJECT
+        monkeypatch.setattr(remote, "_device_transport", lambda: None)
+    first_request, second_lock, release = threading.Event(), threading.Event(), threading.Event()
+    original = remote_module.held
+    @contextmanager
+    def observed_lock(path):
+        if threading.current_thread().name == "second-client":
+            second_lock.set()
+        with original(path):
+            yield
+    monkeypatch.setattr(remote_module, "held", observed_lock)
+    count, results, errors = [], [], []
+    def request(action, payload):
+        count.append(action)
+        secret = f"mlws1.worker.secret{len(count)}"
+        if len(count) == 1:
+            first_request.set()
+            assert release.wait(5)
+        return {"id": "worker", "token": secret}
+    def call(operation, token):
+        from ml_stack.workspace.identity import Denied
+        if token != f"mlws1.worker.secret{len(count)}":
+            raise Denied("stale credential") from ServerError("expired", status=403)
+        return {"id": "worker"}
+    for remote in (first, second):
+        monkeypatch.setattr(remote, "_request", request)
+        monkeypatch.setattr(remote, "call", call)
+    def run(remote):
+        try:
+            results.append(remote.token(agent="worker"))
+        except Exception as error:
+            errors.append(error)
+    workers = [threading.Thread(target=run, args=(first,), name="first-client"),
+               threading.Thread(target=run, args=(second,), name="second-client")]
+    workers[0].start()
+    assert first_request.wait(5)
+    workers[1].start()
+    assert second_lock.wait(5)
+    release.set()
+    for worker in workers:
+        worker.join(5)
+        assert not worker.is_alive()
+    assert not errors and results == ["mlws1.worker.secret1"] * 2
+    assert count == ["ensure"]
+    assert tokens.load(first.base, "worker") == results[0]
 
 
 @pytest.fixture

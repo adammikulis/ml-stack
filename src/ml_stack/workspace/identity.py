@@ -323,6 +323,8 @@ class Registry:
         with held(self.path.with_name("agents.lock")):
             agents = self._load()
             entry = agents.get(name)
+            if entry and entry.get("session_device"):
+                raise Denied("device sessions recover only through their enrolled device authority")
             if not self._live(agents, entry):
                 self.within(str((entry or {}).get("minted_by", "local-account")), *limits)
             if entry:
