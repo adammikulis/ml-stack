@@ -330,3 +330,29 @@ def test_direct_heartbeat_forwards_bounded_ttl(direct_cli):
     args.action, args.arguments, args.ttl = 'heartbeat', [], 19
     assert remote_cli.run(args) == {'renewed': 0, 'capped': []}
     assert ('native.heartbeat', {'ttl_s': 19}) in calls
+
+
+@pytest.mark.redteam
+@pytest.mark.parametrize('action', ['send', 'announce'])
+def test_direct_completion_requires_explicit_agent(direct_cli, monkeypatch, action):
+    args, calls = direct_cli
+    args.action, args.agent, args.token_file = action, '', 'fixture-agent-token'
+    args.arguments = ['receiver', 'done', 'Complete'] if action == 'send' else ['done', 'Complete']
+    monkeypatch.setattr(harness_remote.project_connection, 'selected', lambda: {'agent': 'worker'})
+    with pytest.raises(Denied, match='explicit agent'):
+        remote_cli.run(args)
+    assert calls == []
+
+
+@pytest.mark.redteam
+@pytest.mark.parametrize('action', ['send', 'announce'])
+def test_direct_completion_blocks_retained_checkout_before_publication(setup, direct_cli, action):
+    args, calls = direct_cli
+    args.action = action
+    args.arguments = ['receiver', 'done', 'Complete'] if action == 'send' else ['done', 'Complete']
+    remote = remote_cli.RemoteWorkspace(args.host, args.project_id)
+    worktree_lifecycle.remember(remote.base, 'worker', '', str(setup.checkout))
+    with pytest.raises(Denied, match='checkout'):
+        remote_cli.run(args)
+    assert calls == [('whoami', {})]
+    assert worktree_lifecycle.pending(remote.base, 'worker')[0]['path'] == str(setup.checkout)
