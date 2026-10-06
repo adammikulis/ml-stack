@@ -284,3 +284,43 @@ def test_legacy_reply_rewiring_is_refused_without_changing_row_digest(replicas):
     with pytest.raises(ValueError, match="legacy reply"):
         right.ws.board.combine_graph(right.owner, payload)
     assert right.ws.bus.log.rows() == []
+
+
+@pytest.mark.redteam
+@pytest.mark.parametrize("field", ["flags", "label", "model", "model_state"])
+def test_exchange_refuses_invalid_render_fields(replicas, field):
+    left, right = replicas
+    left.ws.send(left.owner, "reader", "status", "kept")
+    payload = left.ws.board.export_graph(left.owner)
+    row = payload["events"][0]["row"]
+    if field == "flags":
+        row.pop(field)
+    else:
+        row[field] = {}
+    from ml_stack.workspace.chain import _digest
+
+    row["hash"] = _digest(row["prev"], row)
+    with pytest.raises(ValueError):
+        right.ws.board.combine_graph(right.owner, payload)
+    assert right.ws.bus.log.rows() == []
+
+
+@pytest.mark.redteam
+def test_valid_rehashed_origin_fork_rolls_back_every_imported_node(replicas):
+    left, right = replicas
+    left.ws.send(left.owner, "reader", "status", "one")
+    left.ws.send(left.owner, "reader", "status", "two")
+    payload = left.ws.board.export_graph(left.owner)
+    right.ws.board.combine_graph(right.owner, payload)
+    fork = deepcopy(payload)
+    event = fork["events"][-1]
+    event["id"] = fork["workspace"] + ":event:" + "f" * 32
+    event["row"].update(event_id=event["id"], body="fork")
+    from ml_stack.workspace.chain import _digest
+
+    event["row"]["hash"] = _digest(event["row"]["prev"], event["row"])
+    with pytest.raises(ValueError, match="fork"):
+        right.ws.board.combine_graph(right.owner, fork)
+    assert [row["body"] for row in right.ws.bus.log.rows()] == ["one", "two"]
+    with right.ws.bus.log.graph.opened() as graph:
+        assert not graph.has(event["id"])

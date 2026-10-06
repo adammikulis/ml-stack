@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -20,6 +21,10 @@ MAX_EVENTS = 10000
 MAX_BYTES = 16 * 1024 * 1024
 
 
+def memory() -> int:
+    return store_memory() if os.environ.get("MLSTACK_STORE_MEMORY") else MEMORY
+
+
 def identifier(workspace, kind, value):
     return f"{workspace}:{kind}:" + hashlib.sha256(str(value).encode()).hexdigest()
 
@@ -34,13 +39,13 @@ class BoardGraph:
     def opened(self):
         with (
             held(self.guard),
-            GraphStore(self.path, buffer_pool_size=store_memory() or MEMORY) as graph,
+            GraphStore(self.path, buffer_pool_size=memory()) as graph,
         ):
             if not graph.get_doc("board-scope"):
                 with (
                     held(self.base / "coordination.lock"),
                     GraphStore(
-                        self.base / "coordination.db", buffer_pool_size=store_memory() or MEMORY
+                        self.base / "coordination.db", buffer_pool_size=memory()
                     ) as coordination,
                 ):
                     nodes = coordination.nodes("workspace")

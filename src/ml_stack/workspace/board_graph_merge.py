@@ -110,11 +110,14 @@ def valid_event(event, workspace):
         or row["expires"] < 0
     ):
         raise ValueError("invalid message expiry")
-    if "flags" in row and (
-        not isinstance(row["flags"], list)
-        or any(not isinstance(flag, str) for flag in row["flags"])
+    if not isinstance(row.get("flags"), list) or any(
+        not isinstance(flag, str) for flag in row["flags"]
     ):
         raise ValueError("invalid message flags")
+    if any(
+        key in row and not isinstance(row[key], str) for key in ("label", "model", "model_state")
+    ):
+        raise ValueError("invalid message display metadata")
     if "file" in row:
         file = row["file"]
         if (

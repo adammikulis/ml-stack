@@ -57,7 +57,7 @@ class GraphLog:
                     verdict.reason,
                 )
         except ChainBroken as error:
-            return Verdict(False, 0, GENESIS, 0, str(error))
+            return Verdict(False, 0, GENESIS, getattr(error, "broken_at", 0), str(error))
 
     def head(self):
         return self.verify().head

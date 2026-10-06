@@ -8,6 +8,12 @@ import json
 from ml_stack.workspace.chain import GENESIS, ChainBroken, Verdict, _digest
 
 
+class EvidenceBroken(ChainBroken):
+    def __init__(self, reason: str, broken_at: int) -> None:
+        super().__init__(reason)
+        self.broken_at = broken_at
+
+
 def envelope(event):
     return hashlib.sha256(
         json.dumps(event, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()
@@ -86,6 +92,17 @@ def validate(graph, stream):
         "scope": graph.get_doc("board-scope"),
         "projection": graph.get_doc("projection:" + stream) or {"seq": 0},
     }:
-        raise ChainBroken("board graph event envelopes disagree with integrity evidence")
+        recorded = evidence.get("events", {}) if isinstance(evidence, dict) else {}
+        changed = next(
+            (
+                number
+                for number, event in enumerate(rows, 1)
+                if recorded.get(event["id"]) != envelope(event)
+            ),
+            0,
+        )
+        raise EvidenceBroken(
+            "board graph event envelopes disagree with integrity evidence", changed
+        )
     if not verified(rows, bases=checkpoints(graph, stream)).ok:
         raise ChainBroken("board graph origin history is damaged")
