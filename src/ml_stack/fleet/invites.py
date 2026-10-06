@@ -174,7 +174,7 @@ class Invitations:
 
     def _grant(self, row: dict, fields: dict, member: Any) -> dict[str, Any]:
         if row["kind"] != "android":
-            return {"kind": "computer", "group": member.group, "key": member.key.decode()}
+            return {"kind": "computer", "group": member.group, "key": member.key.decode(), "mode": member.mode}
         if len(self.devices) >= 128:
             raise ValueError("revoke an Android device before enrolling another")
         ident, token = secrets.token_hex(16), encode(secrets.token_bytes(32))

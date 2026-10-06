@@ -8,7 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import pytest
 
 from ml_stack.fleet import invite_client, tls
-from ml_stack.fleet.discovery import Membership
+from ml_stack.fleet.discovery import DiscoveryError, Membership
 from ml_stack.fleet.invites import Invitations, decode, encode
 
 
@@ -53,10 +53,11 @@ def test_every_resolved_address_must_be_a_remote_lan_device(monkeypatch, address
         invite_client.parse_invite(payload(), now=1000)
 
 
-@pytest.fixture
-def invitation_server(tmp_path, monkeypatch):
+@pytest.fixture(params=["dev", "prod"])
+def invitation_server(tmp_path, monkeypatch, request):
     identity = tls.identity(tmp_path / 'tls', 'test-device')
-    member = Membership(group='Test cluster', key=encode(b'k' * 32).encode())
+    member = Membership(group='Test cluster', key=encode(b'k' * 32).encode(),
+                        mode=request.param, selection='manual')
     hits = []
     source = [None]
 
@@ -99,7 +100,10 @@ def invitation_server(tmp_path, monkeypatch):
 def test_actual_pinned_tls_exchange_joins_once(invitation_server):
     store, member, hits = invitation_server
     invite = store.mint(member.group)['invite']
-    assert invite_client.redeem(invite, 'test-device') == member
+    redeemed = invite_client.redeem(invite, 'test-device')
+    assert redeemed == member
+    assert redeemed.mode == member.mode
+    assert redeemed.selection == 'manual'
     assert hits == ['/join/invite/challenge', '/join/invite/redeem']
     with pytest.raises(ValueError, match='refused'):
         invite_client.redeem(invite, 'test-device')
@@ -129,3 +133,22 @@ def test_modified_grant_is_rejected(invitation_server, monkeypatch):
     monkeypatch.setattr(invite_client, '_post', tampered)
     with pytest.raises(ValueError, match='authenticated'):
         invite_client.redeem(store.mint(member.group)['invite'], 'test-device')
+
+
+@pytest.mark.redteam
+@pytest.mark.parametrize("mode", [None, "invalid", 1, []])
+def test_authenticated_grant_refuses_missing_or_invalid_mode(invitation_server, monkeypatch, mode):
+    store, member, _ = invitation_server
+    grant = store._grant
+
+    def malformed(row, fields, held):
+        payload = grant(row, fields, held)
+        if mode is None:
+            payload.pop("mode")
+        else:
+            payload["mode"] = mode
+        return payload
+
+    monkeypatch.setattr(store, "_grant", malformed)
+    with pytest.raises((ValueError, DiscoveryError)):
+        invite_client.redeem(store.mint(member.group)["invite"], "test-device")

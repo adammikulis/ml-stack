@@ -147,6 +147,6 @@ def redeem(invite: str, device_name: str) -> Membership:
     if not hmac.compare_digest(expected, answer["proof"]):
         raise ValueError("the invitation grant was not authenticated")
     document = _json(grant)
-    if set(document) != {"kind", "group", "key"} or document.pop("kind") != "computer":
+    if set(document) != {"kind", "group", "key", "mode"} or document.pop("kind") != "computer":
         raise ValueError("the invitation granted unexpected access")
     return parse_recovery(json.dumps(document))
