@@ -20,9 +20,13 @@ OPTIONS = {"-i": "index-url", "--index-url": "index-url",
            "--extra-index-url": "extra-index-url", "-f": "find-links", "--find-links": "find-links"}
 
 
+def _pip(python, args, environment, timeout):
+    return subprocess.run([str(python), "-m", "pip", *args], capture_output=True,
+                          text=True, timeout=timeout, env=environment)
+
+
 def _config(python, command, environment, timeout):
-    result = subprocess.run([str(python), "-m", "pip", "config", "list"],
-                            capture_output=True, text=True, env=environment, timeout=timeout)
+    result = _pip(python, ["config", "list"], environment, timeout)
     if result.returncode:
         raise Refused("pip configuration could not be checked")
     values = {}
@@ -99,8 +103,7 @@ def run(python, args, *, timeout, env=None):
         if not args or args[0] not in {"inspect", "uninstall", "check", "show"}:
             raise Refused("unsupported pip command")
         environment["PIP_DISABLE_PIP_VERSION_CHECK"] = "1"
-        return subprocess.run([str(python), "-m", "pip", *args], capture_output=True,
-                              text=True, timeout=timeout, env=environment)
+        return _pip(python, args, environment, timeout)
     configured = _config(python, args[0], environment, timeout)
     for name in ("requirement", "constraint", "build-constraint", "editable", "target", "prefix", "root"):
         if configured.get(name):
@@ -152,5 +155,4 @@ def run(python, args, *, timeout, env=None):
                 environment.pop(name, None)
         environment.update({name: value for name, value in guarded.items() if name.startswith("GIT_")})
         environment.update(PIP_CONFIG_FILE=os.devnull, PIP_DISABLE_PIP_VERSION_CHECK="1")
-        return subprocess.run([str(python), "-m", "pip", *rewritten], capture_output=True,
-                              text=True, timeout=timeout, env=environment)
+        return _pip(python, rewritten, environment, timeout)

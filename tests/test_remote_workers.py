@@ -38,9 +38,9 @@ def _server(root, machine, projects):
     daemon = api.Daemon(runner, files, lambda: derive_token(memberships()[0].key))
     daemon.projects, daemon.workspaces = projects, WorkspaceHost(projects)
     ident = tls.identity(root / machine / 'tls', machine)
-    server = LimitedServer(('0.0.0.0', 0), api.make_handler(daemon), tls=tls.server_context(ident))
+    server = LimitedServer((discovery.primary_ip(), 0), api.make_handler(daemon), tls=tls.server_context(ident))
     threading.Thread(target=server.serve_forever, daemon=True).start()
-    beacon = Beacon(name=machine, machine=machine, host='127.0.0.1', port=server.server_port, cert=ident.beacon)
+    beacon = Beacon(name=machine, machine=machine, host=discovery.primary_ip(), port=server.server_port, cert=ident.beacon)
     peer = Peer(beacon.base_url, derive_token(KEY), beacon=beacon)
     http.pin(urlsplit(beacon.base_url).netloc, tls.pinned_context(ident.beacon))
     return daemon, server, runner, peer
@@ -408,6 +408,7 @@ def test_self_lan_authority_uses_the_signed_loopback_certificate(devices, monkey
     state = devices
     monkeypatch.setattr(remote_workers.home, 'machine_id', lambda: 'device-a')
     authority_peer = state.peers[0]
+    monkeypatch.setattr(authority_peer, 'base_url', f'https://127.0.0.1:{authority_peer.beacon.port}')
     lan_host = f'https://{discovery.primary_ip()}:{authority_peer.beacon.port}'
     state.project.board_host = lan_host
     caller = RemoteWorkspace(lan_host, PROJECT, cluster=CLUSTER)
@@ -428,7 +429,7 @@ def test_self_lan_alias_rejects_unbound_endpoints(devices, monkeypatch, wrong):
     node = state.peers[0]
     cert = node.beacon.cert if wrong != 'certificate' else ''
     beacon = SimpleNamespace(machine='other-node' if wrong == 'machine' else 'device-a', cert=cert)
-    observed = SimpleNamespace(base_url=node.base_url, beacon=beacon)
+    observed = SimpleNamespace(base_url=f'https://127.0.0.1:{node.beacon.port}', beacon=beacon)
     monkeypatch.setattr(Peer, 'discover', lambda **kwargs: [observed])
     host = '192.168.99.99' if wrong == 'address' else discovery.primary_ip()
     port = node.beacon.port + (1 if wrong == 'port' else 0)
@@ -454,7 +455,7 @@ def test_self_lan_alias_transport_refuses_another_signed_certificate(devices, mo
     state = devices
     monkeypatch.setattr(remote_workers.home, 'machine_id', lambda: 'device-a')
     node = state.peers[0]
-    forged = SimpleNamespace(base_url=node.base_url,
+    forged = SimpleNamespace(base_url=f'https://127.0.0.1:{node.beacon.port}',
                              beacon=SimpleNamespace(machine='device-a', cert=state.peers[1].beacon.cert))
     monkeypatch.setattr(Peer, 'discover', lambda **kwargs: [forged])
     host = f'https://{discovery.primary_ip()}:{node.beacon.port}'

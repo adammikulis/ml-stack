@@ -8,6 +8,8 @@ import pytest
 from ml_stack.httpguard import Refused
 from ml_stack.net import packages, policy
 
+pytestmark = pytest.mark.redteam
+
 
 def capture(monkeypatch, tmp_path, config=""):
     calls = []

@@ -24,7 +24,7 @@ note = "Origin URLs are read with a fixed argv, timeout and checkout directory; 
 
 
 [[group]]
-match = ["egress:workspace/automatic_connection.py:_register"]
+match = ["egress:fleet/project_client.py:register_local"]
 status = "covered"
 count = 1
 tests = ["tests/test_automatic_project_connection.py::test_local_registration_refuses_hostile_response"]

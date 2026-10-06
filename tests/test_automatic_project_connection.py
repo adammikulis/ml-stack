@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from ml_stack import home, sealing
+from ml_stack.fleet import project_client
 from ml_stack.fleet import remote as fleet_remote
 from ml_stack.http import Sealed
 from ml_stack.workspace import automatic_connection as automatic
@@ -234,7 +235,7 @@ def test_local_registration_refuses_hostile_response(tmp_path, monkeypatch, atta
             options["guard"]("https://foreign.invalid/workspace/v1/local-project")
         return nullcontext(response)
 
-    monkeypatch.setattr(automatic, "open_stream", transport)
+    monkeypatch.setattr(project_client, "open_stream", transport)
     with pytest.raises((Denied, ValueError)):
         automatic._register(tmp_path, SimpleNamespace(key=b"fixture-dev-key"), PROJECT)
     assert len(calls) == 1 and calls[0][0] == endpoint

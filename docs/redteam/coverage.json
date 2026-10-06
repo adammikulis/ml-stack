@@ -1,7 +1,7 @@
 {
- "surfaces": 772,
+ "surfaces": 776,
  "by_status": {
-  "covered": 451,
+  "covered": 455,
   "partial": 199,
   "uncovered": 53,
   "n/a": 69,
@@ -37,8 +37,8 @@
    "unmapped": 0
   },
   "egress": {
-   "covered": 37,
-   "partial": 47,
+   "covered": 41,
+   "partial": 48,
    "uncovered": 0,
    "n/a": 0,
    "unmapped": 0
@@ -79,7 +79,7 @@
    "unmapped": 0
   },
   "parser": {
-   "covered": 75,
+   "covered": 74,
    "partial": 0,
    "uncovered": 49,
    "n/a": 0,
@@ -100,8 +100,8 @@
    "unmapped": 0
   },
   "spawn": {
-   "covered": 45,
-   "partial": 63,
+   "covered": 46,
+   "partial": 62,
    "uncovered": 0,
    "n/a": 2,
    "unmapped": 0
@@ -1957,6 +1957,18 @@
    "note": "signed source replies stay on the exact LAN authority endpoint; wire and plaintext bounds include authenticated sealing overhead"
   },
   {
+   "id": "egress:fleet/project_client.py:register_local",
+   "kind": "egress",
+   "source": "fleet/project_client.py:register_local",
+   "trust": "addresses and redirects named by pages, repositories and peers",
+   "attacker": "a redirect or address sends the request somewhere the person did not choose",
+   "status": "covered",
+   "tests": [
+    "tests/test_automatic_project_connection.py::test_local_registration_refuses_hostile_response"
+   ],
+   "note": "bounded loopback registration rejects foreign redirects, oversized replies, absent or tampered seals, malformed JSON and another project identity"
+  },
+  {
    "id": "egress:fleet/remote.py:<module>",
    "kind": "egress",
    "source": "fleet/remote.py:<module>",
@@ -2209,6 +2221,66 @@
    "id": "egress:net/git.py:guarded",
    "kind": "egress",
    "source": "net/git.py:guarded",
+   "trust": "addresses and redirects named by pages, repositories and peers",
+   "attacker": "a redirect or address sends the request somewhere the person did not choose",
+   "status": "covered",
+   "tests": [
+    "tests/test_net_no_bypass.py",
+    "tests/test_httpguard.py",
+    "tests/test_net_download.py",
+    "tests/test_net_untrusted.py"
+   ],
+   "note": ""
+  },
+  {
+   "id": "egress:net/packages.py:_admit",
+   "kind": "egress",
+   "source": "net/packages.py:_admit",
+   "trust": "addresses and redirects named by pages, repositories and peers",
+   "attacker": "a redirect or address sends the request somewhere the person did not choose",
+   "status": "covered",
+   "tests": [
+    "tests/test_net_no_bypass.py",
+    "tests/test_httpguard.py",
+    "tests/test_net_download.py",
+    "tests/test_net_untrusted.py"
+   ],
+   "note": ""
+  },
+  {
+   "id": "egress:net/packages.py:_config",
+   "kind": "egress",
+   "source": "net/packages.py:_config",
+   "trust": "addresses and redirects named by pages, repositories and peers",
+   "attacker": "a redirect or address sends the request somewhere the person did not choose",
+   "status": "covered",
+   "tests": [
+    "tests/test_net_no_bypass.py",
+    "tests/test_httpguard.py",
+    "tests/test_net_download.py",
+    "tests/test_net_untrusted.py"
+   ],
+   "note": ""
+  },
+  {
+   "id": "egress:net/packages.py:_options",
+   "kind": "egress",
+   "source": "net/packages.py:_options",
+   "trust": "addresses and redirects named by pages, repositories and peers",
+   "attacker": "a redirect or address sends the request somewhere the person did not choose",
+   "status": "covered",
+   "tests": [
+    "tests/test_net_no_bypass.py",
+    "tests/test_httpguard.py",
+    "tests/test_net_download.py",
+    "tests/test_net_untrusted.py"
+   ],
+   "note": ""
+  },
+  {
+   "id": "egress:net/packages.py:run",
+   "kind": "egress",
+   "source": "net/packages.py:run",
    "trust": "addresses and redirects named by pages, repositories and peers",
    "attacker": "a redirect or address sends the request somewhere the person did not choose",
    "status": "covered",
@@ -2542,18 +2614,6 @@
    "note": ""
   },
   {
-   "id": "egress:workspace/automatic_connection.py:_register",
-   "kind": "egress",
-   "source": "workspace/automatic_connection.py:_register",
-   "trust": "addresses and redirects named by pages, repositories and peers",
-   "attacker": "a redirect or address sends the request somewhere the person did not choose",
-   "status": "covered",
-   "tests": [
-    "tests/test_automatic_project_connection.py::test_local_registration_refuses_hostile_response"
-   ],
-   "note": "bounded loopback registration rejects foreign redirects, oversized replies, absent or tampered seals, malformed JSON and another project identity"
-  },
-  {
    "id": "egress:workspace/coordinator_client.py:_device_peer",
    "kind": "egress",
    "source": "workspace/coordinator_client.py:_device_peer",
@@ -2566,6 +2626,18 @@
     "tests/test_workspace_coordinator.py::test_remote_mcp_never_falls_back_to_local_workspace"
    ],
    "note": "Saved origins reject plaintext, credentials and foreign URL components; revoked, missing, ambiguous, unpaired and certificate-mismatched device rows cannot install a pin or open transport; remote clients refuse local fallback"
+  },
+  {
+   "id": "egress:workspace/remote.py:RemoteWorkspace.__init__",
+   "kind": "egress",
+   "source": "workspace/remote.py:RemoteWorkspace.__init__",
+   "trust": "addresses and redirects named by pages, repositories and peers",
+   "attacker": "a redirect or address sends the request somewhere the person did not choose",
+   "status": "partial",
+   "tests": [
+    "tests/test_net_no_bypass.py"
+   ],
+   "note": "loopback and LAN calls to servers the person configured; the net-no-bypass scan keeps public hosts out, answers from a hostile server (oversized, slow, malformed JSON) are not sent"
   },
   {
    "id": "egress:workspace/remote.py:RemoteWorkspace._request",
@@ -6957,19 +7029,6 @@
    "note": ""
   },
   {
-   "id": "parser:workspace/automatic_connection.py",
-   "kind": "parser",
-   "source": "workspace/automatic_connection.py",
-   "trust": "files, pages and archives from outside",
-   "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
-   "status": "covered",
-   "tests": [
-    "tests/test_workspace_bus.py",
-    "tests/test_workspace_rules.py"
-   ],
-   "note": ""
-  },
-  {
    "id": "parser:workspace/backlog.py",
    "kind": "parser",
    "source": "workspace/backlog.py",
@@ -10072,18 +10131,6 @@
    "note": "The interpreter comes from the fixed library catalog or the running Python; the probe uses a fixed -c program and an argv list, without model, peer or browser text"
   },
   {
-   "id": "spawn:fleet/environment.py:Environment.pip",
-   "kind": "spawn",
-   "source": "fleet/environment.py:Environment.pip",
-   "trust": "arguments built from model output, peer messages or file names",
-   "attacker": "attacker text becomes a command line, environment or working directory",
-   "status": "partial",
-   "tests": [
-    "tests/test_redteam_spawn.py::test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line"
-   ],
-   "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
-  },
-  {
    "id": "spawn:fleet/jobs.py:JobRunner._run_one",
    "kind": "spawn",
    "source": "fleet/jobs.py:JobRunner._run_one",
@@ -10488,6 +10535,20 @@
     "tests/test_project_source.py"
    ],
    "note": "snapshot paths use verified Git object IDs and bounded index/blob output; options, oversized objects and checkout filters are refused"
+  },
+  {
+   "id": "spawn:net/packages.py:_pip",
+   "kind": "spawn",
+   "source": "net/packages.py:_pip",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_sandbox_redteam.py",
+    "tests/test_pdf_engine.py",
+    "tests/test_net_scan.py"
+   ],
+   "note": ""
   },
   {
    "id": "spawn:net/pdfread.py:run_child",
