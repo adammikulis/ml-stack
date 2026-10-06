@@ -5,6 +5,7 @@ import msvcrt
 import os
 from ctypes import wintypes
 from pathlib import Path
+from typing import ClassVar
 
 _kernel = ctypes.WinDLL("kernel32", use_last_error=True)
 _create = _kernel.CreateFileW
@@ -34,7 +35,7 @@ FILE_RENAME_POSIX_SEMANTICS = 2
 
 
 class _Rename(ctypes.Structure):
-    _fields_ = [("flags", wintypes.DWORD), ("root", wintypes.HANDLE),
+    _fields_: ClassVar = [("flags", wintypes.DWORD), ("root", wintypes.HANDLE),
                 ("length", wintypes.DWORD), ("name", wintypes.WCHAR * 1)]
 
 

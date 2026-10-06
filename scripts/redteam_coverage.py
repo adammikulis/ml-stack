@@ -102,7 +102,7 @@ FORCED = ("hub/cards.py", "hub/discover.py", "hub/listing.py", "workspace/notes.
           "workspace/service.py", "memory/recall.py", "memory/tools.py", "sandbox/policies.py",
           "sentinel/review.py", "decide/questions.py", "decide/pointer_prompt.py",
           "decide/logprob.py")
-READ_CALLS = {"json.loads", "tomllib.loads", "tomllib.load", "struct.unpack",
+READ_CALLS = {"json.load", "json.loads", "tomllib.loads", "tomllib.load", "struct.unpack",
               "struct.unpack_from", "xml.etree.ElementTree.fromstring",
               "xml.etree.ElementTree.parse", "zipfile.ZipFile", "tarfile.open", "pickle.loads"}
 READ_ATTRS = {"read_text", "read_bytes", "readlines"}

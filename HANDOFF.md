@@ -5,13 +5,13 @@
 - **Speed up checks without reducing coverage.** `scripts/gates/_floors.py` now reuses the gate's
   full tree fingerprint for its collection cache. An uncached `scripts/budgets` run still took
   95.6 seconds; further profiling and safe optimization remain.
-- **Repair shared Git metadata before integration.** The primary repository's multi-pack index
-  fails verification (`incorrect checksum`, `bad pack-int-id`), so ordinary Git status fails.
-  Git commands work with `-c core.multiPackIndex=false`; do not rewrite pack metadata until the
-  worktrees and unique changes are inventoried.
-- **Resume the local Qwen worker after integration.** The worker was stopped while task-queue
-  launch and task-worktree behavior were being changed; verify its state and start it against the
-  clean development checkout so it can claim queued project tasks.
+- **Migrate the live local Qwen worker to an immutable published wheel.** `qwen-wsl` is
+  running and idle on an editable primary-checkout runtime. After publication, verify its
+  ownership and an idle boundary, then use the maintained stop/start flow from the wheel
+  runtime outside the primary checkout. Preserve its identity and saved settings: chat,
+  read-only, ThinkingCap-Qwen3.8-27B IQ4_XS, 131072 context, effort off, maximum effort low,
+  and orders from codex. Confirm the new process uses the wheel and resumes its existing
+  workspace; do not launch a duplicate worker or point it at a changing checkout.
 
 ## Current state (2026-10-03)
 

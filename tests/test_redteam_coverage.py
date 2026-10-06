@@ -4,6 +4,7 @@ falls. The checks are the ones `scripts/redteam_coverage.py --check` runs."""
 
 from __future__ import annotations
 
+import ast
 import importlib.util
 import sys
 from functools import cache
@@ -130,3 +131,10 @@ def test_the_uncovered_count_may_only_fall(monkeypatch):
 def test_the_written_map_is_the_one_the_tree_produces():
     cov = coverage()
     assert cov.OUT.read_text(encoding="utf-8") == cov.render(state()[3])
+
+
+@pytest.mark.parametrize("call", ["json.load(handle)", "json.loads(text)"])
+def test_json_stream_and_text_parsers_remain_inventoried(call):
+    found = {}
+    coverage().find_parsers(found, "src/ml_stack/files.py", ast.parse(call))
+    assert "parser:files.py" in found
