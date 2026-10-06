@@ -58,6 +58,15 @@ def test_git_runs_without_prompts_hooks_or_foreign_protocols(tmp_path):
     assert pairs["submodule.recurse"] == "false" and pairs["transfer.fsckObjects"] == "true"
 
 
+@pytest.mark.parametrize("selector", [
+    "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_PREFIX",
+    "GIT_NAMESPACE", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+])
+def test_git_repository_selection_cannot_be_overridden_by_environment(tmp_path, monkeypatch, selector):
+    monkeypatch.setenv(selector, str(tmp_path / "foreign-repository"))
+    assert selector not in netgit.environment("https", tmp_path / "hooks")
+
+
 def test_a_local_repository_is_not_cloned_through_the_network_path(tmp_path):
     origin = tmp_path / "origin"
     origin.mkdir()

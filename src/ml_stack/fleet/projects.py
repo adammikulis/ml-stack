@@ -55,6 +55,11 @@ def identity(root: Path) -> str:
     attached = read_json(root / ".ml-stack-project.json", {})
     if isinstance(attached, dict) and attached.get("kind") == "project-checkout":
         return source.project_id(attached["project_id"])
+    return git_identity(root)
+
+
+def git_identity(root: Path) -> str:
+    """Return the project identity from its Git origin or initial commit."""
     try:
         origin = git.run(["remote", "get-url", "origin"], cwd=root).stdout.strip()
         parts = urllib.parse.urlsplit(origin)

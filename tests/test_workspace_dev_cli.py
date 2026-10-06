@@ -3,6 +3,7 @@
 import hashlib
 import socket
 import threading
+from contextlib import nullcontext
 from types import SimpleNamespace
 from urllib.parse import urlsplit
 
@@ -40,7 +41,7 @@ def test_cli_enrolls_authenticated_local_agent_without_manual_metadata(monkeypat
                             registry=SimpleNamespace(info=lambda actor: {"model": model, "harness": harness}))
     monkeypatch.setattr(cli, "Workspace", lambda: local)
     monkeypatch.setattr(cli, "_local_token", lambda args: "authenticated-local-token")
-    monkeypatch.setattr(automatic_connection.device_agent, "owned_local", lambda ws, token: ws.auth(token))
+    monkeypatch.setattr(automatic_connection.device_agent, "owned_project_session", lambda ws, token, *args: nullcontext(ws.auth(token)))
     enrolled = []
     def attach(root, name, choice, *, claim):
         enrolled.append((root, name, claim, choice))
@@ -61,9 +62,9 @@ def test_cli_cannot_enroll_privileged_or_child_identity(monkeypatch, tmp_path, r
     local = SimpleNamespace(auth=lambda token: SimpleNamespace(id=name, role=role))
     monkeypatch.setattr(cli, "Workspace", lambda: local)
     monkeypatch.setattr(cli, "_local_token", lambda args: "local-token")
-    def owned(ws, token):
+    def owned(ws, token, *args):
         raise Denied("automatic project connection requires an authenticated local parent agent")
-    monkeypatch.setattr(automatic_connection.device_agent, "owned_local", owned)
+    monkeypatch.setattr(automatic_connection.device_agent, "owned_project_session", owned)
     monkeypatch.setattr(automatic_connection, "attach", lambda *a, **kw: pytest.fail("enrolled foreign role"))
     with pytest.raises(Denied, match="local parent agent"):
         cli._context(SimpleNamespace(agent=name, token_file=""), {"automatic": True, "root": str(tmp_path)})
@@ -119,7 +120,7 @@ def test_saved_connection_resolves_authenticated_local_alias(monkeypatch, tmp_pa
     monkeypatch.setattr(cli, "Workspace", lambda: object())
     monkeypatch.setattr(cli, "_local_token", lambda args: "local-token")
     checked = []
-    monkeypatch.setattr(automatic_connection.device_agent, "owned_local", lambda ws, token: checked.append(token) or actor)
+    monkeypatch.setattr(automatic_connection.device_agent, "owned_project_session", lambda ws, token, *args: nullcontext(checked.append(token) or actor))
     monkeypatch.setenv(cli.tokens.AGENT_ENV, "worker" if environment else "")
     used = []
     remote = SimpleNamespace(token=lambda **kw: used.append(kw) or "project-token")
@@ -136,9 +137,9 @@ def test_saved_alias_revocation_never_reenrolls(monkeypatch, tmp_path):
               "agent": "worker-device", "local_agent": "worker"}
     monkeypatch.setattr(cli, "Workspace", lambda: object())
     monkeypatch.setattr(cli, "_local_token", lambda args: "local-token")
-    def denied(ws, token):
+    def denied(ws, token, *args):
         raise Denied("local identity revoked")
-    monkeypatch.setattr(automatic_connection.device_agent, "owned_local", denied)
+    monkeypatch.setattr(automatic_connection.device_agent, "owned_project_session", denied)
     monkeypatch.setattr(automatic_connection, "attach", lambda *a, **kw: pytest.fail("reenrollment"))
     with pytest.raises(Denied, match="revoked"):
         cli._context(SimpleNamespace(agent="worker", token_file=""), choice)
@@ -148,7 +149,7 @@ def test_saved_alias_revocation_never_reenrolls(monkeypatch, tmp_path):
 def test_saved_alias_preserves_explicit_other_identity_and_token(monkeypatch, tmp_path, agent, token_file):
     choice = {"host": "https://board.invalid", "project_id": "a" * 32, "root": str(tmp_path),
               "agent": "worker-device", "local_agent": "worker"}
-    monkeypatch.setattr(automatic_connection.device_agent, "owned_local", lambda *a: pytest.fail("alias substitution"))
+    monkeypatch.setattr(automatic_connection.device_agent, "owned_project_session", lambda *a: pytest.fail("alias substitution"))
     used = []
     remote = SimpleNamespace(token=lambda **kw: used.append(kw) or "project-token")
     monkeypatch.setattr(project_connection, "RemoteWorkspace", lambda *a, **kw: remote)
@@ -226,6 +227,10 @@ def dev_pair(repository, tmp_path, monkeypatch):
     from ml_stack.fleet.projects import identity
     from ml_stack.fleet.remote import Peer
 
+    original_destinations = discovery._destinations
+    monkeypatch.setattr(discovery, "_destinations", lambda group, port: [
+        (address, interface) for address, interface in original_destinations(group, port)
+        if address[0] != discovery.LOOPBACK and interface != discovery.LOOPBACK])
     checkouts = _project_checkouts(repository, tmp_path)
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
         probe.bind(("127.0.0.1", 0))
@@ -295,6 +300,10 @@ def test_default_profile_catalogue_and_automatic_board_use_real_udp_and_tls(repo
     from ml_stack.fleet import automatic_clusters, discovery
     from ml_stack.fleet.projects import identity
     from ml_stack.fleet.remote import Peer
+    original_destinations = discovery._destinations
+    monkeypatch.setattr(discovery, "_destinations", lambda group, port: [
+        (address, interface) for address, interface in original_destinations(group, port)
+        if address[0] != discovery.LOOPBACK and interface != discovery.LOOPBACK])
     state = tmp_path / "default-device"
     monkeypatch.setenv("ML_STACK_HOME", str(state))
     monkeypatch.delenv("ML_STACK_CLUSTER_KEY", raising=False)
@@ -352,3 +361,74 @@ def _exchange_default_board(repository, project_id):
     assert received["from"] == first["agent"]
     assert received["to"] == second["agent"]
     assert "default profile connects without a code" in received["text"]
+
+
+def test_setup_saved_standard_agent_attaches_without_device_registration(tmp_path, monkeypatch):
+    from workspace_kit import Kit, clean_env
+
+    from ml_stack.workspace import onboard, project, tokens
+    from ml_stack.workspace.identity import AGENT
+
+    root = tmp_path / 'project'
+    root.mkdir()
+    kit = Kit(clean_env(monkeypatch, tmp_path))
+    token = kit.ws.registry.mint(onboard.SETUP, 'worker', AGENT, 3600)
+    kit.ws.registry.set_project(kit.ws.auth(kit.owner), 'worker', project.describe(str(root)))
+    tokens.store(kit.base, 'worker', token)
+    before = kit.ws.registry.path.read_bytes()
+    choice = {'automatic': True, 'root': str(root), 'host': 'https://board.invalid',
+              'project_id': 'a' * 32, 'agent': ''}
+    monkeypatch.setattr(cli, 'Workspace', lambda: kit.ws)
+    monkeypatch.setattr(cli, '_local_token', lambda args: token)
+    calls = []
+    def attach(path, name, selected, *, claim):
+        calls.append((path, name))
+        return {**selected, 'agent': 'worker-device'}
+    monkeypatch.setattr(automatic_connection, 'attach', attach)
+    remote = SimpleNamespace(token=lambda **kwargs: 'private-project-session')
+    monkeypatch.setattr(project_connection, 'RemoteWorkspace', lambda *args, **kwargs: remote)
+    monkeypatch.setattr(project_connection, 'CanonicalWorkspace', lambda remote, capability: capability)
+    actor = SimpleNamespace(agent='worker', token_file='')
+    assert cli._context(actor, choice)[1] == 'private-project-session'
+    assert calls == [(root, 'worker')] and actor.agent == 'worker-device'
+    assert kit.ws.registry.path.read_bytes() == before
+    assert not (kit.base / 'device-accounts.db').exists()
+
+
+def test_saved_canonical_git_grant_refuses_another_repository(repository, tmp_path, monkeypatch):
+    import json
+
+    from workspace_kit import Kit, clean_env
+
+    from ml_stack.net import git
+    from ml_stack.workspace import device_agent, onboard, project, tokens
+    from ml_stack.workspace.identity import AGENT
+
+    kit = Kit(clean_env(monkeypatch, tmp_path))
+    token = kit.ws.registry.mint(onboard.SETUP, 'worker', AGENT, 3600)
+    grant = project.authoritative(str(repository))
+    kit.ws.registry.set_project(kit.ws.auth(kit.owner), 'worker', grant)
+    tokens.store(kit.base, 'worker', token)
+    with device_agent.owned_project_session(kit.ws, token, 'worker', repository) as actor:
+        assert actor.id == 'worker'
+    foreign = tmp_path / 'foreign-repository'
+    foreign.mkdir()
+    git.run(['init'], cwd=foreign)
+    (foreign / 'other.txt').write_text('unrelated project')
+    git.run(['add', '--', 'other.txt'], cwd=foreign)
+    git.run(['-c', 'user.name=Test', '-c', 'user.email=test@example.invalid',
+             '-c', 'commit.gpgsign=false', 'commit', '-m', 'fixture'], cwd=foreign)
+    with pytest.raises(Denied, match='not authorized'), device_agent.owned_project_session(
+            kit.ws, token, 'worker', foreign):
+        pytest.fail('another repository received canonical project authorization')
+    (foreign / '.ml-stack-project.json').write_text(json.dumps({
+        'kind': 'project-checkout', 'project_id': grant['key']}))
+    with pytest.raises(Denied, match='not authorized'), device_agent.owned_project_session(
+            kit.ws, token, 'worker', foreign):
+        pytest.fail('forged checkout metadata received canonical project authorization')
+    monkeypatch.setenv('GIT_DIR', str(repository / '.git'))
+    monkeypatch.setenv('GIT_WORK_TREE', str(repository))
+    monkeypatch.setenv('GIT_COMMON_DIR', str(repository / '.git'))
+    with pytest.raises(Denied, match='not authorized'), device_agent.owned_project_session(
+            kit.ws, token, 'worker', foreign):
+        pytest.fail('inherited Git selectors received canonical project authorization')

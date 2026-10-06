@@ -291,3 +291,91 @@ def test_delegated_session_cannot_outlive_or_widen_root_authorization(enrolled, 
     kit.ws.registry._save(agents)
     with pytest.raises(Denied):
         device_sessions.check(kit.ws, token, device, projects)
+
+
+@pytest.fixture
+def saved_project_actor(tmp_path, monkeypatch):
+    from ml_stack.workspace import device_agent, onboard, project
+
+    monkeypatch.setattr(device_agent, 'device_id', lambda: 'abcdef0123456789')
+    root = tmp_path / 'project'
+    root.mkdir()
+    kit = Kit(clean_env(monkeypatch, tmp_path))
+    token = kit.ws.registry.mint(onboard.SETUP, 'worker', AGENT, 3600)
+    kit.ws.registry.set_project(kit.ws.auth(kit.owner), 'worker', project.describe(str(root)))
+    tokens.store(kit.base, 'worker', token)
+    return kit, root, token
+
+
+def test_saved_setup_standard_agent_has_project_access_without_worker_device_rights(saved_project_actor):
+    from ml_stack.workspace import device_agent
+
+    kit, root, token = saved_project_actor
+    before = kit.ws.registry.path.read_bytes()
+    with device_agent.owned_project_session(kit.ws, token, 'worker', root) as actor:
+        assert actor.id == 'worker'
+    assert kit.ws.registry.path.read_bytes() == before
+    assert not (kit.base / 'device-accounts.db').exists()
+    with pytest.raises(Denied, match='trusted local device registration'):
+        device_agent.owned_local(kit.ws, token)
+
+
+@pytest.mark.redteam
+@pytest.mark.parametrize('attack', ['revoked', 'expired', 'copied', 'id', 'symlink', 'owner',
+                                  'child', 'lead', 'person', 'device', 'project'])
+def test_saved_standard_project_session_preserves_identity_scope_and_storage(saved_project_actor, tmp_path, monkeypatch, attack):
+    from ml_stack.workspace import device_agent, project
+
+    kit, root, token = saved_project_actor
+    requested = 'worker'
+    entries = kit.ws.registry._load()
+    entry = entries['worker']
+    if attack == 'revoked':
+        entry['revoked'] = True
+    elif attack == 'expired':
+        entry['expires'] = 1
+    elif attack == 'lead':
+        entry['role'] = 'lead'
+    elif attack == 'person':
+        entry['role'] = 'human'
+    elif attack == 'device':
+        entry['session_device'] = 'e' * 64
+    elif attack == 'project':
+        entry['project'] = project.describe(str(tmp_path))
+    kit.ws.registry._save(entries)
+    if attack == 'child':
+        delegated = kit.ws.delegate(token, 'child')
+        requested = delegated['id']
+        token = tokens.load(kit.base, requested)
+    elif attack == 'copied':
+        foreign = Kit(tmp_path / 'foreign')
+        token = foreign.agent('worker')
+        tokens.store(kit.base, 'worker', token)
+    elif attack == 'id':
+        requested = 'other'
+    elif attack == 'symlink':
+        saved = tokens.directory(kit.base) / 'worker'
+        copied = tmp_path / 'copied-token'
+        copied.write_text(token)
+        copied.chmod(0o600)
+        saved.unlink()
+        saved.symlink_to(copied)
+    elif attack == 'owner':
+        real = tokens.problem
+        monkeypatch.setattr(tokens, 'problem', lambda path: 'belongs to another user'
+                            if path == kit.ws.registry.path else real(path))
+    before = kit.ws.registry.path.read_bytes()
+    with pytest.raises(Denied), device_agent.owned_project_session(kit.ws, token, requested, root):
+        pytest.fail('invalid saved actor received project attachment authority')
+    assert kit.ws.registry.path.read_bytes() == before
+
+
+def test_saved_project_scope_accepts_its_primary_worktree_equivalent(saved_project_actor, tmp_path, monkeypatch):
+    from ml_stack.workspace import device_agent
+
+    kit, primary, token = saved_project_actor
+    checkout = tmp_path / 'worktree'
+    checkout.mkdir()
+    monkeypatch.setattr(device_agent.worktreerules, 'checkouts', lambda path: (checkout, primary))
+    with device_agent.owned_project_session(kit.ws, token, 'worker', checkout) as actor:
+        assert actor.id == 'worker'

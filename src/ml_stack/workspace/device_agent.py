@@ -1,13 +1,17 @@
 """Trusted installed-device accounts bind local worker identities independently of models."""
+from contextlib import contextmanager
+
+from ml_stack import worktreerules
+from ml_stack.fleet.projects import git_identity
 from ml_stack.graph.store import GraphStore
 from ml_stack.home import device_id
 from ml_stack.workspace import localagent, project, tokens
 from ml_stack.workspace.chain import held
 from ml_stack.workspace.device_accounts import account_for, account_in
-from ml_stack.workspace.identity import AGENT, HUMAN, Denied
+from ml_stack.workspace.identity import AGENT, HUMAN, Denied, valid_name
 from ml_stack.workspace.onboard import TOKEN_S
 
-__all__ = ["account_for", "bind_owned_worker", "bind_worker", "enroll", "owned_local"]
+__all__ = ["account_for", "bind_owned_worker", "bind_worker", "enroll", "owned_local", "owned_project_session"]
 
 
 def _graph(ws):
@@ -90,6 +94,42 @@ def _owned_parent(ws, token, device):
 def owned_local(ws, token):
     """Authenticate this OS account's saved local agent session."""
     return _owned_parent(ws, token, device_id())[0]
+
+
+@contextmanager
+def owned_project_session(ws, token, name, root):
+    """Hold a saved private standard agent's authorization for its project attachment."""
+    if not valid_name(name):
+        raise Denied('project attachment requires a named top-level standard agent')
+    paths = (ws.base, ws.registry.path, tokens.directory(ws.base),
+             tokens.directory(ws.base) / name)
+    if any(tokens.problem(path) for path in paths):
+        raise Denied('project attachment requires private owned workspace state')
+    existing = account_for(ws, name) if (ws.base / 'device-accounts.db').exists() else None
+    device = device_id() if existing else ''
+    lock = ws.registry.path.with_name('agents.lock')
+    why = tokens.problem(lock)
+    if why not in {'', 'missing'}:
+        raise Denied('project attachment requires a private registry lock')
+    with held(lock):
+        actor = ws.auth(token)
+        entry = ws.registry._load().get(actor.id, {})
+        if (actor.id != name or actor.role != AGENT or actor.parent or entry.get('session_device')):
+            raise Denied('project attachment requires this saved top-level standard agent')
+        if any(tokens.problem(path) for path in paths) or tokens.load(ws.base, name) != token:
+            raise Denied('project attachment requires the saved private agent session')
+        if existing and (existing['device_id'] != device
+                         or ws.registry.info(existing['base_id'])['revoked']):
+            raise Denied('the saved agent device registration is unavailable')
+        scope = entry.get('project', {}).get('key')
+        found = project.describe(str(root))
+        if not scope or scope != found.get('key'):
+            checkout = worktreerules.checkouts(root)
+            if (not scope or not checkout
+                    or (scope != project.describe(str(checkout[1])).get('key')
+                        and scope != git_identity(checkout[0]))):
+                raise Denied('the saved agent is not authorized for this project')
+        yield actor
 
 
 def bind_owned_worker(ws, token, name):

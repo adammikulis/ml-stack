@@ -47,19 +47,21 @@ def cli_connection(args, connection, local_token, workspace):
         return connection
     if connection.get("automatic"):
         local = workspace()
-        actor = device_agent.owned_local(local, local_token(args))
-        metadata = local.registry.info(actor.id)
-        claim = (getattr(args, "model", "") or metadata["model"],
-                 getattr(args, "harness", "") or metadata["harness"])
-        connection = attach(Path(connection["root"]), actor.id, connection, claim=claim)
-        args.agent = connection["agent"]
+        name = args.agent or os.environ.get(tokens.AGENT_ENV, "")
+        with device_agent.owned_project_session(local, local_token(args), name, Path(connection["root"])) as actor:
+            metadata = local.registry.info(actor.id)
+            claim = (getattr(args, "model", "") or metadata["model"],
+                     getattr(args, "harness", "") or metadata["harness"])
+            connection = attach(Path(connection["root"]), actor.id, connection, claim=claim)
+            args.agent = connection["agent"]
     elif connection.get("local_agent"):
         requested = args.agent or os.environ.get(tokens.AGENT_ENV, "")
         if requested == connection["local_agent"]:
-            actor = device_agent.owned_local(workspace(), local_token(args))
-            if actor.id != requested:
-                raise Denied("the local agent does not match this project's saved identity")
-            args.agent = connection["agent"]
+            with device_agent.owned_project_session(workspace(), local_token(args), requested,
+                                                   Path(connection["root"])) as actor:
+                if actor.id != requested:
+                    raise Denied("the local agent does not match this project's saved identity")
+                args.agent = connection["agent"]
     return refresh(connection, args.agent or os.environ.get(tokens.AGENT_ENV, ""))
 
 
