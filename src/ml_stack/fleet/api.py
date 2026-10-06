@@ -37,7 +37,7 @@ from . import (
     companion_routes,
     device_auth,
     invite_routes,
-    project_enrollment,
+    project_workers,
     projects as project_routes,
 )
 from .availability import Availability, parse_window
@@ -626,31 +626,7 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
             return got
 
         def _workspace(self, body: bytes) -> bool:
-            match = re.fullmatch(r"/workspace/v1/projects/([a-f0-9]{32})/(join|board|ensure|enroll)",
-                                 urllib.parse.urlparse(self.path).path)
-            if not match:
-                return False
-            host = daemon.workspaces
-            opening = self._sealing()
-            if host is None:
-                self._send(501, {"error": "project workspace hosting is unavailable"})
-            elif opening is None or not opening[2]:
-                self._send(403, {"error": "project agent capabilities require sealed fleet requests"})
-            else:
-                request = self._object(body)
-                cluster, cluster_id = project_enrollment.authenticated_cluster(opening, cluster_key_path)
-                if match[2] == "enroll":
-                    if not project_enrollment.admit(self.connection, opening, cluster_key_path, request):
-                        self._send(403, {"error": "automatic project enrollment requires the active Dev cluster over TLS"})
-                        return True
-                    code, reply = host.enroll(match[1], request, cluster=cluster, cluster_id=cluster_id)
-                else:
-                    code, reply = host.answer(match[1], match[2], request,
-                                              device=self._workspace_device,
-                                              admission=(cluster, cluster_id, project_enrollment.visible(
-                                                  self.connection, opening, cluster_key_path)))
-                self._send(code, reply)
-            return True
+            return project_workers.answer(self, daemon.workspaces, body, cluster_key_path)
 
         def _route_post(self, body: bytes) -> None:
             parsed = urllib.parse.urlparse(self.path)

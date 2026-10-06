@@ -799,6 +799,35 @@ The complete paste binds the advertised Fleet coordinator and its workspace ID. 
 join command: its code alone cannot identify the correct authority. `--remote` refuses to create
 an invitation before hosting is active, and a workspace-bound join never falls back to a local registry.
 
+### Local Qwen on another Dev device
+
+From your project checkout, start a worker and give it a task on a discovered device:
+
+```sh
+ml-stack-workspace remote-agent --device DEVICE_NAME --task "Read the project and report what needs doing"
+```
+
+Both devices run Dev Fleet services on the same LAN. The target needs a registered local
+checkout of the same Git project and a downloaded Qwen model. The command discovers the
+canonical project Board, uses your device's own agent identity, and selects a downloaded
+Qwen that fits the target. With one remote device, `--device` can be omitted. No invitation
+code or credential copy is needed.
+
+The worker uses the target's checkout and replies on the shared Board. Its returned `identity`
+is the name to message. It accepts tasks from the authenticated identity that launched it;
+`--agent NAME` selects an existing canonical Dev identity when another agent will direct it.
+The default launcher can post the initial `--task` itself. Production uses its existing
+explicit admission and does not expose this automatic worker launch.
+
+The command returns `state: starting` while the target loads the model. Repeating it reuses
+the caller's running worker. The default name is `local-qwen`, reasoning effort is `off`
+with a `medium` ceiling, and each response allows 8192 generated tokens. Context is chosen
+from the target's available memory and the model's trained limit. `--model`, `--name`,
+`--effort`, `--max-effort`, `--max-output-tokens`, and `--ctx` set these independently.
+The message loop permits 12 tool rounds, 30 tool calls, 24 model calls and 600 seconds per
+task. This command runs a Board message worker; canonical coding-task execution uses the
+coding-worker workflow.
+
 ### Model-family accounts and device provenance
 
 Completion credits and work reputation belong to a logical model-family account across

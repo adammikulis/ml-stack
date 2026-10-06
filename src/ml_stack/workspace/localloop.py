@@ -155,7 +155,8 @@ class Loop:
         self.approval = (functools.partial(lt.ask_a_person, stop=self.stopped)
                          if settings.approval is lt.ask_a_person else settings.approval)
         self.execute = settings.execute
-        self.token = tokens.load(ws.base, agent.identity or agent.name)
+        self.token = (ws.worker_token(agent) if hasattr(type(ws), "worker_token")
+                      else tokens.load(ws.base, agent.identity or agent.name))
         self.steps = self.tasks = self.ignored = 0
         self.effort = agent.effort
 
@@ -199,7 +200,9 @@ class Loop:
         guarded = lt.Guarded(self.held.client, effort=level,
                              limits=lt.Limits(self.caps.seconds, self.caps.steps, self.agent.ctx,
                                               self.agent.max_output_tokens), stop=self.stopped)
-        extension = lt.workspace_extension(self.ws, self.token, self.agent.name, state, self.obeyed)
+        identity = (self.ws.worker_identity if hasattr(type(self.ws), "worker_token")
+                    else self.agent.name)
+        extension = lt.workspace_extension(self.ws, self.token, identity, state, self.obeyed)
         agent = chatting.Chat(guarded, person, tools=chatting.tools_for_chat(person=person),
                               role=self.agent.role, task=True, extension=extension)
         agent.rounds = self.caps.rounds

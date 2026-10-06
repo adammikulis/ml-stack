@@ -29,6 +29,13 @@ METHODS = frozenset({"send", "inbox", "outbox", "ack", "thread", "announce", "cl
                      "board.rollup", "board.summary", "board.mentions"})
 
 
+def _reputation(ws, token, args, kwargs):
+    from ml_stack.workspace.work_reputation import standings
+    if args or set(kwargs) - {"agent", "offset"}:
+        raise ValueError("reputation takes an agent and evidence offset")
+    return standings(ws, token, **kwargs)
+
+
 class WorkspaceHost:
     """Serve isolated registered project boards to authenticated agents."""
 
@@ -181,7 +188,9 @@ class WorkspaceHost:
         token, operation, args, kwargs = request
         if operation in {"whoami", "agents", "claims", "who", "history"} and "read" not in who.can:
             raise Denied("agent capability has no read permission")
-        if operation == "task.command":
+        if operation == "work.reputation":
+            result = _reputation(ws, token, args, kwargs)
+        elif operation == "task.command":
             if len(args) != 1 or kwargs:
                 raise ValueError("canonical task operation takes one typed command")
             result = remote_tasks.command(ws, token, self.projects.get(project_id), args[0])

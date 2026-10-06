@@ -315,8 +315,11 @@ def test_foreign_device_rebinding_and_agent_enrollment_cannot_steal_credits(work
         device_agent.bind_worker(work.ws, work.owner, 'worker')
     second = device_agent.enroll(work.ws, work.owner)
     rows = standings(work.ws, work.owner, ledger=work.ledger)['team']
-    assert next(row for row in rows if row['agent'] == first['base_id'])['economy']['balance'] == 10
-    assert next(row for row in rows if row['agent'] == second['base_id'])['economy']['balance'] == 0
+    original = next(row for row in rows if row['agent'] == work.agent_id)
+    assert original['economy']['balance'] == 10 and original['members'] == [work.agent_id]
+    assert device_agent.account_for(work.ws, work.agent_id)['base_id'] == first['base_id']
+    assert not any(row['agent'] in (first['base_id'], second['base_id']) for row in rows)
+    assert sum(row['economy']['balance'] for row in rows) == 10
 
 
 def test_awards_ratings_and_usage_are_linked_graph_evidence_and_migration_is_once(work, monkeypatch):

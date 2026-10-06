@@ -36,6 +36,7 @@ from ml_stack.workspace import (
     project_connection,
     remote_cli,
     remote_task_client,
+    remote_workers,
     task_integration,
     task_outcomes,
     task_worktree_recovery,
@@ -808,6 +809,10 @@ def _remote(args: argparse.Namespace) -> int:
 
 COMMANDS.add("remote", _guarded(_remote), help="attach and use one shared project board on its host",
              options=remote_cli.OPTIONS)
+COMMANDS.add("remote-agent", _guarded(remote_workers.main_cli),
+             help="launch a local Qwen worker on a discovered Dev device", options=remote_workers.OPTIONS)
+
+
 def _bare(handler: Callable[[argparse.Namespace, Workspace], int]) -> Callable[[argparse.Namespace], int]:
     def run(args):
         requested = getattr(args, "project", "") if handler is _connect else ""

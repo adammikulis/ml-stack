@@ -31,6 +31,8 @@ def scope(ws) -> str:
 def standings(ws, token: str, *, agent: str = "", offset: int = 0,
               ledger: WorkLedger | None = None) -> dict[str, Any]:
     """The authenticated caller's completion standing and its workspace team's evidence."""
+    if reader := getattr(type(ws), "remote_reputation", None):
+        return reader(ws, token, agent=agent, offset=offset)
     who = ws.auth(token)
     ws._may(who, 'read')
     if type(agent) is not str or (agent and not valid_id(agent)):
