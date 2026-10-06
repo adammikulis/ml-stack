@@ -77,3 +77,24 @@ def test_daemon_routes_roots_before_startup_services(tmp_path, monkeypatch):
     monkeypatch.setattr(daemon, "load_cluster_key", inspect_startup)
     with pytest.raises(StartupObserved):
         daemon.serve_forever(root=root, announce=False, web=False)
+
+
+def test_background_startup_does_not_display_token(monkeypatch, capsys):
+    from ml_stack import person
+    from ml_stack.fleet.runtime_paths import announce_token
+
+    def refuse(_action):
+        raise person.HumanRequired("background process")
+
+    monkeypatch.setattr(person, "require_person", refuse)
+    announce_token("fixture-token")
+    assert capsys.readouterr().out == ""
+
+
+def test_person_startup_displays_token(monkeypatch, capsys):
+    from ml_stack import person
+    from ml_stack.fleet.runtime_paths import announce_token
+
+    monkeypatch.setattr(person, "require_person", lambda _action: None)
+    announce_token("fixture-token")
+    assert capsys.readouterr().out == "  token fixture-token\n"
