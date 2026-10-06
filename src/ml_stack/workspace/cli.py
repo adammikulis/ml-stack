@@ -20,6 +20,7 @@ from ml_stack.log import say, warn
 from ml_stack.sentinel import human
 from ml_stack.sentinel.human import HumanRequired
 from ml_stack.workspace import (
+    backlog,
     chat,
     coordinator_client,
     coordinator_config,
@@ -532,6 +533,14 @@ TABLE: tuple[tuple[str, str, list[Any], Handler], ...] = (
     ("tasks", "authorized canonical tasks and progress metrics", [], lambda a, w, t: TaskBoard(w).list(t)),
     ("task", "task lease, checkpoints, proposal and independent review", [flag("id")],
      lambda a, w, t: TaskBoard(w).get(t, a.id)),
+    ("task-subscribe", "receive inbox status changes for a task", [flag("id")],
+     lambda a, w, t: TaskBoard(w).subscribe(t, a.id)),
+    ("task-unsubscribe", "stop inbox status changes for a task", [flag("id")],
+     lambda a, w, t: TaskBoard(w).unsubscribe(t, a.id)),
+    ("issue-subscribe", "receive inbox status changes for a GitHub issue", [flag("ref", metavar="OWNER/REPO#NUMBER")],
+     lambda a, w, t: backlog.subscribe_issue(w, t, a.ref)),
+    ("issue-unsubscribe", "stop inbox status changes for a GitHub issue", [flag("ref", metavar="OWNER/REPO#NUMBER")],
+     lambda a, w, t: backlog.subscribe_issue(w, t, a.ref, False)),
     ("task-claim", "claim a queued task with an existing trusted allocation", [flag("id"), flag("allocation_id")],
      lambda a, w, t: TaskBoard(w).claim(t, a.id, a.allocation_id)),
     ("task-heartbeat", "renew your active canonical task lease", [flag("id")],

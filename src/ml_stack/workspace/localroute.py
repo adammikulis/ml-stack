@@ -37,7 +37,7 @@ __all__ = ["COOKIE", "PREFIX", "respond", "serve", "session_ok"]
 PREFIX = "/agents/"
 COOKIE = "ml_session"
 BODY_MAX = 4096
-START_KEYS = {"model": str, "name": str, "role": str, "effort": str, "max_effort": str, "profile": str, "ctx": str, "project": str, "harness": str}
+START_KEYS = {"model": str, "name": str, "role": str, "effort": str, "max_effort": str, "profile": str, "ctx": str, "project": str, "repo": str, "harness": str}
 STOP_WAIT_S = 10.0
 
 
@@ -77,7 +77,8 @@ def _read(ws: Workspace, route: str) -> Any:
         return {"agents": ls.listing(ws), "roles": la.role_choices(), "default_role": roles.DEFAULT, "efforts": [*le.LEVELS, le.AUTO],
                 "default_effort": le.DEFAULT, "default_max_effort": le.DEFAULT_MAX,
                 "orders_from": list(la.DEFAULT_ORDERS_FROM), "harnesses": [localharness.OWN, *coding.HARNESSES],
-                "saved": [{key: getattr(agent, key) for key in START_KEYS}
+                "saved": [{key: (agent.extra.get("backlog", {}).get("repo", "") if key == "repo"
+                                 else getattr(agent, key)) for key in START_KEYS}
                           for name in la.names(ws) if (agent := la.load(ws, name)) is not None]}
     if route == "model":
         return {**_model_view(), "profiles": {"chat": _model_view(), "coding": _model_view(coding=True)}}
@@ -99,12 +100,17 @@ def _typed(body: bytes, shape: Mapping[str, type]) -> dict[str, Any]:
 def _write(ws: Workspace, route: str, body: bytes) -> tuple[int, Any]:
     if route == "start":
         data = _typed(body, START_KEYS)
+        profile = data.get("profile") or "coding"
+        role = data.get("role") or (la.PLAN_AND_GO if profile == "coding" else roles.DEFAULT)
+        context = lp.parse_ctx(data.get("ctx", "")) or (
+            131072 if profile == "coding" else lp.profile(profile).ctx)
         try:
             got = ls.start(ws, ls.Ask(data.get("model") or localmodel.AUTO, data.get("name", ""),
-                                      data.get("role") or roles.DEFAULT, data.get("effort") or le.DEFAULT,
+                                      role, data.get("effort") or le.DEFAULT,
                                       data.get("max_effort") or le.DEFAULT_MAX,
-                                      data.get("profile") or "chat", lp.parse_ctx(data.get("ctx", "")),
-                                      data.get("project", ""), harness=data.get("harness") or "codex"),
+                                      profile, context,
+                                      data.get("project", ""), harness=data.get("harness") or "claude",
+                                      repo=data.get("repo", "")),
                            person_token=tokens.read_file(tokens.directory(ws.base) / tokens.OWNER_FILE))
         except ls.Unavailable as err:
             return 409, {"error": plain.line(err.problem, 300), "hint": plain.line(err.hint, 200)}

@@ -16,6 +16,7 @@ from ml_stack import jobs, roles
 from ml_stack.serve import broker_wire
 from ml_stack.serve.process import pid_exists, started_at
 from ml_stack.workspace import (
+    backlog,
     device_agent,
     issuepump,
     localagent as la,
@@ -30,7 +31,7 @@ from ml_stack.workspace import (
     tokens,
 )
 from ml_stack.workspace.chain import held
-from ml_stack.workspace.identity import AGENT
+from ml_stack.workspace.identity import AGENT, LEAD, Denied
 from ml_stack.workspace.service import Workspace
 
 __all__ = ["Ask", "Started", "Stopped", "Unavailable", "listing", "start", "stop"]
@@ -62,6 +63,7 @@ class Ask:
     orders_from: tuple[str, ...] = la.DEFAULT_ORDERS_FROM
     harness: str = lh.CODEX
     authority: tuple[str, str] | None = None
+    repo: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,21 +98,27 @@ def _mint(ws: Workspace, name: str, project: dict[str, str]) -> None:
     ws.board.place(name, project)
 
 
-def start(ws: Workspace, ask: Ask, *, pick=None, spawn=None, person_token="") -> Started:
+def start(ws: Workspace, ask: Ask, *, pick=None, spawn=None, person_token="", parent_token="") -> Started:
     """Start a worker and bind person-authorized launches to the persistent device account."""
+    if parent_token and ws.auth(parent_token).role not in (AGENT, LEAD):
+        raise Denied('coding queue launch requires an authenticated agent parent')
     if person_token:
         device_agent.enroll(ws, person_token)
-    result = _start(ws, ask, pick=pick, spawn=spawn)
+    result = _start(ws, ask, pick=pick, spawn=spawn, parent_token=parent_token)
     if person_token:
         device_agent.bind_worker(ws, person_token, result.name)
     return result
 
 
-def _worker_identity(ws, have, name, project):
+def _worker_identity(ws, have, name, project, parent_token=""):
     if have and ws.registry.role_of(have.identity or name):
         identity = have.identity or name
-        ws.auth(tokens.load(ws.base, identity))
+        child = ws.auth(tokens.load(ws.base, identity))
+        if parent_token and child.parent != ws.auth(parent_token).id:
+            raise Denied('coding queue launch requires this worker registered parent')
         return identity
+    if parent_token:
+        return ws.delegate(parent_token, name)['id']
     _mint(ws, name, project)
     return name
 
@@ -122,7 +130,7 @@ def _running(have, chosen):
 
 
 def _start(ws: Workspace, ask: Ask, *, pick: localmodel.Pick | None = None,
-          spawn: Callable[..., Any] | None = None) -> Started:
+          spawn: Callable[..., Any] | None = None, parent_token="") -> Started:
     """Join a local model to the workspace and run its loop detached; the same name again reports
     the agent already running. Raises `Unavailable` when no suitable model is downloaded or it
     would not fit, ValueError for a bad name, role or project."""
@@ -133,12 +141,15 @@ def _start(ws: Workspace, ask: Ask, *, pick: localmodel.Pick | None = None,
     orders = la.check_orders(list(ask.orders_from))
     prof = lp.profile(ask.profile)
     ctx = ask.ctx or prof.ctx
+    if parent_token and prof.name == 'coding' and (not folder_ or
+            ws.registry.info(ws.auth(parent_token).id).get('project') != projects.describe(folder_)):
+        raise Denied('coding queue launch requires the parent registered project')
     chosen = pick or localmodel.choose(
         ask.model, selection=localmodel.Selection(coding=prof.name == "coding", context=ctx))
     if not chosen.ok:
         raise Unavailable(chosen.problem, chosen.hint)
     if prof.name == "coding":
-        return _coding(ws, ask, chosen, ctx, folder_)
+        return _coding(ws, ask, chosen, ctx, folder_, parent_token)
     problem, hint = lp.admit(chosen.ref or chosen.name, ctx)
     if problem:
         raise Unavailable(problem, hint)
@@ -166,7 +177,8 @@ def _start(ws: Workspace, ask: Ask, *, pick: localmodel.Pick | None = None,
     return Started(name, job.pid, chosen.name, role)
 
 
-def _coding(ws: Workspace, ask: Ask, chosen: localmodel.Pick | None, ctx: int, project: str) -> Started:
+def _coding(ws: Workspace, ask: Ask, chosen: localmodel.Pick | None, ctx: int, project: str,
+            parent_token="") -> Started:
     """Start a coding worker through its configured native harness and maintained broker."""
     chosen = chosen or localmodel.choose(ask.model, selection=localmodel.Selection(coding=True, context=ctx))
     if not chosen.ok:
@@ -195,7 +207,8 @@ def _coding(ws: Workspace, ask: Ask, chosen: localmodel.Pick | None, ctx: int, p
                          ctx=ctx, project=project, effort=le.clamp(le.valid(ask.effort), le.valid(ask.max_effort)), max_effort=ask.max_effort,
                          extra=dict(have.extra) if have else {}, orders_from=la.check_orders(list(ask.orders_from)),
                          started=time.time())
-        identity = (have.identity or have.name) if ask.authority else _worker_identity(ws, have, name, project)
+        identity = (have.identity or have.name) if ask.authority else _worker_identity(
+            ws, have, name, projects.describe(project) if project else {}, parent_token)
         agent = replace(agent, identity=identity)
         if not ask.authority:
             _record_model(ws, identity, chosen)
@@ -204,6 +217,9 @@ def _coding(ws: Workspace, ask: Ask, chosen: localmodel.Pick | None, ctx: int, p
                           home=la.folder(ws) / "jobs")
         la.save(ws, replace(agent, pid=job.pid, process_started=started_at(job.pid) or 0.0,
                             log=str(job.log)))
+    repo = ask.repo or (backlog.repository(project) if project else "")
+    if repo and parent_token:
+        issuepump.configure_and_start(ws, parent_token, name, repo, project)
     ws.audit("local-agent.start", onboard.SETUP.id, agent=name, role=role, harness=ask.harness)
     return Started(name, job.pid, chosen.name, role)
 

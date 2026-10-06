@@ -7,11 +7,13 @@ import time
 
 from ml_stack import activity, files, jobs
 from ml_stack.serve.process import pid_exists, started_at
-from ml_stack.workspace import backlog, localagent as la, task_scheduler, task_scope, tokens
+from ml_stack.workspace import backlog, localagent as la, project as projects, task_scheduler, tokens
 from ml_stack.workspace.chain import held
 from ml_stack.workspace.identity import AGENT_MARKERS, HUMAN, Denied
 from ml_stack.workspace.service import Workspace
 from ml_stack.workspace.taskboard import TaskBoard
+
+QUEUE_DEPTH = 3
 
 
 def _status(ws, agent, **fields):
@@ -44,44 +46,87 @@ def _reconcile(ws, token, agent, board):
     with held(ws.base / 'issue-backlog.lock'), backlog._store(ws) as graph:
         rows = [row['attrs'] for row in graph.nodes('issue-dispatch')
                 if row['attrs']['worker'] == (agent.identity or agent.name)]
+    active = []
     for row in rows:
         task = board.get(token, row['task'])
+        if not row.get('assigned_notified'):
+            _deliver_assignment(ws, token, agent, row, task)
+        watchers = backlog.issue_watchers(ws, row['issue']['repo'], row['issue']['number'])
+        if task['state'] != row.get('notified_state'):
+            for watcher in watchers:
+                ws.send(token, watcher, 'status', f"Task {task['id']} is {task['state']}: {task['title'][:160]}",
+                        subject=f"Task {task['state']}: {task['title'][:100]}")
+            row['notified_state'] = task['state']
+            with held(ws.base / 'issue-backlog.lock'), backlog._store(ws) as graph:
+                graph.upsert_node({'id': row['id'], 'kind': 'issue-dispatch', 'label': row['task'], 'attrs': row})
         if task['state'] in ('queued', 'working', 'accepted'):
-            return task
+            active.append(task)
+            continue
         if row.get('reported_state') == task['state']:
             continue
         if task['state'] in ('review', 'completed', 'blocked', 'rejected'):
             summary = task.get('blocked_reason') or (task.get('proposal') or {}).get('summary', task['state'])
             backlog.finish(ws, row['issue'], agent, ('answer' if task['state'] in ('review', 'completed') else 'status', summary))
+            if (agent.identity or agent.name) not in watchers:
+                ws.send(token, agent.identity or agent.name, 'status',
+                        f"Task {task['id']} is {task['state']}; {summary[:500]}",
+                        subject=f"Task {task['state']}: {task.get('title', task['id'])[:100]}")
             with held(ws.base / 'issue-backlog.lock'), backlog._store(ws) as graph:
                 row['reported_state'] = task['state']
                 graph.upsert_node({'id': row['id'], 'kind': 'issue-dispatch', 'label': row['task'], 'attrs': row})
-    return None
+    return active
 
 
-def _enqueue(ws, token, agent, board):
-    issue, detail = backlog.pick(ws, agent)
+def _enqueue(ws, token, agent, board, exclude=frozenset()):
+    issue, detail = backlog.pick(ws, agent, exclude=exclude)
     if issue is None:
         _status(ws, agent, state='blocked' if 'intake blocked' in detail.lower() else 'idle', detail=detail)
         return None
     source = f"github:{issue['repo']}:{issue['number']}:{issue.get('updatedAt', '')}"
     task = board.create(token, {'title': str(issue['title'])[:200], 'description': _task(issue),
-        'source_key': source, 'capabilities': ['coding'], 'limits': {'max_wall_s': 1200, 'max_retries': 0},
+        'source_key': source, 'project': projects.describe(agent.project), 'capabilities': ['coding'], 'limits': {'max_wall_s': 1200, 'max_retries': 0},
         'acceptance': ['Compare the issue with current source and owner decisions; explain obsolete or completed requests.',
                        'Commit one currently missing change, or provide a supported no-change finding.',
                        'Report meaningful scoped non-Linux checks through scripts/test and remaining limitations.']})
+    if (agent.identity or agent.name) not in board.watchers(task['id']):
+        board.subscribe(token, task['id'], subscriber=agent.identity or agent.name)
     key = f"issue-dispatch:{task['id']}"
     with held(ws.base / 'issue-backlog.lock'), backlog._store(ws) as graph:
+        existing = next((row['attrs'] for row in graph.nodes('issue-dispatch') if row['id'] == key), {})
+        dispatch = {**existing, 'id': key, 'task': task['id'],
+                    'worker': agent.identity or agent.name, 'issue': issue}
         graph.upsert_node({'id': key, 'kind': 'issue-dispatch', 'label': task['title'],
-                           'attrs': {'id': key, 'task': task['id'], 'worker': agent.identity or agent.name, 'issue': issue}})
+                           'attrs': dispatch})
         graph.upsert_edge({'source': key, 'target': issue['key'], 'rel': 'issue-source'})
         graph.upsert_node({'id': task['id'], 'kind': 'canonical-task-ref', 'label': task['title'],
                            'attrs': {'workspace': board.workspace_id}})
         graph.upsert_edge({'source': key, 'target': task['id'], 'rel': 'canonical-task'})
+    _deliver_assignment(ws, token, agent, dispatch, task)
     _status(ws, agent, state='queued', task=task['id'], issue_url=issue['url'], title=issue['title'])
     activity.record('agent.task', actor=agent.identity or agent.name, subject=issue['title'], outcome='queued',
                     refs={'issue_url': issue['url'], 'task': task['id']}, meta={'source': 'issue'})
     return task
+
+
+def _deliver_assignment(ws, token, agent, row, task):
+    """Notify the subscribed worker once the durable task reference exists."""
+    if row.get('assigned_notified'):
+        return
+    recipient = agent.identity or agent.name
+    ws.send(token, recipient, 'status', f"Subscribed to task {task['id']}: {task['title'][:140]}",
+            subject=f"Subscribed to task {task['id']}")
+    ws.send(token, recipient, 'task',
+            f"Assigned project task {task['id']}: {task['title']} — {row['issue']['url']}",
+            subject=f"Task assigned: {task['title'][:100]}")
+    observers = set(backlog.issue_watchers(ws, row['issue']['repo'], row['issue']['number']))
+    observers.discard(recipient)
+    for watcher in sorted(observers):
+        ws.send(token, watcher, 'status', f"Task {task['id']} is queued: {task['title'][:160]}",
+                subject=f"Task queued: {task['title'][:100]}")
+    row['assigned_notified'] = True
+    row['notified_state'] = task['state']
+    with held(ws.base / 'issue-backlog.lock'), backlog._store(ws) as graph:
+        graph.upsert_node({'id': row['id'], 'kind': 'issue-dispatch', 'label': row['task'], 'attrs': row})
 
 
 def step(ws, token, name):
@@ -98,20 +143,29 @@ def step(ws, token, name):
         raise Denied('canonical repository intake requires the registered worker parent')
     task_scheduler.integrate_completed(ws, token, identity)
     board = TaskBoard(ws)
+    board.flush_notifications(token)
     pending = _reconcile(ws, token, agent, board)
     if la.pause_file(ws, name).exists() or not la.alive(agent):
         _status(ws, agent, state='paused', detail='The coding worker is paused or stopped')
         return
+    excluded = {_issue_source(task) for task in pending}
+    for _ in range(max(0, QUEUE_DEPTH - len(pending))):
+        task = _enqueue(ws, token, agent, board, excluded)
+        if task is None:
+            break
+        pending.append(task)
+        excluded.add(_issue_source(task))
     state = la.status_of(ws, name)
     if state.get('state') != 'idle':
-        _status(ws, agent, state='waiting', detail='The worker is executing canonical work')
+        _status(ws, agent, state='working', detail=f"{len(pending)} project tasks queued or active")
         return
-    queued = any(row['state'] == 'queued' and task_scope.eligible(ws, child, row)
-                 and set(row['capabilities']) <= {agent.profile} for row in board.list(token)['tasks'])
-    if pending is None and not queued:
-        _enqueue(ws, token, agent, board)
     if lease := state.get('lease', {}).get('id'):
         task_scheduler.assign_next(ws, token, identity, lease)
+
+
+def _issue_source(task):
+    parts = str(task.get('source_key', '')).split(':', 3)
+    return f"issue:{parts[1]}:{parts[2]}" if len(parts) == 4 and parts[0] == 'github' else ''
 
 
 def start(ws, token, name):
@@ -132,6 +186,12 @@ def start(ws, token, name):
         graph.upsert_node({'id': key, 'kind': 'issue-producer', 'label': name, 'attrs': record})
         _status(ws, agent, **record, state="starting")
     return job.pid
+
+
+def configure_and_start(ws, token, name, repo, project):
+    """Bind a coding worker launch to its project issue queue and start the producer."""
+    backlog.configure(ws, token, name, repo, project)
+    return start(ws, token, name)
 
 
 def run(argv=None):

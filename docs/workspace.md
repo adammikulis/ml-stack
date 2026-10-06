@@ -163,8 +163,8 @@ separate agent processes and a lead session coordinate through ml-stack instead 
 person relaying text and instead of colliding on scratch files, ports, branches and servers.
 
     ml-stack workspace init                         # a person, at a terminal, once (setup does this)
-    ml-stack workspace mint --role lead lead-1      # prints that agent's token once
-    export ML_STACK_WORKSPACE_TOKEN=...             # per agent process (or --agent NAME)
+    ml-stack workspace join --agent worker-one     # joins this agent automatically
+    ml-stack workspace status --agent worker-one   # authenticated agent session
     ml-stack workspace send reviewer task "check the lease tests"
     ml-stack workspace watch --once --timeout 600   # run in the background; exits on a message
     ml-stack workspace claim port 8081 --pid $$     # released when this shell exits
@@ -624,6 +624,14 @@ The main **Tasks** view organizes canonical claims, resource leases, checkpoints
 artifacts, independent outcomes and credit recording. See [Tasks and independent outcomes](tasks.md)
 for the person workflow, service/API contract, recovery and supported limits. Task outcomes
 are verified separately from Board discussion and worker progress reports.
+
+Follow a canonical task or GitHub issue with `ml-stack-workspace task-subscribe TASK_ID` or
+`ml-stack-workspace issue-subscribe OWNER/REPO#NUMBER`. Use the matching `task-unsubscribe` or
+`issue-unsubscribe` command to stop updates. Issue-driven workers subscribe to each task before
+receiving its assignment notice; the worker gets a subscription status before that assignment.
+Followers are notified when someone subscribes or unsubscribes. Assignment and task state notices
+are persisted and retried by the issue worker if delivery is temporarily refused or rate-limited.
+The task queue remains authoritative when notices are unread.
 
 A scheduler-prepared task worktree can be explicitly handed from its authenticated parent
 to the assigned child. Before a native mutation, the guard checks the graph assignment,

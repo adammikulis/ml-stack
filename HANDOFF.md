@@ -1,14 +1,19 @@
 # Handoff
 
-## Current state (2026-10-03)
+## Active work (2026-10-06)
 
-What the docs now describe as in place: `ml-stack-chat` (roles `read-only`, `approve-first`, `plan-and-go`, saved
-Always/Never rules; `ml-stack-do` is gone), graph-based encrypted agent memory per user and per
-project (`ml-stack-memory`), source reputation (`ml-stack-reputation`), the one OS keystore item
-(`ml-stack-security unlock`, `keystore`, `keystore-reset`), the single click-to-release sentinel
-dialog (`ML_STACK_NOTIFY`), MTP draft heads on by default, the typed `decide()` API with
-`ml-stack-decide train`, `eval` and `jevbench`, and the auto worker budget in `scripts/test`.
-`docs/assistant-security.md` is the contract for new integrations and says what is not built.
+- **Speed up checks without reducing coverage.** `scripts/gates/_floors.py` now reuses the gate's
+  full tree fingerprint for its collection cache. An uncached `scripts/budgets` run still took
+  95.6 seconds; further profiling and safe optimization remain.
+- **Repair shared Git metadata before integration.** The primary repository's multi-pack index
+  fails verification (`incorrect checksum`, `bad pack-int-id`), so ordinary Git status fails.
+  Git commands work with `-c core.multiPackIndex=false`; do not rewrite pack metadata until the
+  worktrees and unique changes are inventoried.
+- **Resume the local Qwen worker after integration.** The worker was stopped while task-queue
+  launch and task-worktree behavior were being changed; verify its state and start it against the
+  clean development checkout so it can claim queued project tasks.
+
+## Current state (2026-10-03)
 
 Open, and known limits (each is a task or a gap, not a done item):
 
