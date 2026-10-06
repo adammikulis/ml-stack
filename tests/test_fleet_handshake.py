@@ -91,7 +91,7 @@ def machine(tmp_path, udp):
 
 
 def _join(tmp_path, udp, words=WORDS, name="b"):
-    return join_by_passphrase(words, "lab", tmp_path / name / "cluster.key", timeout_s=1.0, port=udp)
+    return join_by_passphrase(words, "lab", tmp_path / name / "cluster.key", options=joining.JoinOptions(timeout_s=1.0, port=udp))
 
 
 def test_a_new_machine_given_the_passphrase_receives_the_cluster_key(machine, tmp_path, udp):

@@ -29,6 +29,7 @@ from .pairing import fingerprint_of, unverified_context
 __all__ = [
     "API",
     "Declined",
+    "JoinOptions",
     "Joiner",
     "Joining",
     "Offer",
@@ -50,6 +51,20 @@ PLAIN = "plain"
 MOST_PENDING = 16
 PENDING_S = 30.0
 MOST_BODY = 4096
+
+
+@dataclass(frozen=True, slots=True)
+class JoinOptions:
+    """Cluster admission profile and discovery controls."""
+
+    mode: str | None = None
+    port: int | None = None
+    timeout_s: float = 1.5
+    action: str | None = None
+    existing: bool = False
+
+
+DEFAULT_JOIN_OPTIONS = JoinOptions()
 
 
 def join_secret(passphrase: str, group: str) -> str:
@@ -368,40 +383,37 @@ def create_by_passphrase(passphrase: str, group: str,
 
 
 def cluster_action(mode: str, passphrase: str, group: str,
-                   path: Path | str | None = None, *, port: int | None = None,
-                   cluster_mode: str | None = None) -> Membership:
+                   path: Path | str | None = None, *, options: JoinOptions = DEFAULT_JOIN_OPTIONS) -> Membership:
     """Join an existing cluster or create a new one."""
     if mode == "join":
-        return join_existing(passphrase, group, path, port=port, mode=cluster_mode)
+        return join_existing(passphrase, group, path, options=options)
     if mode == "create":
-        return create_by_passphrase(passphrase, group, path, port=port, mode=cluster_mode or "prod")
+        return create_by_passphrase(passphrase, group, path, port=options.port, mode=options.mode or "prod")
     raise DiscoveryError("Choose Join existing cluster or Create new cluster.")
 
 
 def join_by_passphrase(passphrase: str, group: str,
-                       path: Path | str | None = None, *, timeout_s: float = 1.5,
-                       port: int | None = None, mode: str | None = None) -> Membership:
+                       path: Path | str | None = None, *, options: JoinOptions = DEFAULT_JOIN_OPTIONS) -> Membership:
     """Join a named cluster or create it when no daemon answers."""
     group = disc.require_name(group)
     secret = join_secret(disc.check_length(passphrase), group)
-    joiners = find_joiners(group, timeout_s=timeout_s, port=port)
+    joiners = find_joiners(group, timeout_s=options.timeout_s, port=options.port)
     if not joiners:
         held = next((m for m in disc.memberships(path) if m.group == group), None)
-        return held or disc.mint_cluster(group, path, join=secret, mode=mode or "prod")
-    return _accept(joiners, group, secret, path, mode=mode)
+        return held or disc.mint_cluster(group, path, join=secret, mode=options.mode or "prod")
+    return _accept(joiners, group, secret, path, mode=options.mode)
 
 
 def join_existing(passphrase: str, group: str, path: Path | str | None = None, *,
-                  timeout_s: float = 1.5, port: int | None = None,
-                  mode: str | None = None) -> Membership:
+                  options: JoinOptions = DEFAULT_JOIN_OPTIONS) -> Membership:
     """Join a live cluster without creating a replacement when it disappears."""
     group = disc.require_name(group)
     secret = join_secret(disc.check_length(passphrase), group)
-    joiners = find_joiners(group, timeout_s=timeout_s, port=port)
+    joiners = find_joiners(group, timeout_s=options.timeout_s, port=options.port)
     if not joiners:
         raise DiscoveryError(f"No machine in '{group}' answered on this network; "
                              "cluster is no longer available; refresh nearby clusters.")
-    return _accept(joiners, group, secret, path, mode=mode)
+    return _accept(joiners, group, secret, path, mode=options.mode)
 
 
 def _accept(joiners: list[Joiner], group: str, secret: str,

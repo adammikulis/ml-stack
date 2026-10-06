@@ -28,9 +28,9 @@ def test_native_named_hint_then_authenticated_join(tmp_path, monkeypatch):
         remembered = []
         monkeypatch.setattr("ml_stack.fleet.ui.recovery.remember", lambda *args: remembered.append(args))
         with pytest.raises(discovery.DiscoveryError):
-            client.join("the wrong words entirely", "lab", "local", existing=True)
+            client.join("the wrong words entirely", "lab", "local", options=joining.JoinOptions(existing=True))
         assert not discovery.memberships(client.cluster_key_path) and not remembered
-        client.join("quince larch marlow", "lab", "local", existing=True)
+        client.join("quince larch marlow", "lab", "local", options=joining.JoinOptions(existing=True))
         assert discovery.load_cluster_key(client.cluster_key_path) == host.member.key
         assert remembered[0][:2] == ("quince larch marlow", "lab")
     finally:
@@ -41,7 +41,7 @@ def test_selected_missing_cluster_never_creates_membership(tmp_path, monkeypatch
     monkeypatch.setattr(joining, "find_joiners", lambda *args, **kwargs: [])
     client = UI(name="desk", cluster_key_path=tmp_path / "client.key")
     with pytest.raises(discovery.DiscoveryError, match="no longer available"):
-        client.join(WORDS, "Cedar lab", "local", existing=True)
+        client.join(WORDS, "Cedar lab", "local", options=joining.JoinOptions(existing=True))
     assert not discovery.memberships(client.cluster_key_path)
 
 
