@@ -7,7 +7,7 @@ import pytest
 from workspace_kit import Kit, clean_env
 
 from ml_stack.net import git
-from ml_stack.workspace import backlog, issuepump, localagent as la, localcli, tokens
+from ml_stack.workspace import backlog, issuepump, localagent as la, localcli, project as projects, tokens
 from ml_stack.workspace.identity import Denied
 from ml_stack.workspace.taskboard import TaskBoard
 
@@ -23,6 +23,7 @@ def setup(monkeypatch, tmp_path):
     git.run(["add", "source.py"], cwd=project)
     git.run(["-c", "user.name=Test", "-c", "user.email=test@example.invalid",
              "commit", "-m", "baseline"], cwd=project)
+    kit.ws.registry.set_project(kit.ws.auth(kit.owner), "lead", projects.describe(project))
     child = kit.ws.delegate(parent, "worker")
     agent = la.Agent("worker", "local.gguf", identity=child["id"], profile="coding", project=str(project))
     la.save(kit.ws, agent)

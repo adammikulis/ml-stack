@@ -2,11 +2,6 @@
 
 ## Active work (2026-10-06)
 
-- **Finish task and issue subscription notifications.** The implementation is in the isolated
-  worktree `/mnt/c/Users/Adam/Documents/repos/ml-stack-agent-taskqueue` on
-  `feat/agent-project-task-queue`; changes are uncommitted. Independent review found no remaining
-  blockers. The latest focused run passed 7 tests; rerun affected selectors and the structural
-  gate after resuming, then commit and integrate before restarting `qwen-wsl`.
 - **Speed up checks without reducing coverage.** `scripts/gates/_floors.py` now reuses the gate's
   full tree fingerprint for its collection cache. An uncached `scripts/budgets` run still took
   95.6 seconds; further profiling and safe optimization remain.
@@ -19,14 +14,6 @@
   clean development checkout so it can claim queued project tasks.
 
 ## Current state (2026-10-03)
-
-What the docs now describe as in place: `ml-stack-chat` (roles `read-only`, `approve-first`, `plan-and-go`, saved
-Always/Never rules; `ml-stack-do` is gone), graph-based encrypted agent memory per user and per
-project (`ml-stack-memory`), source reputation (`ml-stack-reputation`), the one OS keystore item
-(`ml-stack-security unlock`, `keystore`, `keystore-reset`), the single click-to-release sentinel
-dialog (`ML_STACK_NOTIFY`), MTP draft heads on by default, the typed `decide()` API with
-`ml-stack-decide train`, `eval` and `jevbench`, and the auto worker budget in `scripts/test`.
-`docs/assistant-security.md` is the contract for new integrations and says what is not built.
 
 Open, and known limits (each is a task or a gap, not a done item):
 

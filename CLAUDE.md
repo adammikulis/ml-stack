@@ -76,10 +76,11 @@ Known failures remain named tasks with evidence and ownership; fix forward rathe
 them as green. A scoped pass is not a claim that the full suite passed. A known relevant
 regression must be fixed before the affected change lands.
 
-Linux and WSL are first-class development environments. Run affected Linux checks through the
-maintained test broker when the change touches Linux behavior, and report the exact platform
-coverage. Keep the same scoped and background policy as other platforms; do not run a second full
-suite before every merge.
+**Linux testing is paused by the owner.** Do not launch local or container Linux tests until
+the owner explicitly resumes them. Linux is not a per-merge prerequisite during this pause;
+record the platform coverage gap honestly. Automated checks and background platform coverage do
+not change this local authorization. When resumed, Linux checks follow the same scoped and
+background policy, rather than a second full suite before every merge.
 
 Use the maintained test broker for every run; shared CPU/GPU admission and ownership apply
 before work starts. Do not bypass a queue, start a competing full run, or extend a temporary
@@ -231,8 +232,8 @@ tests, running the suite, merging its own branch -- goes to a subagent, one per 
 own worktree. It does a piece itself only when handing it off would cost more: a one-line edit, a
 change that needs what only this conversation knows, a thing an agent has failed at twice.
 
-For Claude agents, use Haiku for read-only or exploratory work, Sonnet for most work, and Opus
-only when Sonnet has failed on the task.
+**Claude subagents run Sonnet. Opus is banned**, for every agent the main session starts,
+whatever the difficulty or the task; a brief never names an Opus model.
 
 **Delegate by capability and difficulty.** Select an available model and harness using the
 work's required capabilities, measured benchmark/task evidence, context needs, latency,
@@ -428,8 +429,6 @@ a guard or sentinel policy, a role, a saved rule, a quarantine release) is done 
 their own screen or terminal: never offered to a model, role, MCP or chat tool, workspace agent or
 channel message. A privileged step goes through the operating system's own administrator prompt;
 ml-stack never sees or stores the password, and never installs a passwordless `sudoers` rule.
-Per-user project settings, development tools, services and startup entries are routine changes
-when they are part of the requested work; they do not require administrator access.
 
 ## Running the tests
 
@@ -437,7 +436,7 @@ Follow **Scoped merge gates and background verification** above. Use `scripts/te
 for affected selection, or reviewed explicit `scripts/test all tests/<affected-file>…` selectors
 when slow browser/process checks are required. Invalid selectors fail before admission; never
 replace a missing selector with an unreviewed omission. Do not run a full suite after every
-intermediate commit.
+intermediate commit or require full Linux testing for a local merge while Linux is paused.
 
 The maintained tiers are `fast` (neither slow nor heavy), `full` (not slow), `slow` (only slow)
 and `all` (including slow). `tests/README.md` describes their mechanics; the policy above
@@ -476,9 +475,9 @@ playwright, or run headless and read screenshots.
 
 ## One thing on the GPU at a time
 
-Schedule GPU work through the broker using available device memory and server slots. Run multiple
-jobs only when the broker admits them and their measured resource needs fit; do not serialize work
-by rule when the device and serving profile have capacity.
+Never put two pieces of work on the GPU at once -- not a question beside a reading, not two
+benchmark rows, not a smoke test while a long run is going. Serve one slot and let the second
+request wait.
 
 Two at once is more than twice as slow, and it takes the meaning out of every number either one
 produces: a row measured under load cannot be compared with a row measured alone, and neither can
@@ -536,8 +535,8 @@ Owner's standing choices (2026-10-03); do not ask again.
 
 ## Saying that something works
 
-For user-facing interface changes, drive the interface before claiming the user flow works. For
-backend, API, CLI and library changes, use the affected tests and relevant boundary checks.
+Drive it the way a person does before you say it works: open the interface, click through the
+screen, type into the box, press the button, read what comes back.
 
 **A request is not a person.** `curl` against a route proves the route answers. It does not prove
 there is a button that reaches it, that the button is on a screen anyone can find, that the reply

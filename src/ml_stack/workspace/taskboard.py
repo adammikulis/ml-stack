@@ -8,7 +8,7 @@ from typing import Any
 from uuid import uuid4
 
 from ml_stack.graph.store import GraphStore
-from ml_stack.workspace import integration_view, task_actions, task_scope, tokens
+from ml_stack.workspace import integration_view, task_actions, task_scope
 from ml_stack.workspace.chain import held
 from ml_stack.workspace.coordination import workspace_id
 from ml_stack.workspace.device_accounts import account_for
@@ -137,20 +137,25 @@ class TaskBoard:
         with self._store() as graph:
             return self._details(self._task(graph, ident), *self._records(graph))
 
-    def subscribe(self, token: str, ident: str) -> dict[str, Any]:
+    def subscribe(self, token: str, ident: str, *, subscriber: str | None = None) -> dict[str, Any]:
         """Follow task status changes in the caller's inbox."""
         who = self._auth(token, 'send')
-        key = f'task-watch:{ident}:{who.id}'
+        subscriber = subscriber or who.id
+        key = f'task-watch:{ident}:{subscriber}'
         with self._store() as graph:
             task = self._task(graph, ident)
+            if subscriber != who.id:
+                info = self.ws.registry.info(subscriber)
+                if info.get('parent') != who.id or not self._project_grant(who.id, task):
+                    raise Denied('task subscription requires the registered project worker parent')
             previous = next((row['attrs'] for row in graph.nodes('task-watch') if row['id'] == key), {})
             graph.upsert_node({'id': key, 'kind': 'task-watch', 'label': task['title'],
-                               'attrs': {'task': ident, 'subscriber': who.id, 'enabled': True}})
+                               'attrs': {'task': ident, 'subscriber': subscriber, 'enabled': True}})
             if not previous.get('enabled'):
-                self._queue_watcher_notice(graph, task, who.id, 'subscribed')
+                self._queue_watcher_notice(graph, task, subscriber, 'subscribed')
         self.ws.audit('task.subscribe', who.id, task=ident)
         self.flush_notifications(token, ident)
-        return {'task': ident, 'subscriber': who.id, 'subscribed': True}
+        return {'task': ident, 'subscriber': subscriber, 'subscribed': True}
 
     def unsubscribe(self, token: str, ident: str) -> dict[str, Any]:
         """Stop task status messages for the caller."""
@@ -228,10 +233,7 @@ class TaskBoard:
             if notice['task'] in blocked:
                 continue
             try:
-                delivery_token = token
-                if notice.get('sender') != who.id:
-                    delivery_token = tokens.load(self.ws.base, notice['sender']) or token
-                self.ws.send(delivery_token, notice['recipient'], 'status', notice['body'],
+                self.ws.send(token, notice['recipient'], 'status', notice['body'],
                              subject=f"Task {notice['event']}: {notice['task']}")
             except (Denied, OSError, ValueError, RateLimited):
                 self.ws.audit('task.notice-pending', who.id, task=notice['task'],

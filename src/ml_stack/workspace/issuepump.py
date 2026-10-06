@@ -7,7 +7,7 @@ import time
 
 from ml_stack import activity, files, jobs
 from ml_stack.serve.process import pid_exists, started_at
-from ml_stack.workspace import backlog, localagent as la, task_scheduler, tokens
+from ml_stack.workspace import backlog, localagent as la, project as projects, task_scheduler, tokens
 from ml_stack.workspace.chain import held
 from ml_stack.workspace.identity import AGENT_MARKERS, HUMAN, Denied
 from ml_stack.workspace.service import Workspace
@@ -84,12 +84,12 @@ def _enqueue(ws, token, agent, board, exclude=frozenset()):
         return None
     source = f"github:{issue['repo']}:{issue['number']}:{issue.get('updatedAt', '')}"
     task = board.create(token, {'title': str(issue['title'])[:200], 'description': _task(issue),
-        'source_key': source, 'capabilities': ['coding'], 'limits': {'max_wall_s': 1200, 'max_retries': 0},
+        'source_key': source, 'project': projects.describe(agent.project), 'capabilities': ['coding'], 'limits': {'max_wall_s': 1200, 'max_retries': 0},
         'acceptance': ['Compare the issue with current source and owner decisions; explain obsolete or completed requests.',
                        'Commit one currently missing change, or provide a supported no-change finding.',
                        'Report meaningful scoped non-Linux checks through scripts/test and remaining limitations.']})
     if (agent.identity or agent.name) not in board.watchers(task['id']):
-        board.subscribe(tokens.load(ws.base, agent.identity or agent.name), task['id'])
+        board.subscribe(token, task['id'], subscriber=agent.identity or agent.name)
     key = f"issue-dispatch:{task['id']}"
     with held(ws.base / 'issue-backlog.lock'), backlog._store(ws) as graph:
         existing = next((row['attrs'] for row in graph.nodes('issue-dispatch') if row['id'] == key), {})

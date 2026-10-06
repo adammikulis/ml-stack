@@ -57,6 +57,30 @@ def test_task_subscriptions_follow_state_changes_and_stop_after_unsubscribe(boar
     assert board.ws.inbox(board.parent, raw=True) == []
 
 
+@pytest.mark.redteam
+def test_foreign_parent_cannot_subscribe_a_project_worker(board):
+    observer = board.agent('observer')
+    with pytest.raises(Denied, match='registered project worker parent'):
+        board.board.subscribe(observer, board.task['id'], subscriber=board.ws.auth(board.child).id)
+    assert board.board.watchers(board.task['id']) == []
+
+
+@pytest.mark.redteam
+def test_notice_retry_uses_only_the_authenticated_caller(board, monkeypatch):
+    task = board.task['id']
+    board.board.subscribe(board.parent, task)
+    original = board.ws.send
+    monkeypatch.setattr(board.ws, 'send', lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError('offline')))
+    observer = board.agent('observer')
+    board.board.subscribe(observer, task)
+    monkeypatch.setattr(tokens, 'load', lambda *_args: (_ for _ in ()).throw(AssertionError('foreign credentials')))
+    monkeypatch.setattr(board.ws, 'send', original)
+    board.board.flush_notifications(board.child, task)
+    notice = board.ws.inbox(board.parent, raw=True)[0]
+    assert notice['from'] == board.ws.auth(board.child).id
+    assert 'observer subscribed' in notice['raw']
+
+
 def test_task_notice_remains_queued_when_inbox_delivery_is_rate_limited(board, monkeypatch):
     task = board.task['id']
     board.board.subscribe(board.parent, task)

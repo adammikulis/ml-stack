@@ -21,8 +21,7 @@ Rules:
 
 - Edit, add and commit only in your own worktree. Never edit, `git add`, `git commit` or
   `git checkout` in the primary checkout.
-- Install this worktree editable in its isolated development environment when needed; do not
-  install it into the primary checkout's environment or use editable installs for stable runtimes.
+- Never `pip install -e`; run your tree's code with `PYTHONPATH=src`.
 - Add files by name; never `git add -A`, `.` or `-u`.
 - Never push, tag or merge. Commit on your own branch by named files before you report.
 - Run `scripts/test quick` while working and the gates CLAUDE.md names before you report.

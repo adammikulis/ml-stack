@@ -78,6 +78,8 @@ def configure(ws, token, name, repo, project):
         raise ValueError("repository backlog requires a source repository")
     if not worktreerules.checkouts(folder):
         raise ValueError("repository backlog requires a registered git checkout")
+    if parent.role != HUMAN and ws.registry.info(parent.id).get('project') != projects.describe(folder):
+        raise Denied('repository backlog requires the parent registered project')
     if folder != agent.project:
         if parent.role != HUMAN:
             raise Denied("only the person may redirect a worker to a different project")
