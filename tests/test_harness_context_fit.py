@@ -57,3 +57,20 @@ def test_sdk_checks_admission_before_serving(monkeypatch):
 def test_explicit_context_is_preserved_above_training_limit(monkeypatch, configured):
     selected = harnessing.config_for("fixture.gguf", harnessing.Want(ctx=65536), lambda _: None)
     assert selected.serving.context == 65536
+
+
+@pytest.mark.parametrize("context,slots", [(8193, 2), (1, 2)])
+def test_explicit_context_cannot_be_silently_rounded(monkeypatch, configured, context, slots):
+    with pytest.raises(ValueError, match="divide evenly"):
+        harnessing.config_for("fixture.gguf", harnessing.Want(ctx=context, slots=slots), lambda _: None)
+
+
+def test_measured_memory_settings_are_replaced_by_the_fit(monkeypatch, configured):
+    measured = Config(serving=Serving(model="fixture.gguf", cache_type="f16", flash_attn=False,
+                                     extra_args=("-ub", "4096")))
+    monkeypatch.setattr(harnessing.profile, "profile_for", lambda _: SimpleNamespace(config=lambda **k: measured))
+    monkeypatch.setattr(harnessing.profile, "said", lambda _: "fixture")
+    monkeypatch.setattr(harnessing.suggest, "suggest", lambda *a, **k: fit())
+    selected = configured().serving
+    assert (selected.cache_type, selected.flash_attn, selected.extra_args) == (
+        "q4_0", True, ("-ub", "1024"))
