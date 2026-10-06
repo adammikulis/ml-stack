@@ -186,6 +186,9 @@ def config_for(found: str, want: Want, say: Callable[[str], None]):
     config = drafted(config, draft, say=say)
     settings = {"slot_context": each, "cache_type": KV}
     if fit is not None:
+        flags = config.serving.extra_args
+        if flags and (len(flags) != 2 or flags[0] != "-ub"):
+            raise ValueError("automatic context cannot estimate measured server flags; specify context explicitly")
         settings.update(cache_type=fit.kv_cache_type, flash_attn=fit.flash_attn,
                         extra_args=("-ub", str(fit.batch)))
     say(f"  {each:,} tokens a slot, {settings['cache_type']} KV cache")
