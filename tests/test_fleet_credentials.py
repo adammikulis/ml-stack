@@ -57,3 +57,35 @@ def test_joined_credential_management_requires_a_signed_in_session(server):
     status, result, _ = server.call("/ui/credentials", method="POST", cookie=cookie,
                                     body={"name": "HF_TOKEN", "value": "hf-private"})
     assert status == 200 and "hf-private" not in str(result)
+
+
+@pytest.mark.redteam
+@pytest.mark.parametrize("body", [None, [], {"name": "HF_TOKEN", "value": []}, {"name": "HF_TOKEN"}])
+def test_credential_schema_and_origin_fail_before_persistence(server, body):
+    status, result, _ = server.call("/ui/credentials", method="POST", body=body)
+    assert status == 400 and "error" in result
+    assert not credentials.file_path().exists()
+    status, _, _ = server.call("/ui/credentials", method="POST",
+        body={"name": "HF_TOKEN", "value": "isolated"}, headers={"Origin": "https://foreign.example"})
+    assert status == 403 and not credentials.file_path().exists()
+
+
+@pytest.mark.slow
+def test_person_saves_and_removes_a_credential_in_settings(server, playwright):
+    from playwright.sync_api import expect
+
+    server.ui.settings.setup_done = True
+    with playwright.chromium.launch(headless=True) as browser:
+        page = browser.new_page()
+        page.goto(f"http://127.0.0.1:{server.port}/ui/#settings")
+        panel = page.locator("#settings-credentials")
+        panel.get_by_label("Credential name", exact=True).fill("OPENAI_API_KEY")
+        panel.get_by_label("Token or API key", exact=True).fill("isolated-browser-secret")
+        panel.get_by_role("button", name="Save credential", exact=True).click()
+        expect(panel.get_by_text("OPENAI_API_KEY · credentials file", exact=False)).to_be_visible()
+        expect(panel.get_by_label("Token or API key", exact=True)).to_have_value("")
+        assert "isolated-browser-secret" not in page.content()
+        panel.get_by_label("Credential name", exact=True).fill("OPENAI_API_KEY")
+        panel.get_by_role("button", name="Remove credential", exact=True).click()
+        expect(panel.get_by_text("OPENAI_API_KEY · credentials file", exact=False)).to_have_count(0)
+        assert credentials.get("OPENAI_API_KEY") is None

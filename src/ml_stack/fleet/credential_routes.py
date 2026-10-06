@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from ml_stack import credentials
+from ml_stack.fleet.room_routes import _origin_ok
 
 
 def route(request) -> bool:
@@ -11,8 +12,20 @@ def route(request) -> bool:
         return True
     if request.method not in ("POST", "DELETE"):
         return False
+    if not _origin_ok(request.header("Origin"), request.host_header):
+        request.send(403, {"error": "credential changes require the local UI origin"})
+        return True
+    try:
+        size = int(request.header("Content-Length", "0") or 0)
+    except ValueError:
+        size = -1
+    if not 0 <= size <= 65536:
+        request.send(400, {"error": "credential request exceeds its size bound"})
+        return True
     body = request.body()
     try:
+        if not isinstance(body, dict):
+            raise credentials.CredentialError("credential request must be an object")
         if request.method == "POST":
             if set(body) != {"name", "value"} or not isinstance(body["name"], str) \
                     or not isinstance(body["value"], str):
