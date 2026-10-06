@@ -15,7 +15,8 @@ def _project(projects, requested):
         raise Denied('agent registration requires an existing hosted project')
     candidates = [row for row in projects.list()
                   if row['authority_machine'] == projects.machine
-                  and (row['id'] == requested.get('key') or row['name'] == requested.get('name'))]
+                  and (row['id'] == requested['key'] if requested.get('key')
+                       else row['name'] == requested.get('name'))]
     if len(candidates) != 1:
         raise Denied('the requested project is not uniquely hosted by this coordinator')
     row = candidates[0]
@@ -34,6 +35,7 @@ def ensure(ws, device, projects, document, token=''):
     if model:
         clean_model(model)
     fingerprint = device.fingerprint
+    requested_scope = _project(projects, document.get('project'))
     with held(ws.base / 'device-sessions.lock'), GraphStore(ws.base / 'device-sessions.db') as graph:
         bindings = [node['attrs'] for node in graph.nodes('device-session')]
         binding = next((row for row in bindings if row['device'] == fingerprint
@@ -43,13 +45,15 @@ def ensure(ws, device, projects, document, token=''):
             live_scope = _project(projects, scope)
             if live_scope != scope:
                 raise Denied('the agent project authorization changed')
+            if requested_scope != scope:
+                raise Denied('the requested project differs from the registered agent scope')
         else:
             if not device.mine:
                 raise Denied('this paired device has no existing agent authorization')
             if (len(bindings) >= ws.limits.agents_live
                     or sum(row['device'] == fingerprint for row in bindings) >= ws.limits.mints_per_identity):
                 raise Denied('the registered device agent limit is reached')
-            scope = _project(projects, document.get('project'))
+            scope = requested_scope
             agent = name
             if agent in ws.registry.ids():
                 agent = name[:35] + '-' + fingerprint[:12]
@@ -63,6 +67,7 @@ def ensure(ws, device, projects, document, token=''):
                           or entry.get('session_device') != fingerprint
                           or entry.get('project') != scope):
                 raise Denied('the registered agent identity is unavailable')
+            credential = ''
             if token:
                 try:
                     actor = ws.auth(token)
@@ -71,19 +76,20 @@ def ensure(ws, device, projects, document, token=''):
                 if actor and actor.id != agent:
                     raise Denied('the presented session belongs to another agent')
                 if actor:
-                    return agent, token
-            key = 'session:' + hashlib.sha256(f"{fingerprint}:{binding['requested']}".encode()).hexdigest()
-            graph.upsert_node({'id': key, 'kind': 'device-session', 'label': agent, 'attrs': binding})
-            value = secrets.token_urlsafe(32)
-            now = ws.clock()
-            if entry is None:
-                entry = {'role': AGENT, 'created': now, 'minted_by': 'paired-device',
-                         'can': list(CAPS), 'project': scope, 'session_device': fingerprint,
-                         'revoked': False}
-                agents[agent] = entry
-            entry.update(hash=hashlib.sha256(value.encode()).hexdigest(), expires=now + onboard.TOKEN_S)
-            ws.registry._save(agents)
-        credential = f'{PREFIX}{agent}.{value}'
+                    credential = token
+            if not credential:
+                key = 'session:' + hashlib.sha256(f"{fingerprint}:{binding['requested']}".encode()).hexdigest()
+                graph.upsert_node({'id': key, 'kind': 'device-session', 'label': agent, 'attrs': binding})
+                value = secrets.token_urlsafe(32)
+                now = ws.clock()
+                if entry is None:
+                    entry = {'role': AGENT, 'created': now, 'minted_by': 'paired-device',
+                             'can': list(CAPS), 'project': scope, 'session_device': fingerprint,
+                             'revoked': False}
+                    agents[agent] = entry
+                entry.update(hash=hashlib.sha256(value.encode()).hexdigest(), expires=now + onboard.TOKEN_S)
+                ws.registry._save(agents)
+                credential = f'{PREFIX}{agent}.{value}'
         tokens.store(ws.base, agent, credential)
         ws.board.place(agent, scope)
         if model or harness:

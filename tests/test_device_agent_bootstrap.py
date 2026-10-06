@@ -1,6 +1,7 @@
 """Paired-device agent recovery preserves scope and denies revoked trust."""
 
 import base64
+import concurrent.futures
 import json
 import threading
 from types import SimpleNamespace
@@ -14,7 +15,7 @@ from ml_stack.fleet.jobs import JobRunner
 from ml_stack.fleet.remote import Peer
 from ml_stack.fleet.onboard.requests import Device
 from ml_stack.fleet.onboard.web import Call
-from ml_stack.workspace import coordinator, coordinator_config, device_sessions, tokens
+from ml_stack.workspace import coordinator, coordinator_client, coordinator_config, device_sessions, tokens
 from ml_stack.workspace.coordination import workspace_id
 from ml_stack.workspace.identity import AGENT, Denied
 from ml_stack.http import Server, ServerError
@@ -151,3 +152,76 @@ def test_canonical_project_bootstrap_has_same_device_boundary(enrolled):
     request = {'agent_token': result['token'], 'operation': 'whoami', 'args': [], 'kwargs': {}}
     assert host.answer(project_id, 'board', request, device=device)[0] == 200
     assert host.answer(project_id, 'board', request)[0] == 403
+
+
+def test_valid_session_records_new_claimed_model_and_harness(enrolled):
+    kit, device, projects, document = enrolled
+    name, token = device_sessions.ensure(kit.ws, device, projects, document)
+    claim = {**document, 'model': 'another-model', 'harness': 'claude-code'}
+    assert device_sessions.ensure(kit.ws, device, projects, claim, token) == (name, token)
+    info = kit.ws.registry.info(name)
+    assert (info['model'], info['harness'], info['model_state']) == (
+        'another-model', 'claude-code', 'claimed')
+    assert [row['model'] for row in info['models']] == ['example-model', 'another-model']
+    assert not any(row['verified'] for row in info['models'])
+
+
+@pytest.mark.parametrize('credential', ['', 'valid', 'expired'])
+def test_bound_session_refuses_different_authoritative_project(enrolled, credential):
+    kit, device, projects, document = enrolled
+    name, token = device_sessions.ensure(kit.ws, device, projects, document)
+    other = {'id': 'c' * 32, 'name': 'other', 'authority_machine': projects.machine}
+    initial = projects.list()
+    projects.list = lambda: [*initial, other]
+    requested = {**document, 'project': {'key': other['id'], 'name': 'example'}}
+    presented = token if credential == 'valid' else 'expired-session' if credential else ''
+    with pytest.raises(Denied, match='requested project differs'):
+        device_sessions.ensure(kit.ws, device, projects, requested, presented)
+    assert kit.ws.auth(token).id == name
+    assert kit.ws.registry.info(name)['project'] == document['project']
+
+
+def test_concurrent_recovery_keeps_the_persisted_session_valid(enrolled, tmp_path):
+    kit, device, projects, document = enrolled
+    base = tmp_path / 'client'
+    base.mkdir()
+    first_issued, second_entered, release = threading.Event(), threading.Event(), threading.Event()
+    counter, counter_lock = [0], threading.Lock()
+
+    def request(method, path, *, data, headers):
+        incoming = json.loads(data)
+        name, token = device_sessions.ensure(
+            kit.ws, device, projects, incoming, headers['X-ML-Stack-Workspace-Token'])
+        with counter_lock:
+            counter[0] += 1
+            number = counter[0]
+        if number == 1:
+            first_issued.set()
+            assert release.wait(5)
+        else:
+            second_entered.set()
+        return 200, json.dumps({'workspace': 'workspace:test', 'agent': name, 'token': token}).encode(), {}
+
+    remote = Remote({'workspace': 'workspace:test'}, SimpleNamespace(_request=request))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as workers:
+        first = workers.submit(remote.ensure, base, 'codex', project=document['project'])
+        assert first_issued.wait(5)
+        second = workers.submit(remote.ensure, base, 'codex', project=document['project'])
+        try:
+            assert not second_entered.wait(0.2)
+        finally:
+            release.set()
+        first_name, second_name = first.result(timeout=5), second.result(timeout=5)
+    assert first_name == second_name
+    assert kit.ws.auth(tokens.load(base, first_name)).id == first_name
+
+
+@pytest.mark.parametrize('count', [0, 2])
+def test_enrolled_device_never_creates_local_authority_without_unique_coordinator(tmp_path, monkeypatch, count):
+    base = tmp_path / 'workspace'
+    monkeypatch.setattr(coordinator_client, 'load_cluster_key', lambda: b'enrolled')
+    monkeypatch.setattr(coordinator_client, 'discover', lambda: [(None, {})] * count)
+    with pytest.raises(Denied, match='unavailable|ambiguous'):
+        coordinator_client.client(base)
+    assert not (base / 'agents.json').exists()
+    assert not coordinator_config.load(base)

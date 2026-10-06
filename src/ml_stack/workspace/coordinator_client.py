@@ -13,6 +13,7 @@ from ml_stack.fleet.onboard.requests import Devices
 from ml_stack.fleet.discovery import load_cluster_key
 from ml_stack.fleet.remote import Peer
 from ml_stack.workspace import coordinator_config, tokens
+from ml_stack.workspace.chain import held
 from ml_stack.workspace.identity import Denied
 
 
@@ -45,7 +46,7 @@ class Remote:
         return result['agent']
 
     def ensure(self, base, name, model='', harness='', project=None):
-        with GraphStore(base / 'remote-sessions.db') as graph:
+        with held(base / 'remote-sessions.lock'), GraphStore(base / 'remote-sessions.db') as graph:
             key = 'remote-session:' + self.config['workspace'] + ':' + name
             rows = graph.nodes('remote-session')
             row = next((row['attrs'] for row in rows if row['id'] == key), {})
@@ -92,12 +93,14 @@ def client(base):
         candidates = [(peer, info) for peer, info in discover()]
         if len(candidates) > 1:
             raise Denied('several trusted coordinators are advertised; workspace routing is ambiguous')
-        if candidates:
-            peer, info = candidates[0]
-            selected = {'mode': 'remote', 'workspace': info['workspace'], 'name': peer.name,
-                        'endpoint': peer.base_url, 'cert': peer.beacon.cert if peer.beacon else ''}
-            _device_peer(selected)
-            config = coordinator_config.save(base, selected)
+        if not candidates:
+            raise Denied('the enrolled workspace coordinator is unavailable; shared authority is preserved')
+        peer, info = candidates[0]
+        selected = {'mode': 'remote', 'workspace': info['workspace'], 'name': peer.name,
+                    'endpoint': peer.base_url, 'cert': peer.beacon.cert if peer.beacon else ''}
+        coordinator_config.validate_endpoint(selected['endpoint'])
+        _device_peer(selected)
+        config = coordinator_config.save(base, selected)
     if config.get('mode') != 'remote':
         return None
     return Remote(config, _device_peer(config))
