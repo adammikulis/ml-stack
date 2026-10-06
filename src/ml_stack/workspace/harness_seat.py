@@ -5,9 +5,8 @@ from dataclasses import dataclass
 from http.client import HTTPException
 from pathlib import Path
 
-from ml_stack import harness_remote
 from ml_stack.client.health import reported_models
-from ml_stack.workspace import onboard, tokens, worktree_lifecycle
+from ml_stack.workspace import harness_remote, onboard, tokens, worktree_lifecycle
 from ml_stack.workspace.identity import AGENT, Denied, Identity
 from ml_stack.workspace.remote import RemoteWorkspace
 from ml_stack.workspace.service import Workspace

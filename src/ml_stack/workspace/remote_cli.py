@@ -3,8 +3,8 @@
 from argparse import Namespace
 from pathlib import Path
 
-from ml_stack import harness_remote
 from ml_stack.command import flag, option
+from ml_stack.workspace import harness_remote
 from ml_stack.workspace.automatic_connection import connect
 from ml_stack.workspace.identity import Denied
 from ml_stack.workspace.project_connection import bind

@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, Any
 
-from ml_stack import harness_claims, harness_remote, requests
+from ml_stack import harness_claims, requests
 from ml_stack.harnesspolicy import (
     Decision,
     _shell_line,
@@ -28,7 +28,7 @@ from ml_stack.harnesspolicy import (
     workspace_authority,
 )
 from ml_stack.keystore import ENV_NONINTERACTIVE
-from ml_stack.workspace import tokens, worktree_lifecycle
+from ml_stack.workspace import harness_remote, tokens, worktree_lifecycle
 from ml_stack.workspace.identity import Denied
 from ml_stack.workspace.service import Workspace
 

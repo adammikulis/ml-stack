@@ -14,7 +14,6 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from ml_stack import harness_remote
 from ml_stack.command import Group, flag, option
 from ml_stack.http import ServerError
 from ml_stack.log import say, warn
@@ -26,6 +25,7 @@ from ml_stack.workspace import (
     coordinator_config,
     filecli,
     guide,
+    harness_remote,
     limits,
     localcli,
     localroute,

@@ -7,14 +7,14 @@ import stat
 import sys
 from pathlib import Path
 
-from ml_stack import harness_remote, worktreerules
+from ml_stack import worktreerules
 from ml_stack.guard.destructive import classify
 from ml_stack.guard.shellscan import segments
 from ml_stack.harnesspolicy import CATALOG, SHELL_TOOLS, _shell_line
 from ml_stack.interventions import Call
 from ml_stack.net import git
 from ml_stack.serve.process import started_at
-from ml_stack.workspace import claim_handoff, tokens, worktree_lifecycle
+from ml_stack.workspace import claim_handoff, harness_remote, tokens, worktree_lifecycle
 from ml_stack.workspace.claims import normal
 from ml_stack.workspace.identity import Denied
 from ml_stack.workspace.project import describe
