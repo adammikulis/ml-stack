@@ -1,12 +1,15 @@
 """Project agent enrollment bounds and scope checks."""
+import io
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
 import pytest
 from test_project_source import repository  # noqa: F401
 
+from ml_stack.workspace import remote_task_client
 from ml_stack.workspace.identity import AGENT, Denied, Registry
 from ml_stack.workspace.remote_host import WorkspaceHost
+from ml_stack.workspace.taskboard import TaskBoard
 
 PROJECT = "a" * 32
 SCOPE = {"key": PROJECT, "name": "fixture-project", "cluster": "dev", "cluster_id": "c" * 64}
@@ -14,7 +17,7 @@ SCOPE = {"key": PROJECT, "name": "fixture-project", "cluster": "dev", "cluster_i
 
 @pytest.fixture
 def enrollment(tmp_path):
-    project = SimpleNamespace(name="fixture-project", authority_machine="local", board_host="https://127.0.0.1:8770")
+    project = SimpleNamespace(id=PROJECT, root=str(tmp_path), name="fixture-project", authority_machine="local", board_host="https://127.0.0.1:8770")
     projects = SimpleNamespace(machine="local", get=lambda identifier: project,
                                workspace_base=lambda identifier: tmp_path / identifier)
     host = WorkspaceHost(projects)
@@ -169,3 +172,75 @@ def test_self_revocation_cleans_exact_claims_and_refuses_replaced_generation(enr
     with pytest.raises(Denied, match="recognised"):
         ws.registry.revoke_self(old, lambda who: host._release_owned_claims(ws, who))
     assert ws.auth(replacement).id == child.id
+
+
+def test_typed_task_commands_bind_full_project_scope_and_idempotency(enrollment):
+    host, _, body = enrollment
+    _, agent = host.enroll(PROJECT, body, cluster="dev", cluster_id="c" * 64)
+    def command(action, payload, request_id="e" * 32):
+        return host.answer(PROJECT, "board", {"agent_token": agent["token"], "operation": "task.command",
+                           "args": [{"action": action, "payload": payload, "request_id": request_id}]},
+                           admission=("dev", "c" * 64, True))
+    spec = {"title": "Typed task", "acceptance": ["Scoped outcome"]}
+    code, created = command("task-create", {"spec": spec})
+    assert code == 200, created
+    ident = created["result"]["id"]
+    assert created["result"]["project"] == SCOPE
+    assert command("task-create", {"spec": spec})[1]["result"]["id"] == ident
+    assert command("task-create", {"spec": {**spec, "title": "Different"}})[0] == 403
+    assert command("task-create", {"spec": {**spec, "project": {"key": "b" * 32}}}, "f" * 32)[0] == 403
+    ws = host.workspace(PROJECT)
+    foreign = TaskBoard(ws).create(agent["token"], {**spec, "project": {"key": "b" * 32}})
+    assert command("task", {"id": foreign["id"]})[0] == 403
+    assert {row["id"] for row in command("tasks", {})[1]["result"]["tasks"]} == {ident}
+    assert command("task-create", {"spec": {**spec, "deps": [foreign["id"]]}}, "f" * 32)[0] == 403
+    assert command("task-claim", {"id": ident, "allocation_id": "untrusted"}, "f" * 32)[0] == 403
+    for action in ("task-integrate", "resource-assign", "task-recover", "mint"):
+        assert command(action, {})[0] == 400
+
+
+def test_native_heartbeat_does_not_renew_physical_or_foreign_area_claims(enrollment, repository):  # noqa: F811
+    host, project, body = enrollment
+    project.root = str(repository / "project")
+    _, agent = host.enroll(PROJECT, body, cluster="dev", cluster_id="c" * 64)
+    ws = host.workspace(PROJECT)
+    actor = ws.auth(agent["token"])
+    ws.claims.reserve(actor, [("branch", "source"), ("area", str(repository / "outside")),
+                              ("port", "9000"), ("worktree", str(repository / "physical"))])
+    before = {(row["kind"], row["key"]): row["expires"] for row in ws.claims.listing()}
+    code, reply = host.answer(PROJECT, "board", {"agent_token": agent["token"], "operation": "native.heartbeat",
+                             "kwargs": {"ttl_s": 1800}}, admission=("dev", "c" * 64, True))
+    assert code == 200, reply
+    assert [row["kind"] for row in reply["result"]] == ["branch"]
+    after = {(row["kind"], row["key"]): row["expires"] for row in ws.claims.listing()}
+    assert after[("branch", "source")] > before[("branch", "source")]
+    assert all(after[key] == expiry for key, expiry in before.items() if key[0] != "branch")
+
+
+def test_canonical_task_client_preserves_stable_request_and_json_stdin(monkeypatch):
+    calls = []
+    remote = SimpleNamespace(call=lambda *args: calls.append(args) or {"id": "task:" + "a" * 32})
+    args = SimpleNamespace(cmd="task-create", payload="-", request_id="e" * 32)
+    for _ in range(2):
+        monkeypatch.setattr("sys.stdin", io.StringIO('{"title":"Typed task","acceptance":["Scoped outcome"]}'))
+        assert remote_task_client.command(remote, "private-agent-capability", args)["id"] == "task:" + "a" * 32
+    assert calls[0] == calls[1]
+    operation, token, document = calls[0]
+    assert operation == "task.command" and token == "private-agent-capability"
+    assert document["request_id"] == "e" * 32 and document["action"] == "task-create"
+    assert document["payload"] == {"spec": {"title": "Typed task", "acceptance": ["Scoped outcome"]}}
+
+
+def test_canonical_task_client_claim_maps_only_existing_allocation_and_refuses_integration():
+    calls = []
+    remote = SimpleNamespace(call=lambda *args: calls.append(args) or {})
+    args = SimpleNamespace(cmd="task-claim", id="task:" + "a" * 32,
+                           allocation_id="allocation:" + "b" * 32, request_id="e" * 32)
+    remote_task_client.command(remote, "private-agent-capability", args)
+    document = calls[0][2]
+    assert document["action"] == "task-claim"
+    assert document["payload"] == {"id": args.id, "allocation_id": args.allocation_id}
+    args.cmd = "task-integrate"
+    with pytest.raises(Denied, match="unavailable"):
+        remote_task_client.command(remote, "private-agent-capability", args)
+    assert len(calls) == 1
