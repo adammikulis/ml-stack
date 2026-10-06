@@ -78,3 +78,12 @@ def test_measured_memory_settings_are_replaced_by_the_fit(monkeypatch, configure
 def test_automatic_fit_requires_the_estimated_single_slot(monkeypatch, configured):
     with pytest.raises(ValueError, match="supports one slot"):
         harnessing.config_for("fixture.gguf", harnessing.Want(ctx=0, slots=2), lambda _: None)
+
+
+def test_automatic_fit_refuses_unestimated_profile_flags(monkeypatch, configured):
+    measured = Config(serving=Serving(model="fixture.gguf", extra_args=("-b", "8192")))
+    monkeypatch.setattr(harnessing.profile, "profile_for", lambda _: SimpleNamespace(config=lambda **k: measured))
+    monkeypatch.setattr(harnessing.profile, "said", lambda _: "fixture")
+    monkeypatch.setattr(harnessing.suggest, "suggest", lambda *a, **k: fit())
+    with pytest.raises(ValueError, match="cannot estimate measured server flags"):
+        configured()
