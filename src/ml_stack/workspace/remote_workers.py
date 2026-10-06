@@ -1,5 +1,6 @@
 """Dev device worker launches and canonical Board message loops."""
 
+import hashlib
 import json
 import logging
 import os
@@ -66,15 +67,19 @@ def credential(remote, name, model, authority, harness="ml-stack-agent"):
                 raise
             token = ''
         if token:
+            if not record or record.get('cluster_id') != remote.cluster_id:
+                remote.renew(alias, authority)
             who = remote.call('whoami', token)
             if who.get('project', {}).get('cluster_id') != remote.cluster_id:
                 raise Denied('worker launch requires an existing Dev project capability')
+            graph.upsert_node({'id': 'worker:' + name, 'kind': 'worker-identity', 'label': name,
+                               'attrs': {'requested': name, 'identity': alias, 'cluster_id': remote.cluster_id}})
             return token
         if record is not None:
             raise Denied('the saved Dev worker capability is unavailable')
         result = remote.enroll(name, model=model, harness=harness, authority_machine=authority)
         graph.upsert_node({'id': 'worker:' + name, 'kind': 'worker-identity', 'label': name,
-                           'attrs': {'requested': name, 'identity': result['id']}})
+                           'attrs': {'requested': name, 'identity': result['id'], 'cluster_id': remote.cluster_id}})
         return tokens.load(remote.base, result['id'])
 
 
@@ -132,6 +137,9 @@ def start(projects, project_id, body, *, admission, cluster_key=None):
                     raise Denied('the running worker belongs to another canonical project or caller')
                 if body.get('model', localmodel.AUTO) not in (localmodel.AUTO, agent.model):
                     raise ValueError('stop the running worker before changing its model')
+                credential(remote, prior['identity'], agent.model_name, project.authority_machine)
+                write_json(connection, {**prior, 'cluster_id': cluster_id})
+                connection.chmod(0o600)
                 return 200, {'name': name, 'identity': prior['identity'], 'model': agent.model_name,
                              'pid': agent.pid, 'project_id': project_id, 'state': 'running', 'already': True}
             chosen = localmodel.choose(body.get('model') or localmodel.AUTO,
@@ -143,7 +151,8 @@ def start(projects, project_id, body, *, admission, cluster_key=None):
             canonical_identity = remote.call('whoami', canonical_token)['id']
             record = {'host': remote.host, 'project_id': project_id, 'cluster': cluster,
                       'cluster_key': str(cluster_key) if cluster_key else '',
-                      'identity': canonical_identity, 'requested_by': caller['id']}
+                      'identity': canonical_identity, 'requested_by': caller['id'],
+                      'name': name, 'cluster_id': cluster_id}
             root = str(Path(project.root).resolve(strict=True))
             ask = localstart.Ask(model=chosen.ref, name=name, project=root,
                                  orders_from=(caller['id'],), effort=body.get('effort', 'off'),
@@ -167,15 +176,63 @@ def start(projects, project_id, body, *, admission, cluster_key=None):
         return 400, {'error': str(error)}
 
 
+class WorkerRemote:
+    """Refresh an existing worker's Dev transport when its installed cluster key changes."""
+
+    def __init__(self, remote, record, path=None):
+        self.current, self.record, self.path = remote, dict(record), path
+        self.refresh()
+
+    def refresh(self):
+        old = self.current
+        rows = memberships(Path(old.cluster_key) if old.cluster_key else None)
+        if not rows or rows[0].mode != 'dev' or rows[0].group != old.cluster:
+            raise Denied('the running worker requires its active Dev cluster')
+        current_id = hashlib.sha256(rows[0].key).hexdigest()
+        if current_id != old.cluster_id:
+            fresh = RemoteWorkspace(old.host, old.project_id,
+                                    cluster_key=Path(old.cluster_key) if old.cluster_key else None,
+                                    cluster=old.cluster)
+            if (fresh.authority_machine != old.authority_machine or fresh.device_cert != old.device_cert):
+                raise Denied('the running worker cannot switch its authenticated Board authority')
+        else:
+            fresh = old
+        if current_id == self.record.get('cluster_id') and fresh is old:
+            return
+        identity = self.record['identity']
+        fresh.renew(identity, fresh.authority_machine)
+        fresh._prepare_storage()
+        alias_path, lock = fresh.base / 'worker-identities.db', fresh.base / 'worker-identities.lock'
+        fresh._safe_storage(alias_path)
+        fresh._safe_storage(lock)
+        with held(lock), GraphStore(alias_path) as graph:
+            alias_path.chmod(0o600)
+            for node in graph.nodes('worker-identity'):
+                attrs = node['attrs']
+                if attrs.get('identity') == identity:
+                    graph.upsert_node({**node, 'attrs': {**attrs, 'cluster_id': current_id}})
+        if self.path is not None:
+            fresh._safe_storage(self.path)
+            write_json(self.path, {**self.record, 'cluster_id': current_id})
+            self.path.chmod(0o600)
+        self.current, self.record['cluster_id'] = fresh, current_id
+
+    def call(self, operation, token, *args, **kwargs):
+        self.refresh()
+        return self.current.call(operation, token, *args, **kwargs)
+
+
 class BoardWorker(CanonicalWorkspace):
     """Keep runtime files local while using the selected canonical agent capability."""
 
-    def __init__(self, local, record):
+    def __init__(self, local, record, name=""):
         remote = RemoteWorkspace(record['host'], record['project_id'],
                                  cluster_key=Path(record['cluster_key']) if record['cluster_key'] else None,
                                  cluster=record['cluster'])
         token = tokens.load(remote.base, record['identity'])
-        super().__init__(remote, token)
+        local_name = name or record.get('name', '')
+        path = la.folder(local) / f'{la.check_name(local_name)}.remote.json' if local_name else None
+        super().__init__(WorkerRemote(remote, record, path), token)
         self.base, self.local = local.base, local
         self.worker_identity = record['identity']
 
@@ -258,7 +315,7 @@ def run_detached(argv=None):
     if agent is None or not agent.project:
         raise Denied('the remote worker requires its saved registered project')
     os.chdir(Path(agent.project).resolve(strict=True))
-    return localloop.run(BoardWorker(local, record), name, localloop.Settings(signals=True))
+    return localloop.run(BoardWorker(local, record, name), name, localloop.Settings(signals=True))
 
 
 if __name__ == '__main__':

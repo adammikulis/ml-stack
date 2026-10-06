@@ -10,7 +10,13 @@ import pytest
 
 from ml_stack import http
 from ml_stack.fleet import api, project_enrollment, tls
-from ml_stack.fleet.discovery import Beacon, Membership, _write_memberships, derive_token
+from ml_stack.fleet.discovery import (
+    Beacon,
+    Membership,
+    _write_memberships,
+    derive_token,
+    memberships,
+)
 from ml_stack.fleet.framing import LimitedServer
 from ml_stack.fleet.jobs import JobRunner
 from ml_stack.fleet.remote import Peer
@@ -29,7 +35,7 @@ def _server(root, machine, projects):
     files = root / machine / 'files'
     files.mkdir()
     runner = JobRunner(root / machine / 'jobs', files)
-    daemon = api.Daemon(runner, files, derive_token(KEY))
+    daemon = api.Daemon(runner, files, lambda: derive_token(memberships()[0].key))
     daemon.projects, daemon.workspaces = projects, WorkspaceHost(projects)
     ident = tls.identity(root / machine / 'tls', machine)
     server = LimitedServer(('127.0.0.1', 0), api.make_handler(daemon), tls=tls.server_context(ident))
@@ -104,7 +110,7 @@ def devices(tmp_path, monkeypatch):
                 'name': 'local-qwen', 'ctx': 32768, 'max_output_tokens': 1234}
         yield SimpleNamespace(caller=caller, token=caller_token, target=target, body=body,
                               local=local, authority=authority, target_projects=target_projects,
-                              spawned=spawned, roots=roots, peers=peers)
+                              spawned=spawned, roots=roots, peers=peers, keyfile=tmp_path / 'cluster.key')
     finally:
         for server in servers:
             server.shutdown()
@@ -281,3 +287,69 @@ def test_generic_canonical_adapter_does_not_supply_a_worker_token_hook(devices):
                          localloop.Settings(), (lambda: False, localagent.Status(devices.local, agent.name)))
     assert loop.token == tokens.load(devices.local.base, agent.identity)
     assert loop.token != devices.token
+
+
+def _rotate_cluster(state):
+    key = base64.urlsafe_b64encode(bytes(reversed(range(32)))).rstrip(b'=')
+    state.keyfile.write_bytes(key)
+    _write_memberships([Membership(CLUSTER, key, mode='dev')], state.keyfile)
+    for peer in state.peers:
+        peer.token = derive_token(key)
+    return hashlib.sha256(key).hexdigest()
+
+
+@pytest.mark.parametrize('legacy', [False, True])
+def test_worker_alias_renews_after_dev_key_rotation_without_changing_identity(devices, legacy):
+    from ml_stack.graph.store import GraphStore
+    before = remote_workers.credential(devices.caller, 'rotating-worker', 'Qwen3.8-test', 'device-a')
+    identity = devices.caller.call('whoami', before)['id']
+    if legacy:
+        with GraphStore(devices.caller.base / 'worker-identities.db') as graph:
+            node = next(row for row in graph.nodes('worker-identity') if row['attrs']['identity'] == identity)
+            attrs = dict(node['attrs'])
+            attrs.pop('cluster_id')
+            graph.upsert_node({**node, 'attrs': attrs})
+    cluster_id = _rotate_cluster(devices)
+    current = RemoteWorkspace(devices.caller.host, PROJECT, cluster=CLUSTER)
+    after = remote_workers.credential(current, 'rotating-worker', 'Qwen3.8-test', 'device-a')
+    assert after == before
+    who = current.call('whoami', after)
+    assert who['id'] == identity and who['project']['cluster_id'] == cluster_id
+    with GraphStore(current.base / 'worker-identities.db') as graph:
+        assert next(row['attrs'] for row in graph.nodes('worker-identity')
+                    if row['attrs']['identity'] == identity)['cluster_id'] == cluster_id
+
+
+@pytest.mark.redteam
+def test_rekey_cannot_restore_a_revoked_worker(devices):
+    token = remote_workers.credential(devices.caller, 'revoked-worker', 'Qwen3.8-test', 'device-a')
+    identity = devices.caller.call('whoami', token)['id']
+    ws = devices.authority.workspace(PROJECT)
+    records = ws.registry._load()
+    records[identity]['revoked'] = True
+    ws.registry._save(records)
+    before = ws.registry.ids()
+    _rotate_cluster(devices)
+    current = RemoteWorkspace(devices.caller.host, PROJECT, cluster=CLUSTER)
+    with pytest.raises(PermissionError):
+        remote_workers.credential(current, 'revoked-worker', 'Qwen3.8-test', 'device-a')
+    assert ws.registry.ids() == before
+
+
+def test_live_board_worker_refreshes_tls_transport_and_sidecar_after_rekey(devices):
+    result = devices.target._request('worker', devices.body)
+    from ml_stack.files import read_json
+    path = localagent.folder(devices.local) / 'local-qwen.remote.json'
+    worker = remote_workers.BoardWorker(devices.local, read_json(path, {}))
+    old_token = worker.token
+    cluster_id = _rotate_cluster(devices)
+    current = RemoteWorkspace(devices.caller.host, PROJECT, cluster=CLUSTER)
+    current.renew('test-caller', 'device-a')
+    current.call('send', devices.token, result['identity'], 'question', 'Report after the cluster refresh')
+    rows = worker.wait(old_token, 0, raw=True)
+    assert any('cluster refresh' in row['raw'] for row in rows)
+    worker.send(old_token, 'test-caller', 'answer', 'Same worker after the refresh', reply_to=rows[0]['seq'])
+    assert any('Same worker' in row['raw'] for row in current.call('inbox', devices.token, raw=True))
+    assert worker.auth(old_token).id == result['identity'] and worker.token == old_token
+    assert read_json(path, {})['cluster_id'] == cluster_id
+    assert len(devices.spawned) == 1
