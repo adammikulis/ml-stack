@@ -16,7 +16,7 @@ from ml_stack.log import say
 from ml_stack.sentinel import human
 from ml_stack.workspace import coordinator_client, coordinator_config, onboard, tokens
 from ml_stack.workspace.chain import held
-from ml_stack.workspace.identity import HUMAN, Denied
+from ml_stack.workspace.identity import AGENT, HUMAN, Denied
 from ml_stack.workspace.service import Workspace
 
 __all__ = ["Plan", "Talk", "agent_connect", "clipboard", "connect", "walk"]
@@ -199,7 +199,19 @@ def agent_connect(ws: Workspace, name: str, found: dict[str, str]) -> dict[str, 
         try:
             token = tokens.load(ws.base, name)
             who = ws.auth(token)
-        except Denied:
+        except Denied as failure:
+            slot = tokens.directory(ws.base) / name.replace("/", "~")
+            if (slot.exists() or slot.is_symlink()) and (why := tokens.problem(slot)):
+                raise Denied(f"agent credential storage {slot}: {why}") from failure
+            if isinstance(failure, tokens.ActorMismatch):
+                entry = ws.registry._load().get(name, {})
+                boards, _ = ws.board.store.state()
+                if (entry.get("minted_by") != "local-account" or entry.get("role") != AGENT
+                        or entry.get("parent") or entry.get("revoked") or entry.get("session_device")
+                        or entry.get("project", {}).get("key") != found.get("key")
+                        or not any(board["project"] == found.get("key") and name in board["members"]
+                                   for board in boards.values())):
+                    raise
             token = ws.registry.bootstrap_agent(name, found,
                                                (ws.limits.mints_per_identity, ws.limits.agents_live))
             tokens.store(ws.base, name, token)

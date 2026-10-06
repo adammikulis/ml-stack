@@ -71,6 +71,29 @@ def test_agent_connect_selects_explicit_project_instead_of_current_board(tmp_pat
     assert results == ([] if unavailable else [{"id": "worker", "project": "requested-board", "state": "connected"}])
 
 
+@pytest.mark.parametrize("owned", [False, True])
+def test_foreign_credential_recovery_requires_owned_local_identity(tmp_path, owned):
+    from ml_stack.workspace import guide, tokens
+    from ml_stack.workspace.identity import Denied
+    from ml_stack.workspace.service import Workspace
+    ws = Workspace(tmp_path / "private-workspace")
+    found = {"key": "project", "name": "project"}
+    guide.agent_connect(ws, "worker", found)
+    rows = ws.registry._load()
+    if not owned:
+        rows["worker"]["minted_by"] = "legacy-person"
+        ws.registry._save(rows)
+    before = ws.registry.path.read_bytes()
+    tokens.store(ws.base, "worker", "mlws1.foreign.credential")
+    if owned:
+        guide.agent_connect(ws, "worker", found)
+        assert ws.auth(tokens.load(ws.base, "worker")).id == "worker"
+    else:
+        with pytest.raises(Denied, match="another agent"):
+            guide.agent_connect(ws, "worker", found)
+        assert ws.registry.path.read_bytes() == before
+
+
 def test_local_runner_discovers_authority_once(monkeypatch):
     discoveries = []
     def discover():

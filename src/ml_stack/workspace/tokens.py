@@ -141,6 +141,10 @@ def read_file(path: Path) -> str:
     return path.read_text(encoding="utf-8").strip()
 
 
+class ActorMismatch(Denied):
+    """A private identity slot contains a credential for a different actor."""
+
+
 def load(base: Path, name: str) -> str:
     """``name``'s token; `Denied` when its file or directory is unsafe or holds another agent's."""
     if not valid_id(name):
@@ -150,7 +154,7 @@ def load(base: Path, name: str) -> str:
         raise Denied(f"token directory {directory(base)}: {why}")
     token = read_file(directory(base) / name.replace("/", "~"))
     if not token.startswith(f"{PREFIX}{name}."):
-        raise Denied(f"the token file for {name} holds a token for another agent")
+        raise ActorMismatch(f"the token file for {name} holds a token for another agent")
     return token
 
 
