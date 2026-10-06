@@ -262,15 +262,15 @@ class Claims:
                                     'assignment': scope['id'], 'task': scope['task'],
                                     'project': scope['project'], 'note': 'Inactive task recovery'}
             self._save(claims)
+            completed = False
             try:
                 yield
-            except BaseException:
-                self._save(before)
-                raise
-            else:
-                for kind, key in resources:
-                    claims.pop(f'{kind}:{key}', None)
-                self._save(claims)
+                completed = True
+            finally:
+                if completed:
+                    for kind, key in resources:
+                        claims.pop(f'{kind}:{key}', None)
+                self._save(claims if completed else before)
 
     def release(self, who: Identity, kind: str, key: str) -> dict[str, Any]:
         """Give up a claim. Its owner, a lead or a human may."""
