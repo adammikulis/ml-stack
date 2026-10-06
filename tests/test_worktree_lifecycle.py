@@ -116,6 +116,7 @@ def test_native_mutation_records_its_unmanaged_checkout(setup):
     from ml_stack.workspace.project import describe
     kit = setup
     tokens.store(kit.base, 'worker', kit.sender)
+    repo.git(kit.primary, 'remote', 'add', 'origin', 'https://example.test/fixture.git')
     kit.ws.registry.set_project(kit.ws.auth(kit.owner), 'worker', describe(str(kit.checkout)))
     harness_claims.reserve('Write', {'file_path': str(kit.checkout / 'source.py')},
                            str(kit.checkout), 'worker', [str(kit.checkout)])
@@ -200,3 +201,102 @@ def test_precreation_claim_catches_checkout_without_another_mutation(setup):
     with pytest.raises(Denied, match=r'reserved-checkout.*worker/reserved'):
         kit.ws.announce(kit.sender, 'done', 'Complete', label='helper')
     assert target.exists()
+
+
+@pytest.mark.redteam
+def test_materialized_reservation_retains_branch_and_commit_after_removal(setup):
+    kit = setup
+    target = kit.checkout.parent / 'reserved-checkout'
+    kit.ws.claim(kit.sender, 'worktree', str(target), label='helper')
+    repo.git(kit.primary, 'worktree', 'add', '-b', 'worker/reserved', str(target))
+    (target / 'source.py').write_text('value = 2\n')
+    repo.git(target, 'add', 'source.py')
+    repo.git(target, 'commit', '-m', 'feat: reserved work')
+    unique = repo.git(target, 'rev-parse', 'HEAD')
+    assert lifecycle.pending(kit.base, 'worker', 'helper')[0]['branch'] == 'worker/reserved'
+    repo.git(kit.primary, 'worktree', 'remove', str(target))
+    with pytest.raises(Denied, match='branches remain: worker/reserved'):
+        kit.ws.announce(kit.sender, 'done', 'Complete', label='helper')
+    repo.git(kit.primary, 'branch', '-D', 'worker/reserved')
+    with pytest.raises(Denied, match='recorded commits are not landed'):
+        kit.ws.announce(kit.sender, 'done', 'Complete', label='helper')
+    repo.git(kit.primary, 'merge', '--ff-only', unique)
+    assert kit.ws.announce(kit.sender, 'done', 'Complete', label='helper')
+
+
+@pytest.mark.redteam
+def test_reserved_path_materialized_as_primary_repository_remains_pending(setup):
+    kit = setup
+    target = kit.checkout.parent / 'reserved-primary'
+    kit.ws.claim(kit.sender, 'worktree', str(target), label='helper')
+    target.mkdir()
+    repo.git(target, 'init', '-b', 'development')
+    assert lifecycle.pending(kit.base, 'worker', 'helper')[0]['reasons'] == ['reserved checkout path remains']
+
+
+@pytest.mark.redteam
+def test_native_mutation_records_target_checkout_instead_of_working_directory(setup):
+    from ml_stack import harness_claims
+    from ml_stack.workspace import tokens
+    from ml_stack.workspace.project import describe
+    kit = setup
+    target = kit.checkout.parent / 'other-checkout'
+    repo.git(kit.primary, 'worktree', 'add', '-b', 'worker/other', str(target))
+    tokens.store(kit.base, 'worker', kit.sender)
+    repo.git(kit.primary, 'remote', 'add', 'origin', 'https://example.test/fixture.git')
+    kit.ws.registry.set_project(kit.ws.auth(kit.owner), 'worker', describe(str(kit.checkout)))
+    harness_claims.reserve('Write', {'file_path': str(target / 'source.py')},
+                           str(kit.checkout), 'worker', [str(kit.checkout), str(target)])
+    scopes = lifecycle.pending(kit.base, 'worker')
+    assert [scope['path'] for scope in scopes] == [str(target)]
+
+
+@pytest.mark.redteam
+def test_launcher_exception_reports_pending_scope_and_preserves_failure(setup):
+    import argparse
+
+    from ml_stack import harnessid, harnessing
+    kit = setup
+    claim(kit)
+    seat = harnessid.Seat('worker', base=kit.base)
+    args = argparse.Namespace(project=str(kit.checkout), parent='', name='worker',
+                              role='plan-and-go', orders_from='owner',
+                              seat_factory=lambda *args: seat)
+    messages = []
+    with pytest.raises(OSError, match='fixture process failed'), \
+            harnessing.opened(args, 'codex', ('http://127.0.0.1:9', 'fixture', 0), messages.append):
+        messages.clear()
+        raise OSError('fixture process failed')
+    assert any('unfinished checkout:' in line for line in messages)
+    assert kit.checkout.exists()
+
+
+@pytest.mark.redteam
+def test_nested_reservation_retains_canonical_checkout_provenance(setup):
+    kit = setup
+    target = kit.checkout.parent / 'reserved-checkout'
+    kit.ws.claim(kit.sender, 'worktree', str(target / 'nested'), label='helper')
+    repo.git(kit.primary, 'worktree', 'add', '-b', 'worker/reserved', str(target))
+    assert lifecycle.pending(kit.base, 'worker', 'helper')[0]['path'] == str(target)
+    repo.git(kit.primary, 'worktree', 'remove', str(target))
+    with pytest.raises(Denied, match='branches remain: worker/reserved'):
+        kit.ws.announce(kit.sender, 'done', 'Complete', label='helper')
+
+
+@pytest.mark.redteam
+def test_launcher_exception_survives_failed_exit_inspection(setup, monkeypatch):
+    import argparse
+
+    from ml_stack import harnessid, harnessing
+    kit = setup
+    seat = harnessid.Seat('worker', base=kit.base)
+    args = argparse.Namespace(project=str(kit.checkout), parent='', name='worker',
+                              role='plan-and-go', orders_from='owner',
+                              seat_factory=lambda *args: seat)
+    messages = []
+    with pytest.raises(OSError, match='fixture process failed'), \
+            harnessing.opened(args, 'codex', ('http://127.0.0.1:9', 'fixture', 0), messages.append):
+        monkeypatch.setattr(harnessid.Seat, 'pending_worktrees',
+                            lambda self: (_ for _ in ()).throw(RuntimeError('fixture inspection failed')))
+        raise OSError('fixture process failed')
+    assert any('checkout inspection failed:' in line for line in messages)

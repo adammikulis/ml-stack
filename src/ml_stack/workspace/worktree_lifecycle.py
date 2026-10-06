@@ -47,14 +47,16 @@ def pending(base: Path, owner: str, label: str = '') -> list[dict]:
         path = Path(scope['path'])
         if not scope['primary']:
             found = worktreerules.checkouts(path)
-            if not found:
+            if not found or found[0] == found[1]:
                 if path.exists():
                     result.append({**scope, 'reasons': ['reserved checkout path remains']})
                 continue
-            branch = repo.git(found[0], 'branch', '--show-current')
-            scope = {**scope, 'primary': str(found[1]), 'branch': branch,
-                     'branches': [branch] if branch else [],
-                     'development': repo.git(found[1], 'branch', '--show-current')}
+            remember(base, scope['owner'], scope['label'], scope['path'])
+            with held(base / 'worktree-lifecycle.lock'), GraphStore(database) as graph:
+                scope = next(row['attrs'] for row in graph.nodes('worktree-lifecycle')
+                             if row['attrs']['path'] == str(found[0])
+                             and all(row['attrs'][key] == scope[key] for key in ('owner', 'label')))
+            path = Path(scope['path'])
         primary = Path(scope['primary'])
         registered = repo.git(primary, 'worktree', 'list', '--porcelain').splitlines()
         refs = repo.git(primary, 'for-each-ref', '--format=%(refname)', 'refs/heads/').splitlines()

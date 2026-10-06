@@ -147,4 +147,7 @@ def reserve(name, args, cwd, actor, roots):
                                          'project': scope['project']} if scope else {})})
 
     if scope is None:
-        worktree_lifecycle.remember(ws.base, who.id, '', cwd)
+        for kind, key in required:
+            if kind in ('file', 'worktree'):
+                target = Path(key)
+                worktree_lifecycle.remember(ws.base, who.id, '', str(target.parent if target.is_file() else target))

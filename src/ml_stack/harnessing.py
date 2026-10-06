@@ -285,7 +285,18 @@ def opened(args: argparse.Namespace, harness: str, served: tuple[str, str, int],
         if not seat.managed_inbox and seat.base:
             for row in seat.pending_worktrees():
                 say(f"unfinished checkout: {row['path']} ({row['branch']}): {', '.join(row['reasons'])}")
-        yield Session(files, seat, cwd, pre, post, brief, stop)
+        try:
+            yield Session(files, seat, cwd, pre, post, brief, stop)
+        finally:
+            failed = sys.exc_info()[0] is not None
+            if not seat.managed_inbox and seat.base:
+                try:
+                    for row in seat.pending_worktrees():
+                        say(f"unfinished checkout: {row['path']} ({row['branch']}): {', '.join(row['reasons'])}")
+                except (OSError, RuntimeError, ValueError) as error:
+                    if not failed:
+                        raise
+                    say(f"checkout inspection failed: {error}")
         if not seat.managed_inbox and seat.base:
             seat.require_clean()
     finally:
