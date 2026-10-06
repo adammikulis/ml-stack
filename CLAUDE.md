@@ -289,8 +289,8 @@ Routine project and development package installation is normal authorized work, 
 high-risk action or a reason to ask permission. When a command fails because a package is
 missing, identify the per-device development environment, install the dependency with the
 project's package manager, and rerun the command. This applies on Windows, Linux/WSL and macOS.
-Use editable installs for local development when they keep the active checkout and environment
-in sync. If project code imports a package on a normal execution path,
+Use a built wheel or pinned runtime tree with matching distribution metadata. Never install an
+editable checkout. If project code imports a package on a normal execution path,
 add it to the required dependency set; if it belongs to an optional feature, add it to that
 feature and its setup path. Keep the canonical environment complete through the repository's
 setup scripts and manifests. Do not stop at a missing-package message, route around it with a
@@ -382,8 +382,8 @@ preservation checks before removal; an unregistered directory is not proof that 
   edit files, stage changes or create commits there. Resolve rebases/conflicts in an isolated
   integration worktree first. Never merge into `main` without the owner's explicit instruction.
 - Packaged releases and stable service runtimes use an immutable built wheel or pinned runtime
-  tree with matching distribution metadata. Local development environments may use an editable
-  checkout on any supported OS. Replace only owned processes at a coordinated safe boundary,
+  tree with matching distribution metadata. Never install an editable checkout or point a running
+  worker at a changing checkout. Replace only owned processes at a coordinated safe boundary,
   preserving their identity and setup; do not interrupt another process's active work.
 - A brief to a subagent names the worktree rule and gives it a branch (the Agent tool's worktree
   isolation does the first half). A subagent told to commit nothing still commits on its own

@@ -9,9 +9,11 @@ from __future__ import annotations
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -67,11 +69,24 @@ def check(where: Path, tmp_path: Path, **files: str) -> tuple[int, str]:
     return code, said.getvalue()
 
 
+def shell_path() -> str:
+    shell = shutil.which("sh")
+    if not shell and os.name == "nt":
+        git = shutil.which("git")
+        candidate = Path(git).parent.parent / "usr" / "bin" / "sh.exe" if git else None
+        shell = str(candidate) if candidate and candidate.is_file() else None
+    assert shell, "a POSIX shell is required"
+    return shell
+
 def check_wrapper(where: Path, tmp_path: Path, script: str = str(HOOK),
                   python: str = sys.executable, **files: str) -> tuple[int, str]:
     """Stage those files and run the shell wrapper the way git does."""
     stage(where, files)
-    done = subprocess.run(["sh", script], cwd=where, capture_output=True, text=True,
+    source = where / "src" / "ml_stack"
+    if not source.exists():
+        shutil.copytree(HOOK.parents[2] / "src" / "ml_stack", source)
+        shutil.copytree(HOOK.parents[2] / "contracts", where / "contracts")
+    done = subprocess.run([shell_path(), script], cwd=where, capture_output=True, text=True,
                           env={**wiring(tmp_path), "PYTHON": python})
     return done.returncode, done.stdout + done.stderr
 
@@ -203,6 +218,42 @@ def test_geography_is_not_shaped_like_a_person(tmp_path):
     assert code == 0, said
 
 
+def test_technical_phrases_that_look_like_people_are_stood_down(tmp_path, monkeypatch):
+    """Named technical phrases are not refused just because Presidio reads them as people."""
+    class Engine:
+        def analyze(self, text, language):
+            for phrase in ("Git metadata", "Cloud Files", "Bea Marlow",
+                           "Cloud Files " + "Bea Marlow"):
+                start = text.find(phrase)
+                if start >= 0:
+                    yield SimpleNamespace(entity_type="PERSON", score=0.99, start=start,
+                                          end=start + len(phrase))
+
+    monkeypatch.setattr(hook, "recogniser", Engine)
+    where = repo(tmp_path, graph={"nodes": []})
+    code, said = check(where, tmp_path, **{"recovery.md": (
+        "Git metadata still points at the original checkout.\n"
+        "Cloud Files placeholders remain in the old worktree.\n"
+        "Cloud Files " + "Bea Marlow" + " is in the log.\n"
+        "Bea Marlow owns the sample checkout.\n")})
+    assert code == 1
+    assert "Git metadata" not in said
+    assert not any("Cloud Files" in line and "Bea Marlow" not in line
+                   for line in said.splitlines())
+    assert "Bea Marlow" in said
+    assert "Cloud Files " + "Bea Marlow" in said
+
+
+def test_the_technical_phrase_rule_does_not_clear_similar_person_names():
+    rules = hook.shapes()
+    assert rules.in_context("Git metadata") == "context_product: Git metadata"
+    assert rules.in_context("Cloud Files") == "context_product: Cloud Files"
+    assert rules.in_context("Git " + "Marlow") is None
+    assert rules.in_context("Cloud " + "Marlow") is None
+    assert rules.in_context("Cloud Files " + "Bea Marlow") is None
+    assert rules.in_context("Bea Marlow " + "Cloud Files") is None
+
+
 def test_a_person_quoted_beside_a_place_is_still_refused(tmp_path):
     """The place rule must not widen into a hole: an ordinary name-shaped pair on the same
     line as a place is still flagged."""
@@ -313,21 +364,50 @@ def test_the_shell_wrapper_runs_the_hook_end_to_end(tmp_path):
 
 
 def test_the_wrapper_finds_the_source_tree_when_ml_stack_is_not_installed(tmp_path):
-    """Run through a `.git/hooks/pre-commit` symlink with a Python that has no site-packages
-    (`-I -S`): the wrapper resolves the symlink to find `../../src`, and the exact list still
-    refuses the name. Presidio is absent from that Python, so the hook says so."""
+    """The copied hook loads checkout source with no installed site packages."""
     where = repo(tmp_path, PEOPLE)
     bare = tmp_path / "bare-python"
-    bare.write_text(f'#!/bin/sh\nexec "{sys.executable}" -I -S "$@"\n')
+    bare.write_text(f'#!/bin/sh\nexec "{Path(sys.executable).as_posix()}" -I -S "$@"\n')
     bare.chmod(0o755)
     link = where / ".git" / "hooks" / "pre-commit"
     link.parent.mkdir(exist_ok=True)
-    link.symlink_to(HOOK)
+    shutil.copyfile(HOOK, link)
     code, said = check_wrapper(where, tmp_path, script=".git/hooks/pre-commit", python=str(bare),
                                notes="Ask Wren Halloway about the kiln.\n")
     assert code == 1, said
     assert "Wren Halloway" in said
     assert "presidio is not installed" in said
+
+
+def test_the_wrapper_prefers_the_current_checkout_to_an_installed_package(tmp_path):
+    where = repo(tmp_path, graph={"nodes": []})
+    source = where / "src" / "ml_stack" / "redact"
+    source.mkdir(parents=True)
+    (where / "src" / "ml_stack" / "__init__.py").write_text("")
+    (source / "__init__.py").write_text("")
+    (source / "hook.py").write_text(
+        "from pathlib import Path\n"
+        "def main(argv=None):\n"
+        "    print(Path(__file__).resolve())\n"
+        "    return 0\n"
+    )
+    stale = tmp_path / "installed" / "ml_stack" / "redact"
+    stale.mkdir(parents=True)
+    (tmp_path / "installed" / "ml_stack" / "__init__.py").write_text("")
+    (stale / "__init__.py").write_text("")
+    (stale / "hook.py").write_text("def main(argv=None):\n    return 1\n")
+
+    shell = shell_path()
+    done = subprocess.run(
+        [shell, str(HOOK)],
+        cwd=where,
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PYTHON": sys.executable,
+             "PYTHONPATH": str(tmp_path / "installed")},
+    )
+    assert done.returncode == 0, done.stderr
+    assert str(source / "hook.py") in done.stdout
 
 
 @pytest.mark.slow
@@ -339,7 +419,7 @@ def test_a_clean_commit_is_still_refused_without_presidio(tmp_path):
     unnoticed, so the hook refuses rather than passing silently."""
     where = repo(tmp_path, {"nodes": [], "messages": {}})
     bare = tmp_path / "bare-python"
-    bare.write_text(f'#!/bin/sh\nexec "{sys.executable}" -I -S "$@"\n')
+    bare.write_text(f'#!/bin/sh\nexec "{Path(sys.executable).as_posix()}" -I -S "$@"\n')
     bare.chmod(0o755)
     code, said = check_wrapper(where, tmp_path, python=str(bare),
                                notes="The kiln needs firing before the studio opens.\n")

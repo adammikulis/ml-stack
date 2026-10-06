@@ -195,8 +195,12 @@ class Shapes:
         if len(words) < 2:
             return None
         known = {p.casefold(): p for p in self.products}
+        phrase = " ".join(words).casefold()
+        for product, label in known.items():
+            if " " in product and phrase == product:
+                return f"context_product: {label}"
         for word in words:
-            if word.casefold() in known:
+            if word.casefold() in known and " " not in word:
                 return f"context_product: {known[word.casefold()]}"
         return None
 

@@ -19,8 +19,7 @@
 #                   relative to the repo root; an absolute path is used as given)
 #   PYTHON          the interpreter to run (default: python3)
 #
-# Where that Python has no ml-stack installed, the source tree beside this script is used:
-# `$0` is resolved through the .git/hooks symlink and `../../src` put on the path.
+# The current checkout's source tree takes precedence over an installed package.
 #
 # Install:  scripts/install-hooks.sh
 #           activate the project environment; then run:
@@ -33,13 +32,10 @@ PY="${PYTHON:-python3}"
 
 exec "$PY" -c '
 import os, sys
-try:
-    from ml_stack.redact.hook import main
-except ImportError:
-    here = os.path.dirname(os.path.realpath(sys.argv[1]))
-    sys.path.insert(0, os.path.normpath(os.path.join(here, "..", "..", "src")))
-    for name in [m for m in sys.modules if m == "ml_stack" or m.startswith("ml_stack.")]:
-        del sys.modules[name]
-    from ml_stack.redact.hook import main
+import subprocess
+root = subprocess.run(["git", "rev-parse", "--show-toplevel"], check=True,
+                      capture_output=True, text=True).stdout.strip()
+sys.path.insert(0, os.path.join(root, "src"))
+from ml_stack.redact.hook import main
 sys.exit(main(sys.argv[2:]))
 ' "$0" "$@"
