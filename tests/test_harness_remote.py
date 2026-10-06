@@ -4,8 +4,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from ml_stack import harness_remote, harnesshook
-from ml_stack.workspace import integration_git as repo, remote_cli, worktree_lifecycle
+from ml_stack import harnesshook
+from ml_stack.workspace import (
+    harness_remote,
+    integration_git as repo,
+    remote_cli,
+    worktree_lifecycle,
+)
 from ml_stack.workspace.claims import Conflict
 from ml_stack.workspace.identity import AGENT, Denied, Identity
 
