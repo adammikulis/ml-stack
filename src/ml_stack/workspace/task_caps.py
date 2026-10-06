@@ -11,7 +11,8 @@ def admit(path):
     """Count one native tool admission or refuse an exhausted task limit."""
     with held(path.with_suffix('.lock')):
         state = json.loads(path.read_text(encoding='utf-8'))
-        if type(state.get('calls')) is not int or type(state.get('limit')) is not int:
+        if (state.get('version') != 1 or type(state.get('calls')) is not int
+                or type(state.get('limit')) is not int or state['calls'] < 0 or state['limit'] <= 0):
             raise ValueError('invalid native tool admission counter')
         if state['calls'] >= state['limit']:
             return False

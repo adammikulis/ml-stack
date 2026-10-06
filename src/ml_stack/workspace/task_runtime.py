@@ -8,7 +8,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from ml_stack.workspace import localloop, resource_allocations, tokens
+from ml_stack.workspace import tokens
 from ml_stack.workspace.identity import Denied
 
 
@@ -16,6 +16,7 @@ from ml_stack.workspace.identity import Denied
 class Settings:
     stopped: Callable[[], bool] = lambda: False
     heartbeat_s: float = 20.0
+    wall_s: float = 3600.0
 
 
 def execute(board, identity: str, task_id: str, allocation_id: str, run: Callable,
@@ -28,8 +29,7 @@ def execute(board, identity: str, task_id: str, allocation_id: str, run: Callabl
     task = board.get(token(), task_id)
     if task['state'] != 'queued':
         raise ValueError('only a queued canonical task may start')
-    runner = resource_allocations._worker(board.ws, identity)
-    seconds = min(task['limits'].get('max_wall_s', 3600), localloop.caps_of(runner).seconds)
+    seconds = min(task['limits'].get('max_wall_s', 3600), settings.wall_s)
     board.claim(token(), task_id, allocation_id)
     task = board.get(token(), task_id)
     done, cancel = threading.Event(), threading.Event()

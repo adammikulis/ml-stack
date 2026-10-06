@@ -73,6 +73,8 @@ class TaskManager(Manager):
         hooks.append({'matcher': '*', 'hooks': [{'type': 'command', 'timeout': 10,
                       'command': shlex.join([sys.executable, '-m', task_caps.__name__, str(counter)])}]})
         task_settings = context[0] / 'task-settings.json'
+        if task_settings.exists():
+            task_settings.chmod(0o600)
         task_settings.write_text(json.dumps(settings), encoding='utf-8')
         task_settings.chmod(0o444)
         command[setting_index] = str(task_settings)

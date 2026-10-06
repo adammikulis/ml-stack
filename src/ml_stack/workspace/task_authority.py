@@ -13,9 +13,11 @@ def authorize(ws, token, worker, task):
     """Return the saved worker after checking the caller's live task authority."""
     caller = ws.auth(token)
     ws._may(caller, "send")
-    runner = la.load(ws, la.check_name(worker))
-    if runner is None:
-        raise Denied('task management requires an existing local worker')
+    runners = [la.load(ws, name) for name in la.names(ws)]
+    matches = [row for row in runners if row and worker in (row.name, row.identity or row.name)]
+    if len(matches) != 1:
+        raise Denied('task management requires one existing local worker')
+    runner = matches[0]
     child = ws.auth(tokens.load(ws.base, runner.identity or runner.name))
     ws._may(caller, 'read')
     if type(task) is not str or not TASK_ID.fullmatch(task):
@@ -28,7 +30,7 @@ def authorize(ws, token, worker, task):
     if caller.role == HUMAN or child.role == HUMAN or caller.id == child.id:
         raise Denied('task management requires separate authenticated agent identities')
     if spec['created_by'] != caller.id or child.id not in spec['assignees']:
-        raise Denied('task management requires the task creator and explicit worker assignee')
+        raise Denied('only the registered worker parent or task creator manages an explicitly assigned worker')
     if not spec['project'] or caller_info.get('project') != spec['project'] \
             or child_info.get('project') != spec['project']:
         raise Denied('task management requires live matching person-set project grants')
