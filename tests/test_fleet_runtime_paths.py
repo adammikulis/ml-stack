@@ -49,3 +49,31 @@ def test_empty_root_overrides_route_to_custom_runtime(tmp_path, monkeypatch):
     configure(tmp_path / "preview")
     assert home.home() == tmp_path / "preview" / "state"
     assert home.cache() == tmp_path / "preview" / "state" / "cache"
+
+
+def test_daemon_routes_roots_before_startup_services(tmp_path, monkeypatch):
+    import pytest
+
+    from ml_stack import keystore, sentinel
+    from ml_stack.fleet import daemon
+    from ml_stack.sentinel.honey import Honey
+    from ml_stack.serve.leases import lease_file
+
+    monkeypatch.delenv(home.ROOT_ENV, raising=False)
+    monkeypatch.delenv(home.CACHE_ENV, raising=False)
+    monkeypatch.setattr(home, "user_home", lambda: tmp_path / "account")
+    root = tmp_path / "preview"
+
+    class StartupObserved(Exception):
+        pass
+
+    def inspect_startup(_path):
+        assert sentinel.sentinel_dir() == root / "state" / "sentinel"
+        assert Honey().directory == root / "state"
+        assert keystore.Keystore().directory == root / "state" / "keystore"
+        assert lease_file() == root / "state" / "servers.json"
+        raise StartupObserved
+
+    monkeypatch.setattr(daemon, "load_cluster_key", inspect_startup)
+    with pytest.raises(StartupObserved):
+        daemon.serve_forever(root=root, announce=False, web=False)
