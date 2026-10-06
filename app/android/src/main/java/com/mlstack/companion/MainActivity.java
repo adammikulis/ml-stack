@@ -232,8 +232,18 @@ public final class MainActivity extends Activity {
                 if (!visible || epoch != generation || grant != session) return;
                 Enrollment.validate(session, System.currentTimeMillis() / 1000);
                 byte[] payload = body == null ? new byte[0] : body.toString().getBytes(StandardCharsets.UTF_8);
+                boolean streaming = path.equals("/companion/v1/chat");
                 byte[] raw = client.request(session.getString("endpoint"), session.getString("fingerprint"),
-                        body == null ? "GET" : "POST", path, session.getString("token"), payload);
+                        body == null ? "GET" : "POST", path, session.getString("token"), payload,
+                        streaming ? piece -> {
+                            JSONObject delta = new JSONObject(new String(piece, StandardCharsets.UTF_8));
+                            runOnUiThread(() -> {
+                                if (!visible || epoch != generation || grant != session) return;
+                                try { reply.accept(delta); }
+                                catch (Exception failure) { notice.setText("The computer returned an unsupported response."); }
+                            });
+                        } : null);
+                if (streaming) return;
                 JSONObject result = new JSONObject(new String(raw, StandardCharsets.UTF_8));
                 runOnUiThread(() -> {
                     if (!visible || epoch != generation || grant != session) return;
@@ -258,6 +268,7 @@ public final class MainActivity extends Activity {
         List<String> names = new ArrayList<>();
         EditText message = input("Message", true);
         TextView answer = text("", 16);
+        button("Cancel", () -> { generation++; if (connection != null) connection.close(); notice.setText("Chat cancelled."); });
         button("Send", () -> {
             String question = message.getText().toString().trim();
             if (question.isEmpty() || question.length() > 16384 || models.getSelectedItem() == null) {
@@ -267,11 +278,11 @@ public final class MainActivity extends Activity {
                 JSONObject body = new JSONObject().put("model", models.getSelectedItem().toString())
                         .put("messages", new JSONArray().put(new JSONObject().put("role", "user").put("content", question)));
                 notice.setText("Waiting for your computer...");
+                answer.setText("");
                 request("/companion/v1/chat", body, response -> {
-                    String result = response.getString("answer");
-                    answer.setText(result);
-                    notice.setText("");
-                    message.setText("");
+                    if (response.has("delta")) { answer.append(response.getString("delta")); notice.setText("Receiving reply..."); }
+                    if (response.optBoolean("done")) { notice.setText(""); message.setText(""); }
+                    if (response.has("error")) notice.setText(response.getString("error"));
                 });
             } catch (Exception failure) { notice.setText("The message could not be sent."); }
         });

@@ -14,7 +14,8 @@ $env:ANDROID_SIGNING_STORE = (Resolve-Path -LiteralPath $SigningStore).Path
 $env:ANDROID_SIGNING_PASSWORD = $SigningPassword
 Push-Location $PSScriptRoot
 try {
-    & $Gradle --no-daemon --max-workers=2 "-PandroidPlugin=$AndroidPlugin" "-PandroidApi=$AndroidApi" protocolChecks lintRelease assembleRelease
+    $python = if ($env:PYTHON) { $env:PYTHON } else { 'python' }
+    & $python (Join-Path $PSScriptRoot 'build.py') $Gradle $AndroidPlugin $AndroidApi
     if ($LASTEXITCODE -ne 0) { throw 'Android build failed.' }
     Get-Item -LiteralPath (Join-Path $PSScriptRoot 'build/outputs/apk/release/ml-stack-android-release.apk')
 } finally {

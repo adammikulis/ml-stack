@@ -38,6 +38,7 @@ class Invitations:
         self.lock = threading.Lock()
         self.rows: dict[str, dict[str, Any]] = {}
         self.requests: dict[str, list[float]] = {}
+        self.devices: dict[str, dict[str, Any]] = {}
 
     def permit(self, source: str) -> None:
         with self.lock:
@@ -53,12 +54,13 @@ class Invitations:
 
     def _prune(self) -> None:
         self.rows = {k: v for k, v in self.rows.items() if v["expires"] > self.clock()}
+        self.devices = {k: v for k, v in self.devices.items() if v["expires"] > self.clock()}
 
     def mint(self, group: str, kind: str = "computer") -> dict[str, Any]:
         if not isinstance(group, str) or not 1 <= len(group) <= 128:
             raise ValueError("a bounded cluster name is required")
-        if kind != "computer":
-            raise ValueError("only owned computer invitations are available")
+        if kind not in {"computer", "android"}:
+            raise ValueError("choose an owned computer or Android device")
         member = next((m for m in self.members() if m.group == group), None)
         if member is None:
             raise ValueError("choose a cluster this computer belongs to")
@@ -79,8 +81,9 @@ class Invitations:
             expires = int(self.clock()) + 600
             payload = {"v": 1, "endpoint": endpoint, "fingerprint": fingerprint, "id": ident,
                            "secret": encode(secret), "expires": expires, "kind": kind}
-            self.rows[ident] = {"secret": secret, "expires": expires, "group": group,
+            self.rows[ident] = {"secret": secret, "expires": expires, "group": group, "kind": kind,
                 "binding": hashlib.sha256(member.key).digest(), "fingerprint": fingerprint,
+                "endpoint": endpoint,
                 "challenges": {}, "attempts": 0, "issued": 0}
             invite = "ml-stack://enroll?data=" + encode(json.dumps(payload, separators=(",", ":")).encode())
             return {"id": ident, "invite": invite, "address": endpoint, "expires": expires}
@@ -88,6 +91,29 @@ class Invitations:
     def revoke(self, ident: str) -> None:
         with self.lock:
             self.rows.pop(ident, None)
+            self.devices.pop(ident, None)
+
+    def active_devices(self) -> list[dict[str, Any]]:
+        with self.lock:
+            self._prune()
+            return [{"device_id": ident, "device_name": row["device_name"],
+                     "group": row["group"], "expires": row["expires"]}
+                    for ident, row in self.devices.items()]
+
+    def authorize(self, token: str) -> dict[str, Any]:
+        if not isinstance(token, str) or len(token) != 43:
+            raise ValueError("Android session required")
+        digest = hashlib.sha256(token.encode()).digest()
+        with self.lock:
+            self._prune()
+            row = next((v for v in self.devices.values() if hmac.compare_digest(v["token"], digest)), None)
+            if row is None:
+                raise ValueError("Android session expired or revoked")
+            member = next((m for m in self.members() if m.group == row["group"]), None)
+            if (member is None or not hmac.compare_digest(hashlib.sha256(member.key).digest(), row["binding"])
+                    or self.origin() != (row["endpoint"], row["fingerprint"])):
+                raise ValueError("Android session authority changed")
+            return dict(row)
 
     def exchange(self, action: str, fields: dict[str, Any]) -> dict[str, Any]:
         for name, limit in (("id", 32), ("challenge", 64), ("proof", 64),
@@ -97,8 +123,8 @@ class Invitations:
                 raise ValueError("invalid invitation field")
         if len(fields.get("id", "")) != 32:
             raise ValueError("invalid invitation id")
-        if fields.get("kind") != "computer" or fields.get("platform") != "computer":
-            raise ValueError("this invitation enrolls an owned computer")
+        if fields.get("kind") not in {"computer", "android"} or fields.get("platform") != fields.get("kind"):
+            raise ValueError("unsupported device platform")
         if not isinstance(fields.get("device_name"), str) or not 1 <= len(fields["device_name"]) <= 128:
             raise ValueError("a bounded device name is required")
         if fields.get("public_key", "") != "":
@@ -108,10 +134,14 @@ class Invitations:
             row = self.rows.get(fields.get("id"))
             if row is None:
                 raise ValueError("invitation expired, revoked or already used")
+            if row["kind"] != fields["kind"]:
+                raise ValueError("invitation device kind changed")
+            if row["kind"] == "android" and len(fields["device_name"]) > 80:
+                raise ValueError("Android device name is too long")
             member = next((m for m in self.members() if m.group == row["group"]), None)
             if member is None or not hmac.compare_digest(hashlib.sha256(member.key).digest(), row["binding"]):
                 raise ValueError("cluster membership changed")
-            if self.origin()[1] != row["fingerprint"]:
+            if self.origin() != (row["endpoint"], row["fingerprint"]):
                 raise ValueError("listener certificate changed")
             challenges = row["challenges"]
             if action == "challenge":
@@ -135,9 +165,22 @@ class Invitations:
             expected = proof(row["secret"], fields, row["fingerprint"])
             if not hmac.compare_digest(expected, str(fields.get("proof", ""))):
                 raise ValueError("invitation proof did not match")
+            if row["kind"] == "android":
+                if len(self.devices) >= 128:
+                    raise ValueError("revoke an Android device before enrolling another")
+                ident, token = secrets.token_hex(16), encode(secrets.token_bytes(32))
+                expires = int(self.clock()) + 3600
+                endpoint, fingerprint = self.origin()
+                self.devices[ident] = {"token": hashlib.sha256(token.encode()).digest(),
+                    "binding": row["binding"], "group": member.group, "expires": expires,
+                    "endpoint": endpoint, "fingerprint": fingerprint, "device_name": fields["device_name"]}
+                payload = {"kind": "android", "device_id": ident, "token": token, "expires": expires,
+                    "capabilities": ["fleet.status", "chat"], "endpoint": endpoint,
+                    "fingerprint": fingerprint, "group": member.group}
+            else:
+                payload = {"kind": "computer", "group": member.group, "key": member.key.decode()}
             self.rows.pop(fields["id"], None)
-            grant = json.dumps({"kind": "computer", "group": member.group, "key": member.key.decode()},
-                               separators=(",", ":")).encode()
+            grant = json.dumps(payload, separators=(",", ":")).encode()
             signature = hmac.new(row["secret"], ("ml-stack-invite-grant/v1\n" + fields["challenge"] + "\n").encode() + grant,
                                  hashlib.sha256).hexdigest()
             return {"grant_data": encode(grant), "proof": signature}

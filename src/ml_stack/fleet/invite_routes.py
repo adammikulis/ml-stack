@@ -13,6 +13,7 @@ from qrcode.image.svg import SvgPathFillImage
 
 from .discovery import DiscoveryError, adopt
 from .invites import Invitations
+from .session import parse_cookie
 
 
 def store(ui: Any) -> Invitations:
@@ -27,24 +28,44 @@ def local(address: str) -> bool:
         return False
 
 
+def person_session(route: Any) -> bool:
+    session = route.ui.sessions.get(parse_cookie(route.cookie))
+    return session is not None and session.who in {"passphrase", "ticket", "setup"}
+
+
 def ui_route(route: Any) -> bool:
-    if route.path not in ("/ui/fleet/invites", "/ui/fleet/join-invite"):
+    if route.path not in ("/ui/fleet/invites", "/ui/fleet/join-invite", "/ui/fleet/android-devices"):
         return False
     if not local(route.client_ip) or not route.ui.host_ok(route.host_header):
         route.send(403, {"error": "invitation actions require this computer's owner interface"})
         return True
-    if route.path.endswith("/invites") and not route.ui.authed(route.cookie):
+    if not route.path.endswith("/join-invite") and not route.ui.authed(route.cookie):
         route.send(401, {"error": "sign in before inviting an owned computer"})
         return True
     try:
+        if route.path.endswith("/android-devices") and not person_session(route):
+            route.send(403, {"error": "Android enrollment controls require an owner browser session"})
+            return True
+        if route.path.endswith("/android-devices") and route.method == "GET":
+            route.send(200, {"devices": store(route.ui).active_devices()}, {"Cache-Control": "no-store"})
+            return True
         length = int(route.header("Content-Length", "0"))
         if not 0 < length <= 8192:
             raise ValueError("invitation request must be between 1 and 8192 bytes")
         body = route.body()
         if not isinstance(body, dict):
             raise ValueError("a JSON object is required")
-        if route.path.endswith("/invites"):
+        if route.path.endswith("/android-devices"):
+            if route.method != "DELETE":
+                route.send(405, {"error": "use GET or DELETE"})
+                return True
+            store(route.ui).revoke(str(body.get("device_id", "")))
+            result = {"revoked": True}
+        elif route.path.endswith("/invites"):
             if route.method == "POST":
+                if body.get("kind") == "android" and not person_session(route):
+                    route.send(403, {"error": "Android enrollment requires an owner browser session"})
+                    return True
                 result = store(route.ui).mint(str(body.get("group", "")), str(body.get("kind", "computer")))
                 buffer = io.BytesIO()
                 qrcode.make(result["invite"], image_factory=SvgPathFillImage, border=4).save(buffer)

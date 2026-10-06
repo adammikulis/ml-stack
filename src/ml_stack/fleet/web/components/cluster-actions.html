@@ -102,6 +102,9 @@
       if (!groups.length) return;
       const named = el("select", { id: `${scope}-invite-group` },
         ...groups.map(group => el("option", { value: group }, group)));
+      const kind = el("select", { id: `${scope}-invite-kind` },
+        el("option", { value: "computer" }, "Owned computer: full cluster access"),
+        el("option", { value: "android" }, "Owned Android phone: local status and chat for one hour"));
       const issued = el("div");
       const create = el("button", { class: "ghost small" }, "Create invite");
       const creation = el("div", { role: "status", "aria-live": "polite" });
@@ -111,19 +114,36 @@
         creation.textContent = "Creating an invite...";
         try {
           const got = await M.api("/ui/fleet/invites", { method: "POST",
-            body: JSON.stringify({ group: named.value, kind: "computer" }) });
+            body: JSON.stringify({ group: named.value, kind: kind.value }) });
           if (generation !== this.generation || M.refused(got)) return;
           if (got.error || got.ok === false) throw new Error(got.error || "Could not create an invite.");
           if (!got.invite || !got.id || !Number.isFinite(got.expires)) throw new Error("The invite response is incomplete.");
-          creation.textContent = "Invite created. Share it with the machine you want to add.";
+          creation.textContent = kind.value === "android" ? "Scan this invite in the Android companion on a phone you own." : "Share this invite with the computer you own.";
           if (this.isConnected) this.showInvite(got, issued, creation, create);
         } catch (error) { creation.textContent = error.message; create.disabled = false; }
       };
       this.create = create; this.issued = issued;
       this.firstChild.append(el("label", { for: `${scope}-invite-group` }, "Cluster to invite into"),
-        named,
+        named, el("label", { for: `${scope}-invite-kind` }, "Device and permissions"), kind,
         el("p", { class: "hint" }, "Only add computers you own. This invite grants full cluster access, including permission to run commands."),
         create, creation, issued);
+      const devices = el("div");
+      const refresh = el("button", { class: "ghost small" }, "Show Android connections");
+      refresh.onclick = async () => {
+        const got = await M.api("/ui/fleet/android-devices");
+        if (M.refused(got)) return;
+        if (got.error) { creation.textContent = got.error; return; }
+        devices.replaceChildren(...(got.devices || []).map(device => el("div", { class: "row" },
+          el("span", {}, `${device.device_name} (${device.group})`),
+          el("button", { class: "ghost small", onclick: async () => {
+            const result = await M.api("/ui/fleet/android-devices", { method: "DELETE",
+              body: JSON.stringify({ device_id: device.device_id }) });
+            if (result.error) creation.textContent = result.error;
+            else refresh.click();
+          } }, "Revoke Android connection"))));
+        if (!devices.childNodes.length) devices.textContent = "No active Android connections.";
+      };
+      this.firstChild.append(refresh, devices);
     }
     showInvite(got, issued, note, create) {
       const text = el("textarea", { rows: "4", readonly: "1", "aria-label": "Created invitation",

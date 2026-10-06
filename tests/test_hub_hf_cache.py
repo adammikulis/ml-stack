@@ -134,3 +134,12 @@ def test_cached_snapshot_symlink_cannot_leave_repository(snapshot, tmp_path):
     with pytest.raises(ValueError):
         hf_cache.fetch("sample/model")
     assert len(calls) == 1 and outside.read_bytes() == b"card"
+
+
+def test_member_nested_checkout_refused_before_any_download(snapshot, monkeypatch):
+    cache, _, calls = snapshot
+    monkeypatch.setattr(hf_cache.worktreerules, "checkouts",
+                        lambda path: (path, path) if path.name == "train.parquet" else None)
+    with pytest.raises(ValueError, match="outside a Git checkout"):
+        hf_cache.fetch("sample/model")
+    assert len(calls) == 1 and not cache.exists()

@@ -31,7 +31,7 @@ from ml_stack.speech import service as speech
 from ml_stack.speech.protocols import ProviderError
 from ml_stack.speech.service import as_json, transcribe
 
-from . import commands, invite_routes, projects as project_routes
+from . import commands, companion_routes, invite_routes, projects as project_routes
 from .availability import Availability, parse_window
 from .deciding import MAX_REQUEST, Deciding
 from .device import device_report
@@ -383,6 +383,8 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
             return False
 
         def do_GET(self) -> None:
+            if companion_routes.answer(ui, self):
+                return
             if self.path == "/favicon.ico":
                 self.send_response(204)
                 self.end_headers()
@@ -554,6 +556,11 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
             self._send(status, payload)
 
         def do_POST(self) -> None:
+            if self.path.split("?", 1)[0].startswith("/companion/"):
+                body = self._body(65536)
+                if body is not None:
+                    companion_routes.answer(ui, self, body)
+                return
             if self._ui():
                 return
             body = self._body()

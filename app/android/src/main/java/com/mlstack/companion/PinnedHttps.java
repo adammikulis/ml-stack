@@ -49,6 +49,13 @@ final class PinnedHttps implements AutoCloseable {
     }
     byte[] request(String endpoint, String fingerprint, String method, String path,
                    String token, byte[] body) throws Exception {
+        return request(endpoint, fingerprint, method, path, token, body, null);
+    }
+
+    interface Chunks { void accept(byte[] raw) throws Exception; }
+
+    byte[] request(String endpoint, String fingerprint, String method, String path,
+                   String token, byte[] body, Chunks chunks) throws Exception {
         if (closed) throw new IllegalStateException("Connection was locked.");
         URI origin = new URI(endpoint);
         if (!"https".equals(origin.getScheme()) || origin.getHost() == null || origin.getUserInfo() != null
@@ -98,7 +105,7 @@ final class PinnedHttps implements AutoCloseable {
                 socket.getOutputStream().write(head.getBytes(StandardCharsets.US_ASCII));
                 socket.getOutputStream().write(body);
                 socket.getOutputStream().flush();
-                return response(socket.getInputStream());
+                return response(socket.getInputStream(), chunks);
             }
         } finally { active = null; transport.close(); }
     }
@@ -132,6 +139,10 @@ final class PinnedHttps implements AutoCloseable {
     }
 
     static byte[] response(InputStream stream) throws Exception {
+        return response(stream, null);
+    }
+
+    static byte[] response(InputStream stream, Chunks chunks) throws Exception {
         String status = line(stream, 4096);
         if (!status.matches("HTTP/1\\.[01] [0-9]{3}.*")) throw new IllegalArgumentException("Invalid device response.");
         int code = Integer.parseInt(status.substring(9, 12));
@@ -159,8 +170,10 @@ final class PinnedHttps implements AutoCloseable {
                     return bytes.toByteArray();
                 }
                 if (size > LIMIT - bytes.size()) throw new IllegalArgumentException("The device response is too large.");
-                bytes.write(exact(stream, size));
+                byte[] piece = exact(stream, size);
+                bytes.write(piece);
                 if (!line(stream, 2).isEmpty()) throw new IllegalArgumentException("Invalid response chunk.");
+                if (chunks != null) chunks.accept(piece);
             }
         }
         if (headers.containsKey("transfer-encoding") || !headers.containsKey("content-length")) throw new IllegalArgumentException("Unsupported device response framing.");

@@ -59,6 +59,11 @@ public final class CompanionProtocolTest {
         }
         equal("{}", new String(response("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}"), StandardCharsets.UTF_8));
         equal("{}", new String(response("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n2\r\n{}\r\n0\r\n\r\n"), StandardCharsets.UTF_8));
+        java.util.List<String> deltas = new java.util.ArrayList<>();
+        PinnedHttps.response(new ByteArrayInputStream(("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n"
+                + "2\r\n{}\r\n2\r\n[]\r\n0\r\n\r\n").getBytes(StandardCharsets.US_ASCII)),
+                raw -> deltas.add(new String(raw, StandardCharsets.UTF_8)));
+        equal(java.util.List.of("{}", "[]"), deltas);
         rejects(() -> response("HTTP/1.1 302 Found\r\nContent-Length: 0\r\n\r\n"));
         rejects(() -> response("HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n"));
         rejects(() -> response("HTTP/1.1 200 OK\r\nContent-Length: 2\r\nContent-Length: 2\r\n\r\n{}"));

@@ -8,7 +8,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-from ml_stack import worktreerules
+from ml_stack import files, worktreerules
+from ml_stack.safenames import safe_join
 
 REPOSITORY = "openlifescienceai/medmcqa"
 REVISION = "91c6572c454088bf71b679ad90aa8dffcd0d5868"
@@ -37,6 +38,10 @@ def convert(row: dict[str, Any]) -> dict[str, Any] | None:
 
 def convert_split(snapshot: Path, split: str, output: Path) -> tuple[int, str]:
     """Write one split as JSONL and return its count and SHA-256."""
+    checked = safe_join(output.parent, output.name)
+    if output.is_symlink() or worktreerules.checkouts(checked) is not None:
+        raise ValueError("generated cases must be outside a Git checkout and cannot replace links")
+    output = checked
     try:
         import pyarrow.parquet as parquet
     except ImportError as exc:
@@ -47,18 +52,18 @@ def convert_split(snapshot: Path, split: str, output: Path) -> tuple[int, str]:
     rows = (row for part in parts for row in parquet.read_table(part).to_pylist())
     digest = hashlib.sha256()
     count = 0
-    with output.open("wb") as stream:
-        for row in rows:
-            case = convert(row)
-            if case is None:
-                continue
-            line = (json.dumps(case, ensure_ascii=False, sort_keys=True) + "\n").encode("utf-8")
-            stream.write(line)
-            digest.update(line)
-            count += 1
-    if count < 40:
-        output.unlink(missing_ok=True)
-        raise ValueError(f"only {count} supported cases in {split}; expected at least 40")
+    with files.writing(output) as temporary:
+        with temporary.open("wb") as stream:
+            for row in rows:
+                case = convert(row)
+                if case is None:
+                    continue
+                line = (json.dumps(case, ensure_ascii=False, sort_keys=True) + "\n").encode("utf-8")
+                stream.write(line)
+                digest.update(line)
+                count += 1
+        if count < 40:
+            raise ValueError(f"only {count} supported cases in {split}; expected at least 40")
     return count, digest.hexdigest()
 
 

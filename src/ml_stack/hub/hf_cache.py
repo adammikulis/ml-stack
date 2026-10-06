@@ -97,12 +97,17 @@ def fetch(repo: str, *, revision: str = "main", repo_type: str = "model") -> Pat
     members = _members(data)
     root = safe_join(cache, f"{repo_type}s--{repo.replace('/', '--')}")
     folder = safe_join(root, f"snapshots/{commit}")
-    if worktreerules.checkouts(folder) is not None:
+    destinations = [safe_join(root, f"snapshots/{commit}/{member.name}") for member in members]
+    if not COMMIT.fullmatch(revision):
+        destinations.append(safe_join(root, f"refs/{revision}"))
+    if any(worktreerules.checkouts(path) is not None for path in (root, folder, *destinations)):
         raise ValueError("the Hub snapshot must be outside a Git checkout")
     prefix = "datasets/" if repo_type == "dataset" else ""
     with lock.only_one(root / ".ml-stack-snapshot.lock", announce=lambda _text: None):
         for member in members:
             target = safe_join(root, f"snapshots/{commit}/{member.name}")
+            if worktreerules.checkouts(target) is not None:
+                raise ValueError("snapshot members must be outside a Git checkout")
             if target.is_file() and not member.verify(target, {}):
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)

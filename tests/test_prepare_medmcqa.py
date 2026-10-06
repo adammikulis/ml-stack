@@ -77,3 +77,35 @@ def test_cli_refuses_generated_cases_in_checkout(tmp_path, monkeypatch):
     with pytest.raises(SystemExit) as failure:
         converter.main()
     assert failure.value.code == 2 and not output.exists()
+
+
+def test_split_refuses_output_inside_nested_checkout(tmp_path, monkeypatch):
+    output = tmp_path / "nested" / "train.jsonl"
+    monkeypatch.setattr(converter.worktreerules, "checkouts", lambda path: (tmp_path, tmp_path))
+    with pytest.raises(ValueError, match="outside a Git checkout"):
+        converter.convert_split(tmp_path, "train", output)
+    assert not output.exists()
+
+
+def test_split_refuses_link_target_before_truncation(tmp_path, monkeypatch):
+    from test_hub_discover import symlink
+    target = tmp_path / "valuable.jsonl"
+    target.write_bytes(b"preserve")
+    output = tmp_path / "cases" / "train.jsonl"
+    output.parent.mkdir()
+    symlink(output, target)
+    with pytest.raises(ValueError):
+        converter.convert_split(tmp_path, "train", output)
+    assert target.read_bytes() == b"preserve"
+
+
+def test_atomic_output_preserves_existing_hardlink_target(tmp_path, monkeypatch):
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data/train-0.parquet").touch()
+    parquet(monkeypatch, [row(index) for index in range(40)])
+    target = tmp_path / "valuable.jsonl"
+    target.write_bytes(b"preserve")
+    output = tmp_path / "train.jsonl"
+    output.hardlink_to(target)
+    converter.convert_split(tmp_path, "train", output)
+    assert target.read_bytes() == b"preserve" and output.read_bytes() != b"preserve"
