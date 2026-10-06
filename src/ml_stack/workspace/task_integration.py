@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from ml_stack.graph.store import GraphStore
 from ml_stack.workspace import integration_git as repo
+from ml_stack.workspace import integration_staging
 from ml_stack.workspace.chain import held
 from ml_stack.workspace.claims import Conflict
 from ml_stack.workspace.identity import HUMAN, Denied, Identity
@@ -108,7 +109,12 @@ class DevelopmentIntegration:
         self.ws, self.token, self.publish_requested = ws, token, publish
         self.task, self.worktree = reviewed(ws, token, task_id)
         self.source, self.commit = _source(self.task, self.worktree)
-        self.primary, self.development, self.before = repo.repository(self.source)
+        self.primary, self.development, self.before = repo.repository(self.source, require_clean=False)
+        self.preserved = integration_staging.files(self.primary, self.commit)
+        who = ws.auth(token)
+        parent = ws.registry.info(self.task["worker"])["parent"]
+        if self.preserved and who.role != HUMAN and who.id != parent:
+            raise Denied("only the authenticated task lead may preserve primary files")
         digest = hashlib.sha256(f'{self.task["workspace"]}:{task_id}:{self.task["review"]["id"]}'.encode()).hexdigest()
         self.ident = 'integration:' + digest
         self.branch = ws.auth(token).id + '/integrate-' + digest[:16]
@@ -124,12 +130,15 @@ class DevelopmentIntegration:
                        'policy': 'development-integration-v1'}
 
     def prepare(self) -> None:
-        repo.clean(self.primary)
+        if integration_staging.files(self.primary, self.commit) != self.preserved:
+            raise Denied("primary preservation changed before integration")
         if repo.git(self.primary, 'rev-parse', 'HEAD') != self.before:
             raise Denied('development changed before integration acquired its lock')
         repo.remote_baseline(self.primary, self.development, self.before)
         self.ws.claim(self.token, 'branch', self.development)
         self.ws.claim(self.token, 'area', str(self.primary / '.ml-stack-integration'))
+        for name in self.preserved:
+            self.ws.claim(self.token, 'file', str(self.primary / name))
         self.ws.claim(self.token, 'branch', self.branch)
         self.ws.claim(self.token, 'worktree', str(self.candidate))
         source_claim = next((claim for claim in self.ws.claims.listing(kind='worktree')
@@ -157,7 +166,7 @@ class DevelopmentIntegration:
 
     def publish(self, checks: list[dict]) -> dict:
         self.ws.claim(self.token, 'branch', self.development)
-        primary, branch, before = repo.repository(self.source)
+        primary, branch, before = repo.repository(self.source, require_clean=False)
         if (primary, branch, before) != (self.primary, self.development, self.before):
             raise Denied('development changed during gating; preserve candidate and recheck the new baseline')
         current, worktree = reviewed(self.ws, self.token, self.task['id'])
@@ -169,6 +178,9 @@ class DevelopmentIntegration:
         repo.clean(self.candidate)
         repo.remote_baseline(self.primary, self.development, self.before)
         tip = repo.git(self.candidate, 'rev-parse', 'HEAD')
+        for name in self.preserved:
+            self.ws.claim(self.token, 'file', str(self.primary / name))
+        integration_staging.stage(self.primary, tip, self.preserved)
         repo.git(self.primary, 'merge', '--ff-only', tip)
         _event(self.ws, self.record, 'integrated', commit=tip, checks=checks)
         if repo.git(self.primary, 'rev-parse', 'HEAD') != tip:
@@ -203,6 +215,10 @@ class DevelopmentIntegration:
             claim = self.ws.who_owns(kind, key)
             if claim and claim['owner'] == self.record['owner']:
                 self.ws.release(self.token, kind, key)
+        for name in self.preserved:
+            claim = self.ws.who_owns('file', str(self.primary / name))
+            if claim and claim['owner'] == self.record['owner']:
+                self.ws.release(self.token, 'file', str(self.primary / name))
         return _event(self.ws, self.record, 'published' if self.publish_requested else 'completed',
                       commit=tip, checks=checks, cleanup_verified=True)
 

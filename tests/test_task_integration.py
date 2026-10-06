@@ -89,7 +89,7 @@ def project(board, tmp_path, monkeypatch, request):
     if getattr(request, 'param', '') == 'bad_patch':
         patch += b'not the reviewed full diff\n'
     (source / '.task.patch').write_bytes(patch)
-    (source / '.task-report.md').write_text('Independent replay ready.\n')
+    (source / '.task-report.md').write_text('Task artifacts recorded.\n')
     repo.git(source, 'add', '--', '.task.patch', '.task-report.md')
     repo.git(source, 'commit', '-m', 'chore: record canonical task artifacts')
     artifacts = {name: hashlib.sha256(repo.git(source, 'show', f'HEAD:{name}', binary=True)).hexdigest()
@@ -431,3 +431,44 @@ def test_completed_task_refuses_recreated_branch_without_deleting_it(board, proj
     with pytest.raises(Denied, match='branch reappeared'):
         task_integration.integrate(board.ws, board.parent, board.task['id'])
     assert repo.git(project['primary'], 'rev-parse', project['worktree']['branch']) == result['commit']
+
+
+@pytest.mark.redteam
+@pytest.mark.parametrize('staged', [False, True])
+def test_lead_preserves_exact_reviewed_primary_bytes_before_fast_forward(board, project, staged):
+    board.board.review(board.parent, board.task['id'], accepted())
+    primary = project['primary']
+    content = repo.git(project['source'], 'show', 'HEAD:sim.py', binary=True)
+    (primary / 'sim.py').write_bytes(content)
+    if staged:
+        repo.git(primary, 'add', '--', 'sim.py')
+    result = task_integration.integrate(board.ws, board.parent, board.task['id'])
+    assert result['state'] == 'completed'
+    assert (primary / 'sim.py').read_bytes() == content
+    assert repo.git(primary, 'status', '--porcelain') == ''
+    assert board.ws.who_owns('file', str(primary / 'sim.py')) is None
+
+
+@pytest.mark.redteam
+@pytest.mark.parametrize('change', ['working', 'staged', 'untracked', 'child'])
+def test_unreviewed_primary_bytes_and_child_staging_are_refused(board, project, change):
+    board.board.review(board.parent, board.task['id'], accepted())
+    primary = project['primary']
+    (primary / 'sim.py').write_text('speed = 2\n')
+    token = board.parent
+    if change == 'working':
+        (primary / 'sim.py').write_text('speed = 99\n')
+    elif change == 'staged':
+        (primary / 'sim.py').write_text('speed = 99\n')
+        repo.git(primary, 'add', '--', 'sim.py')
+        (primary / 'sim.py').write_text('speed = 2\n')
+    elif change == 'untracked':
+        (primary / 'unknown.py').write_text('unknown = True\n')
+    else:
+        token = board.child
+    before = repo.git(primary, 'diff', '--cached', binary=True)
+    with pytest.raises(Denied):
+        task_integration.integrate(board.ws, token, board.task['id'])
+    assert repo.git(primary, 'diff', '--cached', binary=True) == before
+    assert repo.git(primary, 'rev-parse', 'HEAD') == project['baseline']
+    assert not project['log'].exists()

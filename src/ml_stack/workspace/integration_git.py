@@ -30,12 +30,12 @@ def git(root: Path, *arguments: str, binary: bool = False):
     return result.stdout if binary else result.stdout.strip()
 
 
-def clean(root: Path) -> None:
+def clean(root: Path, *, allow_changes: bool = False) -> None:
     for marker in ('MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD', 'rebase-merge', 'rebase-apply'):
         path = root / git(root, 'rev-parse', '--git-path', marker)
         if path.exists():
             raise Denied(f'{root} has an unfinished {marker} operation')
-    if git(root, 'status', '--porcelain'):
+    if not allow_changes and git(root, 'status', '--porcelain'):
         raise Denied(f'{root} has uncommitted changes; commit or preserve them before integration')
 
 
@@ -75,7 +75,7 @@ def native_patch(root: Path, commit: str, baseline: str, artifacts: dict[str, st
         raise Denied('the committed native patch does not describe the exact reviewed source changes')
 
 
-def repository(source: Path) -> tuple[Path, str, str]:
+def repository(source: Path, *, require_clean: bool = True) -> tuple[Path, str, str]:
     checkout = worktreerules.checkouts(source)
     if not checkout or checkout[0] != source.resolve() or checkout[0] == checkout[1]:
         raise Denied('reviewed work must belong to a prepared isolated Git worktree')
@@ -84,7 +84,8 @@ def repository(source: Path) -> tuple[Path, str, str]:
     if not branch or branch == 'main':
         raise Denied('integration only targets the checked-out development branch, never main')
     git(primary, 'check-ref-format', '--branch', branch)
-    clean(primary)
+    if require_clean:
+        clean(primary)
     return primary, branch, git(primary, 'rev-parse', 'HEAD')
 
 

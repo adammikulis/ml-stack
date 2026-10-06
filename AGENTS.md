@@ -5,8 +5,10 @@ subagent. Read it first. This summary adds no restrictions or exceptions.
 
 - Edit, stage and commit only named files in your own isolated worktree and branch. Never use
   an editable install. An independently reviewed, scoped-gated `git merge --ff-only <branch>`
-  into the primary checkout's development branch is explicitly permitted; editing, staging and
-  committing in that checkout are forbidden. Resolve conflicts in an integration worktree.
+  into the primary checkout's development branch is permitted. The authenticated task lead may
+  stage named primary files through maintained `task-integrate` only when their exact bytes
+  match its committed, independently reviewed candidate, with file claims and scoped gates.
+  Primary edits, commits and bare `git add` remain forbidden. Resolve conflicts in an integration worktree.
 - Create worktrees beside the primary checkout, never inside it. Completion includes checking
   for unique work, removing the worktree and merged branch, pruning and verifying cleanup
   before the final report or `announce done` (see `CLAUDE.md`, "Worktrees").
