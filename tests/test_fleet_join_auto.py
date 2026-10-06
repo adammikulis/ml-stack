@@ -74,7 +74,7 @@ def test_no_argument_terminal_does_not_prompt_or_read_stdin(monkeypatch, tmp_pat
     monkeypatch.delenv("ML_STACK_CLUSTER", raising=False)
     monkeypatch.setattr("builtins.input", lambda *a: pytest.fail("automatic join prompted"))
     asked = []
-    monkeypatch.setattr(joining, "join_machine", lambda **kw: asked.append(kw) or joining.Joined(name="larch", port=1, root=tmp_path))
+    monkeypatch.setattr(joining, "join_machine", lambda **kw: asked.append(kw) or joining.Joined(name="larch", port=1, root=tmp_path, group=""))
     assert joining.main(["--root", str(tmp_path), "join"]) == 0
     assert asked[0]["passphrase"] == "" and asked[0]["group"] == ""
     assert asked[0]["mode"] is None
