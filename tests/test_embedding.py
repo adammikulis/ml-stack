@@ -17,7 +17,14 @@ SRC = Path(__file__).resolve().parents[1] / "src"
 DOC = Path(__file__).resolve().parents[1] / "docs" / "embedding.md"
 
 PROBE = """
-import socket, sys
+import socket, sys, tomllib
+from packaging.requirements import Requirement
+from importlib.metadata import packages_distributions
+from pathlib import Path
+declared = {Requirement(value).name.lower().replace('_', '-') for value in
+            tomllib.loads(Path('pyproject.toml').read_text())['project']['dependencies']}
+core = {module for module, distributions in packages_distributions().items()
+        if any(name.lower().replace('_', '-') in declared for name in distributions)}
 def refuse(*args, **kwargs):
     raise RuntimeError("socket opened at import")
 socket.socket.connect = refuse
@@ -25,7 +32,7 @@ import ml_stack.serve, ml_stack.client
 outside = sorted({name.split('.')[0] for name in sys.modules
                   if not name.startswith('_')
                   and name.split('.')[0] not in sys.stdlib_module_names}
-                 - {'ml_stack', 'psutil', 'packaging'})
+                 - core - {'ml_stack'})
 print(outside)
 """
 

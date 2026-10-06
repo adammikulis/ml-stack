@@ -15,6 +15,7 @@ import zipfile
 from pathlib import Path
 
 from ml_stack.files import writing
+from ml_stack.net import packages
 from ml_stack.safenames import unpack
 
 ORIGIN = "source-checkout"
@@ -117,14 +118,15 @@ def install_checkout(checkout: Path, *, timeout: float) -> tuple[int, str]:
             cached = cache_wheel(found[0], commit)
             _run([sys.executable, "-m", "pip", "install", "--upgrade", str(cached)], timeout)
             said = _run([sys.executable, "-m", "pip", "install", "--force-reinstall",
-                         "--no-deps", str(cached)], timeout)
+                         "--no-deps", "--no-index", str(cached)], timeout)
             return 0, said[-2000:]
     except (OSError, subprocess.SubprocessError, ValueError) as exc:
         return 1, str(exc)[-2000:]
 
 
 def _run(argv: list[str], timeout: float) -> str:
-    done = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
+    done = (packages.run(argv[0], argv[3:], timeout=timeout) if argv[1:3] == ["-m", "pip"]
+            else subprocess.run(argv, capture_output=True, text=True, timeout=timeout))
     output = f"{done.stdout}{done.stderr}".strip()
     if done.returncode:
         raise ValueError(output or f"{argv[0]} exited {done.returncode}")

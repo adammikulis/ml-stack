@@ -10,12 +10,8 @@ from __future__ import annotations
 
 import os
 import secrets
+from importlib import import_module
 from pathlib import Path
-
-try:
-    import machineid
-except ImportError:
-    machineid = None
 
 from ml_stack.files import promote
 
@@ -115,9 +111,8 @@ def machine_id() -> str:
 
 def device_id():
     """Fail explicitly when the host provider cannot identify this device."""
-    if machineid is None:
-        raise RuntimeError("physical device identity unavailable; install ml-stack[coordinator]")
     try:
+        machineid = import_module("machineid")
         identity = machineid.hashed_id("ml-stack")
     except (ImportError, OSError, RuntimeError) as exc:
         raise RuntimeError("physical device identity unavailable; install ml-stack[coordinator]") from exc

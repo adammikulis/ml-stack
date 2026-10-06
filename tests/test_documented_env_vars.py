@@ -17,6 +17,11 @@ TEXT = {".py", ".rs", ".ts", ".tsx", ".js", ".sh", ".ps1", ".toml", ".json", ".y
 NAME = re.compile(r"\bML_STACK_[A-Z0-9_]*[A-Z0-9]\b")
 
 EXTERNAL: dict[str, str] = {
+    "ML_STACK_FROZEN_BINARY": "standalone daemon input for packaging conversation tests",
+    "ML_STACK_FROZEN_CODING_BINARY": "standalone daemon input for packaging coding tests",
+    "ML_STACK_ACCEPTANCE_DECIDE_CACHE": "installed decide cache input for native gym acceptance tests",
+    "ML_STACK_ACCEPTANCE_DECISION_DEVICE": "accelerator selection for native gym acceptance tests",
+    "ML_STACK_ACCEPTANCE_VISION": "opt-in native vision gym acceptance test",
     "ML_STACK_TEST_GGUF": "opt-in input of the real-model tests, read by tests/ only",
     "ML_STACK_TEST_SSHD": "opt-in switch of the localhost-sshd onboarding test, read by tests/ only",
     "ML_STACK_MANUAL_DIALOG": "opt-in switch of the manual notification-dialog test, read by tests/ only",
