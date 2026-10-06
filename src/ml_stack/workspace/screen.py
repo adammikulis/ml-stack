@@ -34,7 +34,7 @@ _AUTHORITY = (r"(?:\b(?:the\s+)?(?:owner|user|person|human|admin(?:istrator)?|le
               r"human|admin(?:istrator)?|lead)\b)")
 _ACT = (r"(?:run|execute|delete|remove|rm|push|force-push|wipe|drop|disable|install|send|upload|"
         r"reveal|print|merge|deploy|overwrite|kill|chmod|sudo|curl|exfiltrate|leak)")
-_YOU = (r"\byou\s+(?:must|should|need\s+to|have\s+to|are\s+to|can\s+now|may\s+now|will)\s+"
+_YOU = (r"\byou\s+(?:must|should|need\s+to|have\s+to|are\s+to|can\s+now|may\s+now|will|to)\s+"
         rf"(?:now\s+)?{_ACT}\b")
 _ORDER = (rf"(?:{_YOU}|(?:[,;:]\s*|\b)(?:so|therefore|thus|hence|now|then|go\s+ahead\s+and)\s*,?\s+"
           rf"(?:you\s+)?(?:now\s+)?{_ACT}\b|[:;]\s*(?:now\s+)?{_ACT}\b)")

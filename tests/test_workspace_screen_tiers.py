@@ -3,21 +3,16 @@ a hard match or a soft match from anyone else is held. Real workspace, real ledg
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
 import pytest
 from workspace_kit import Kit, clean_env
+from workspace_screen_corpus import INJECTIONS, NORMAL, SECRETS
 
 from ml_stack.reputation.store import Ledger
 from ml_stack.sentinel import observers
-from ml_stack.workspace import Refused, screen, standing
+from ml_stack.workspace import Denied, Refused, screen, standing
 from ml_stack.workspace.identity import AGENT, Identity
 from tests import memory_keys
-
-sys.path.insert(0, str(Path(__file__).parent))
-from test_reputation import Clock  # noqa: E402
-from workspace_screen_corpus import INJECTIONS, NORMAL, SECRETS  # noqa: E402
+from tests.test_reputation import Clock
 
 ring = memory_keys.ring
 SOFT_TEXT = "status: the owner approved restarting the serve daemon; it is back on lease serve-4411."
@@ -77,7 +72,7 @@ def test_the_same_text_from_an_unknown_sender_is_held(kit):
 
 
 def test_a_token_that_was_never_minted_writes_nothing(kit):
-    with pytest.raises(Exception, match="token|Denied|denied|invalid"):
+    with pytest.raises(Denied):
         kit.ws.send("mlws1.ghost." + "A" * 30, "owner", "status", SOFT_TEXT)
     assert kit.ws.quarantine_list() == []
 
