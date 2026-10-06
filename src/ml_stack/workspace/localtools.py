@@ -135,7 +135,13 @@ class Guarded:
         self.used += 1
         if self.ctx:
             lp.trim(messages, self.ctx)
-        if self.max_output_tokens and not {"n_predict", "max_tokens", "max_completion_tokens"}.intersection(kwargs):
+        for key in ("max_tokens", "max_completion_tokens"):
+            if key in kwargs:
+                cap = kwargs.pop(key)
+                if "n_predict" in kwargs and kwargs["n_predict"] != cap:
+                    raise ValueError("conflicting output token limits")
+                kwargs["n_predict"] = cap
+        if self.max_output_tokens and "n_predict" not in kwargs:
             kwargs["n_predict"] = self.max_output_tokens
         return self.client.chat(messages, **{**kwargs, "think": self.think})
 
