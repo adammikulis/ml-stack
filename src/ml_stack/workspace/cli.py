@@ -320,7 +320,7 @@ def _connect(args: argparse.Namespace, ws: Workspace) -> int:
     if agent:
         if args.no_project or args.one_agent or args.remote or args.code_only or args.name:
             raise Denied("agent connect takes --agent and --project; invite options need a person")
-        connection = _project_connection()
+        connection = _project_connection(Path(args.project) if args.project else None)
         if connection is not None:
             canonical, token = _context(args, connection)
             who = canonical.auth(token)
@@ -754,7 +754,8 @@ COMMANDS.add("remote", _guarded(_remote), help="attach and use one shared projec
              options=remote_cli.OPTIONS)
 def _bare(handler: Callable[[argparse.Namespace, Workspace], int]) -> Callable[[argparse.Namespace], int]:
     def run(args):
-        connection = _project_connection()
+        requested = getattr(args, "project", "") if handler is _connect else ""
+        connection = _project_connection(Path(requested) if requested else None)
         if handler is _connect and (args.agent or os.environ.get(tokens.AGENT_ENV, "")):
             if connection is not None:
                 return handler(args, None)
