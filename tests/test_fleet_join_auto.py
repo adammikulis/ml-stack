@@ -55,7 +55,7 @@ def test_passphrase_enrollment_preserves_selected_mode(isolated_join, monkeypatc
     joined = joining.join_machine(root=tmp_path, passphrase="quince larch marlow",
                                   group="orchard", mode=mode, start=lambda *a: 42,
                                   say=lambda text: None)
-    assert asked[0][1]["mode"] == mode
+    assert asked[0][1]["options"].mode == mode
     assert joined.mode == expected
 
 

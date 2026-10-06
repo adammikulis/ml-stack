@@ -49,7 +49,7 @@ from .discovery import (
 from .launch import HTTP_PORT, already_running, wait_for_health
 from .onboard.cli import COMMANDS as ONBOARD_COMMANDS, add_commands, run as run_onboarding
 from .onboard.clusters import format_clusters, known_clusters, pick_cluster
-from .onboard.joining import join_by_passphrase
+from .onboard.joining import JoinOptions, join_by_passphrase
 from .pausing import (
     Answer,
     Fanout,
@@ -458,12 +458,7 @@ def join_machine(*, name: str = "", passphrase: str = "", group: str = "",
         say(f"following '{joined.tracking}'" if joined.tracking
             else "following releases")
 
-    say("checking this machine")
-    joined.checks = checks(root, ensure=ensure, say=say)
-    for c in joined.checks:
-        say(f"  {'ok  ' if c.good else '  ! '}{c.name}: {c.said}")
-        if not c.good and c.fix:
-            say(f"        fix: {c.fix}")
+    joined.checks = _machine_checks(root, ensure, say)
 
     running = already_running(port)
     if passphrase:
@@ -472,7 +467,7 @@ def join_machine(*, name: str = "", passphrase: str = "", group: str = "",
                 port, words, g, mode)))(passphrase, group)
         else:
             join_by_passphrase(passphrase, group, cluster_key_path,
-                               mode=mode)
+                               options=JoinOptions(mode=mode))
         enrolled = next((m for m in memberships(cluster_key_path) if m.group == group), None)
         joined.mode = enrolled.mode if enrolled else mode or cluster_modes.PRODUCTION
         say(f"joined cluster '{group}'")
@@ -486,12 +481,7 @@ def join_machine(*, name: str = "", passphrase: str = "", group: str = "",
     say(cluster_modes.notice(joined.mode))
 
     if running is not None:
-        joined.name = str(running.get("name") or name)
-        joined.machine = str(running.get("machine") or "")
-        say(f"the daemon is already running as '{joined.name}' on port {port}")
-        if joined.tracking:
-            say(f"  it reads '{joined.tracking}' at its next start; restart it to follow "
-                "the branch now")
+        _running_notice(joined, running, say)
     else:
         if persist:
             joined.persisted, joined.persist_note = _persist(persist_with, say)
@@ -517,6 +507,28 @@ def join_machine(*, name: str = "", passphrase: str = "", group: str = "",
                          port=discovery_port, self_machine=joined.machine, finder=finder)
     say(table(joined.peers))
     return joined
+
+
+def _running_notice(joined: Joined, running: dict, say: Callable[[str], None]) -> None:
+    """Report the running daemon's identity and selected tracking branch."""
+    joined.name = str(running.get("name") or joined.name)
+    joined.machine = str(running.get("machine") or "")
+    say(f"the daemon is already running as '{joined.name}' on port {joined.port}")
+    if joined.tracking:
+        say(f"  it reads '{joined.tracking}' at its next start; restart it to follow "
+            "the branch now")
+
+
+def _machine_checks(root: Path, ensure: Callable[[Path], Path] | None,
+                    say: Callable[[str], None]) -> list[Check]:
+    """Report the machine checks for cluster onboarding."""
+    say("checking this machine")
+    found = checks(root, ensure=ensure, say=say)
+    for check in found:
+        say(f"  {'ok  ' if check.good else '  ! '}{check.name}: {check.said}")
+        if not check.good and check.fix:
+            say(f"        fix: {check.fix}")
+    return found
 
 
 def _persist(persist_with: Callable[..., Any] | None, say: Callable[[str], None]

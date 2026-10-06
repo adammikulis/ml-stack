@@ -41,7 +41,9 @@ def test_enrollment_preserves_optional_cluster_mode(monkeypatch, tmp_path, reque
     route = Enrollment(request, tmp_path / "cluster.key")
     assert route._clusters()
     assert route.answers[0][0] == 200
-    assert calls == [{"port": 1234, "cluster_mode" if action else "mode": requested}]
+    assert len(calls) == 1
+    assert calls[0]["options"].port == 1234
+    assert calls[0]["options"].mode == requested
 
 
 def test_rejected_mode_does_not_remember_passphrase_or_rejoin(monkeypatch, tmp_path):
