@@ -1,5 +1,23 @@
 # Handoff
 
+## Active work (2026-10-06)
+
+- **Finish task and issue subscription notifications.** The implementation is in the isolated
+  worktree `/mnt/c/Users/Adam/Documents/repos/ml-stack-agent-taskqueue` on
+  `feat/agent-project-task-queue`; changes are uncommitted. Independent review found no remaining
+  blockers. The latest focused run passed 7 tests; rerun affected selectors and the structural
+  gate after resuming, then commit and integrate before restarting `qwen-wsl`.
+- **Speed up checks without reducing coverage.** `scripts/gates/_floors.py` now reuses the gate's
+  full tree fingerprint for its collection cache. An uncached `scripts/budgets` run still took
+  95.6 seconds; further profiling and safe optimization remain.
+- **Repair shared Git metadata before integration.** The primary repository's multi-pack index
+  fails verification (`incorrect checksum`, `bad pack-int-id`), so ordinary Git status fails.
+  Git commands work with `-c core.multiPackIndex=false`; do not rewrite pack metadata until the
+  worktrees and unique changes are inventoried.
+- **Resume the local Qwen worker after integration.** The worker was stopped while task-queue
+  launch and task-worktree behavior were being changed; verify its state and start it against the
+  clean development checkout so it can claim queued project tasks.
+
 ## Current state (2026-10-03)
 
 What the docs now describe as in place: `ml-stack-chat` (roles `read-only`, `approve-first`, `plan-and-go`, saved

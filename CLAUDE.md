@@ -76,11 +76,10 @@ Known failures remain named tasks with evidence and ownership; fix forward rathe
 them as green. A scoped pass is not a claim that the full suite passed. A known relevant
 regression must be fixed before the affected change lands.
 
-**Linux testing is paused by the owner.** Do not launch local or container Linux tests until
-the owner explicitly resumes them. Linux is not a per-merge prerequisite during this pause;
-record the platform coverage gap honestly. Automated checks and background platform coverage do
-not change this local authorization. When resumed, Linux checks follow the same scoped and
-background policy, rather than a second full suite before every merge.
+Linux and WSL are first-class development environments. Run affected Linux checks through the
+maintained test broker when the change touches Linux behavior, and report the exact platform
+coverage. Keep the same scoped and background policy as other platforms; do not run a second full
+suite before every merge.
 
 Use the maintained test broker for every run; shared CPU/GPU admission and ownership apply
 before work starts. Do not bypass a queue, start a competing full run, or extend a temporary
@@ -232,8 +231,8 @@ tests, running the suite, merging its own branch -- goes to a subagent, one per 
 own worktree. It does a piece itself only when handing it off would cost more: a one-line edit, a
 change that needs what only this conversation knows, a thing an agent has failed at twice.
 
-**Claude subagents run Sonnet. Opus is banned**, for every agent the main session starts,
-whatever the difficulty or the task; a brief never names an Opus model.
+For Claude agents, use Haiku for read-only or exploratory work, Sonnet for most work, and Opus
+only when Sonnet has failed on the task.
 
 **Delegate by capability and difficulty.** Select an available model and harness using the
 work's required capabilities, measured benchmark/task evidence, context needs, latency,
@@ -429,6 +428,8 @@ a guard or sentinel policy, a role, a saved rule, a quarantine release) is done 
 their own screen or terminal: never offered to a model, role, MCP or chat tool, workspace agent or
 channel message. A privileged step goes through the operating system's own administrator prompt;
 ml-stack never sees or stores the password, and never installs a passwordless `sudoers` rule.
+Per-user project settings, development tools, services and startup entries are routine changes
+when they are part of the requested work; they do not require administrator access.
 
 ## Running the tests
 
@@ -436,7 +437,7 @@ Follow **Scoped merge gates and background verification** above. Use `scripts/te
 for affected selection, or reviewed explicit `scripts/test all tests/<affected-file>…` selectors
 when slow browser/process checks are required. Invalid selectors fail before admission; never
 replace a missing selector with an unreviewed omission. Do not run a full suite after every
-intermediate commit or require full Linux testing for a local merge while Linux is paused.
+intermediate commit.
 
 The maintained tiers are `fast` (neither slow nor heavy), `full` (not slow), `slow` (only slow)
 and `all` (including slow). `tests/README.md` describes their mechanics; the policy above
@@ -475,9 +476,9 @@ playwright, or run headless and read screenshots.
 
 ## One thing on the GPU at a time
 
-Never put two pieces of work on the GPU at once -- not a question beside a reading, not two
-benchmark rows, not a smoke test while a long run is going. Serve one slot and let the second
-request wait.
+Schedule GPU work through the broker using available device memory and server slots. Run multiple
+jobs only when the broker admits them and their measured resource needs fit; do not serialize work
+by rule when the device and serving profile have capacity.
 
 Two at once is more than twice as slow, and it takes the meaning out of every number either one
 produces: a row measured under load cannot be compared with a row measured alone, and neither can
@@ -535,8 +536,8 @@ Owner's standing choices (2026-10-03); do not ask again.
 
 ## Saying that something works
 
-Drive it the way a person does before you say it works: open the interface, click through the
-screen, type into the box, press the button, read what comes back.
+For user-facing interface changes, drive the interface before claiming the user flow works. For
+backend, API, CLI and library changes, use the affected tests and relevant boundary checks.
 
 **A request is not a person.** `curl` against a route proves the route answers. It does not prove
 there is a button that reaches it, that the button is on a screen anyone can find, that the reply
@@ -566,31 +567,11 @@ want your view" and "let me know how you want to proceed" are deferring dressed 
 If you cannot write it as one question with options, it is not a decision but a judgement that
 is yours: make it and say what you chose.
 
-**Nothing you could change is a blocker.** Not existing code, not code you did not write, not a
-function that returns the wrong thing on one platform, not a missing branch, not a test that was
-never written -- and not something this repository does not have yet: a dependency nobody has
-taken, a tool that is not installed, a setting nothing wires, a helper nobody wrote. Those are
-the work: add it and write the straightforward code, because downloading costs nothing. Never
-leave something unfixed on purpose, and never write worse code to avoid adding something --
-string-matching a file a parser would read, a hand-rolled version compare, a shape copied because
-importing the real one would mean a new name in `pyproject.toml`. A test-only dependency is not
-bound by `dependencies = []`, a promise about what a *user* installs; put it in the `test` extra
-and in the line CI installs. Upgrade on the same terms: a package below its pin is the
-environment being wrong, not a version to code around, so upgrade it, run the suite, and say what
-moved. `ml-stack-doctor` reports what is below its pin and `ml_stack.installed` holds the check.
-
-Watch for the passive voice that turns a bug into weather: "the field is simply absent", "psutil
-isn't available there", "that platform doesn't expose it". Every one of those is a sentence about
-something you could have changed. If it is genuinely impossible, say why in terms of the thing
-that makes it impossible, not what currently happens. The bar for mentioning a problem at all is
-the bar for a commit: it changes what someone would do next.
-
-**A measurement that names a cause we control is a task, not a finding.** "Precision was low
-because the model selected everything it read" names a prompt, a flag or a setting, so the
-sentence is not finished until it says what was changed and what the re-measurement showed. Write
-the fix, run the smoke, queue the sampled run, and report cause, change and number together. A
-cause we cannot control (the weights, the hardware, an upstream PR) is reported as such, with
-what would change it.
+Do not leave a relevant regression, security issue, or missing prerequisite unresolved. Install
+routine dependencies in the active development environment; declare them in the appropriate
+required dependency set, optional extra, test extra, or setup script. Upgrade a package when the
+task or project pin requires it, then run the affected checks. Do not expand a task to include
+unrelated defects or measurements; record those as separate follow-up work when useful.
 
 ## Never a real person
 

@@ -163,8 +163,8 @@ separate agent processes and a lead session coordinate through ml-stack instead 
 person relaying text and instead of colliding on scratch files, ports, branches and servers.
 
     ml-stack workspace init                         # a person, at a terminal, once (setup does this)
-    ml-stack workspace mint lead-1 --role lead      # prints that agent's token once
-    export ML_STACK_WORKSPACE_TOKEN=...             # per agent process (or --agent NAME)
+    ml-stack workspace join --agent worker-one     # joins this agent automatically
+    ml-stack workspace status --agent worker-one   # authenticated agent session
     ml-stack workspace send reviewer task "check the lease tests"
     ml-stack workspace watch --once --timeout 600   # run in the background; exits on a message
     ml-stack workspace claim port 8081 --pid $$     # released when this shell exits
@@ -555,7 +555,7 @@ agent processes, 2000 messages, send p99 58 ms, nothing refused. Every limit bel
 | Unread inbox | 500 per recipient (`inbox_pending`), 100 from any one sender (`unread_per_sender`) | the sender is refused with "N has 500 unread messages" (`why: inbox-full`) or "already has 100 unread messages waiting for N" (`why: sender-share`); broadcasts and board posts are not counted | `inbox`, `status` (`fullest_inboxes`) |
 | Message and note size | 16 KiB body, 200 character subject, 8 KiB note, 500 notes per agent | `Refused`, exit 3 | the refusal text |
 | Retention | 7 days of messages (`retention_s`) | `gc` drops the oldest rows; the chain continues from the last dropped row; readers re-read the file | `audit-verify` (rows, head) |
-| Claim TTL | 15 minutes, renewed by `heartbeat`; one renewal adds at most 1 hour and no claim lives past 8 hours from when it was taken | the claim is released the next time anyone reads the registry and audited as `claim.expired` or `claim.dead-pid`; another agent that takes it is audited as `claim.stolen` with the previous owner | `claims` lists `expires_in_s` and `expiring_soon` (true in the last 5 minutes or a third of the TTL, whichever is shorter) |
+| Claim lifetime | 15 minutes, renewed by `heartbeat`; one renewal adds at most 1 hour and no claim lives past 8 hours from when it was taken | the claim is released the next time anyone reads the registry and audited as `claim.expired` or `claim.dead-pid`; another agent that takes it is audited as `claim.stolen` with the previous owner | `claims` lists `expires_in_s` and `expiring_soon` (true in the last 5 minutes or a third of the TTL, whichever is shorter) |
 | Token TTL | 24 hours (`token_ttl_s`) | the token stops authenticating; mint a new one | `whoami` |
 | Delegation | a human mints anyone, a lead mints `agent` tokens, an agent mints nothing; a lead or agent that mints holds at most 16 live identities (`mints_per_identity`) and the workspace at most 64 (`agents_live`) | the mint is refused (`Denied`) | `status` (agents) |
 | Keystore reads | 600 per hour per user, backoff from 480 | `KeystoreBusy` naming the hour | `ml-stack-security keystore` |
@@ -624,6 +624,14 @@ The main **Tasks** view organizes canonical claims, resource leases, checkpoints
 artifacts, independent outcomes and credit recording. See [Tasks and independent outcomes](tasks.md)
 for the person workflow, service/API contract, recovery and supported limits. Task outcomes
 are verified separately from Board discussion and worker progress reports.
+
+Follow a canonical task or GitHub issue with `ml-stack-workspace task-subscribe TASK_ID` or
+`ml-stack-workspace issue-subscribe OWNER/REPO#NUMBER`. Use the matching `task-unsubscribe` or
+`issue-unsubscribe` command to stop updates. Issue-driven workers subscribe to each task before
+receiving its assignment notice; the worker gets a subscription status before that assignment.
+Followers are notified when someone subscribes or unsubscribes. Assignment and task state notices
+are persisted and retried by the issue worker if delivery is temporarily refused or rate-limited.
+The task queue remains authoritative when notices are unread.
 
 A scheduler-prepared task worktree can be explicitly handed from its authenticated parent
 to the assigned child. Before a native mutation, the guard checks the graph assignment,

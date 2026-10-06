@@ -3,16 +3,17 @@
 [CLAUDE.md](CLAUDE.md) is the complete trusted repository policy for every coding agent and
 subagent. Read it first. This summary adds no restrictions or exceptions.
 
-- Edit, stage and commit only named files in your own isolated worktree and branch. Never use
-  an editable install. An independently reviewed, scoped-gated `git merge --ff-only <branch>`
+- Edit, stage and commit only named files in your own isolated worktree and branch. Use an
+  editable install in that device's active development environment; use built wheels for stable
+  runtimes. An independently reviewed, scoped-gated `git merge --ff-only <branch>`
   into the primary checkout's development branch is explicitly permitted; editing, staging and
   committing in that checkout are forbidden. Resolve conflicts in an integration worktree.
 - Create worktrees beside the primary checkout, never inside it. Completion includes checking
   for unique work, removing the worktree and merged branch, pruning and verifying cleanup
   before the final report or `announce done` (see `CLAUDE.md`, "Worktrees").
 - Gate each merge with affected tests and required structural/security checks. Run full suites
-  in the background per batch/schedule, not before every merge. **Linux testing is paused by
-  the owner until explicitly resumed.** Report platform gaps and known failures honestly.
+  in the background per batch/schedule, not before every merge. Linux and WSL are first-class
+  development environments; run affected platform checks and report coverage honestly.
 - Delegate by demonstrated capability, difficulty, benchmarks and available resources; no
   hardcoded vendor/model hierarchy. Keep independent review and name exact runtime provenance.
 - Reasoning, output tokens, context, turns, wall time and resource admission are separate

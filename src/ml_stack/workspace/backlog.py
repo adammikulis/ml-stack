@@ -13,13 +13,53 @@ from uuid import uuid4
 from ml_stack import worktreerules
 from ml_stack.graph.store import GraphStore
 from ml_stack.serve.process import pid_exists
-from ml_stack.workspace import localagent as la, tokens
+from ml_stack.workspace import localagent as la, project as projects, tokens
 from ml_stack.workspace.chain import held
 from ml_stack.workspace.identity import HUMAN, Denied
 from ml_stack.workspace.plain import line
 
 POLL_S = 60
 REPO = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+ISSUE_REF = re.compile(r"^([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)#([1-9][0-9]*)$")
+
+
+def repository(project):
+    """Return the GitHub owner/repository named by the checkout's origin, if any."""
+    try:
+        result = subprocess.run(["git", "remote", "get-url", "origin"], cwd=project,
+                                capture_output=True, text=True, timeout=5, check=True)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    value = result.stdout.strip()
+    match = re.fullmatch(r"(?:https://github\.com/|git@github\.com:)([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?/?", value)
+    return match.group(1) if match and REPO.fullmatch(match.group(1)) \
+        and '..' not in match.group(1) else ""
+
+
+def subscribe_issue(ws, token, ref, enabled=True):
+    """Follow or stop following one ``OWNER/REPO#NUMBER`` issue in the caller's inbox."""
+    who = ws.auth(token)
+    ws._may(who, 'send')
+    match = ISSUE_REF.fullmatch(ref)
+    if not match or not REPO.fullmatch(match.group(1)) or '..' in match.group(1):
+        raise ValueError('issue reference must be OWNER/REPO#NUMBER')
+    repo, number = match.group(1), int(match.group(2))
+    key = f'issue-watch:{repo}:{number}:{who.id}'
+    with held(ws.base / 'issue-backlog.lock'), _store(ws) as graph:
+        graph.upsert_node({'id': key, 'kind': 'issue-watch', 'label': f'{repo}#{number}',
+                           'attrs': {'repo': repo, 'number': number, 'subscriber': who.id,
+                                     'enabled': bool(enabled)}})
+    ws.audit('issue.subscribe' if enabled else 'issue.unsubscribe', who.id,
+             repo=repo, issue=number)
+    return {'repo': repo, 'issue': number, 'subscriber': who.id, 'subscribed': bool(enabled)}
+
+
+def issue_watchers(ws, repo, number):
+    """Return identities following one source issue."""
+    with _store(ws) as graph:
+        return sorted(row['attrs']['subscriber'] for row in graph.nodes('issue-watch')
+                      if row['attrs'].get('repo') == repo and row['attrs'].get('number') == number
+                      and row['attrs'].get('enabled'))
 
 
 def configure(ws, token, name, repo, project):
@@ -38,6 +78,12 @@ def configure(ws, token, name, repo, project):
         raise ValueError("repository backlog requires a source repository")
     if not worktreerules.checkouts(folder):
         raise ValueError("repository backlog requires a registered git checkout")
+    if folder != agent.project:
+        if parent.role != HUMAN:
+            raise Denied("only the person may redirect a worker to a different project")
+        ws.registry.set_project(parent, agent.identity or name, projects.describe(folder))
+        agent = replace(agent, project=folder)
+        la.save(ws, agent)
     scope = {"repo": repo, "project": folder, "authority": parent.id, "enabled": True}
     la.save(ws, replace(agent, extra={**agent.extra, "backlog": scope}))
     ws.audit("local-agent.backlog", parent.id, agent=name, repo=repo, project=folder)
@@ -170,7 +216,7 @@ def _cache(ws, scope, fetcher, now):
     return error
 
 
-def pick(ws, agent, *, fetcher=fetch, clock=time.time):
+def pick(ws, agent, *, fetcher=fetch, clock=time.time, exclude=frozenset()):
     """Lease the next eligible issue, or return its idle/blocked explanation."""
     scope = _scope(ws, agent)
     if not scope.get("enabled"):
@@ -186,6 +232,8 @@ def pick(ws, agent, *, fetcher=fetch, clock=time.time):
                     ("blocked", "wontfix", "duplicate") for label in issue.get("labels", [])):
                 continue
             key = f"issue:{repo}:{issue['number']}"
+            if key in exclude:
+                continue
             old = _record(graph, key)
             if old.get('state') in ('blocked', 'superseded'):
                 continue

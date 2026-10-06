@@ -97,6 +97,7 @@ def checkpoint(board, token, ident, value):
 def submit(board, token, ident, value):
     value = submission(value)
     with working(board, token, ident) as (graph, task, lease):
+        previous_state = task['state']
         proposal = {'id': f'proposal:{uuid4().hex}', 'task': ident, 'worker': task['worker'],
                     'at': board.ws.clock(), 'lease_id': lease['id'], **value}
         proposal['claimed_provenance'] = proposal['provenance']
@@ -115,6 +116,7 @@ def submit(board, token, ident, value):
         save(graph, 'lease', lease)
         task.update(state='review', proposal_id=proposal['id'])
         save(graph, 'task', task)
+        board.queue_state_notice(graph, task, task['worker'], previous_state)
         return proposal
 
 
@@ -122,6 +124,7 @@ def review(board, token, ident, decision):
     who = board._auth(token, 'send')
     with board._store() as graph:
         task = board._task(graph, ident)
+        previous_state = task['state']
         if task['state'] != 'review':
             raise ValueError('the task has no proposal awaiting independent review')
         worker = task['worker']
@@ -149,6 +152,7 @@ def review(board, token, ident, decision):
         elif decision['outcome'] == 'blocked_infrastructure':
             task.update(blocked_reason=decision['reason'], blocked_at=board.ws.clock())
         save(graph, 'task', task)
+        board.queue_state_notice(graph, task, who.id, previous_state)
         return outcome
 
 
@@ -159,6 +163,7 @@ def block(board, token, ident, reason, kind):
         raise ValueError('blocked kind must be infrastructure or failure')
     with board._store() as graph:
         task = board._task(graph, ident)
+        previous_state = task['state']
         worker = task.get('worker')
         parent = board.ws.registry.info(worker).get('parent', '') if worker else ''
         if who.role != HUMAN and who.id != worker and not (who.id == task['created_by'] == parent):
@@ -171,6 +176,7 @@ def block(board, token, ident, reason, kind):
         lease['active'] = False
         save(graph, 'lease', lease)
         save(graph, 'task', task)
+        board.queue_state_notice(graph, task, who.id, previous_state)
         return task
 
 
@@ -179,6 +185,7 @@ def ready(board, token, ident, reason, *, expired):
     reason = text(reason, 'resume reason', 2000)
     with board._store() as graph:
         task = board._task(graph, ident)
+        previous_state = task['state']
         board._reviewer(who, task, economic=False)
         if expired:
             if task['state'] != 'working':
@@ -206,4 +213,5 @@ def ready(board, token, ident, reason, *, expired):
         task.pop('blocked_reason', None)
         task.pop('blocked_kind', None)
         save(graph, 'task', task)
+        board.queue_state_notice(graph, task, who.id, previous_state)
         return task

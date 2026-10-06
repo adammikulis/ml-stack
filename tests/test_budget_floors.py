@@ -47,6 +47,16 @@ def test_the_collected_count_is_recorded_as_a_floor() -> None:
     assert isinstance(least[_floors.NAME], int) and least[_floors.NAME] > 0
 
 
+def test_repository_collection_reuses_the_budget_tree_fingerprint(monkeypatch) -> None:
+    seen = []
+    monkeypatch.setattr("gates.repo_fingerprint", lambda: "shared-tree-hash")
+    monkeypatch.setattr(_floors, "remembered",
+                        lambda root, name, compute, salt="", fingerprint="":
+                        seen.append(fingerprint) or [10, 0])
+    assert _floors.collect(REPO) == (10, 0)
+    assert seen == ["shared-tree-hash"]
+
+
 @pytest.mark.slow
 def test_the_suite_collects_at_least_what_is_recorded() -> None:
     reason = _floors.skip(REPO)

@@ -36,6 +36,32 @@ def issue(number=1, **extra):
             "assignees": [], "labels": [], **extra}
 
 
+@pytest.mark.redteam
+def test_repository_infers_github_origin_as_argument_vector(monkeypatch, tmp_path):
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return SimpleNamespace(stdout="https://github.com/sample/project.git\n")
+
+    monkeypatch.setattr(backlog.subprocess, "run", run)
+    assert backlog.repository(tmp_path) == "sample/project"
+    argv, options = calls[0]
+    assert argv == ["git", "remote", "get-url", "origin"]
+    assert options["cwd"] == tmp_path and options["timeout"] == 5 and options["check"] is True
+    assert "shell" not in options
+    monkeypatch.setattr(backlog.subprocess, "run", lambda *_args, **_kwargs:
+                        SimpleNamespace(stdout="https://github.com/sample/project;id"))
+    assert backlog.repository(tmp_path) == ""
+
+
+@pytest.mark.redteam
+def test_repository_rejects_traversal_owner_in_origin(monkeypatch, tmp_path):
+    monkeypatch.setattr(backlog.subprocess, "run", lambda *_args, **_kwargs:
+                        SimpleNamespace(stdout="https://github.com/../repo.git"))
+    assert backlog.repository(tmp_path) == ""
+
+
 def test_worker_cannot_authorize_itself_or_another_parents_worker(setup):
     kit, _, agent, project = setup
     for token in (tokens.load(kit.base, agent.identity), kit.agent("other")):
@@ -45,6 +71,14 @@ def test_worker_cannot_authorize_itself_or_another_parents_worker(setup):
         backlog.configure(kit.ws, kit.owner, agent.name, "../outside", str(project))
     with pytest.raises(ValueError, match="registered git checkout"):
         backlog.configure(kit.ws, kit.owner, agent.name, "sample/project", str(project.parent))
+
+
+def test_issue_subscription_is_easy_to_add_and_remove(setup):
+    kit, _, _, _ = setup
+    subscribed = backlog.subscribe_issue(kit.ws, kit.owner, 'sample/project#3')
+    assert subscribed['subscribed'] and backlog.issue_watchers(kit.ws, 'sample/project', 3) == ['owner']
+    removed = backlog.subscribe_issue(kit.ws, kit.owner, 'sample/project#3', False)
+    assert not removed['subscribed'] and backlog.issue_watchers(kit.ws, 'sample/project', 3) == []
 
 
 def test_two_workers_cannot_claim_the_same_issue_and_reopen_preserves_result(setup):
@@ -91,13 +125,13 @@ def test_assigned_and_blocked_issues_are_skipped_and_fetch_failures_are_visible(
     assert "blocked" in detail and "GitHub unavailable" in detail
 
 
-def test_idle_dispatch_creates_one_canonical_task_and_chat_cannot_complete_it(setup, monkeypatch):
+def test_idle_dispatch_creates_canonical_task_and_notifies_worker_in_its_inbox(setup, monkeypatch):
     kit, parent, agent, project = setup
     monkeypatch.setattr(backlog, "fetch", lambda _: [issue()])
     monkeypatch.setattr(la, "alive", lambda _: True)
     la.Status(kit.ws, agent.name).update(state="idle")
     original = backlog.pick
-    monkeypatch.setattr(backlog, "pick", lambda ws, a: original(ws, a, fetcher=backlog.fetch))
+    monkeypatch.setattr(backlog, "pick", lambda ws, a, **kw: original(ws, a, fetcher=backlog.fetch, **kw))
     issuepump.step(kit.ws, parent, agent.name)
     child = tokens.load(kit.base, agent.identity)
     tasks = TaskBoard(kit.ws).list(parent)['tasks']
@@ -105,12 +139,41 @@ def test_idle_dispatch_creates_one_canonical_task_and_chat_cannot_complete_it(se
     assert str(project) not in tasks[0]['description'] and 'bare pytest' in tasks[0]['description']
     assert tasks[0]['source_key'] == 'github:sample/project:1:revision1'
     assert tasks[0]['capabilities'] == ['coding'] and tasks[0]['limits']['max_retries'] == 0
-    assert not kit.ws.inbox(child, raw=True)
+    TaskBoard(kit.ws).subscribe(kit.owner, tasks[0]['id'])
+    assert TaskBoard(kit.ws).watchers(tasks[0]['id']) == ['lead/worker', 'owner']
+    notices = kit.ws.inbox(child, raw=True)
+    assert [row['type'] for row in notices[:2]] == ['status', 'task']
+    assert 'Subscribed to task' in notices[0]['raw']
+    assert 'Assigned project task' in notices[1]['raw']
+    assert all(tasks[0]['id'] in row['raw'] for row in notices)
     issuepump.step(kit.ws, parent, agent.name)
     assert len(TaskBoard(kit.ws).list(parent)['tasks']) == 1
     kit.ws.send(child, 'lead', 'answer', 'Discussion claiming the patch is done')
     issuepump.step(kit.ws, parent, agent.name)
     assert TaskBoard(kit.ws).get(parent, tasks[0]['id'])['state'] == 'queued'
+    TaskBoard(kit.ws).unsubscribe(kit.owner, tasks[0]['id'])
+    assert TaskBoard(kit.ws).watchers(tasks[0]['id']) == ['lead/worker']
+
+
+def test_producer_keeps_ahead_of_the_worker_with_a_durable_queue(setup, monkeypatch):
+    kit, parent, agent, _ = setup
+    rows = [issue(n) for n in range(1, 6)]
+    monkeypatch.setattr(backlog, "fetch", lambda _: rows)
+    monkeypatch.setattr(la, "alive", lambda _: True)
+    la.Status(kit.ws, agent.name).update(state="working")
+    original = backlog.pick
+    monkeypatch.setattr(backlog, "pick", lambda ws, a, **kw: original(ws, a, fetcher=backlog.fetch, **kw))
+    issuepump.step(kit.ws, parent, agent.name)
+    tasks = TaskBoard(kit.ws).list(parent)['tasks']
+    assert len(tasks) == issuepump.QUEUE_DEPTH
+    notices = kit.ws.inbox(tokens.load(kit.base, agent.identity), raw=True)
+    assert len(notices) == issuepump.QUEUE_DEPTH * 2
+    assert sum(row['type'] == 'task' for row in notices) == issuepump.QUEUE_DEPTH
+    monkeypatch.setattr(backlog, 'pid_exists', lambda _: False)
+    issuepump.step(kit.ws, parent, agent.name)
+    assert len(TaskBoard(kit.ws).list(parent)['tasks']) == issuepump.QUEUE_DEPTH
+    assert len(kit.ws.inbox(tokens.load(kit.base, agent.identity), raw=True)) == issuepump.QUEUE_DEPTH * 2
+    assert all(task['state'] == 'queued' for task in tasks)
 
 
 def test_interrupted_projection_preserves_canonical_task_without_duplicate_dispatch(setup, monkeypatch):
@@ -118,7 +181,7 @@ def test_interrupted_projection_preserves_canonical_task_without_duplicate_dispa
     monkeypatch.setattr(la, "alive", lambda _: True)
     la.Status(kit.ws, agent.name).update(state="idle")
     original = backlog.pick
-    monkeypatch.setattr(backlog, 'pick', lambda ws, a: original(ws, a, fetcher=lambda _: [issue()]))
+    monkeypatch.setattr(backlog, 'pick', lambda ws, a, **kw: original(ws, a, fetcher=lambda _: [issue()], **kw))
     previous = issuepump._status
     def interrupted(*args, **kwargs):
         raise RuntimeError('Projection interrupted after canonical commit')
@@ -128,7 +191,8 @@ def test_interrupted_projection_preserves_canonical_task_without_duplicate_dispa
     monkeypatch.setattr(issuepump, '_status', previous)
     issuepump.step(kit.ws, parent, agent.name)
     assert len(TaskBoard(kit.ws).list(parent)['tasks']) == 1
-    assert not kit.ws.inbox(tokens.load(kit.base, agent.identity), raw=True)
+    notices = kit.ws.inbox(tokens.load(kit.base, agent.identity), raw=True)
+    assert sum(row['type'] == 'task' for row in notices) == 1
 
 
 def test_parent_superseded_issue_stays_excluded_after_revision_change(setup):

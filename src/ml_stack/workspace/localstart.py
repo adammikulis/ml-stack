@@ -16,6 +16,7 @@ from ml_stack import jobs, roles
 from ml_stack.serve import broker_wire
 from ml_stack.serve.process import pid_exists, started_at
 from ml_stack.workspace import (
+    backlog,
     device_agent,
     issuepump,
     localagent as la,
@@ -59,6 +60,7 @@ class Ask:
     project: str = ""
     orders_from: tuple[str, ...] = la.DEFAULT_ORDERS_FROM
     harness: str = lh.CODEX
+    repo: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -182,7 +184,7 @@ def _coding(ws: Workspace, ask: Ask, chosen: localmodel.Pick, ctx: int, project:
                          ctx=ctx, project=project, effort=le.clamp(le.valid(ask.effort), le.valid(ask.max_effort)), max_effort=ask.max_effort,
                          extra=dict(have.extra) if have else {}, orders_from=la.check_orders(list(ask.orders_from)),
                          started=time.time())
-        identity = _worker_identity(ws, have, name, project)
+        identity = _worker_identity(ws, have, name, projects.describe(project) if project else {})
         agent = replace(agent, identity=identity)
         _record_model(ws, identity, chosen)
         la.save(ws, agent)
@@ -190,6 +192,10 @@ def _coding(ws: Workspace, ask: Ask, chosen: localmodel.Pick, ctx: int, project:
                           home=la.folder(ws) / "jobs")
         la.save(ws, replace(agent, pid=job.pid, process_started=started_at(job.pid) or 0.0,
                             log=str(job.log)))
+    repo = ask.repo or (backlog.repository(project) if project else "")
+    if repo:
+        token = tokens.read_file(tokens.directory(ws.base) / tokens.OWNER_FILE)
+        issuepump.configure_and_start(ws, token, name, repo, project)
     ws.audit("local-agent.start", onboard.SETUP.id, agent=name, role=role, harness=ask.harness)
     return Started(name, job.pid, chosen.name, role)
 

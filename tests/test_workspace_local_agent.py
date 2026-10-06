@@ -679,6 +679,26 @@ def test_a_coding_worker_is_registered_once_before_its_native_harness_starts(kit
         ls.stop(kit.ws, got.name, release=lambda lease: True, wait_s=5)
 
 
+def test_a_project_coding_launch_starts_its_issue_queue(kit, monkeypatch, tmp_path):
+    from ml_stack.net import git
+    from ml_stack.workspace import localprofile as lp
+
+    project = tmp_path / "repo"
+    project.mkdir()
+    git.run(["init", str(project)])
+    started = []
+    monkeypatch.setattr(lp, "admit", lambda model, ctx: ("", ""))
+    monkeypatch.setattr(ls.jobs, "detach", sleeper)
+    monkeypatch.setattr(ls.issuepump, "configure_and_start",
+                        lambda ws, token, name, repo, folder: started.append((name, repo, folder)))
+    got = ls.start(kit.ws, ls.Ask(name="queue-worker", profile="coding", project=str(project),
+                                  repo="sample/project", harness="claude"), pick=PICK)
+    try:
+        assert started == [(got.name, "sample/project", str(project.resolve()))]
+    finally:
+        ls.stop(kit.ws, got.name, release=lambda lease: True, wait_s=5)
+
+
 def test_a_shared_server_with_a_smaller_context_than_asked_is_refused():
     from ml_stack.testing.fakes import Served, fake_llama_server
     with fake_llama_server(Served(context=32768)) as fake:
