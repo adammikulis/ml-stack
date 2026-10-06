@@ -5,7 +5,13 @@ from pathlib import Path
 from ml_stack import worktreerules
 from ml_stack.graph.store import GraphStore
 from ml_stack.net import git
-from ml_stack.workspace import integration_git as repo, localagent, task_scope, tokens
+from ml_stack.workspace import (
+    integration_git as repo,
+    localagent,
+    task_authority,
+    task_scope,
+    tokens,
+)
 from ml_stack.workspace.chain import held
 from ml_stack.workspace.identity import HUMAN, Denied
 from ml_stack.workspace.task_schema import TASK_ID
@@ -15,7 +21,7 @@ def prepare(ws, token: str, worker: str, task: str) -> dict:
     """Reserve a claimed checkout and committed baseline for one canonical task."""
     caller, child = ws.auth(token), ws.auth(tokens.load(ws.base, worker))
     if caller.role != HUMAN and child.parent != caller.id:
-        raise Denied('only the person or registered worker parent prepares task worktrees')
+        task_authority.authorize(ws, token, worker, task)
     if not TASK_ID.fullmatch(task):
         raise ValueError('a canonical task ID is required')
     runners = [localagent.load(ws, name) for name in localagent.names(ws)]

@@ -11,7 +11,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from typing import Any
 
 from ml_stack import chat as chatting, harnessing, hub
@@ -97,7 +97,19 @@ def check_context(want: int, base_url: str, read: Callable[..., Any] | None = No
 def caps_of(agent: la.Agent) -> Caps:
     """The caps of the agent's profile."""
     p = lp.profile(agent.profile)
-    return Caps(p.rounds, p.calls, p.steps, p.seconds)
+    defaults = Caps(p.rounds, p.calls, p.steps, p.seconds)
+    saved = agent.extra.get('task_caps', {})
+    if not isinstance(saved, dict):
+        raise ValueError('saved task caps must be an object')
+    values = {}
+    for key, ceiling in asdict(defaults).items():
+        value = saved.get(key, ceiling)
+        if (type(value) not in (int, float) or not 0 < value <= ceiling
+                or (key != 'seconds' and type(value) is not int)):
+            raise ValueError('saved task caps must be positive and within profile limits')
+        values[key] = int(value) if key != 'seconds' else float(value)
+    return Caps(**values)
+
 
 
 def lease_model(agent: la.Agent, *, wait_s: float = LEASE_WAIT_S) -> Held:

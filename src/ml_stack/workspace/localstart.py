@@ -8,7 +8,7 @@ import os
 import signal
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -21,10 +21,12 @@ from ml_stack.workspace import (
     localagent as la,
     localeffort as le,
     localharness as lh,
+    localloop,
     localmodel,
     localprofile as lp,
     onboard,
     project as projects,
+    task_authority,
     tokens,
 )
 from ml_stack.workspace.chain import held
@@ -59,6 +61,7 @@ class Ask:
     project: str = ""
     orders_from: tuple[str, ...] = la.DEFAULT_ORDERS_FROM
     harness: str = lh.CODEX
+    authority: tuple[str, str] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,9 +166,11 @@ def _start(ws: Workspace, ask: Ask, *, pick: localmodel.Pick | None = None,
     return Started(name, job.pid, chosen.name, role)
 
 
-def _coding(ws: Workspace, ask: Ask, chosen: localmodel.Pick, ctx: int, project: str) -> Started:
-    """A coding agent runs on the Codex harness, whose seat mints its own identity and serves the
-    model at 256K through the broker; this detaches it and records the pid."""
+def _coding(ws: Workspace, ask: Ask, chosen: localmodel.Pick | None, ctx: int, project: str) -> Started:
+    """Start a coding worker through its configured native harness and maintained broker."""
+    chosen = chosen or localmodel.choose(ask.model, selection=localmodel.Selection(coding=True, context=ctx))
+    if not chosen.ok:
+        raise Unavailable(chosen.problem, chosen.hint)
     problem, hint = lp.admit(chosen.ref or chosen.name, ctx)
     if problem:
         raise Unavailable(problem, hint)
@@ -175,6 +180,14 @@ def _coding(ws: Workspace, ask: Ask, chosen: localmodel.Pick, ctx: int, project:
     name = la.check_name(ask.name or "local-coding")
     with held(la.folder(ws) / "start.lock"):
         have = la.load(ws, name)
+        if ask.authority:
+            authorized, _ = task_authority.authorize(ws, ask.authority[0], name, ask.authority[1])
+            if chosen.ref != authorized.model:
+                raise ValueError('task launch must preserve the saved worker model')
+            if any(getattr(ask, key) != getattr(authorized, key) for key in
+                   ('model', 'name', 'role', 'effort', 'max_effort', 'ctx', 'project', 'orders_from')):
+                raise ValueError('saved worker configuration changed before task launch')
+            have = replace(have, extra={**have.extra, 'task_caps': asdict(localloop.caps_of(have))})
         if have is not None and la.alive(have):
             return _running(have, chosen)
         agent = la.Agent(name=name, model=chosen.ref, model_name=chosen.name,
@@ -182,9 +195,10 @@ def _coding(ws: Workspace, ask: Ask, chosen: localmodel.Pick, ctx: int, project:
                          ctx=ctx, project=project, effort=le.clamp(le.valid(ask.effort), le.valid(ask.max_effort)), max_effort=ask.max_effort,
                          extra=dict(have.extra) if have else {}, orders_from=la.check_orders(list(ask.orders_from)),
                          started=time.time())
-        identity = _worker_identity(ws, have, name, project)
+        identity = (have.identity or have.name) if ask.authority else _worker_identity(ws, have, name, project)
         agent = replace(agent, identity=identity)
-        _record_model(ws, identity, chosen)
+        if not ask.authority:
+            _record_model(ws, identity, chosen)
         la.save(ws, agent)
         job = jobs.detach(lh.RUNNER, [name], log=la.log_file(ws, name), kind=name,
                           home=la.folder(ws) / "jobs")

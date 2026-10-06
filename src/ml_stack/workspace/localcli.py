@@ -16,10 +16,12 @@ from ml_stack.workspace import (
     issuepump,
     localagent as la,
     localeffort as le,
+    localloop,
     localmodel,
     localprofile as lp,
     localstart as ls,
     plain,
+    task_launch,
     task_scheduler,
     tokens,
 )
@@ -32,6 +34,7 @@ READY_WAIT_S = 180.0
 OPTIONS = [
     flag("action", choices=ACTIONS, help="start a local model as an agent, stop one, or list them"),
     flag("target", nargs="?", default="", metavar="NAME", help="stop: the agent to stop"),
+    flag("--task", default="", help="existing assigned canonical task authorizing worker management"),
     flag("--model", default=localmodel.AUTO, metavar="auto|ID",
          help="auto: the best downloaded Qwen model that fits this machine, or the id "
               "of a downloaded model"),
@@ -82,6 +85,16 @@ def _wait(ws: Workspace, name: str, seconds: float) -> int:
 
 
 def _start(args: argparse.Namespace, ws: Workspace) -> int:
+    if args.agent:
+        if not args.task or not (args.name or args.target):
+            raise ValueError('agent start requires an existing worker name and --task')
+        got = task_launch.start(ws, tokens.load(ws.base, args.agent), args.name or args.target, args.task)
+        runner = la.load(ws, got.name)
+        caps = localloop.caps_of(runner)
+        say(f'{got.name}: {runner.model_name}; {runner.ctx} context; {runner.role}; {runner.harness}; '
+            f'effort {runner.effort}, ceiling {runner.max_effort}; '
+            f'{caps.rounds} turns, {caps.calls} tool calls, {caps.steps} model calls, {caps.seconds:g}s wall time')
+        return 0 if args.no_wait else _wait(ws, got.name, READY_WAIT_S)
     if not ws.registry.ids():
         tokens.store(ws.base, tokens.OWNER_FILE, ws.init("owner"))
     selected_profile = lp.profile(args.profile)
@@ -114,7 +127,8 @@ def _start(args: argparse.Namespace, ws: Workspace) -> int:
 def _stop(args: argparse.Namespace, ws: Workspace) -> int:
     if not args.target:
         raise ValueError("agent stop needs the agent's name; `agent list` shows them")
-    done = ls.stop(ws, args.target)
+    done = (task_launch.stop(ws, tokens.load(ws.base, args.agent), args.target, args.task)
+            if args.agent else ls.stop(ws, args.target))
     say(f"stopped {done.name}" + (" (it had to be killed)" if done.forced else "")
         + ("; its model lease is released" if done.lease_released else ""))
     for note in done.notes:
@@ -143,7 +157,7 @@ def run(args: argparse.Namespace, ws: Workspace) -> int:
     if args.action == 'schedule':
         if not args.target or not args.agent:
             raise ValueError('agent schedule requires a worker name and --agent registered-parent')
-        return task_scheduler.watch(ws, tokens.load(ws.base, args.agent), la.check_name(args.target))
+        return task_scheduler.watch(ws, tokens.load(ws.base, args.agent), la.check_name(args.target), task=args.task)
     if args.action in ("supersede-issue", "resume-issue"):
         if not args.target:
             raise ValueError("supersede-issue needs the existing worker name")
@@ -156,7 +170,8 @@ def run(args: argparse.Namespace, ws: Workspace) -> int:
         decision(ws, token, args.target, args.issue, args.reason)
         say(f"issue {args.issue}: {args.action} decision recorded")
         return 0
-    human.require_person(f"{args.action} a local agent")
+    if not (args.agent and args.action in ("start", "stop")):
+        human.require_person(f"{args.action} a local agent")
     if args.action == "backlog":
         if not args.target:
             raise ValueError("agent backlog needs the existing worker's name")
