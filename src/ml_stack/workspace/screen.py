@@ -63,7 +63,7 @@ MARKERS: tuple[tuple[str, re.Pattern[str]], ...] = tuple((n, re.compile(p, re.I 
                        r"takes\s+precedence)\b"),
 ))
 
-SOFT = frozenset({"authority-claim", "tool-order", "rule-promotion"})
+SOFT = frozenset({"authority-claim", "rule-promotion"})
 """Markers that ordinary agent messages carry; the rest, and any guard marker, always hold."""
 HARD = frozenset(name for name, _ in MARKERS) - SOFT
 
@@ -105,7 +105,9 @@ def marker_tiers(text: str) -> tuple[list[str], list[str]]:
     """``(hard, soft)``: the markers ``text`` matches that always hold it, and those that hold it
     only for a sender without good standing."""
     found = injection_markers(text)
-    return [m for m in found if m not in SOFT], [m for m in found if m in SOFT]
+    guard = set(guard_untrusted.injection_markers(text))
+    return ([m for m in found if m not in SOFT or m in guard],
+            [m for m in found if m in SOFT and m not in guard])
 
 
 def _terms(denylist: Path) -> list[str]:

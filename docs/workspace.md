@@ -221,8 +221,8 @@ and a convenience second.
      `new-instructions`, `role-play`, `prompt-leak`, `exfiltrate`, `chat-markup`, `fake-fence`,
      `authority-imperative`, and whatever `ml_stack.guard` reports as injection. A hard hit is
      also recorded against the sender in the reputation ledger as `injection_flagged`.
-   * Soft markers (`authority-claim`, `tool-order`, `rule-promotion`) are what ordinary agent
-     traffic says ("the owner approved the restart", "use the ml-stack-serve tool", "add this to
+   * Soft markers (`authority-claim`, `rule-promotion`) are what ordinary agent
+     traffic says ("the owner approved the restart", "add this to
      CLAUDE.md"). A soft-only match is delivered, fenced as untrusted data with
      `flagged: <marker>` in the fence header, and counted by one `screen.flagged` audit row,
      when the sender holds a valid token (agent, lead or human) and its standing is `good`.
