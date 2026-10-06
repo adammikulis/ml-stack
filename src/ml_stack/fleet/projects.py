@@ -1,4 +1,4 @@
-"""Explicit project publication and canonical workspace authority."""
+"""Local project metadata, explicit publication and canonical workspace authority."""
 
 from __future__ import annotations
 
@@ -109,10 +109,16 @@ class ProjectRegistry:
         for path in candidates:
             path = path.resolve()
             try:
-                git.run(["rev-parse", "--show-toplevel"], cwd=path)
-                identifier = hashlib.sha256(str(path).encode()).hexdigest()[:32]
+                path = Path(git.run(["rev-parse", "--show-toplevel"], cwd=path).stdout.strip()).resolve()
+                identifier = identity(path)
                 self._candidates[identifier] = path
-            except (OSError, git.GitFailed):
+                if identifier not in self._projects:
+                    attached = read_json(path / ".ml-stack-project.json", {})
+                    authority = attached.get("authority", {})
+                    self._projects[identifier] = Project(
+                        id=identifier, name=path.name, root=str(path), source_machine=self.machine,
+                        authority_machine=authority.get("machine", ""), board_host=authority.get("host", ""))
+            except (OSError, git.GitFailed, source.ProjectError):
                 continue
 
     def candidates(self) -> list[dict]:
@@ -122,8 +128,8 @@ class ProjectRegistry:
         source.project_id(identifier)
         with self.lock:
             project = self._projects.get(identifier)
-            if project is None or not project.shared:
-                raise source.ProjectError("Project is not shared here")
+            if project is None:
+                raise source.ProjectError("Project is not registered here")
             return project
 
     def list(self) -> list[dict]:
@@ -160,7 +166,10 @@ class ProjectRegistry:
 
     def unshare(self, identifier: str) -> None:
         with self.lock:
-            self.get(identifier).shared = False
+            project = self.get(identifier)
+            if not project.shared:
+                raise source.ProjectError("Project is not shared here")
+            project.shared = False
             self._save()
 
     def _bundle(self, project: Project) -> Path:
@@ -169,6 +178,8 @@ class ProjectRegistry:
     def snapshot(self, identifier: str, revision: str) -> bytes:
         with self.lock:
             project = self.get(identifier)
+            if not project.shared:
+                raise source.ProjectError("Project is not shared here")
             if revision != project.source_hash:
                 raise source.ProjectError("Project source revision is no longer published")
             data = self._bundle(project).read_bytes()
@@ -182,21 +193,32 @@ class ProjectRegistry:
             raise source.ProjectError("Project workspace belongs to another device")
         return self.root / "shared-workspaces" / project.id
 
-    def claim_authority(self, identifier: str) -> Project:
-        """Select this device as workspace authority during an explicit human action."""
+    def claim_authority(self, identifier: str, *, expected_machine: str = "") -> Project:
+        """Select this device as the canonical workspace authority."""
         with self.lock:
             project = self.get(identifier)
+            if expected_machine and expected_machine != self.machine:
+                raise source.ProjectError("Selected workspace device does not match this device")
             if project.authority_machine and project.authority_machine != self.machine:
                 raise source.ProjectError("Project already has another workspace authority")
             if not self.host:
                 raise source.ProjectError("This device has no reachable workspace address")
+            if project.board_host and project.board_host != self.host:
+                raise source.ProjectError("Project already has another workspace address")
             project.authority_machine, project.board_host = self.machine, self.host
             self._save()
             return project
 
+    def boards(self) -> list[dict]:
+        """Return registered project Board metadata without checkout paths or source bundles."""
+        with self.lock:
+            return [{"id": p.id, "name": p.name, "machine": self.machine,
+                     "authority_machine": p.authority_machine, "board_host": p.board_host}
+                    for p in self._projects.values()]
+
     def catalogue(self) -> dict:
         code = bootstrap()
-        return {"projects": self.list(), "machine": self.machine,
+        return {"projects": self.list(), "boards": self.boards(), "machine": self.machine,
                 "capabilities": ["project-source"],
                 "bootstrap_sha256": hashlib.sha256(code).hexdigest()}
 
