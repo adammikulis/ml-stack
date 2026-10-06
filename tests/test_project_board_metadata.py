@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from ml_stack.files import write_json
-from ml_stack.fleet import projects, project_source as source
+from ml_stack.fleet import project_source as source, projects
 from ml_stack.fleet.projects import ProjectRegistry, answer, identity
 from ml_stack.net import git
 

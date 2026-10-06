@@ -155,7 +155,7 @@ def test_native_person_start_creates_durable_parent_and_revocable_child(startup_
 @pytest.mark.redteam
 def test_native_agent_start_cannot_mint_an_unrelated_project_parent(startup_remote, tmp_path, monkeypatch):
     monkeypatch.setattr(automatic.person, "marked", lambda: "ML_STACK_AGENT")
-    with pytest.raises(Denied, match="parent.*connection"):
+    with pytest.raises(Denied, match=r"parent.*connection"):
         automatic.startup(tmp_path, "worker", "local-parent")
     assert startup_remote == []
 
