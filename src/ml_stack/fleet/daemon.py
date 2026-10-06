@@ -1,10 +1,4 @@
-"""A training daemon: one GPU box, one job at a time, reachable over the LAN.
-
-`serve_forever` puts the parts together and runs them -- the `fleet.jobs.JobRunner`, the
-`fleet.files.Fetcher`, the model store, the bench host, the web interface, the updater and
-the beacon -- behind the routes `fleet.api.make_handler` builds. `main` is
-``ml-stack-traind``.
-"""
+"""The LAN device daemon and its lifecycle configuration."""
 
 from __future__ import annotations
 
@@ -17,6 +11,7 @@ import secrets
 import socket
 import threading
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from importlib.metadata import entry_points
 from pathlib import Path
 from typing import Any
@@ -76,18 +71,16 @@ ALL_INTERFACES = "0.0.0.0"  # noqa: S104 - what LAN mode means
 
 
 def bind_address(host: str | None, *, lan: bool, joined: bool) -> str:
-    """Where the daemon listens: ``host`` if one was named, the LAN when ``lan`` or this
-    machine is in a cluster, else this machine only."""
+    """Return the configured loopback or LAN listening address."""
     if host:
         return host
     return ALL_INTERFACES if lan or joined else LOOPBACK
 
 
-def load_or_create_token(root: Path, cluster_key: bytes | None = None, *,
-                         profile: Path | str | None = None) -> str:
-    """The secret requests are signed with: derived from the cluster key, or random and local.
-
-    Kept in an owner-only machine token file for the selected profile."""
+def load_or_create_token(
+    root: Path, cluster_key: bytes | None = None, *, profile: Path | str | None = None
+) -> str:
+    """Return the owner-only machine token for the selected cluster profile."""
     p = root / "token"
     if profile is not None:
         identity = str(home.expand(profile).resolve()).encode()
@@ -110,7 +103,9 @@ def load_or_create_token(root: Path, cluster_key: bytes | None = None, *,
     return tok
 
 
-def workspace_host(projects: ProjectRegistry, factory: Callable[[ProjectRegistry], Any] | None = None) -> Any:
+def workspace_host(
+    projects: ProjectRegistry, factory: Callable[[ProjectRegistry], Any] | None = None
+) -> Any:
     """Create project hosting from the injected or installed provider."""
     if factory is None:
         providers = tuple(entry_points(group="ml_stack.workspace_hosts", name="default"))
@@ -122,403 +117,509 @@ def workspace_host(projects: ProjectRegistry, factory: Callable[[ProjectRegistry
 
 def identity_directory(root):
     """Return the installed device identity directory or an isolated daemon root."""
-    return home.state('onboard', 'tls') if root == default_root() else root / 'tls'
+    return home.state("onboard", "tls") if root == default_root() else root / "tls"
 
 
-def serve_forever(root: Path | str | None = None,
-                  host: str | None = None, port: int = DEFAULT_PORT, *,
-                  lan: bool = False, ui_from_lan: bool = False,
-                  name: str = "", announce: bool = True,
-                  cluster_key_path: Path | str | None = None,
-                  cluster_mode: str | None = None,
-                  device_report: Callable[[], dict[str, Any]] | None = None,
-                  slots: int = 1, labels: Iterable[str] = (),
-                  fetch_slots: int = 2, web: bool = True,
-                  setup_from_lan: bool = False,
-                  busy_hours: Iterable[str] = (), free_hours: Iterable[str] = (),
-                  on_paused: str = "stop",
-                  bench_home: Path | str | None = None,
-                  track: str | None = None,
-                  workspace_factory: Callable[[ProjectRegistry], Any] | None = None) -> None:
-    """Serve until stopped. ``host``, ``lan`` and ``setup_from_lan`` say where to listen
-    (`bind_address`); ``ui_from_lan`` lets other machines open the web interface.
+@dataclass(frozen=True)
+class DaemonOptions:
+    root: Path | str | None = None
+    host: str | None = None
+    port: int = DEFAULT_PORT
+    lan: bool = False
+    ui_from_lan: bool = False
+    name: str = ""
+    announce: bool = True
+    cluster_key_path: Path | str | None = None
+    cluster_mode: str | None = None
+    device_report: Callable[[], dict[str, Any]] | None = None
+    slots: int = 1
+    labels: Iterable[str] = ()
+    fetch_slots: int = 2
+    web: bool = True
+    setup_from_lan: bool = False
+    busy_hours: Iterable[str] = ()
+    free_hours: Iterable[str] = ()
+    on_paused: str = "stop"
+    bench_home: Path | str | None = None
+    track: str | None = None
+    workspace_factory: Callable[[ProjectRegistry], Any] | None = None
 
-    ``bench_home`` is where this machine's ``ml-stack-bench`` keeps its measuring lock; the
-    ``bench`` beside ``root`` unless given (`fleet.measuring.bench_home`).
 
-    ``track`` is a branch this machine follows instead of releases -- ``main`` on a machine
-    you trust to run unreviewed code -- and it is remembered, so it is asked for once.
-    ``off`` turns it back to releases; None leaves whatever the settings hold."""
-    root = home.expand(root) if root else default_root()
-    configure_runtime_paths(root)
-    root.mkdir(parents=True, exist_ok=True)
-    live_token: list[str] = [""]
-    files_root = root / "files"
-    files_root.mkdir(exist_ok=True)
-    selected = memberships(cluster_key_path)
-    effective_mode = cluster_modes.validate(cluster_mode or (selected[0].mode if selected else "dev"))
-    if selected and selected[0].mode != effective_mode:
-        raise DiscoveryError("select a cluster with the requested mode before starting this daemon")
-    if announce:
-        selected_member = automatic_clusters.ensure(cluster_key_path, mode=effective_mode)
-        effective_mode = selected_member.mode
-    say(cluster_modes.notice(effective_mode))
-    key = load_cluster_key(cluster_key_path)
-    token = load_or_create_token(root, key, profile=cluster_key_path or os.environ.get("ML_STACK_CLUSTER_KEY"))
-    live_token[0] = token
-    settings_path = root / "settings.json"
-    settings = Settings.load(settings_path)
-    name = (name or os.environ.get("ML_STACK_PEER_NAME") or settings.name
-            or socket.gethostname())
-    live_name = [name]
-    if slots == 1 and settings.slots != 1:
-        slots = settings.slots
-    if not labels and settings.labels:
-        labels = settings.labels
-    if on_paused == "stop" and settings.on_paused != "stop":
-        on_paused = settings.on_paused
+class DaemonRuntime:
+    def __init__(self, options: DaemonOptions):
+        self.root = options.root
+        self.host = options.host
+        self.port = options.port
+        self.lan = options.lan
+        self.ui_from_lan = options.ui_from_lan
+        self.name = options.name
+        self.announce = options.announce
+        self.cluster_key_path = options.cluster_key_path
+        self.cluster_mode = options.cluster_mode
+        self.device_report = options.device_report
+        self.slots = options.slots
+        self.labels = options.labels
+        self.fetch_slots = options.fetch_slots
+        self.web = options.web
+        self.setup_from_lan = options.setup_from_lan
+        self.busy_hours = options.busy_hours
+        self.free_hours = options.free_hours
+        self.on_paused = options.on_paused
+        self.bench_home = options.bench_home
+        self.track = options.track
+        self.workspace_factory = options.workspace_factory
 
-    schedule_path = root / "availability.json"
-    schedule = Availability.load(schedule_path)
-    for spec in busy_hours:
-        schedule.windows.append(parse_window(spec))
-    for spec in free_hours:
-        schedule.windows.append(parse_window(spec, busy=False))
-    if busy_hours or free_hours:
-        schedule.save(schedule_path)
+    def configure(self) -> None:
+        self.root = home.expand(self.root) if self.root else default_root()
+        configure_runtime_paths(self.root)
+        self.root.mkdir(parents=True, exist_ok=True)
+        self.files_root = self.root / "files"
+        self.files_root.mkdir(exist_ok=True)
+        self.selected = memberships(self.cluster_key_path)
+        self.effective_mode = cluster_modes.validate(
+            self.cluster_mode or (self.selected[0].mode if self.selected else "dev")
+        )
+        if self.selected and self.selected[0].mode != self.effective_mode:
+            raise DiscoveryError(
+                "select a cluster with the requested mode before starting this daemon"
+            )
+        if self.announce:
+            self.selected_member = automatic_clusters.ensure(
+                self.cluster_key_path, mode=self.effective_mode
+            )
+            self.effective_mode = self.selected_member.mode
+        say(cluster_modes.notice(self.effective_mode))
+        self.key = load_cluster_key(self.cluster_key_path)
+        self.token = load_or_create_token(
+            self.root,
+            self.key,
+            profile=self.cluster_key_path or os.environ.get("ML_STACK_CLUSTER_KEY"),
+        )
+        self.settings_path = self.root / "settings.json"
+        self.settings = Settings.load(self.settings_path)
+        self.name = (
+            self.name
+            or os.environ.get("ML_STACK_PEER_NAME")
+            or self.settings.name
+            or socket.gethostname()
+        )
+        if self.slots == 1 and self.settings.slots != 1:
+            self.slots = self.settings.slots
+        if not self.labels and self.settings.labels:
+            self.labels = self.settings.labels
+        if self.on_paused == "stop" and self.settings.on_paused != "stop":
+            self.on_paused = self.settings.on_paused
+        self.schedule_path = self.root / "availability.json"
+        self.schedule = Availability.load(self.schedule_path)
+        for spec in self.busy_hours:
+            self.schedule.windows.append(parse_window(spec))
+        for spec in self.free_hours:
+            self.schedule.windows.append(parse_window(spec, busy=False))
+        if self.busy_hours or self.free_hours:
+            self.schedule.save(self.schedule_path)
+        self.taken = adopt_pause(
+            self.schedule, peer_pause(self.cluster_key_path, timeout_s=ADOPT_S)
+        )
+        if self.taken is not None:
+            self.schedule.save(self.schedule_path)
+            say(f"  paused with the cluster: {self.taken.said()}")
+        self.settings.slots = self.slots
+        self.settings.labels = [s.strip() for s in self.labels if s and s.strip()]
+        self.settings.on_paused = self.on_paused
+        if self.track is not None:
+            self.wanted = self.track.strip()
+            self.settings.track_branch = (
+                "" if self.wanted.lower() in ("", "off", "none") else self.wanted
+            )
+            self.settings.save(self.settings_path)
 
-    taken = adopt_pause(schedule, peer_pause(cluster_key_path, timeout_s=ADOPT_S))
-    if taken is not None:
-        schedule.save(schedule_path)
-        say(f"  paused with the cluster: {taken.said()}")
+    def services(self) -> None:
+        self.environment = Environment(self.root)
+        self.serving = Serving(self.root / "serving.json")
+        self.hosting = Hosting(self.root, self.serving)
+        self.models = Models(
+            default_roots(self.root),
+            self.root / "models",
+            sources=lambda: self.settings.download_sources,
+        )
+        self.conversations = Conversations(self.root / "chats")
+        self.downloads = Downloads(self.models)
+        self.measuring_home = (
+            Path(self.bench_home).expanduser()
+            if self.bench_home is not None
+            else bench_home_beside(self.root)
+        )
+        self.bench_host: BenchHost | None = None
+        self.runner = JobRunner(
+            self.root,
+            self.files_root,
+            slots=self.slots,
+            gate=self.may_start,
+            environment=self.environment,
+        )
+        self.bench_host = BenchHost(self.runner, home=self.measuring_home, name=self.name)
+        self.fetcher = Fetcher(self.files_root, self.key, slots=self.fetch_slots)
+        self.interface = None
+        self.setup_token = ""
+        if self.web:
+            if self.key is None and self.setup_from_lan:
+                self.setup_token = secrets.token_urlsafe(9)
+            self.interface = UI(
+                name=self.name,
+                cluster_key_path=self.cluster_key_path,
+                peer_port=self.port,
+                setup_token=self.setup_token,
+            )
+        self.base_report = self.device_report or default_report
+        self.labels = sorted({s.strip() for s in self.labels if s and s.strip()})
+        self.heard: list[str] = []
+        threading.Thread(target=self.probe_speech, name="speech-probe", daemon=True).start()
 
-    # What the screen shows has to be what the daemon is doing, so the effective
-    # values go back into the settings object whether they came from a flag or a file.
-    settings.slots = slots
-    settings.labels = [s.strip() for s in labels if s and s.strip()]
-    settings.on_paused = on_paused
-    if track is not None:
-        wanted = track.strip()
-        settings.track_branch = "" if wanted.lower() in ("", "off", "none") else wanted
-        settings.save(settings_path)
+    def initialize_listener(self) -> None:
+        self.projects = ProjectRegistry(
+            self.root,
+            self.bench_host.machine,
+            (Path(__file__).resolve().parents[3], Path.cwd()),
+            lan_host(self.port),
+        )
+        self.workspaces = workspace_host(self.projects, self.workspace_factory)
+        self.handler = make_handler(
+            Daemon(
+                self.runner,
+                self.files_root,
+                lambda: self.token,
+                name=lambda: self.name,
+                report=self.report,
+                fetcher=self.fetcher,
+                ui=self.interface,
+                projects=self.projects,
+                workspaces=self.workspaces,
+                schedule=self.schedule,
+                on_paused=self.on_paused,
+                schedule_path=self.schedule_path,
+                serving=self.serving,
+                models=self.models,
+                cluster_key_path=self.cluster_key_path,
+                cluster_mode=self.effective_mode,
+                tokens=self.every_token,
+                devices=lambda: Devices(home.state("onboard", "devices.json")).all(),
+                bench=self.bench_host,
+                hosting=self.hosting,
+                decide=Deciding(self.serving),
+                ui_from_lan=self.ui_from_lan or self.setup_from_lan,
+                joining=Joining(lambda: memberships(self.cluster_key_path), self.fingerprint),
+            )
+        )
+        self.listening = bind_address(
+            self.host, lan=self.lan or self.setup_from_lan, joined=self.key is not None
+        )
+        self.widen = threading.Event()
+        self.cert: tls.Identity | None = None
+        if self.interface is not None:
+            self.interface.invitations = Invitations(
+                lambda: memberships(self.cluster_key_path),
+                lambda: (lan_host(self.port), self.fingerprint()),
+            )
+            self.interface.join_invitation = lambda code: invite_routes.joined(
+                self.interface, invite_client.redeem(code, self.name)
+            )
+        self.httpd = self.listen(self.listening)
 
-    environment = Environment(root)
-    serving = Serving(root / "serving.json")
-    hosting = Hosting(root, serving)
-    models = Models(default_roots(root), root / "models", sources=lambda: settings.download_sources)
-    conversations = Conversations(root / "chats")
-    downloads = Downloads(models)
-    measuring_home = (Path(bench_home).expanduser() if bench_home is not None
-                      else bench_home_beside(root))
-    bench_host: list[BenchHost] = []
+    def updates(self) -> None:
+        self.nothing_running = updating.quiet(
+            jobs=lambda: bool(self.runner.status()["busy"]),
+            measuring=lambda: bool(self.bench_host.measuring()),
+            leases=lambda: bool(self.serving.live()),
+        )
+        self.tracked = str(getattr(self.settings, "track_branch", "") or "").strip()
+        self.tracked_from = str(getattr(self.settings, "track_repo", "") or "") or updating.GIT_URL
+        self.checkout = updating.checkout_here() if self.tracked else None
+        if self.tracked and self.checkout is not None:
+            say(f"  following {self.tracked} on {self.tracked_from} in {self.checkout}")
+            updating.track(
+                updating.TrackedBranch(self.tracked_from, self.tracked, self.checkout),
+                idle=self.nothing_running,
+            )
+        else:
+            if self.tracked:
+                say(
+                    f"  cannot follow '{self.tracked}': this copy is not a git checkout. Releases instead."
+                )
+            updating.watch(
+                wanted=lambda: bool(getattr(self.settings, "auto_update", False)),
+                idle=self.nothing_running,
+            )
 
-    def may_start() -> tuple[bool, str]:
-        """A measurement holds the GPU as surely as a job does, so nothing starts
-        beside one -- whether this daemon started it or someone at the keyboard did."""
-        if bench_host and bench_host[0].measuring():
-            return False, "a benchmark is measuring on this machine"
-        return schedule.may_start()
+    def announcements(self) -> None:
+        self.advertiser: Advertiser | None = None
+        self.advertisers: dict[str, Advertiser] = {}
+        self.announcement_lock = threading.RLock()
 
-    runner = JobRunner(root, files_root, slots=slots, gate=may_start,
-                       environment=environment)
-    bench_host.append(BenchHost(runner, home=measuring_home, name=name))
-    fetcher = Fetcher(files_root, key, slots=fetch_slots)
-    interface = None
-    setup_token = ""
-    if web:
-        if key is None and setup_from_lan:
-            setup_token = secrets.token_urlsafe(9)
-        interface = UI(name=name, cluster_key_path=cluster_key_path, peer_port=port,
-                       setup_token=setup_token)
-    base_report = device_report or default_report
-    labels = sorted({s.strip() for s in labels if s and s.strip()})
+    def configure_interface(self) -> None:
+        if self.interface is not None:
+            self.interface.rename = self.rename
+            self.interface.on_join = self.joined_a_cluster
+            self.interface.runner = self.runner
+            self.interface.schedule = self.schedule
+            self.interface.settings = self.settings
+            self.interface.settings_path = self.settings_path
+            self.interface.schedule_path = self.schedule_path
+            self.interface.report = self.report
+            self.interface.environment = self.environment
+            self.interface.serving = self.serving
+            self.interface.hosting = self.hosting
+            self.interface.models = self.models
+            self.interface.conversations = self.conversations
+            self.interface.downloads = self.downloads
+            self.interface.root = self.root
+            self.interface.projects = self.projects
+            self.interface.workspaces = self.workspaces
 
-    heard: list[str] = []
+    def report_startup(self) -> None:
+        if self.announce:
+            self.start_announcing()
+        say(
+            f"ml-stack traind on {('http' if self.listening == LOOPBACK else 'https')}://{self.listening}:{self.port}"
+            + ("" if self.listening != LOOPBACK else "  (this machine only; --lan opens it)")
+        )
+        say(f"  name  {self.name}")
+        for member in memberships(self.cluster_key_path):
+            say(f"  cluster {member.group}")
+        say(f"  root  {self.root}")
+        say(f"  bench {self.measuring_home}")
+        say(f"  slots {self.slots}")
+        self.state = self.schedule.public()
+        for window in self.schedule.windows:
+            say(f"  busy  {window.describe()}" if window.busy else f"  free  {window.describe()}")
+        if not self.state["available"]:
+            say(f"  NOT TAKING WORK -- {self.state['unavailable_because']}")
+        if self.labels:
+            say(f"  labels {' '.join(self.labels)}")
+        if self.advertiser is not None:
+            say(
+                f"  peers announcing on {self.advertiser.group}:{self.advertiser.port} (key {key_path(self.cluster_key_path)})"
+            )
+            say("  token derived from the cluster key -- peers compute it themselves")
+        elif self.key is None:
+            announce_token(self.token)
+            say(f"  discovery OFF: no cluster key at {key_path(self.cluster_key_path)}")
+            if self.interface is None:
+                say("  run 'ml-stack-peers setup' to join one")
+        say(f"  device {json.dumps(self.report())}")
+        if self.slots > 1:
+            say(
+                f"  {self.slots} jobs will run at once. Correct for CPU work; on a GPU box this makes every job slower."
+            )
+        if self.interface is not None:
+            self.shown = LOOPBACK if self.listening in (ALL_INTERFACES, "") else self.listening
+            say(f"  open   http://{self.shown}:{self.port}/ui/")
+            if self.key is None:
+                say(
+                    "  this machine has not joined a cluster yet -- open the address above ON THIS MACHINE to set it up"
+                )
+                if self.setup_token:
+                    say(f"  setup from the LAN with this one-time code: {self.setup_token}")
+        say("  EVERY MACHINE IN THIS CLUSTER CAN RUN COMMANDS HERE. Trusted LAN only.", flush=True)
 
-    def probe_speech() -> None:
-        heard[:] = speech.working()
+    def run(self) -> None:
+        on_quit(self._quit)
+        self.scanner = guarded.start(sentinel.armed(), canaries.lease_file_targets(lease_file()))
+        from contextlib import ExitStack
 
-    # Off the startup path: a probe imports whisper's dependencies where they are
-    # installed, and the beacon carries what has been found by the time it goes out.
-    threading.Thread(target=probe_speech, name="speech-probe", daemon=True).start()
+        from ml_stack.limits import read as limits_read
+        from ml_stack.serve.reclaim import watching
 
-    def report() -> dict[str, Any]:
-        # `updates.state` puts the version, the commit and how this machine keeps current
-        # on the beacon, so `ml-stack-fleet status` can show a fleet that is half-updated
-        # rather than everyone guessing.
-        return {**base_report(), "labels": labels, **bench_host[0].report(),
-                **updating.state(), "speech": list(heard)}
-    def every_token() -> set[str]:
+        self.idle_s = limits_read().idle_s
+        self.reclaiming = ExitStack()
+        if self.idle_s:
+            say(f"  reclaiming a server unused for {self.idle_s:.0f}s")
+            self.reclaiming.enter_context(watching(older_than=self.idle_s, say=print))
+        self.convergence_stop = threading.Event()
+        self.convergence = None
+        if self.announce and self.effective_mode == "dev":
+            self.convergence = threading.Thread(
+                target=automatic_clusters.converge,
+                args=(self.convergence_stop, self.start_announcing, self.cluster_key_path),
+                name="development-cluster-convergence",
+                daemon=True,
+            )
+            self.convergence.start()
+        try:
+            while True:
+                self.httpd.serve_forever()
+                if not self.widen.is_set():
+                    break
+                self.widen.clear()
+                self.httpd.server_close()
+                self.listening = ALL_INTERFACES
+                self.httpd = self.listen(ALL_INTERFACES)
+                for one in self.advertisers.values():
+                    one.beacon.cert = self.served_cert()
+                    one.announce()
+                say(f"  listening on {ALL_INTERFACES}:{self.port}")
+        except KeyboardInterrupt:
+            pass
+        finally:
+            self.convergence_stop.set()
+            if self.convergence is not None:
+                self.convergence.join(timeout=12.0)
+            self.reclaiming.close()
+            self.scanner.stop()
+            _stop_advertisers(self.advertisers)
+            if self.advertiser is not None:
+                self.advertiser.stop()
+            self.runner.shutdown()
+            self.httpd.server_close()
+
+    def may_start(self) -> tuple[bool, str]:
+        """A measurement holds the GPU and blocks new work."""
+        if self.bench_host and self.bench_host.measuring():
+            return (False, "a benchmark is measuring on this machine")
+        return self.schedule.may_start()
+
+    def probe_speech(self) -> None:
+        self.heard[:] = speech.working()
+
+    def report(self) -> dict[str, Any]:
+        return {
+            **self.base_report(),
+            "labels": self.labels,
+            **self.bench_host.report(),
+            **updating.state(),
+            "speech": list(self.heard),
+        }
+
+    def every_token(self) -> set[str]:
         """Every token this machine answers to, one per cluster it is in."""
-        return {derive_token(m.key) for m in memberships(cluster_key_path)}
+        return {derive_token(m.key) for m in memberships(self.cluster_key_path)}
 
-    def fingerprint() -> str:
-        offered = served_cert()
+    def fingerprint(self) -> str:
+        offered = self.served_cert()
         return hashlib.sha256(base64.b64decode(offered)).hexdigest() if offered else PLAIN
 
-    projects = ProjectRegistry(root, bench_host[0].machine,
-                               (Path(__file__).resolve().parents[3], Path.cwd()), lan_host(port))
-    workspaces = workspace_host(projects, workspace_factory)
-    handler = make_handler(Daemon(
-        runner, files_root, lambda: live_token[0],
-        name=lambda: live_name[0], report=report, fetcher=fetcher,
-        ui=interface, projects=projects, workspaces=workspaces, schedule=schedule, on_paused=on_paused,
-        schedule_path=schedule_path, serving=serving, models=models,
-        cluster_key_path=cluster_key_path, cluster_mode=effective_mode, tokens=every_token,
-        devices=lambda: Devices(home.state('onboard', 'devices.json')).all(),
-        bench=bench_host[0], hosting=hosting,
-        decide=Deciding(serving), ui_from_lan=ui_from_lan or setup_from_lan,
-        joining=Joining(lambda: memberships(cluster_key_path), fingerprint)))
-    listening = [bind_address(host, lan=lan or setup_from_lan, joined=key is not None)]
-    widen = threading.Event()
-    cert: list[tls.Identity | None] = [None]
-
-    def identity() -> tls.Identity | None:
+    def identity(self) -> tls.Identity | None:
         """This daemon's certificate, made on first use; None when signed-only is named."""
         if tls.disabled():
             return None
-        if cert[0] is None:
-            cert[0] = tls.identity(identity_directory(root), live_name[0])
-        return cert[0]
+        if self.cert is None:
+            self.cert = tls.identity(identity_directory(self.root), self.name)
+        return self.cert
 
-    def served_cert() -> str:
+    def served_cert(self) -> str:
         """The certificate peers should pin: this daemon's, if it listens beyond this machine."""
-        if listening[0] == LOOPBACK or (found := identity()) is None:
+        if self.listening == LOOPBACK or (found := self.identity()) is None:
             return ""
         return found.beacon
 
-    def listen(address: str) -> LimitedServer:
+    def listen(self, address: str) -> LimitedServer:
         """A server on ``address``: a machine-only one speaks plain HTTP, any other TLS."""
         if address in (LOOPBACK, "localhost", "::1"):
-            return LimitedServer((address, port), handler)
-        found = identity()
+            return LimitedServer((address, self.port), self.handler)
+        found = self.identity()
         if found is None:
-            warn(f"  {tls.ENV}=off: traffic on {address}:{port} is signed but NOT encrypted")
-            return LimitedServer((address, port), handler)
-        return LimitedServer((address, port), handler, tls=tls.server_context(found))
+            warn(f"  {tls.ENV}=off: traffic on {address}:{self.port} is signed but NOT encrypted")
+            return LimitedServer((address, self.port), self.handler)
+        return LimitedServer((address, self.port), self.handler, tls=tls.server_context(found))
 
-    if interface is not None:
-        interface.invitations = Invitations(lambda: memberships(cluster_key_path),
-                                           lambda: (lan_host(port), fingerprint()))
-        interface.join_invitation = lambda code: invite_routes.joined(
-            interface, invite_client.redeem(code, live_name[0]))
-    httpd = listen(listening[0])
-    # Keeping this machine current, in one of two modes and never in both. Either way the
-    # gate is the same: nothing is replaced over a job, a measurement or a loaded model.
-    nothing_running = updating.quiet(
-        jobs=lambda: bool(runner.status()["busy"]),
-        measuring=lambda: bool(bench_host[0].measuring()),
-        leases=lambda: bool(serving.live()))
-    tracked = str(getattr(settings, "track_branch", "") or "").strip()
-    tracked_from = str(getattr(settings, "track_repo", "") or "") or updating.GIT_URL
-    checkout = updating.checkout_here() if tracked else None
-    if tracked and checkout is not None:
-        say(f"  following {tracked} on {tracked_from} in {checkout}")
-        updating.track(tracked_from, tracked, checkout, idle=nothing_running)
-    else:
-        if tracked:
-            say(f"  cannot follow '{tracked}': this copy is not a git checkout. "
-                "Releases instead.")
-        updating.watch(wanted=lambda: bool(getattr(settings, "auto_update", False)),
-                       idle=nothing_running)
-
-    advertiser: Advertiser | None = None
-    advertisers: dict[str, Advertiser] = {}
-
-    def refresh(b: Beacon) -> None:
+    def refresh(self, b: Beacon) -> None:
         """Bring the beacon's mutable half up to date before it goes on the wire."""
-        status = runner.status()
-        available = schedule.public()
-        b.busy, b.queued = status["busy"], status["queued"]
-        b.slots, b.free = status["slots"], status["free"]
+        status = self.runner.status()
+        available = self.schedule.public()
+        b.busy, b.queued = (status["busy"], status["queued"])
+        b.slots, b.free = (status["slots"], status["free"])
         if not available["available"]:
             b.free = 0
-        b.device = {**report(), "availability": available,
-                    "serving": serving.public(), **models.beacon()}
+        b.device = {
+            **self.report(),
+            "availability": available,
+            "serving": self.serving.public(),
+            **self.models.beacon(),
+        }
 
-    announcement_lock = threading.RLock()
-
-    def start_announcing() -> None:
+    def start_announcing(self) -> None:
         """Advertise on every cluster this machine is in, and stop on any it left."""
-        nonlocal advertiser, key
-        with announcement_lock:
-            if not announce:
+        with self.announcement_lock:
+            if not self.announce:
                 return
-            joined = {m.group: m for m in memberships(cluster_key_path)}
-
-            for group in [g for g in advertisers if g not in joined]:
+            joined = {m.group: m for m in memberships(self.cluster_key_path)}
+            for group in [g for g in self.advertisers if g not in joined]:
                 with contextlib.suppress(Exception):
-                    advertisers.pop(group).stop()
-
+                    self.advertisers.pop(group).stop()
             for group, member in joined.items():
-                if group in advertisers and advertisers[group].key != member.key:
-                    advertisers.pop(group).stop()
-                if group in advertisers:
-                    advertisers[group].mode = member.mode
-                    advertisers[group].joinable = member.mode == "dev" or bool(member.join)
+                if group in self.advertisers and self.advertisers[group].key != member.key:
+                    self.advertisers.pop(group).stop()
+                if group in self.advertisers:
+                    self.advertisers[group].mode = member.mode
+                    self.advertisers[group].joinable = member.mode == "dev" or bool(member.join)
                     continue
                 try:
-                    offered = served_cert()
+                    offered = self.served_cert()
                 except tls.TlsUnavailable as exc:
                     say(f"  discovery OFF for {group}: {exc}")
                     continue
-                beacon = Beacon(name=live_name[0], port=port, device=report(), cert=offered,
-                                slots=runner.slots, free=runner.slots,
-                                machine=bench_host[0].machine)
+                beacon = Beacon(
+                    name=self.name,
+                    port=self.port,
+                    device=self.report(),
+                    cert=offered,
+                    slots=self.runner.slots,
+                    free=self.runner.slots,
+                    machine=self.bench_host.machine,
+                )
                 try:
-                    # Not group=: that is the multicast address every cluster shares.
-                    # Clusters are told apart by the key their beacons are signed with.
-                    tell = Advertiser(beacon, member.key, cluster=group, refresh=refresh)
+                    tell = Advertiser(beacon, member.key, cluster=group, refresh=self.refresh)
                     tell.mode = member.mode
                     tell.joinable = member.mode == "dev" or bool(member.join)
-                    advertisers[group] = tell.start()
+                    self.advertisers[group] = tell.start()
                 except DiscoveryError as exc:
                     say(f"  discovery OFF for {group}: {exc}")
-
             first = next(iter(joined.values()), None)
             if first is not None:
-                key = first.key
-                fetcher.key = first.key
-                live_token[0] = load_or_create_token(
-                    root, first.key, profile=cluster_key_path or os.environ.get("ML_STACK_CLUSTER_KEY"))
-                advertiser = advertisers.get(first.group)
+                self.key = first.key
+                self.fetcher.key = first.key
+                self.token = load_or_create_token(
+                    self.root,
+                    first.key,
+                    profile=self.cluster_key_path or os.environ.get("ML_STACK_CLUSTER_KEY"),
+                )
+                self.advertiser = self.advertisers.get(first.group)
 
-    def rename(called: str) -> str:
+    def rename(self, called: str) -> str:
         """Give this machine a new name now, on the page and on the network."""
         called = called.strip()
-        if not called or called == live_name[0]:
-            return live_name[0]
-        live_name[0] = called
-        bench_host[0].name = called
-        if interface is not None:
-            interface.name = called
-        for one in advertisers.values():
+        if not called or called == self.name:
+            return self.name
+        self.name = called
+        self.bench_host.name = called
+        if self.interface is not None:
+            self.interface.name = called
+        for one in self.advertisers.values():
             one.beacon.name = called
         return called
 
-    def joined_a_cluster() -> None:
+    def joined_a_cluster(self) -> None:
         """Announce, and listen on the network now that peers are meant to reach this."""
-        start_announcing()
-        for member in memberships(cluster_key_path):
+        self.start_announcing()
+        for member in memberships(self.cluster_key_path):
             say(f"  joined cluster {member.group!r}")
-        if not host and listening[0] == LOOPBACK:
-            widen.set()
-            httpd.shutdown()
+        if not self.host and self.listening == LOOPBACK:
+            self.widen.set()
+            self.httpd.shutdown()
 
-    if interface is not None:
-        interface.rename = rename
-        interface.on_join = joined_a_cluster
-        interface.runner = runner
-        interface.schedule = schedule
-        interface.settings = settings
-        interface.settings_path = settings_path
-        interface.schedule_path = schedule_path
-        interface.report = report
-        interface.environment = environment
-        interface.serving = serving
-        interface.hosting = hosting
-        interface.models = models
-        interface.conversations = conversations
-        interface.downloads = downloads
-        interface.root = root
-        interface.projects = projects
-        interface.workspaces = workspaces
-
-    if announce:
-        start_announcing()
-    say(f"ml-stack traind on {'http' if listening[0] == LOOPBACK else 'https'}://"
-        f"{listening[0]}:{port}"
-        + ("" if listening[0] != LOOPBACK else "  (this machine only; --lan opens it)"))
-    say(f"  name  {name}")
-    for member in memberships(cluster_key_path):
-        say(f"  cluster {member.group}")
-    say(f"  root  {root}")
-    say(f"  bench {measuring_home}")
-    say(f"  slots {slots}")
-    state = schedule.public()
-    for window in schedule.windows:
-        say(f"  busy  {window.describe()}" if window.busy
-            else f"  free  {window.describe()}")
-    if not state["available"]:
-        say(f"  NOT TAKING WORK -- {state['unavailable_because']}")
-    if labels:
-        say(f"  labels {' '.join(labels)}")
-    if advertiser is not None:
-        say(f"  peers announcing on {advertiser.group}:{advertiser.port} "
-            f"(key {key_path(cluster_key_path)})")
-        say("  token derived from the cluster key -- peers compute it themselves")
-    elif key is None:
-        announce_token(token)
-        say(f"  discovery OFF: no cluster key at {key_path(cluster_key_path)}")
-        if interface is None:
-            say("  run 'ml-stack-peers setup' to join one")
-    say(f"  device {json.dumps(report())}")
-    if slots > 1:
-        say(f"  {slots} jobs will run at once. Correct for CPU work; on a GPU box "
-            "this makes every job slower.")
-    if interface is not None:
-        shown = LOOPBACK if listening[0] in (ALL_INTERFACES, "") else listening[0]
-        say(f"  open   http://{shown}:{port}/ui/")
-        if key is None:
-            say("  this machine has not joined a cluster yet -- open the address "
-                "above ON THIS MACHINE to set it up")
-            if setup_token:
-                say(f"  setup from the LAN with this one-time code: {setup_token}")
-    say("  EVERY MACHINE IN THIS CLUSTER CAN RUN COMMANDS HERE. Trusted LAN only.", flush=True)
-
-    def _quit(signum: int, _frame: Any) -> None:
-        # SIGTERM (launchd, systemd, kill) and on Windows SIGBREAK take the same exit as
-        # Ctrl+C, so the beacon stops and the server closes rather than vanishing.
+    def _quit(self, signum: int, _frame: Any) -> None:
         raise KeyboardInterrupt(f"signal {signum}")
 
-    on_quit(_quit)
-    scanner = guarded.start(sentinel.armed(), canaries.lease_file_targets(lease_file()))
-    # A server this machine was told to stop when nobody is using it (`ml-stack-serve
-    # limits --idle`). Without one, nothing is watched and nothing is stopped.
-    from contextlib import ExitStack
 
-    from ml_stack.limits import read as limits_read
-    from ml_stack.serve.reclaim import watching
-
-    idle_s = limits_read().idle_s
-    reclaiming = ExitStack()
-    if idle_s:
-        say(f"  reclaiming a server unused for {idle_s:.0f}s")
-        reclaiming.enter_context(watching(older_than=idle_s, say=print))
-    convergence_stop = threading.Event()
-    convergence = None
-    if announce and effective_mode == "dev":
-        convergence = threading.Thread(
-            target=automatic_clusters.converge,
-            args=(convergence_stop, start_announcing, cluster_key_path),
-            name="development-cluster-convergence", daemon=True)
-        convergence.start()
-    try:
-        while True:
-            httpd.serve_forever()
-            if not widen.is_set():
-                break
-            widen.clear()
-            httpd.server_close()
-            listening[0] = ALL_INTERFACES
-            httpd = listen(ALL_INTERFACES)
-            for one in advertisers.values():
-                one.beacon.cert = served_cert()
-                one.announce()
-            say(f"  listening on {ALL_INTERFACES}:{port}")
-    except KeyboardInterrupt:
-        pass
-    finally:
-        convergence_stop.set()
-        if convergence is not None:
-            convergence.join(timeout=12.0)
-        reclaiming.close()
-        scanner.stop()
-        _stop_advertisers(advertisers)
-        if advertiser is not None:
-            advertiser.stop()
-        runner.shutdown()
-        httpd.server_close()
+def serve(options: DaemonOptions) -> None:
+    runtime = DaemonRuntime(options)
+    runtime.configure()
+    runtime.services()
+    runtime.initialize_listener()
+    runtime.updates()
+    runtime.announcements()
+    runtime.configure_interface()
+    runtime.report_startup()
+    runtime.run()
 
 
 def _stop_advertisers(advertisers: dict[str, Any]) -> None:
@@ -530,8 +631,7 @@ def _stop_advertisers(advertisers: dict[str, Any]) -> None:
 
 
 def persist(*, slots: int = 1, labels: tuple[str, ...] = (), report: str = "") -> int:
-    """``ml-stack-traind --persist``: start at login from now on, the way ``ml-stack-serve
-    build --persist`` refreshes weekly. Says what was installed, or what a person must run."""
+    """Install the daemon at login and report its result."""
     done = autostart.install("login", slots=slots, labels=labels, report=report)
     if done.installed:
         say("installed to start at login")
@@ -549,87 +649,159 @@ def persist(*, slots: int = 1, labels: tuple[str, ...] = (), report: str = "") -
     return 2
 
 
-def run(argv: list[str] | None = None, *,
-         workspace_factory: Callable[[ProjectRegistry], Any] | None = None) -> int:
+def run(
+    argv: list[str] | None = None,
+    *,
+    workspace_factory: Callable[[ProjectRegistry], Any] | None = None,
+) -> int:
     import argparse
+
     ap = argparse.ArgumentParser(prog="ml-stack-traind")
     ap.add_argument("--root", default=str(default_root()))
-    ap.add_argument("--gym-python", default=None, metavar="PYTHON",
-                    help="reuse this existing simulator interpreter and remember it under --root")
-    ap.add_argument("--bench-home", default=None, metavar="DIR",
-                    help="where this machine's ml-stack-bench keeps its measuring lock "
-                         "(default: the 'bench' beside --root). "
-                         "While that lock is held, queued training waits.")
-    ap.add_argument("--host", default=None,
-                    help="the address to listen on (default: this machine only, or every "
-                         "interface when --lan is given or this machine is in a cluster)")
-    ap.add_argument("--lan", action="store_true",
-                    help="listen on every interface so other machines can reach this one")
-    ap.add_argument("--ui-from-lan", action="store_true",
-                    help="let other machines open the web interface. It signs in with the "
-                         "passphrase over plain HTTP, so only on a network you trust")
+    ap.add_argument(
+        "--gym-python",
+        default=None,
+        metavar="PYTHON",
+        help="reuse this existing simulator interpreter and remember it under --root",
+    )
+    ap.add_argument(
+        "--bench-home",
+        default=None,
+        metavar="DIR",
+        help="where this machine's ml-stack-bench keeps its measuring lock "
+        "(default: the 'bench' beside --root). "
+        "While that lock is held, queued training waits.",
+    )
+    ap.add_argument(
+        "--host",
+        default=None,
+        help="the address to listen on (default: this machine only, or every "
+        "interface when --lan is given or this machine is in a cluster)",
+    )
+    ap.add_argument(
+        "--lan",
+        action="store_true",
+        help="listen on every interface so other machines can reach this one",
+    )
+    ap.add_argument(
+        "--ui-from-lan",
+        action="store_true",
+        help="let other machines open the web interface. It signs in with the "
+        "passphrase over plain HTTP, so only on a network you trust",
+    )
     ap.add_argument("--port", type=int, default=DEFAULT_PORT)
-    ap.add_argument("--name", default="",
-                    help="how this box identifies itself to peers "
-                         "(default: $ML_STACK_PEER_NAME, else the hostname)")
-    ap.add_argument("--cluster-key", default=None,
-                    help="path to the cluster key (default: ~/.ml-stack/cluster.key)")
-    ap.add_argument("--mode", choices=("dev", "prod"), default=None,
-                    help="cluster admission mode (default: existing cluster mode, otherwise dev)")
-    ap.add_argument("--no-announce", action="store_true",
-                    help="serve, but stay invisible to peer discovery")
-    ap.add_argument("--busy", action="append", default=[], metavar="WHEN",
-                    help="when this machine is NOT available for work, e.g. "
-                         "'mon-fri 09:00-17:00' or '22:00-06:00'. Repeatable. Queued "
-                         "work waits for the window to close rather than failing.")
-    ap.add_argument("--free", action="append", default=[], metavar="WHEN",
-                    help="carve an exception out of a busy window, e.g. "
-                         "'mon-fri 12:00-13:00'")
-    ap.add_argument("--on-paused", choices=("stop", "finish"), default="stop",
-                    help="what happens to work already running when the machine is "
-                         "paused: stop it (default -- SIGTERM, so a loop that "
-                         "checkpoints keeps its progress, and it is requeued) or let "
-                         "it finish")
-    ap.add_argument("--no-web", action="store_true",
-                    help="serve the API but not the web interface")
-    ap.add_argument("--setup-from-lan", action="store_true",
-                    help="on a machine that has not joined a cluster, allow first-run "
-                         "setup from another machine using the one-time code printed "
-                         "at startup. For a headless box you cannot open a browser on.")
-    ap.add_argument("--fetch-slots", type=int, default=2,
-                    help="concurrent peer-to-peer file transfers (default 2). Not job "
-                         "slots: a transfer is I/O against another box, not compute, "
-                         "and must not occupy a training slot.")
-    ap.add_argument("--label", action="append", default=[], metavar="LABEL",
-                    help="a role this box declares, e.g. 'prep'. Repeatable. Work can "
-                         "require or exclude labels; nothing is inferred from them.")
-    ap.add_argument("--report", action="append", default=[], metavar="MODULE:CALLABLE",
-                    help="a richer device probe, e.g. "
-                         "'ml_stack.train.accelerator:report' on a box with a card. "
-                         "Repeatable; later ones win. Without any, the daemon reports "
-                         "only what the standard library can see, plus whatever is "
-                         "registered under the 'ml_stack.device_report' entry point.")
-    ap.add_argument("--slots", type=int,
-                    default=int(os.environ.get("ML_STACK_SLOTS") or 1),
-                    help="how many jobs to run at once (default 1; raise it only on a "
-                         "box whose work does not contend for one accelerator)")
-    ap.add_argument("--track", default=None, metavar="BRANCH",
-                    help="follow a branch instead of releases: this machine pulls "
-                         "BRANCH (e.g. 'main'), reinstalls if the packaging moved and "
-                         "restarts, whenever no job, benchmark or model is running. "
-                         "Needs a git checkout with an editable install. Remembered, so "
-                         "it is asked for once; '--track off' goes back to releases. It "
-                         "runs code nobody reviewed -- only on a machine you trust to.")
-    ap.add_argument("--persist", action="store_true",
-                    help="do not serve; install this daemon (with these --slots, --label "
-                         "and --report) to start when you log in -- a LaunchAgent on "
-                         "macOS, a user systemd unit on Linux, a Scheduled Task on "
-                         "Windows -- and start it now. 'ml-stack-traind --persist' twice "
-                         "replaces the first install.")
+    ap.add_argument(
+        "--name",
+        default="",
+        help="how this box identifies itself to peers "
+        "(default: $ML_STACK_PEER_NAME, else the hostname)",
+    )
+    ap.add_argument(
+        "--cluster-key",
+        default=None,
+        help="path to the cluster key (default: ~/.ml-stack/cluster.key)",
+    )
+    ap.add_argument(
+        "--mode",
+        choices=("dev", "prod"),
+        default=None,
+        help="cluster admission mode (default: existing cluster mode, otherwise dev)",
+    )
+    ap.add_argument(
+        "--no-announce", action="store_true", help="serve, but stay invisible to peer discovery"
+    )
+    ap.add_argument(
+        "--busy",
+        action="append",
+        default=[],
+        metavar="WHEN",
+        help="when this machine is NOT available for work, e.g. "
+        "'mon-fri 09:00-17:00' or '22:00-06:00'. Repeatable. Queued "
+        "work waits for the window to close rather than failing.",
+    )
+    ap.add_argument(
+        "--free",
+        action="append",
+        default=[],
+        metavar="WHEN",
+        help="carve an exception out of a busy window, e.g. 'mon-fri 12:00-13:00'",
+    )
+    ap.add_argument(
+        "--on-paused",
+        choices=("stop", "finish"),
+        default="stop",
+        help="what happens to work already running when the machine is "
+        "paused: stop it (default -- SIGTERM, so a loop that "
+        "checkpoints keeps its progress, and it is requeued) or let "
+        "it finish",
+    )
+    ap.add_argument("--no-web", action="store_true", help="serve the API but not the web interface")
+    ap.add_argument(
+        "--setup-from-lan",
+        action="store_true",
+        help="on a machine that has not joined a cluster, allow first-run "
+        "setup from another machine using the one-time code printed "
+        "at startup. For a headless box you cannot open a browser on.",
+    )
+    ap.add_argument(
+        "--fetch-slots",
+        type=int,
+        default=2,
+        help="concurrent peer-to-peer file transfers (default 2). Not job "
+        "slots: a transfer is I/O against another box, not compute, "
+        "and must not occupy a training slot.",
+    )
+    ap.add_argument(
+        "--label",
+        action="append",
+        default=[],
+        metavar="LABEL",
+        help="a role this box declares, e.g. 'prep'. Repeatable. Work can "
+        "require or exclude labels; nothing is inferred from them.",
+    )
+    ap.add_argument(
+        "--report",
+        action="append",
+        default=[],
+        metavar="MODULE:CALLABLE",
+        help="a richer device probe, e.g. "
+        "'ml_stack.train.accelerator:report' on a box with a card. "
+        "Repeatable; later ones win. Without any, the daemon reports "
+        "only what the standard library can see, plus whatever is "
+        "registered under the 'ml_stack.device_report' entry point.",
+    )
+    ap.add_argument(
+        "--slots",
+        type=int,
+        default=int(os.environ.get("ML_STACK_SLOTS") or 1),
+        help="how many jobs to run at once (default 1; raise it only on a "
+        "box whose work does not contend for one accelerator)",
+    )
+    ap.add_argument(
+        "--track",
+        default=None,
+        metavar="BRANCH",
+        help="follow a branch instead of releases: this machine pulls "
+        "BRANCH, installs its committed wheel and "
+        "restarts, whenever no job, benchmark or model is running. "
+        "Needs the tracked source checkout. Remembered, so "
+        "it is asked for once; '--track off' goes back to releases. It "
+        "runs code nobody reviewed -- only on a machine you trust to.",
+    )
+    ap.add_argument(
+        "--persist",
+        action="store_true",
+        help="do not serve; install this daemon (with these --slots, --label "
+        "and --report) to start when you log in -- a LaunchAgent on "
+        "macOS, a user systemd unit on Linux, a Scheduled Task on "
+        "Windows -- and start it now. 'ml-stack-traind --persist' twice "
+        "replaces the first install.",
+    )
     a = ap.parse_args(argv)
     if a.persist:
-        return persist(slots=a.slots, labels=tuple(a.label), report=a.report[-1]
-                       if a.report else "")
+        return persist(
+            slots=a.slots, labels=tuple(a.label), report=a.report[-1] if a.report else ""
+        )
     if a.gym_python:
         python = Path(a.gym_python).expanduser().absolute()
         if not python.is_file():
@@ -647,14 +819,31 @@ def run(argv: list[str] | None = None, *,
                 out.update(probe() or {})
         return out
 
-    serve_forever(a.root, a.host, a.port, name=a.name, lan=a.lan, ui_from_lan=a.ui_from_lan,
-                  announce=not a.no_announce, cluster_key_path=a.cluster_key, cluster_mode=a.mode,
-                  slots=a.slots, device_report=report if probes else None,
-                  labels=a.label or os.environ.get("ML_STACK_LABELS", "").split(","),
-                  fetch_slots=a.fetch_slots, web=not a.no_web,
-                  setup_from_lan=a.setup_from_lan,
-                  busy_hours=a.busy, free_hours=a.free, on_paused=a.on_paused,
-                  bench_home=a.bench_home, track=a.track, workspace_factory=workspace_factory)
+    serve(
+        DaemonOptions(
+            root=a.root,
+            host=a.host,
+            port=a.port,
+            name=a.name,
+            lan=a.lan,
+            ui_from_lan=a.ui_from_lan,
+            announce=not a.no_announce,
+            cluster_key_path=a.cluster_key,
+            cluster_mode=a.mode,
+            slots=a.slots,
+            device_report=report if probes else None,
+            labels=a.label or os.environ.get("ML_STACK_LABELS", "").split(","),
+            fetch_slots=a.fetch_slots,
+            web=not a.no_web,
+            setup_from_lan=a.setup_from_lan,
+            busy_hours=a.busy,
+            free_hours=a.free,
+            on_paused=a.on_paused,
+            bench_home=a.bench_home,
+            track=a.track,
+            workspace_factory=workspace_factory,
+        )
+    )
     return 0
 
 

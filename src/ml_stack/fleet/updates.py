@@ -1,21 +1,9 @@
-"""Keeping this machine's ml-stack current: a newer release, or the head of a branch.
-
-Two modes, and a machine picks one. **Releases** is what a bundled install does: ask
-GitHub for the newest release, download the zip for this platform, check its signature
-against `signing.RELEASE_KEY`, swap the whole bundle into place -- the daemon, the CLI and
-the app window are one download -- and restart. **A branch** is for a machine that is a git
-checkout with an editable install: poll ``git ls-remote`` for the head of, say, ``main``,
-fast-forward onto it only if the tip commit is signed by the same key, reinstall only if the
-packaging changed, and restart. It is off unless asked for.
-
-Neither ever interrupts work. `quiet` is the gate both loops pass through: no job running,
-no benchmark measuring, no model loaded. A machine part way through a run is left alone
-until it is not, however new the code is.
-"""
+"""Install signed releases and immutable wheels from tracked branches at idle boundaries."""
 
 from __future__ import annotations
 
 import contextlib
+import logging
 import os
 import platform
 import re
@@ -27,7 +15,7 @@ import threading
 import time
 import zipfile
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -46,7 +34,10 @@ __all__ = [
     "REPO",
     "Pulled",
     "Release",
+    "TrackedBranch",
     "UpdateError",
+    "UpdateRuntime",
+    "UpdateSchedule",
     "apply_if_newer",
     "asset_for",
     "check",
@@ -63,6 +54,8 @@ __all__ = [
     "track_once",
     "watch",
 ]
+
+_LOG = logging.getLogger(__name__)
 
 REPO = "adammikulis/ml-stack"
 GIT_URL = f"https://github.com/{REPO}"
@@ -82,10 +75,7 @@ COMPANIONS = ("ml-stack", "ml-stack-headless", "ml-stack.exe", "ml-stack-headles
 whole install, not the one binary that happened to notice it: the daemon and the CLI on
 different versions is the bug this list exists to prevent."""
 
-INSTALL_TRIGGERS = ("pyproject.toml", "setup.py", "setup.cfg", "uv.lock", "poetry.lock",
-                    "requirements.txt", "requirements-dev.txt")
-"""A pull that changed one of these needs ``pip install -e .`` again; any other pull does
-not, because an editable install already reads the files that moved."""
+
 
 
 class UpdateError(RuntimeError):
@@ -440,7 +430,7 @@ def state() -> dict[str, Any]:
     that was last looked at, so `fleet.join.table` can print "main, 4m ago" rather than a
     claim nobody checked.
     """
-    commit = str(LAST.get("commit") or "") or _installed_commit()
+    commit = _installed_commit()
     return {"version": current_version(), "commit": commit,
             "commit_age_s": commit_age_s(commit),
             "tracking": str(LAST.get("tracking") or "off"),
@@ -482,7 +472,9 @@ def checkout_here() -> Path | None:
     """The git working tree this package is imported from, or None for a plain install."""
     from ml_stack.paths import repo_root
 
-    return repo_root(Path(__file__).resolve().parent)
+    from .runtime_wheel import source_checkout
+
+    return repo_root(Path(__file__).resolve().parent) or source_checkout()
 
 
 def git_in(checkout: Path | str) -> Git:
@@ -514,14 +506,36 @@ def _remote_in(words: list[str]) -> str:
 
 
 def pip_install(checkout: Path | str) -> tuple[int, str]:
-    """``pip install -e .`` in the checkout, with the interpreter that is running."""
-    try:
-        done = subprocess.run([sys.executable, "-m", "pip", "install", "-e", "."],
-                              cwd=str(Path(checkout).expanduser()), capture_output=True,
-                              text=True, timeout=PIP_TIMEOUT)
-    except (OSError, subprocess.SubprocessError) as exc:
-        return 1, str(exc)
-    return done.returncode, f"{done.stdout}{done.stderr}".strip()[-2000:]
+    """Build and install an immutable wheel with the running interpreter."""
+    from .runtime_wheel import install_checkout
+
+    return install_checkout(Path(checkout).expanduser(), timeout=PIP_TIMEOUT)
+
+
+@dataclass(frozen=True, slots=True)
+class TrackedBranch:
+    repo_url: str
+    branch: str
+    install_dir: Path | str
+
+
+@dataclass(frozen=True, slots=True)
+class UpdateRuntime:
+    git: Git | None = None
+    pip: Callable[[Path], tuple[int, str]] = pip_install
+    restart: Callable[[], Any] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class UpdateSchedule:
+    interval: float = EVERY_S
+    first_after_s: float = 30.0
+    rounds: int = 0
+
+
+_DEFAULT_RUNTIME = UpdateRuntime()
+_TRACK_SCHEDULE = UpdateSchedule()
+_RELEASE_SCHEDULE = UpdateSchedule(interval=24 * 3600, first_after_s=300.0)
 
 
 def _same(a: str, b: str) -> bool:
@@ -548,8 +562,8 @@ def check_remote(repo_url: str, branch: str) -> None:
         raise UpdateError(f"{branch!r} is not a branch name")
 
 
-def _unsigned(run: Git) -> str:
-    """Why ``FETCH_HEAD`` is not signed by the release key, or "" when it is."""
+def _unsigned(run: Git, target: str = "FETCH_HEAD") -> str:
+    """Return the signature verification failure for a commit, or an empty string."""
     key = signing.RELEASE_KEY.split()
     if len(key) < 2:
         return "no release key is set"
@@ -557,29 +571,16 @@ def _unsigned(run: Git) -> str:
         signers = Path(tmp) / "allowed_signers"
         signers.write_text(f"* {key[0]} {key[1]}\n")
         rc, out = run(["-c", "gpg.format=ssh", "-c", f"gpg.ssh.allowedSignersFile={signers}",
-                       "verify-commit", "FETCH_HEAD"])
+                       "verify-commit", target])
     return "" if rc == 0 else (out or "verify-commit failed")
 
 
-def track_once(repo_url: str, branch: str, install_dir: Path | str, *,
-               git: Git | None = None,
-               pip: Callable[[Path], tuple[int, str]] = pip_install,
-               restart: Callable[[], Any] | None = None) -> Pulled:
-    """One look at ``branch``: fast-forward onto it if it moved, and restart on the new code.
-
-    Never a merge. A checkout holding commits the branch does not have is *reported and
-    left alone* -- resolving that is a person's decision, and a daemon that reset someone's
-    work in progress at three in the morning would be unforgivable. ``pip install -e .``
-    runs only when the pull touched packaging (`INSTALL_TRIGGERS`); an editable install
-    already sees every other file that moved. A pull that fails changes nothing, so the
-    daemon keeps running the code it started with.
-
-    ``git``, ``pip`` and ``restart`` are the three seams; everything else is what the
-    machine does.
-    """
-    checkout = Path(install_dir).expanduser()
-    run = git if git is not None else git_in(checkout)
-    bring_back = restart if restart is not None else restart_after_update
+def track_once(source: TrackedBranch, *, runtime: UpdateRuntime = _DEFAULT_RUNTIME) -> Pulled:
+    """Fast-forward a signed branch and install its immutable wheel before restarting."""
+    repo_url, branch = source.repo_url, source.branch
+    checkout = Path(source.install_dir).expanduser()
+    run = runtime.git if runtime.git is not None else git_in(checkout)
+    bring_back = runtime.restart if runtime.restart is not None else restart_after_update
 
     try:
         check_remote(repo_url, branch)
@@ -596,7 +597,7 @@ def track_once(repo_url: str, branch: str, install_dir: Path | str, *,
     if rc != 0 or not local:
         return Pulled(branch, remote=head,
                       error=f"{checkout} is not a git checkout: {out or 'no HEAD'}")
-    if _same(local, head):
+    if _same(local, head) and _same(_installed_commit(), local):
         return Pulled(branch, was=local, now=local, remote=head)
 
     rc, out = run(["fetch", "--", repo_url, branch])
@@ -604,23 +605,21 @@ def track_once(repo_url: str, branch: str, install_dir: Path | str, *,
         return Pulled(branch, was=local, now=local, remote=head,
                       error=f"could not fetch {branch}: {out}")
 
-    refused = _unsigned(run)
+    refused = _unsigned(run, local if _same(local, head) else "FETCH_HEAD")
     if refused:
         return Pulled(branch, was=local, now=local, remote=head,
                       error=f"{branch} at {head[:7]} is not signed by the release key, "
                             f"so it is not pulled: {refused}")
+
+    if _same(local, head):
+        return _install_branch(Pulled(branch, was=local, now=local, remote=head),
+                               checkout, runtime.pip, bring_back)
 
     rc, _ = run(["merge-base", "--is-ancestor", "HEAD", "FETCH_HEAD"])
     if rc != 0:
         return Pulled(branch, was=local, now=local, remote=head, diverged=True,
                       error=f"{checkout} has commits {branch} does not, so it is left "
                             f"alone. Merge or reset it by hand, then it follows again.")
-
-    rc, changed = run(["diff", "--name-only", "HEAD", "FETCH_HEAD"])
-    moved = [line.strip() for line in changed.splitlines() if line.strip()]
-    # Not being able to list what moved means installing anyway: a stale install is worse
-    # than a wasted minute.
-    needs_install = rc != 0 or any(Path(f).name in INSTALL_TRIGGERS for f in moved)
 
     rc, out = run(["merge", "--ff-only", "FETCH_HEAD"])
     if rc != 0:
@@ -631,50 +630,40 @@ def track_once(repo_url: str, branch: str, install_dir: Path | str, *,
     rc, out = run(["rev-parse", "HEAD"])
     now = out.split()[0] if rc == 0 and out.split() else head
 
-    if needs_install:
-        code, said = pip(checkout)
-        if code != 0:
-            return Pulled(branch, was=local, now=now, remote=head, pulled=True,
-                          error=f"pulled {now[:7]}, but 'pip install -e .' failed and it "
-                                f"was not restarted: {said}")
-        return Pulled(branch, was=local, now=now, remote=head, pulled=True,
-                      installed=True, restarted=str(bring_back() or ""))
-    return Pulled(branch, was=local, now=now, remote=head, pulled=True,
-                  restarted=str(bring_back() or ""))
+    return _install_branch(Pulled(branch, was=local, now=now, remote=head, pulled=True),
+                           checkout, runtime.pip, bring_back)
 
 
-def track(repo_url: str, branch: str, install_dir: Path | str, *,
-          interval: float = EVERY_S, first_after_s: float = 30.0,
-          idle: Callable[[], bool] = lambda: True,
-          git: Git | None = None,
-          pip: Callable[[Path], tuple[int, str]] = pip_install,
-          restart: Callable[[], Any] | None = None,
-          rounds: int = 0) -> threading.Thread:
-    """Follow ``branch`` on a timer, on a machine that is a checkout with an editable install.
+def _install_branch(result: Pulled, checkout: Path,
+                    pip: Callable[[Path], tuple[int, str]], restart: Callable[[], Any]) -> Pulled:
+    code, said = pip(checkout)
+    if code != 0:
+        return replace(result, error=f"source is at {result.now[:7]}, but immutable wheel "
+                       f"installation failed and it was not restarted: {said}")
+    return replace(result, installed=True, restarted=str(restart() or ""))
 
-    ``idle`` is `quiet`: nothing is pulled over a job, a measurement or a loaded model. The
-    thread stops once it has restarted, because the restart is what puts the new code in
-    charge -- either the process is gone or it re-execs. ``rounds`` bounds the loop for a
-    test; 0 is forever.
-    """
-    note(tracking=branch)
+
+def track(source: TrackedBranch, *, idle: Callable[[], bool] = lambda: True,
+          runtime: UpdateRuntime = _DEFAULT_RUNTIME,
+          schedule: UpdateSchedule = _TRACK_SCHEDULE) -> threading.Thread:
+    """Follow a signed branch and replace the installed wheel while idle."""
+    note(tracking=source.branch)
 
     def loop() -> None:
-        time.sleep(first_after_s)
+        time.sleep(schedule.first_after_s)
         seen = 0
-        while not rounds or seen < rounds:
+        while not schedule.rounds or seen < schedule.rounds:
             seen += 1
             try:
                 if idle():
-                    got = track_once(repo_url, branch, install_dir, git=git, pip=pip,
-                                     restart=restart)
+                    got = track_once(source, runtime=runtime)
                     note(checked_at=time.time(), error=got.error,
                          commit=got.now or LAST.get("commit", ""))
                     if got.restarted:
                         return
             except Exception as exc:                  # noqa: BLE001 - a loop that dies stops following
                 note(checked_at=time.time(), error=str(exc))
-            time.sleep(interval)
+            time.sleep(schedule.interval)
 
     thread = threading.Thread(target=loop, daemon=True, name="track")
     thread.start()
@@ -720,16 +709,9 @@ def apply_if_newer() -> dict[str, Any]:
 
 
 def watch(*, wanted: Callable[[], bool], idle: Callable[[], bool],
-          every_s: float = 24 * 3600, first_after_s: float = 300.0,
           restart: Callable[[], Any] | None = None,
-          rounds: int = 0) -> threading.Thread:
-    """Check for a newer release on a timer, and put it on when nothing is running.
-
-    A machine part way through a training run, a measurement or an answer is left alone
-    until it is not (``idle`` is `quiet`). ``restart`` is the seam: the release is the
-    whole install, so what comes back is the new daemon, the new CLI and, if this is the
-    windowed copy, the new window. ``rounds`` bounds the loop for a test; 0 is forever.
-    """
+          schedule: UpdateSchedule = _RELEASE_SCHEDULE) -> threading.Thread:
+    """Check releases on a schedule and install them when the machine is idle."""
     bring_back = restart if restart is not None else restart_after_update
     # Recorded here rather than from inside the thread: which mode this machine is in is
     # known the moment the watcher is set up, and a loop writing it on every turn is a loop
@@ -737,9 +719,9 @@ def watch(*, wanted: Callable[[], bool], idle: Callable[[], bool],
     note(tracking="releases")
 
     def loop() -> None:
-        time.sleep(first_after_s)
+        time.sleep(schedule.first_after_s)
         seen = 0
-        while not rounds or seen < rounds:
+        while not schedule.rounds or seen < schedule.rounds:
             seen += 1
             try:
                 if wanted() and idle():
@@ -747,9 +729,10 @@ def watch(*, wanted: Callable[[], bool], idle: Callable[[], bool],
                     note(checked_at=time.time(), error=str(got.get("error") or ""))
                     if got.get("installed") and bring_back():
                         return
-            except Exception:                         # noqa: BLE001
-                pass
-            time.sleep(every_s)
+            except Exception as exc:                  # noqa: BLE001
+                _LOG.exception("Release update check failed")
+                note(checked_at=time.time(), error=str(exc))
+            time.sleep(schedule.interval)
 
     thread = threading.Thread(target=loop, daemon=True, name="updates")
     thread.start()

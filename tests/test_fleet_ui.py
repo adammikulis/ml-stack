@@ -70,7 +70,7 @@ def nobody_else_is_on_the_network(monkeypatch):
 
 def _free_port() -> int:
     with socket.socket() as s:
-        s.bind(("", 0))
+        s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
 
 
@@ -94,9 +94,19 @@ class Serving:
         self.ui.settings_path = tmp_path / "settings.json"
         self.ui.report = lambda: {"cpus": 8, "accelerator": False}
         self.port = _free_port()
-        context = tls.server_context(tls.identity(tmp_path / "tls", name)) if secure else None
+        from ml_stack.fleet import invite_client, invite_routes
+        from ml_stack.fleet.discovery import memberships
+        from ml_stack.fleet.invites import Invitations
+
+        identity = tls.identity(tmp_path / "tls", name) if secure else None
+        context = tls.server_context(identity) if identity else None
+        self.ui.invitations = Invitations(lambda: memberships(self.keyfile),
+                                         lambda: (f"https://127.0.0.1:{self.port}",
+                                                  identity.fingerprint if identity else ""))
+        self.ui.join_invitation = lambda code: invite_routes.joined(
+            self.ui, invite_client.redeem(code, name))
         self.httpd = LimitedServer(
-            ("0.0.0.0", self.port), tls=context,
+            ("127.0.0.1", self.port), tls=context,
             handler=make_handler(Daemon(self.runner, self.files, token, name, ui=self.ui,
                          schedule=schedule, tokens=self._cluster_tokens,
                          cluster_key_path=self.keyfile, ui_from_lan=True,
@@ -1104,8 +1114,14 @@ class TestUpdatingItself:
         tried = threading.Event()
         monkeypatch.setattr(updates, "apply_if_newer",
                             lambda: (tried.set(), {"installed": False})[1])
-        thread = updates.watch(wanted=lambda: True, idle=lambda: False,
-                               every_s=0.02, first_after_s=0.0)
+        thread = updates.watch(
+            wanted=lambda: True,
+            idle=lambda: False,
+            schedule=updates.UpdateSchedule(
+                first_after_s=0.0,
+                interval=0.02,
+            ),
+        )
         time.sleep(0.4)
         assert not tried.is_set(), "it updated while a job was running"
         assert thread.is_alive()
@@ -1116,8 +1132,14 @@ class TestUpdatingItself:
         tried = threading.Event()
         monkeypatch.setattr(updates, "apply_if_newer",
                             lambda: (tried.set(), {"installed": False})[1])
-        updates.watch(wanted=lambda: False, idle=lambda: True,
-                      every_s=0.02, first_after_s=0.0)
+        updates.watch(
+            wanted=lambda: False,
+            idle=lambda: True,
+            schedule=updates.UpdateSchedule(
+                first_after_s=0.0,
+                interval=0.02,
+            ),
+        )
         time.sleep(0.4)
         assert not tried.is_set(), "it updated with the setting off"
 
@@ -1130,8 +1152,14 @@ class TestUpdatingItself:
                             lambda: {"ok": True, "installed": True, "version": "9.9.9"})
         monkeypatch.setattr(updates, "relaunch",
                             lambda **k: (done.set(), True)[1])
-        updates.watch(wanted=lambda: True, idle=lambda: True,
-                      every_s=0.05, first_after_s=0.0)
+        updates.watch(
+            wanted=lambda: True,
+            idle=lambda: True,
+            schedule=updates.UpdateSchedule(
+                first_after_s=0.0,
+                interval=0.05,
+            ),
+        )
         assert done.wait(3.0), "it never restarted itself"
 
     def test_relaunch_says_no_when_this_is_not_a_bundle(self, monkeypatch):

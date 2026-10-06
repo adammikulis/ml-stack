@@ -190,8 +190,14 @@ def _plain_git(local: Path):
 
 
 def _track(remote: Path, local: Path) -> updates.Pulled:
-    return updates.track_once(str(remote), "main", local, git=_plain_git(local),
-                              pip=lambda where: (0, ""), restart=lambda: "restarted")
+    return updates.track_once(
+        updates.TrackedBranch(str(remote), 'main', local),
+        runtime=updates.UpdateRuntime(
+            git=_plain_git(local),
+            pip=lambda where: (0, ''),
+            restart=lambda: 'restarted',
+        ),
+    )
 
 
 class TestTrackedCommits:

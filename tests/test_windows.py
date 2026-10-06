@@ -509,7 +509,7 @@ class TestTraindPersist:
                                        note="scheduled task runs it at logon")
 
         monkeypatch.setattr(autostart, "install", fake_install)
-        monkeypatch.setattr(daemon_module, "serve_forever",
+        monkeypatch.setattr(daemon_module, "serve",
                             lambda *a, **k: pytest.fail("--persist must not serve"))
 
         code = daemon_module.run(["--persist", "--slots", "2", "--label", "prep",

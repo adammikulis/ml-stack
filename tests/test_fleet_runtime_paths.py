@@ -76,7 +76,7 @@ def test_daemon_routes_roots_before_startup_services(tmp_path, monkeypatch):
 
     monkeypatch.setattr(daemon, "load_cluster_key", inspect_startup)
     with pytest.raises(StartupObserved):
-        daemon.serve_forever(root=root, announce=False, web=False)
+        daemon.serve(daemon.DaemonOptions(root=root, announce=False, web=False))
 
 
 @pytest.mark.parametrize("marker", ["", "CLAUDECODE", "ML_STACK_AGENT", "ML_STACK_NONINTERACTIVE"])

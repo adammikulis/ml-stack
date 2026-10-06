@@ -16,9 +16,10 @@ _WHERE = {
     "Conversations": "conversations",
     "Message": "conversations",
     "Daemon": "api",
+    "DaemonOptions": "daemon",
     "make_handler": "api",
     "load_or_create_token": "daemon",
-    "serve_forever": "daemon",
+    "serve": "daemon",
     "REPORT_GROUP": "device",
     "device_report": "device",
     "registered_reports": "device",
@@ -86,6 +87,7 @@ Conversation: Any
 Conversations: Any
 DEFAULT_CLUSTER: Any
 Daemon: Any
+DaemonOptions: Any
 DaemonError: Any
 DiscoveryError: Any
 Downloads: Any
@@ -141,7 +143,7 @@ run: Any
 safe_relpath: Any
 searched_count: Any
 searched_families: Any
-serve_forever: Any
+serve: Any
 soonest: Any
 stdlib_device_report: Any
 suggestions: Any
@@ -160,6 +162,7 @@ __all__ = [
     'Conversations',
     'Daemon',
     'DaemonError',
+    'DaemonOptions',
     'DiscoveryError',
     'Downloads',
     'Endpoint',
@@ -212,7 +215,7 @@ __all__ = [
     'safe_relpath',
     'searched_count',
     'searched_families',
-    'serve_forever',
+    'serve',
     'soonest',
     'stdlib_device_report',
     'suggestions',

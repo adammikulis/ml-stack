@@ -68,8 +68,8 @@ def test_launcher_remembers_venv_path_without_resetting_setup(monkeypatch, tmp_p
     root = tmp_path / "studio"
     root.mkdir()
     Settings(setup_done=True).save(root / "settings.json")
-    monkeypatch.setattr(daemon, "serve_forever", lambda *_args, **_kwargs: None)
-    assert daemon.main(["--root", str(root), "--gym-python", str(python), "--no-announce"]) == 0
+    monkeypatch.setattr(daemon, "serve", lambda *_args, **_kwargs: None)
+    assert daemon.run(["--root", str(root), "--gym-python", str(python), "--no-announce"]) == 0
     saved = Settings.load(root / "settings.json")
     assert saved.gym_python == str(python)
     assert saved.setup_done
