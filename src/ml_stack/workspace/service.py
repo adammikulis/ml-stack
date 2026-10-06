@@ -79,6 +79,7 @@ class ClaimOptions(TypedDict, total=False):
     ttl_s: float
     pid: int
     note: str
+    label: str
 
 
 def _only(given: dict[str, Any], allowed: type) -> dict[str, Any]:
@@ -692,6 +693,9 @@ class Workspace:
         except Conflict:
             self.audit("claim.conflict", who.id, kind=kind, key=key)
             raise
+        if kind == "worktree":
+            from ml_stack.workspace.worktree_lifecycle import remember
+            remember(self.base, who.id, str(given.get("label", "")), made["key"])
         self.audit("claim", who.id, kind=kind, key=made["key"])
         return made
 

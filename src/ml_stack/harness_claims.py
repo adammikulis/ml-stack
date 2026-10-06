@@ -145,3 +145,7 @@ def reserve(name, args, cwd, actor, roots):
                                      'environment': str(Path(sys.prefix).resolve()),
                                      **({'assignment': scope['id'], 'task': scope['task'],
                                          'project': scope['project']} if scope else {})})
+
+    if scope is None:
+        from ml_stack.workspace.worktree_lifecycle import remember
+        remember(ws.base, who.id, '', cwd)

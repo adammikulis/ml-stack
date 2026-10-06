@@ -263,7 +263,12 @@ def _note_add(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
 
 def _claim(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
     note = f"[{_label(args)}] {args.note}".strip() if _label(args) else args.note
-    return ws.claim(token, args.kind, args.key, ttl_s=args.ttl, pid=args.pid, note=note)
+    return ws.claim(token, args.kind, args.key, ttl_s=args.ttl, pid=args.pid, note=note, label=_label(args))
+
+
+def _worktrees(args, ws, token):
+    from ml_stack.workspace.worktree_lifecycle import pending
+    return pending(ws.base, ws.auth(token).id, _label(args))
 
 
 def _released(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
@@ -624,6 +629,7 @@ TABLE: tuple[tuple[str, str, list[Any], Handler], ...] = (
         flag("--pid", type=int, default=0, help="release when this process is gone"),
         flag("--note", default="")], _claim),
     ("release", "give a claim up", CLAIM, lambda a, w, t: w.release(t, a.kind, a.key)),
+    ("worktrees", "inspect your unfinished coding checkout scopes", [], _worktrees),
     ("heartbeat", "renew every claim you hold", [flag("--ttl", type=float, default=0.0)], _heartbeat),
     ("who", "who owns this?", CLAIM,
      lambda a, w, t: w.who_owns(a.kind, a.key) or {"owner": None}),
