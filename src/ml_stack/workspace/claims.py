@@ -6,6 +6,7 @@ import os
 import re
 import time
 from collections.abc import Callable, Mapping
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -227,6 +228,45 @@ class Claims:
                 claims.pop(f"{value['kind']}:{value['key']}")
             self._save(claims)
             return {**claim, 'released_claims': released}
+
+    @contextmanager
+    def inactive_worktree(self, who: Identity, scope: dict[str, Any]):
+        """Hold exact inactive task ownership through checkout recovery and preserve failed claims."""
+        if who.role != HUMAN and who.id != scope['owner']:
+            raise Denied('inactive worktree recovery requires its registered parent or person')
+        resources = [('worktree', normal('worktree', scope['project'])), ('branch', scope['branch'])]
+        with held(self.lock):
+            claims = self._load()
+            self._sweep(claims)
+            before = dict(claims)
+            for claim in claims.values():
+                assigned = claim.get('assignment') == scope['id'] or claim.get('task') == scope['task'] \
+                    or claim.get('project') == scope['project']
+                if claim['kind'] in ('file', 'area') and assigned:
+                    raise Denied('inactive recovery requires release of exact task file and area reservations')
+                if any(_covers(claim, kind, key) for kind, key in resources):
+                    if claim['kind'] in ('file', 'install'):
+                        raise Denied('the inactive checkout has a live physical mutation reservation')
+                    if claim['owner'] != who.id or claim.get('assignment') not in (None, scope['id']):
+                        raise Denied('the inactive checkout has another live ownership assignment')
+            now = self.clock()
+            for kind, key in resources:
+                name = f'{kind}:{key}'
+                if name not in claims:
+                    claims[name] = {'kind': kind, 'key': key, 'owner': who.id, 'pid': 0,
+                                    'since': now, 'expires': now + self.ttl_s,
+                                    'assignment': scope['id'], 'task': scope['task'],
+                                    'project': scope['project'], 'note': 'Inactive task recovery'}
+            self._save(claims)
+            try:
+                yield
+            except BaseException:
+                self._save(before)
+                raise
+            else:
+                for kind, key in resources:
+                    claims.pop(f'{kind}:{key}', None)
+                self._save(claims)
 
     def release(self, who: Identity, kind: str, key: str) -> dict[str, Any]:
         """Give up a claim. Its owner, a lead or a human may."""
