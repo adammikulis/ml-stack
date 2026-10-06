@@ -82,7 +82,7 @@ def test_capability_and_invite_cannot_cross_projects(host):
     assert host.answer(OTHER, "join", {"name": "wrong", "code": invite["code"]})[0] == 403
 
 
-@pytest.mark.parametrize("operation", ["init", "mint", "registry.info", "files.read",
+@pytest.mark.parametrize("operation", ["init", "mint", "registry.info", "files.read", "claim", "release", "renew",
                                        "quarantine_release", "__class__", "status"])
 def test_operation_allowlist_blocks_privilege_and_unrelated_data(host, operation):
     assert call(host, joined(host), operation)[0] == 403
@@ -97,7 +97,7 @@ def test_unscoped_agent_token_is_refused(host):
 
 def test_remote_claim_does_not_use_a_foreign_process_id(host):
     agent = joined(host)
-    code, result = call(host, agent, "claim", "branch", "feature", pid=99999999)
+    code, result = call(host, agent, "native.reserve", [["branch", "feature"]])
     assert code == 200, result
     assert host.workspace(PROJECT).claims.listing()[0]["pid"] == 0
 

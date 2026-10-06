@@ -20,7 +20,7 @@ from ml_stack.workspace.service import Workspace
 
 MAX_REPLY = 512 * 1024
 METHODS = frozenset({"send", "inbox", "outbox", "ack", "thread", "announce", "claim_model", "nudge", "wait",
-                     "claim", "release", "heartbeat", "renew", "board.list", "board.read",
+                     "heartbeat", "board.list", "board.read",
                      "board.threads", "board.join", "board.leave", "board.dm",
                      "board.subscribe", "board.unsubscribe", "board.subs", "board.digest",
                      "board.rollup", "board.summary", "board.mentions"})
@@ -183,14 +183,18 @@ class WorkspaceHost:
             elif operation == "agents":
                 result = [row for row in ws.registered() if row["role"] == AGENT]
             elif operation == "claims":
-                result = ws.claims.listing()
+                result = [public for row in ws.claims.listing()
+                          if (public := self._public_claim(project_id, row)) is not None]
             elif operation == "who":
-                result = ws.who_owns(*args, **kwargs)
+                if len(args) != 2 or kwargs:
+                    raise ValueError("ownership lookup takes a project resource kind and relative key")
+                kind, key = args
+                mapped = self._native_resource(project_id, kind, key)
+                row = ws.who_owns(kind, mapped)
+                result = {**row, "key": key} if row else None
             elif operation in METHODS:
                 owner, name = (ws.board, operation[6:]) if operation.startswith("board.") else (ws, operation)
                 method = getattr(owner, name)
-                if operation == "claim":
-                    kwargs["pid"] = 0
                 bound = inspect.signature(method).bind(token, *args, **kwargs)
                 if "limit" in bound.arguments:
                     bound.arguments["limit"] = min(max(int(bound.arguments["limit"]), 1), 100)
@@ -213,6 +217,17 @@ class WorkspaceHost:
             return 409, {"error": str(exc)}
         except (ValueError, TypeError) as exc:
             return 400, {"error": str(exc)}
+
+    def _public_claim(self, project_id, row):
+        if row["kind"] == "branch":
+            return row
+        if row["kind"] != "area":
+            return None
+        root = Path(normal("area", self.projects.get(project_id).root))
+        key = Path(row["key"])
+        if not key.is_relative_to(root) or key == root:
+            return None
+        return {**row, "key": key.relative_to(root).as_posix()}
 
     def _native_claims(self, ws, who, token, project_id, operation, args, kwargs):
         if operation == "native.release":
