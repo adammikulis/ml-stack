@@ -8,8 +8,8 @@ from ml_stack.serve.serving import Config, Serving
 
 
 def fit(**over):
-    return SimpleNamespace(**dict(context=8192, verdict="yellow", n_gpu_layers="auto",
-                                  kv_cache_type="q4_0", flash_attn=True, batch=1024) | over)
+    return SimpleNamespace(**({"context": 8192, "verdict": "yellow", "n_gpu_layers": "auto",
+                               "kv_cache_type": "q4_0", "flash_attn": True, "batch": 1024} | over))
 
 
 @pytest.fixture
@@ -48,9 +48,8 @@ def test_sdk_checks_admission_before_serving(monkeypatch):
     monkeypatch.setattr(harnessing, "config_for", lambda *a: config)
     calls = []
     monkeypatch.setattr(harnessing, "admitted", lambda *a, **k: calls.append(k) or False)
-    with pytest.raises(ValueError, match="wired-memory"):
-        with harness.session("fixture.gguf"):
-            pytest.fail("unsafe server admitted")
+    with pytest.raises(ValueError, match="wired-memory"), harness.session("fixture.gguf"):
+        pytest.fail("unsafe server admitted")
     assert calls == [{"kv": "q4_0"}]
 
 
