@@ -162,8 +162,6 @@ def test_canonical_client_recovers_and_remembers_device_scoped_identity(tmp_path
     remote = RemoteWorkspace.__new__(RemoteWorkspace)
     remote.base, remote.project_id = tmp_path / "sessions", PROJECT
     requests = []
-    transports = []
-    monkeypatch.setattr(remote, "_device_transport", lambda: transports.append("device"))
     def request(action, payload):
         requests.append((action, payload))
         return {"id": "worker-peer", "token": "mlws1.worker-peer.saved", "project_id": PROJECT}
@@ -175,7 +173,7 @@ def test_canonical_client_recovers_and_remembers_device_scoped_identity(tmp_path
     assert requests[0][1]["project"] == {"key": PROJECT}
     assert requests[0][1]["agent_token"] == ""
     assert remote.token(agent="worker-peer") == token
-    assert len(requests) == 1 and len(transports) == 2
+    assert len(requests) == 1
     (tokens.directory(remote.base) / "worker-peer").unlink()
     assert remote.token(agent="worker") == token
     assert requests[-1][1]["name"] == "worker"
@@ -186,6 +184,9 @@ def test_canonical_client_recovers_expiry_and_preserves_outage_failure(tmp_path,
     remote = RemoteWorkspace.__new__(RemoteWorkspace)
     remote.base, remote.project_id = tmp_path / "sessions", PROJECT
     tokens.store(remote.base, "worker", "mlws1.worker.saved")
+    with remote_module.GraphStore(remote.base / "remote-sessions.db") as graph:
+        graph.upsert_node({"id": "session:worker", "kind": "remote-session", "label": "worker",
+                           "attrs": {"name": "worker", "id": "worker"}})
     requests = []
     monkeypatch.setattr(remote, "_device_transport", lambda: None)
     def call(operation, token):
@@ -217,6 +218,45 @@ def test_canonical_recovery_refuses_unsafe_credential_storage(tmp_path, monkeypa
     from ml_stack.workspace.identity import Denied
     with pytest.raises(Denied, match="project session storage"):
         remote.token(agent="worker")
+
+
+def test_canonical_transport_is_per_identity_including_delegated_and_explicit_tokens(tmp_path, monkeypatch):
+    remote = RemoteWorkspace.__new__(RemoteWorkspace)
+    remote.base, remote.project_id, remote.fleet_token = tmp_path / "sessions", PROJECT, "dev-mac"
+    tokens.prepare(remote.base)
+    with remote_module.GraphStore(remote.base / "remote-sessions.db") as graph:
+        graph.upsert_node({"id": "session:paired", "kind": "remote-session", "label": "paired.agent",
+                           "attrs": {"name": "paired", "id": "paired.agent"}})
+    monkeypatch.setattr(remote, "_device_transport", lambda: "device-mac")
+    for name, expected in [("paired.agent", "device-mac"), ("dev-parent", "dev-mac"),
+                           ("paired.agent/child", "device-mac"), ("dev-parent/child", "dev-mac")]:
+        token = f"{tokens.PREFIX}{name}.secret"
+        path = tokens.store(remote.base, name, token)
+        explicit = remote.token(token_file=str(path))
+        assert remote._transport("board", {"agent_token": explicit}) == expected
+        assert remote.fleet_token == "dev-mac"
+    assert remote._transport("ensure", {}) == "device-mac"
+    assert remote._transport("enroll", {}) == "dev-mac"
+
+
+@pytest.mark.parametrize("paired, saved", [(False, True), (True, True), (False, False), (True, False)])
+def test_delegated_credentials_never_recover_as_paired_top_identity(tmp_path, monkeypatch, paired, saved):
+    from ml_stack.workspace.identity import Denied
+    remote = RemoteWorkspace.__new__(RemoteWorkspace)
+    remote.base, remote.project_id = tmp_path / "sessions", PROJECT
+    tokens.prepare(remote.base)
+    if paired:
+        with remote_module.GraphStore(remote.base / "remote-sessions.db") as graph:
+            graph.upsert_node({"id": "session:parent", "kind": "remote-session", "label": "parent",
+                               "attrs": {"name": "parent", "id": "parent"}})
+    if saved:
+        tokens.store(remote.base, "parent/child", f"{tokens.PREFIX}parent/child.expired")
+    def expired(*args):
+        raise Denied("expired delegation") from ServerError("expired", status=403)
+    monkeypatch.setattr(remote, "call", expired)
+    monkeypatch.setattr(remote, "_request", lambda *a: pytest.fail("delegation became another identity"))
+    with pytest.raises(Denied):
+        remote.token(agent="parent/child")
 
 
 def test_canonical_recovery_serializes_read_ensure_and_store(tmp_path, monkeypatch):

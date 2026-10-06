@@ -45,6 +45,8 @@ class RemoteWorkspace:
         key = rows[0].key if rows else load_cluster_key(cluster_key)
         if key is None:
             raise Denied("join the host's cluster before attaching its project board")
+        self.cluster = rows[0].group if rows else cluster
+        self.cluster_id = hashlib.sha256(key).hexdigest()
         self.fleet_token = derive_token(key)
         self.device_cert = ""
         if parts.scheme == "https":
@@ -65,7 +67,7 @@ class RemoteWorkspace:
         url = guard(f"{self.endpoint}/{action}")
         try:
             with open_stream(url, data=json.dumps(payload).encode(), method="POST",
-                             token=self.fleet_token, timeout=30, guard=guard,
+                             token=self._transport(action, payload), timeout=30, guard=guard,
                              headers={"Content-Type": "application/json", sealing.HEADER: "2"}) as response:
                 if not response.headers.get(sealing.HEADER):
                     raise Denied("project board response was not authenticated and sealed")
@@ -94,9 +96,46 @@ class RemoteWorkspace:
         return {"id": name, "project_id": self.project_id, "host": self.host,
                 "token_file": str(path), "state": "connected"}
 
+    def enroll(self, name: str, *, model: str, harness: str, authority_machine: str) -> dict:
+        """Save a newly issued private Dev project agent capability."""
+        result = self._request("enroll", {"name": name, "model": model,
+                                          "harness": harness, "cluster": self.cluster, "cluster_id": self.cluster_id,
+                                          "authority_machine": authority_machine})
+        name, token = str(result["id"]), str(result["token"])
+        if result.get("project_id") != self.project_id:
+            raise Denied("agent enrollment returned another project")
+        path = tokens.store(self.base, name, token)
+        return {"id": name, "project_id": self.project_id, "host": self.host,
+                "token_file": str(path), "state": "connected"}
+
     def call(self, operation: str, token: str, *args, **kwargs):
         return self._request("board", {"agent_token": token, "operation": operation,
-                                       "args": list(args), "kwargs": kwargs})["result"]
+                                       "args": list(args), "kwargs": kwargs, "cluster": self.cluster})["result"]
+
+    def delegate(self, parent: str, name: str) -> dict:
+        """Store a private bounded child capability delegated by the selected parent."""
+        result = self.call("delegate", self.token(agent=parent), name)
+        child = f"{parent}/{name}"
+        if result.get("id") != child or result.get("project_id") != self.project_id:
+            raise Denied("delegation returned another project or identity")
+        path = tokens.store(self.base, child, str(result["token"]))
+        return {"id": child, "token_file": str(path), "expires": result["expires"]}
+
+    def self_revoke(self, name: str) -> dict:
+        """Revoke the selected agent's own capability and remove its private token file."""
+        result = self.call("revoke_self", self.token(agent=name))
+        if result.get("id") != name or result.get("revoked") is not True:
+            raise Denied("self revocation returned another identity")
+        (tokens.directory(self.base) / name.replace("/", "~")).unlink()
+        return result
+
+    def native_reserve(self, name: str, resources: list, label: str = "") -> list:
+        """Atomically reserve canonical project areas and branches for the selected worker."""
+        return self.call("native.reserve", self.token(agent=name), resources, label=label)
+
+    def native_release(self, name: str, kind: str, relativekey: str) -> dict:
+        """Release the selected worker's canonical project resource."""
+        return self.call("native.release", self.token(agent=name), kind, relativekey)
 
     def token(self, *, agent: str = "", token_file: str = "") -> str:
         if token_file:
@@ -138,8 +177,6 @@ class RemoteWorkspace:
         ident = str(session.get("id", name))
         if not valid_id(ident):
             raise Denied("project session record holds an invalid agent identity")
-        if session:
-            self._device_transport()
         try:
             saved = tokens.load(self.base, ident)
         except Denied:
@@ -152,7 +189,10 @@ class RemoteWorkspace:
             except Denied as error:
                 if not isinstance(error.__cause__, ServerError) or error.__cause__.status != 403:
                     raise
-        self._device_transport()
+                if not session:
+                    raise
+        if "/" in ident:
+            raise Denied("delegated project identities need a live parent-authorized credential")
         result = self._request("ensure", {"name": str(session.get("name", name)),
                                          "model": "", "harness": "",
                                          "project": {"key": self.project_id}, "agent_token": saved})
@@ -163,6 +203,25 @@ class RemoteWorkspace:
                                "attrs": {"name": str(session.get("name", name)), "id": ident}})
         return token
 
-    def _device_transport(self) -> None:
-        self.fleet_token = coordinator_client._device_peer(
+    def _transport(self, action: str, payload: dict) -> str:
+        if action == "ensure":
+            return self._device_transport()
+        if action == "board":
+            self._safe_storage(self.base)
+            credential = str(payload.get("agent_token", ""))
+            if credential.startswith(tokens.PREFIX):
+                name = credential[len(tokens.PREFIX):].rsplit(".", 1)[0].split("/", 1)[0]
+                path = self.base / "remote-sessions.db"
+                why = tokens.problem(path)
+                if why not in {"", "missing"} and not why.startswith("mode "):
+                    raise Denied(f"project session records {path}: {why}")
+                if path.exists():
+                    with GraphStore(path) as graph:
+                        if any(node["attrs"].get("id") == name
+                               for node in graph.nodes("remote-session")):
+                            return self._device_transport()
+        return self.fleet_token
+
+    def _device_transport(self) -> str:
+        return coordinator_client._device_peer(
             {"endpoint": self.host, "cert": self.device_cert}).token
