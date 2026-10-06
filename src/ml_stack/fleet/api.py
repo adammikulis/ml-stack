@@ -604,9 +604,8 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
                     code, reply = host.enroll(match[1], request, cluster=cluster, cluster_id=cluster_id)
                 else:
                     code, reply = host.answer(match[1], match[2], request,
-                                              cluster=cluster, cluster_id=cluster_id,
-                                              dev_admission=project_enrollment.visible(
-                                                  self.connection, opening, cluster_key_path))
+                                              admission=(cluster, cluster_id, project_enrollment.visible(
+                                                  self.connection, opening, cluster_key_path)))
                 self._send(code, reply)
             return True
 
