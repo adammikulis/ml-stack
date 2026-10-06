@@ -98,10 +98,13 @@ login.
 ## Testing
 
 ```
-python -m pytest tests/ -q
+python scripts/test all tests/<affected-file>.py -n 1
 ```
 
-Run tests through `scripts/test`, which queues for workers in the machine-wide budget:
+Agents test their own changes through `scripts/test`, which defaults to one worker and uses
+shared broker admission. Explicit `-n 0` requests an automatic pool; explicit worker ceilings
+remain effective. The main agent runs shared structural/security gates once per consolidated
+integration batch before publication, handles full end-to-end checks, and schedules full suites.
 
 | tier | what it runs | about |
 |---|---|---|
@@ -112,7 +115,8 @@ Run tests through `scripts/test`, which queues for workers in the machine-wide b
 | `scripts/test all` | slow included: what CI runs | |
 | `scripts/test ratchet` | compares the last `full` run with `tests/full-tier-time.json` (10 % tolerance) | |
 
-`quick` needs a per-checkout testmon map (`.testmondata`, not committed). The first `quick` in a
+The main agent owns `quick`; its cold-map recording and fallback can start full runs.
+Workers use explicit affected selectors. `quick` needs a per-checkout testmon map (`.testmondata`, not committed). The first `quick` in a
 checkout runs the test files the import graph reaches and starts `scripts/test record` detached
 (three workers, a lock file, a log in `.testmondata.log`); the map is written to a scratch file and
 moved into place when the run ends, so the second `quick` is fast and never sees half a map. A

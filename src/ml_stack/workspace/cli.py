@@ -35,6 +35,7 @@ from ml_stack.workspace import (
     remote_cli,
     task_integration,
     task_outcomes,
+    task_worktree_recovery,
     tokens,
 )
 from ml_stack.workspace.boardapi import Follow
@@ -546,6 +547,8 @@ TABLE: tuple[tuple[str, str, list[Any], Handler], ...] = (
      lambda a, w, t: task_outcomes.credit(w, t, a.id)),
     ("task-integrate", "gate, land and clean an independently accepted committed native task", [flag("id")],
      lambda a, w, t: task_integration.integrate(w, t, a.id)),
+    ("task-dematerialize", "remove an unchanged inactive task checkout, preserving its pending history", [flag("id"), flag("reason")],
+     lambda a, w, t: task_worktree_recovery.dematerialize(w, t, a.id, a.reason)),
     ("inbox", "unread messages, fenced as data", [
         *READ,
         flag("--children", action="store_true", help="only messages from your delegates")],
@@ -663,6 +666,8 @@ def _guarded(run: Callable[[argparse.Namespace], int | None]) -> Callable[[argpa
 def _runner(handler: Handler) -> Callable[[argparse.Namespace], int]:
     def run(args: argparse.Namespace) -> int:
         remote = coordinator_client.client(limits.root())
+        if args.cmd == 'task-dematerialize' and (remote or project_connection.selected() is not None):
+            raise Denied('native task checkout recovery runs only on its local coordinator')
         if remote and project_connection.selected() is not None:
             raise Denied("select one workspace authority before dispatching commands")
         if remote:

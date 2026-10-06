@@ -40,7 +40,7 @@ import testselectors
 import testslots_runner
 import testtime
 
-from ml_stack.activity.gate import Run, record_run
+from ml_stack.activity.gate import Run, record_run, tree_hash
 
 ROOT = Path(__file__).resolve().parent.parent
 BASE = "0.2dev"
@@ -59,7 +59,7 @@ def pytest_command(workers: int, *rest: str) -> list[str]:
 
 
 def run(command: list[str], env: dict[str, str] | None = None, tier: str = "") -> int:
-    """Run pytest in the repository and record its activity."""
+    """Run pytest in the repository and write its local evidence artifact."""
     descriptor, name = tempfile.mkstemp(suffix=".xml")
     os.close(descriptor)
     junit = Path(name)
@@ -72,17 +72,25 @@ def run(command: list[str], env: dict[str, str] | None = None, tier: str = "") -
     want = int(shown[index + 1])
     shown[index + 1] = "{workers}"
     shown.extend(["-p", "testslots_pytest"])
+    executed_tree = tree_hash(ROOT)
     began = time.monotonic()
     load = os.getloadavg()[0] if hasattr(os, "getloadavg") else 0.0
     status = testslots_runner.run_pytest(shown, want, env=environment)
     if status == 5 and any("::" in value for value in command):
         print("test: the explicit node selector matched no tests", file=sys.stderr)
         status = 4
+    if tree_hash(ROOT) != executed_tree:
+        print("test: source tree changed during the run", file=sys.stderr)
+        status = 4
     wall = time.monotonic() - began
     if junit is not None and tier in ("full", "all") and not [a for a in command if a.startswith("tests/") or a == "-k"]:
         measured(command, junit, wall, load)
     if junit is not None:
-        record_run(Run(ROOT, tier, command, junit, status, wall))
+        artifact_fd, artifact_name = tempfile.mkstemp(suffix=".result.json")
+        os.close(artifact_fd)
+        artifact = Path(artifact_name)
+        record_run(Run(ROOT, tier, command, junit, status, wall, executed_tree), artifact)
+        print(f"test: evidence {artifact}", flush=True)
         junit.unlink(missing_ok=True)
     return status
 
@@ -278,8 +286,8 @@ def main() -> int:
                         help="ratchet --update: record a higher time (refused for an agent)")
     parser.add_argument("--junit", type=Path, help="heavy: the junit file to read")
     parser.add_argument("--over", type=float, default=12.0, help="heavy: seconds per module")
-    parser.add_argument("-n", "--workers", type=int, default=0,
-                        help="xdist workers: a ceiling, or 0 = auto (default): what the machine can spare, a fair share when others are queued")
+    parser.add_argument("-n", "--workers", type=int, default=1,
+                        help="xdist worker ceiling (default: 1); explicit 0 = automatic pool up to broker capacity")
     parser.add_argument("--base", default=BASE, help="branch quick diffs against")
     parser.add_argument("--slow", action="store_true", help="quick: include slow tests")
     parser.add_argument("--explain", action="store_true", help="quick: say what selected what")

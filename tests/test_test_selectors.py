@@ -41,3 +41,13 @@ def test_xdist_empty_explicit_node_is_an_error_even_for_quick(monkeypatch):
     monkeypatch.setattr(module, 'record_run', lambda *args: None)
     status = module.run(module.pytest_command(2, 'tests/test_test_selectors.py::test_nonexistent'), tier='quick')
     assert status == 4 and module.clean(status) == 4
+
+
+@pytest.mark.parametrize(('options', 'workers'), [([], 1), (['-n', '0'], 0), (['-n', '3'], 3)])
+def test_runner_defaults_to_one_worker_and_preserves_explicit_limits(monkeypatch, options, workers):
+    module = runner()
+    calls = []
+    monkeypatch.setattr(sys, 'argv', ['scripts/test', 'all', 'tests/test_test_selectors.py', *options])
+    monkeypatch.setattr(module, 'run', lambda command, **kwargs: calls.append(command) or 0)
+    assert module.main() == 0
+    assert calls[0][calls[0].index('-n') + 1] == str(workers)

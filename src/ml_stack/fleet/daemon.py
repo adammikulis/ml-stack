@@ -55,6 +55,7 @@ from .models import Downloads, Models
 from .onboard.joining import PLAIN, Joining
 from .pausing import ADOPT_S, adopt_pause, peer_pause
 from .projects import ProjectRegistry, lan_host
+from .runtime_paths import announce_token, configure as configure_runtime_paths
 from .serving import Hosting, Serving
 from .settings import Settings
 from .ui import UI
@@ -113,6 +114,7 @@ def serve_forever(root: Path | str | None = None,
     you trust to run unreviewed code -- and it is remembered, so it is asked for once.
     ``off`` turns it back to releases; None leaves whatever the settings hold."""
     root = home.expand(root) if root else default_root()
+    configure_runtime_paths(root)
     root.mkdir(parents=True, exist_ok=True)
     live_token: list[str] = [""]
     files_root = root / "files"
@@ -393,7 +395,7 @@ def serve_forever(root: Path | str | None = None,
             f"(key {key_path(cluster_key_path)})")
         say("  token derived from the cluster key -- peers compute it themselves")
     elif key is None:
-        say(f"  token {token}")
+        announce_token(token)
         say(f"  discovery OFF: no cluster key at {key_path(cluster_key_path)}")
         if interface is None:
             say("  run 'ml-stack-peers setup' to join one")

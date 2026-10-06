@@ -7,13 +7,14 @@ invented.
 
 ## Running them
 
-One command per tier, `scripts/test <tier>`; `-n N` asks for workers (default 4) and any other
+One command per tier, `scripts/test <tier>`; `-n N` sets a worker ceiling (default 1; explicit `-n 0` requests an automatic pool) and any other
 argument goes to pytest. Each run queues for them in the machine-wide budget
 (`scripts/testslots.py`; `python scripts/testslots.py status`) and uses what it is granted, so
-run the tiers, not a bare `pytest -n N`. `DEV_TEST_BUDGET` sets the budget (default three
-quarters of the cores). Agents must not disable the queue with `DEV_TEST_SLOTS=off`.
+run the tiers, not a bare `pytest -n N`. `DEV_TEST_BUDGET` sets the budget (default logical CPU count minus one). Agents must not disable the queue with `DEV_TEST_SLOTS=off`.
 
-[CLAUDE.md](../CLAUDE.md#scoped-merge-gates-and-background-verification) defines when checks run: scoped merge gates, background full suites, and the current owner-directed Linux pause.
+[CLAUDE.md](../CLAUDE.md#scoped-merge-gates-and-background-verification) defines when checks run. Agents test their own changed behavior. The main agent runs shared
+structural/security gates once per consolidated integration batch, handles full end-to-end
+checks and background suites, and honors the owner-directed Linux pause.
 
 | tier | what runs | when |
 | --- | --- | --- |
@@ -26,7 +27,7 @@ quarters of the cores). Agents must not disable the queue with `DEV_TEST_SLOTS=o
 ```sh
 scripts/test quick --explain      # which file selected which test file
 scripts/test fast -n 2            # while a bench has the GPU
-scripts/test all tests/<affected-file>.py -n 0   # brokered sequential reproduction
+scripts/test all tests/<affected-file>.py -n 1   # brokered sequential reproduction
 scripts/test full --durations=0 --durations-min=1.8    # scheduled background timing
 ```
 
@@ -34,6 +35,9 @@ Use the workers granted by the maintained broker. Coordinate test concurrency wi
 benchmarks; do not reserve a fixed worker pool or bypass shared admission.
 
 ### How `quick` chooses
+
+The main agent owns `quick`, including cold-map recording and fallbacks that can start full
+runs. Workers use explicit affected selectors for their own changes.
 
 It diffs the working tree against the merge-base with `0.2dev` (`--base` to change it), then
 takes the union of two selections:

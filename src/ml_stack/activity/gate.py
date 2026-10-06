@@ -6,13 +6,18 @@ from __future__ import annotations
 import hashlib
 import os
 import subprocess
+import sys
 import tempfile
+import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
 
+import psutil
+
 from ml_stack.activity import writer
-from ml_stack.activity.schema import Entry
+from ml_stack.activity.schema import Entry, Said, build
+from ml_stack.files import write_json
 
 __all__ = ["Run", "evidence", "record_run", "tree_hash"]
 
@@ -50,22 +55,33 @@ class Run:
     junit: Path
     exit_code: int
     seconds: float
+    tree: str = ""
 
 
-def record_run(run: Run) -> bool:
+def record_run(run: Run, artifact: Path | None = None) -> bool:
     """Record one pytest run: tree, tier, a hash of the command, counts and duration."""
     root, tier, exit_code = run.root, run.tier, run.exit_code
     try:
         counts = _counts(run.junit)
     except (OSError, ET.ParseError, ValueError):
         counts = {}
-    tree = tree_hash(root)
+    tree = run.tree or tree_hash(root)
     words = [w for w in run.command if not w.startswith("--junitxml") and not w.startswith("-n")]
     digest = hashlib.sha256(" ".join(words).encode()).hexdigest()[:16]
-    return writer.record(
-        "test.result", actor="system", subject=f"tree:{tree[:12]}", outcome="pass" if exit_code == 0 else "fail",
-        refs={"tree": tree, "command": digest, "tier": tier},
-        meta={**counts, "seconds": round(run.seconds, 1), "exit": exit_code})
+    said: Said = {"subject": f"tree:{tree[:12]}", "outcome": "pass" if exit_code == 0 else "fail",
+                  "refs": {"tree": tree, "command": digest, "tier": tier},
+                  "meta": {**counts, "seconds": round(run.seconds, 1), "exit": exit_code}}
+    if artifact is not None:
+        payload = build("test.result", ts=time.time(), actor="system",
+                        session=f"test-{os.getpid()}", **said)
+        payload["run"] = {"requested_command": list(run.command), "runner_interpreter": sys.executable,
+                          "executed_interpreter": run.command[0] if run.command else "",
+                          "root": str(root.resolve()), "tree_after": tree_hash(root)}
+        payload["process"] = {"pid": os.getpid(),
+                              "started": psutil.Process().create_time()}
+        write_json(artifact, payload)
+        return True
+    return writer.record("test.result", actor="system", **said)
 
 
 def evidence(tree: str, tier: str = "") -> Entry | None:

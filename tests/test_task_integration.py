@@ -89,7 +89,7 @@ def project(board, tmp_path, monkeypatch, request):
     if getattr(request, 'param', '') == 'bad_patch':
         patch += b'not the reviewed full diff\n'
     (source / '.task.patch').write_bytes(patch)
-    (source / '.task-report.md').write_text('Independent replay ready.\n')
+    (source / '.task-report.md').write_text('ready\n')
     repo.git(source, 'add', '--', '.task.patch', '.task-report.md')
     repo.git(source, 'commit', '-m', 'chore: record canonical task artifacts')
     artifacts = {name: hashlib.sha256(repo.git(source, 'show', f'HEAD:{name}', binary=True)).hexdigest()
@@ -232,7 +232,7 @@ def test_same_worker_claim_for_another_assignment_cannot_be_returned(board, proj
     claim = board.ws.who_owns('worktree', str(project['source']))
     assert claim['assignment'] == project['worktree']['id']
     wrong = {**project['worktree'], 'id': 'task-worktree:' + '0' * 32}
-    with pytest.raises(Denied, match='different ownership claim'):
+    with pytest.raises(Denied, match='exact task delegation'):
         board.ws.claims.return_worktree(board.ws.auth(board.parent), wrong)
     current = board.ws.who_owns('worktree', str(project['source']))
     assert {key: value for key, value in current.items() if key != 'expires_in_s'} == \
