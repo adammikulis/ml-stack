@@ -19,7 +19,28 @@ if [[ -z "$UV" ]]; then
   exit 2
 fi
 
-"$UV" venv --python 3.12 "$VENV"
+if [[ -x "$VENV/bin/python" ]]; then
+  venv_check="$("$VENV/bin/python" -c '
+import sys
+from pathlib import Path
+
+expected = Path(sys.argv[1]).resolve()
+actual = Path(sys.prefix).resolve()
+if sys.prefix == sys.base_prefix or actual != expected:
+    print(f"not a venv rooted at {expected} (interpreter prefix: {actual})")
+elif sys.version_info[:2] != (3, 12):
+    print(f"uses Python {sys.version_info.major}.{sys.version_info.minor}")
+else:
+    print("ok")
+' "$VENV")"
+  if [[ "$venv_check" != ok ]]; then
+    printf 'Existing environment at %s %s; remove it or set ML_STACK_WSL_VENV to a Python 3.12 venv.\n' \
+      "$VENV" "$venv_check" >&2
+    exit 2
+  fi
+else
+  "$UV" venv --python 3.12 "$VENV"
+fi
 "$UV" pip install --python "$VENV/bin/python" "${ROOT}[wsl-dev]" \
     "ruff==0.13.3" "pyright==1.1.411"
 "$UV" pip install --python "$VENV/bin/python" \
