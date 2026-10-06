@@ -11,6 +11,8 @@ Every checkout shares the same admission broker.
 Agents run affected tests for their own changes. The main agent coordinates shared structural
 and security gates once per consolidated integration batch before publication, handles full
 end-to-end checks, and schedules background full suites. Workers do not repeat those checks.
+The main agent owns `quick`, whose cold-map recording and fallback can start full runs; workers
+use explicit affected selectors.
 
 CPU capacity defaults to the logical CPU count minus one, with a minimum of
 one. `DEV_TEST_RESERVED_CORES` changes that reservation. This reserves capacity;

@@ -110,8 +110,8 @@ rise on its own, and no agent may raise one at all: `--allow-increase` is refuse
 where you found it, not into a budget file for the owner to discover. Reporting a tolerance as a
 good state ("holding at nineteen") is worse than not mentioning it.
 
-Six checks refuse a change rather than describing what it should have been. Run them before you
-ask whether the suite passes. `budgets.json` holds the highest count each shape in
+Six checks refuse a change rather than describing what it should have been. The main agent runs
+them once for the consolidated integration batch before publication. `budgets.json` holds the highest count each shape in
 `scripts/gates/` is allowed. `scripts/budgets` prints metric, budget, actual and delta, a total
 under the table -- what the budgets add up to, what the tree holds, the distance between them
 -- and every site that is over. `tests/test_budgets.py` fails when a number rises, and also
@@ -450,9 +450,10 @@ ml-stack never sees or stores the password, and never installs a passwordless `s
 
 ## Running the tests
 
-Follow **Scoped merge gates and background verification** above. Use `scripts/test quick`
-for affected selection, or reviewed explicit `scripts/test all tests/<affected-file>…` selectors
-when slow browser/process checks are required. Invalid selectors fail before admission; never
+Follow **Scoped merge gates and background verification** above. Workers use reviewed explicit
+`scripts/test all tests/<affected-file>…` selectors for their own changes, including relevant
+slow browser/process checks. The main agent owns `scripts/test quick`: its cold-map recording
+and fallback can start full runs. Invalid selectors fail before admission; never
 replace a missing selector with an unreviewed omission. Do not run a full suite after every
 intermediate commit or require full Linux testing for a local merge while Linux is paused.
 

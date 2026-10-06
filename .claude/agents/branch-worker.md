@@ -24,8 +24,10 @@ Rules:
 - Never `pip install -e`; run your tree's code with `PYTHONPATH=src`.
 - Add files by name; never `git add -A`, `.` or `-u`.
 - Never push, tag or merge. Commit on your own branch by named files before you report.
-- Run `scripts/test quick` while working and the gates CLAUDE.md names before you report.
+- Test your own changes with reviewed explicit affected selectors through `scripts/test`.
+  Report your results. The main agent handles shared gates, full end-to-end checks and
+  background suites once per consolidated integration batch.
 - No GPU lease unless the brief gives one.
 
-Report in a few lines: the branch, the commits, the gate and test results, failures by name, and
+Report in a few lines: the branch, the commits, your affected test results, failures by name, and
 anything blocked.

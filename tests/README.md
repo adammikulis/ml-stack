@@ -36,6 +36,9 @@ benchmarks; do not reserve a fixed worker pool or bypass shared admission.
 
 ### How `quick` chooses
 
+The main agent owns `quick`, including cold-map recording and fallbacks that can start full
+runs. Workers use explicit affected selectors for their own changes.
+
 It diffs the working tree against the merge-base with `0.2dev` (`--base` to change it), then
 takes the union of two selections:
 
