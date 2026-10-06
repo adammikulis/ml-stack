@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from http.client import HTTPException
 from pathlib import Path
 
+from ml_stack import harness_remote
 from ml_stack.client.health import reported_models
 from ml_stack.workspace import onboard, tokens
 from ml_stack.workspace.identity import AGENT, Denied, Identity
@@ -63,7 +64,9 @@ class Seat:
             return False
         if self.remote is not None:
             try:
+                snapshot = harness_remote.revocation_snapshot(self.remote, self.name)
                 self.remote.self_revoke(self.name)
+                harness_remote.release_revoked(self.remote, self.name, snapshot)
                 return True
             except (ValueError, Denied, OSError):
                 return False
