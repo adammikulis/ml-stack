@@ -318,6 +318,8 @@ def test_main_branch_edits_and_commits_are_refused(repo):
 def test_claimed_primary_write_reaches_ownership_reservation(repo, monkeypatch):
     primary, _, _ = repo
     reserved = []
+    monkeypatch.setattr(harnesshook, "decide",
+                        lambda *args, **kwargs: harnesspolicy.Decision("allow", "reversible", "owned write"))
     monkeypatch.setattr(harnesshook.harness_claims, "conflict", lambda *args: "")
     monkeypatch.setattr(harnesshook.harness_claims, "reserve", lambda *args: reserved.append(args))
     event = {"tool_name": "Write", "cwd": str(primary),
@@ -325,3 +327,12 @@ def test_claimed_primary_write_reaches_ownership_reservation(repo, monkeypatch):
     out = harnesshook.pre(event, harnesshook.Rail("plan-and-go", "worker", roots=[str(primary)]))
     assert out["hookSpecificOutput"]["permissionDecision"] == "allow"
     assert len(reserved) == 1 and reserved[0][3] == "worker"
+
+
+def test_linked_main_checkout_edits_and_staging_are_refused(repo):
+    primary, work, _ = repo
+    git(work, "checkout", "-q", "-b", "main")
+    assert worktreerules.edit_refusal([str(work / "a.py")], str(primary))
+    assert worktreerules.bash_refusal(f"git -C {work} add a.py", str(primary))
+    assert worktreerules.bash_refusal("git commit -m x", str(work))
+    assert commit(work, CLAUDECODE="1").returncode == 1

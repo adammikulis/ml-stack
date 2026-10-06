@@ -81,8 +81,8 @@ def edit_refusal(paths: Iterable[str], cwd: str) -> str:
     base = Path(cwd or Path.cwd())
     for raw in filter(None, paths):
         target = base / _unquote(raw)
-        primary = in_primary(target.parent)
-        if primary and _branch(primary) == "main":
+        found = checkouts(target.parent)
+        if found and _enforced(found[1]) and _branch(found[0]) == "main":
             return f"{target} is on main; development changes require a development branch."
     return ""
 
@@ -181,8 +181,9 @@ def bash_refusal(command: str, cwd: str) -> str:
             given = re.search(r"\s-C\s+(\S+)", segment)
             where = here / _unquote(given.group(1)) if given else here
             primary = in_primary(where)
-            if primary and git["verb"] in {"add", "commit"}:
-                if _branch(primary) == "main":
+            found = checkouts(where)
+            if found and _enforced(found[1]) and git["verb"] in {"add", "commit"}:
+                if _branch(found[0]) == "main":
                     return "An agent may not stage or commit on main."
                 continue
             if primary and not (git["verb"] == "merge" and _landing(segment)):
