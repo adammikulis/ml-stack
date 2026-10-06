@@ -400,6 +400,8 @@ def join_by_passphrase(passphrase: str, group: str,
     joiners = find_joiners(group, timeout_s=options.timeout_s, port=options.port)
     if not joiners:
         held = next((m for m in disc.memberships(path) if m.group == group), None)
+        if held is not None and options.mode is not None and held.mode != options.mode:
+            raise DiscoveryError("the cluster admission mode differs from the requested mode")
         return held or disc.mint_cluster(group, path, join=secret, mode=options.mode or "prod")
     return _accept(joiners, group, secret, path, mode=options.mode)
 
