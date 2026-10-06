@@ -5,9 +5,11 @@ from dataclasses import dataclass
 from http.client import HTTPException
 from pathlib import Path
 
+from ml_stack import harness_remote
 from ml_stack.client.health import reported_models
 from ml_stack.workspace import onboard, tokens
 from ml_stack.workspace.identity import AGENT, Denied, Identity
+from ml_stack.workspace.remote import RemoteWorkspace
 from ml_stack.workspace.service import Workspace
 
 
@@ -22,6 +24,8 @@ class Seat:
     base: Path | None = None
     issuer: Identity | None = None
     managed_inbox: bool = False
+    remote: RemoteWorkspace | None = None
+    lifecycle_base: Path | None = None
 
     def flags(self) -> list[str]:
         """The workspace command flags this session's messages carry."""
@@ -33,6 +37,15 @@ class Seat:
         if not self.minted:
             return False
         try:
+            if self.remote is not None:
+                token = self.remote.token(agent=self.name)
+                who = self.remote.call("whoami", token)
+                if who.get("id") != self.name or who.get("role") != AGENT:
+                    return False
+                if server and alias not in reported_models(server):
+                    return False
+                self.remote.call("claim_model", token, Path(alias).name, harness)
+                return True
             ws = Workspace(self.base)
             if server:
                 who = ws.auth(tokens.load(ws.base, self.name))
@@ -49,6 +62,14 @@ class Seat:
         """Stop the token working and delete its file; False when nothing was minted."""
         if not self.minted or self.base is None:
             return False
+        if self.remote is not None:
+            try:
+                snapshot = harness_remote.revocation_snapshot(self.remote, self.name)
+                self.remote.self_revoke(self.name)
+                harness_remote.release_revoked(self.remote, self.name, snapshot)
+                return True
+            except (ValueError, Denied, OSError):
+                return False
         ws = Workspace(self.base)
         try:
             authority = self.issuer or onboard.SETUP

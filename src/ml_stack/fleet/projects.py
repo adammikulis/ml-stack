@@ -1,4 +1,4 @@
-"""Explicit project publication and canonical workspace authority."""
+"""Local project metadata, explicit publication and canonical workspace authority."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from ml_stack.home import DEFAULT_NAME
 from ml_stack.net import git
 from ml_stack.redact import secrets
 
-from . import project_source as source, tls
+from . import project_enrollment, project_source as source, tls
 from .discovery import primary_ip
 from .wsl_network import ENV as BRIDGE_ENV
 
@@ -53,7 +53,7 @@ def bootstrap() -> bytes:
 def identity(root: Path) -> str:
     """Return the project identity from checkout metadata or its Git origin."""
     attached = read_json(root / ".ml-stack-project.json", {})
-    if attached.get("kind") == "project-checkout":
+    if isinstance(attached, dict) and attached.get("kind") == "project-checkout":
         return source.project_id(attached["project_id"])
     try:
         origin = git.run(["remote", "get-url", "origin"], cwd=root).stdout.strip()
@@ -68,6 +68,21 @@ def identity(root: Path) -> str:
     if not origin:
         raise source.ProjectError("Project has no Git identity")
     return hashlib.sha256(origin.encode()).hexdigest()[:32]
+
+
+def attached_authority(root: Path) -> dict:
+    """Return validated authority metadata from a managed checkout."""
+    attached = read_json(root / ".ml-stack-project.json", {})
+    if not isinstance(attached, dict) or attached.get("kind") != "project-checkout":
+        return {}
+    authority = attached.get("authority", {})
+    if not isinstance(authority, dict):
+        raise source.ProjectError("Project authority metadata is invalid")
+    for key in ("machine", "host"):
+        value = authority.get(key, "")
+        if not isinstance(value, str) or len(value) > 2048 or any(ord(c) < 32 for c in value):
+            raise source.ProjectError("Project authority metadata is invalid")
+    return authority
 
 
 @dataclass
@@ -109,11 +124,40 @@ class ProjectRegistry:
         for path in candidates:
             path = path.resolve()
             try:
-                git.run(["rev-parse", "--show-toplevel"], cwd=path)
-                identifier = hashlib.sha256(str(path).encode()).hexdigest()[:32]
+                path = Path(git.run(["rev-parse", "--show-toplevel"], cwd=path).stdout.strip()).resolve()
+                identifier = identity(path)
+                authority = attached_authority(path)
                 self._candidates[identifier] = path
-            except (OSError, git.GitFailed):
+                if identifier not in self._projects:
+                    self._projects[identifier] = Project(
+                        id=identifier, name=path.name, root=str(path), source_machine=self.machine,
+                        authority_machine=authority.get("machine", ""), board_host=authority.get("host", ""))
+            except (OSError, git.GitFailed, source.ProjectError):
                 continue
+
+    def register(self, root: Path, expected_project: str) -> dict:
+        """Register a verified local Git project and return its Board metadata."""
+        source.project_id(expected_project)
+        if not root.is_absolute() or len(str(root)) > 2048 or any(ord(c) < 32 for c in str(root)):
+            raise source.ProjectError("Choose an absolute local project path")
+        try:
+            canonical = Path(git.run(["rev-parse", "--show-toplevel"], cwd=root).stdout.strip()).resolve()
+            identifier = identity(canonical)
+            if identifier != expected_project:
+                raise source.ProjectError("Local project identity does not match the requested project")
+            authority = attached_authority(canonical)
+        except (OSError, git.GitFailed) as exc:
+            raise source.ProjectError("Choose an available local Git project") from exc
+        with self.lock:
+            project = self._projects.get(identifier)
+            if project is None:
+                project = Project(id=identifier, name=canonical.name, root=str(canonical),
+                                  source_machine=self.machine, authority_machine=authority.get("machine", ""),
+                                  board_host=authority.get("host", ""))
+                self._projects[identifier] = project
+            self._candidates[identifier] = canonical
+            self._save()
+            return self._board(project)
 
     def candidates(self) -> list[dict]:
         return [{"id": identifier, "name": path.name} for identifier, path in self._candidates.items()]
@@ -122,8 +166,8 @@ class ProjectRegistry:
         source.project_id(identifier)
         with self.lock:
             project = self._projects.get(identifier)
-            if project is None or not project.shared:
-                raise source.ProjectError("Project is not shared here")
+            if project is None:
+                raise source.ProjectError("Project is not registered here")
             return project
 
     def list(self) -> list[dict]:
@@ -139,12 +183,11 @@ class ProjectRegistry:
             root = self._candidates.get(candidate)
             if root is None:
                 raise source.ProjectError("Choose an available local project")
-            attached = read_json(root / ".ml-stack-project.json", {})
+            authority = attached_authority(root)
             identifier = identity(root)
             manifest, packed = source.build(root, identifier)
             source.verify(packed, identifier, manifest["source_hash"])
             prior = self._projects.get(identifier)
-            authority = attached.get("authority", {})
             project = Project(id=identifier, name=name.strip() or root.name, root=str(root),
                               source_machine=self.machine, shared=True, source_hash=manifest["source_hash"],
                               archive_sha256=hashlib.sha256(packed).hexdigest(), size_bytes=manifest["size_bytes"],
@@ -160,7 +203,10 @@ class ProjectRegistry:
 
     def unshare(self, identifier: str) -> None:
         with self.lock:
-            self.get(identifier).shared = False
+            project = self.get(identifier)
+            if not project.shared:
+                raise source.ProjectError("Project is not shared here")
+            project.shared = False
             self._save()
 
     def _bundle(self, project: Project) -> Path:
@@ -169,6 +215,8 @@ class ProjectRegistry:
     def snapshot(self, identifier: str, revision: str) -> bytes:
         with self.lock:
             project = self.get(identifier)
+            if not project.shared:
+                raise source.ProjectError("Project is not shared here")
             if revision != project.source_hash:
                 raise source.ProjectError("Project source revision is no longer published")
             data = self._bundle(project).read_bytes()
@@ -182,26 +230,39 @@ class ProjectRegistry:
             raise source.ProjectError("Project workspace belongs to another device")
         return self.root / "shared-workspaces" / project.id
 
-    def claim_authority(self, identifier: str) -> Project:
-        """Select this device as workspace authority during an explicit human action."""
+    def claim_authority(self, identifier: str, *, expected_machine: str = "") -> Project:
+        """Select this device as the canonical workspace authority."""
         with self.lock:
             project = self.get(identifier)
+            if expected_machine and expected_machine != self.machine:
+                raise source.ProjectError("Selected workspace device does not match this device")
             if project.authority_machine and project.authority_machine != self.machine:
                 raise source.ProjectError("Project already has another workspace authority")
             if not self.host:
                 raise source.ProjectError("This device has no reachable workspace address")
+            if project.board_host and project.board_host != self.host:
+                raise source.ProjectError("Project already has another workspace address")
             project.authority_machine, project.board_host = self.machine, self.host
             self._save()
             return project
 
-    def catalogue(self) -> dict:
+    def boards(self) -> list[dict]:
+        """Return registered project Board metadata without checkout paths or source bundles."""
+        with self.lock:
+            return [self._board(project) for project in self._projects.values()]
+
+    def _board(self, project: Project) -> dict:
+        return {"id": project.id, "name": project.name, "machine": self.machine,
+                "authority_machine": project.authority_machine, "board_host": project.board_host}
+
+    def catalogue(self, *, include_boards: bool = False) -> dict:
         code = bootstrap()
-        return {"projects": self.list(), "machine": self.machine,
+        return {"projects": self.list(), "boards": self.boards() if include_boards else [], "machine": self.machine,
                 "capabilities": ["project-source"],
                 "bootstrap_sha256": hashlib.sha256(code).hexdigest()}
 
 
-def answer(handler, registry: ProjectRegistry | None, parsed) -> bool:
+def answer(handler, registry: ProjectRegistry | None, parsed, *, cluster_key_path: Path | None = None) -> bool:
     """Answer authenticated source catalogue and immutable bundle requests."""
     prefix = "/workspace/v1/projects"
     if not parsed.path.startswith(prefix) or registry is None:
@@ -209,7 +270,10 @@ def answer(handler, registry: ProjectRegistry | None, parsed) -> bool:
     pieces = parsed.path.removeprefix(prefix).strip("/").split("/")
     try:
         if parsed.path == prefix:
-            handler._send(200, registry.catalogue())
+            show_boards = False
+            if cluster_key_path is not None:
+                show_boards = project_enrollment.visible(handler.connection, handler._sealing(), cluster_key_path)
+            handler._send(200, registry.catalogue(include_boards=show_boards))
         elif pieces == ["bootstrap"]:
             handler._send(200, {}, raw=bootstrap(), content_type="text/x-python")
         elif len(pieces) == 2 and pieces[1] == "snapshot":

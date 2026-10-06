@@ -232,7 +232,7 @@ def test_a_terminal_picks_a_cluster_by_number_then_types_its_passphrase_once(
     advertise("lab", "studio")
     advertise("home", "harrowgate")
     prompts = _terminal(monkeypatch, ["1"], [WORDS])
-    assert _join(tmp_path) == 0
+    assert _join(tmp_path, "--mode", "prod") == 0
     assert captured["group"] == "home" and captured["passphrase"] == WORDS
     assert sum("Passphrase" in p for p in prompts) == 1
     assert not any("Again" in p for p in prompts)
@@ -240,14 +240,14 @@ def test_a_terminal_picks_a_cluster_by_number_then_types_its_passphrase_once(
 
 def test_a_terminal_that_types_a_new_name_confirms_the_passphrase(captured, tmp_path, monkeypatch, udp):
     prompts = _terminal(monkeypatch, ["attic"], [WORDS, WORDS])
-    assert _join(tmp_path) == 0
+    assert _join(tmp_path, "--mode", "prod") == 0
     assert captured["group"] == "attic"
     assert any("Again" in p for p in prompts)
 
 
 def test_a_terminal_takes_the_default_name_on_enter_when_none_is_found(captured, tmp_path, monkeypatch, udp):
     _terminal(monkeypatch, [""], [WORDS, WORDS])
-    assert _join(tmp_path) == 0
+    assert _join(tmp_path, "--mode", "prod") == 0
     assert captured["group"] == "ml-stack"
 
 
@@ -262,7 +262,8 @@ def test_a_script_is_never_asked(captured, tmp_path, monkeypatch):
     monkeypatch.setattr("builtins.input", lambda *_: pytest.fail("asked a script"))
     monkeypatch.setattr(sys, "stdin", io.StringIO(f"{WORDS}\n"))
     assert _join(tmp_path) == 0
-    assert captured["group"] == "ml-stack" and captured["passphrase"] == WORDS
+    assert captured["group"] == "" and captured["passphrase"] == ""
+    assert sys.stdin.read() == f"{WORDS}\n"
 
 
 def test_a_terminal_marked_non_interactive_is_never_asked(captured, tmp_path, monkeypatch):
@@ -270,7 +271,7 @@ def test_a_terminal_marked_non_interactive_is_never_asked(captured, tmp_path, mo
     monkeypatch.setattr("builtins.input", lambda *_: pytest.fail("asked an agent"))
     monkeypatch.setattr(sys, "stdin", _Terminal(f"{WORDS}\n"))
     assert _join(tmp_path) == 0
-    assert captured["group"] == "ml-stack"
+    assert captured["group"] == "" and captured["passphrase"] == ""
 
 
 def test_a_passphrase_from_the_environment_is_never_asked_for_a_name(captured, tmp_path, monkeypatch):

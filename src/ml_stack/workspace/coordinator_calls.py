@@ -13,7 +13,7 @@ READS = frozenset({'whoami', 'agents', 'inbox', 'thread', 'outbox', 'claims', 'w
                    'status', 'tasks', 'task', 'notes-search', 'notes-get',
                    'audit-verify', 'audit-head'})
 WRITES = frozenset({'send', 'announce', 'ack', 'hello-model', 'notes-add', 'claim',
-                    'release', 'heartbeat', 'task-create', 'task-review', 'task-heartbeat', 'task-checkpoint', 'task-submit'})
+                    'release', 'heartbeat', 'task-create', 'task-claim', 'task-credit', 'task-review', 'task-heartbeat', 'task-checkpoint', 'task-submit'})
 REQUEST_ID = re.compile(r'[a-f0-9]{32}')
 MAX_OUTCOME = 256 * 1024
 MAX_CACHED = 10000

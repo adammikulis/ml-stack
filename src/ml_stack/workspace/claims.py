@@ -287,7 +287,8 @@ class Claims:
             self._save(claims)
             return found
 
-    def renew(self, who: Identity, ttl_s: float = 0.0) -> list[dict[str, Any]]:
+    def renew(self, who: Identity, ttl_s: float = 0.0, *,
+              predicate: Callable[[dict[str, Any]], bool] | None = None) -> list[dict[str, Any]]:
         """Extend every claim ``who`` holds by ``ttl_s`` (at most ``MAX_RENEW_S``) from now, never
         past ``MAX_LIFETIME_S`` after it was first taken; returns the renewed claims, each marked
         ``capped`` when the lifetime cap held it back."""
@@ -296,7 +297,8 @@ class Claims:
             claims = self._load()
             self._sweep(claims)
             now = self.clock()
-            mine = [c for c in claims.values() if c["owner"] == who.id]
+            mine = [c for c in claims.values() if c["owner"] == who.id
+                    and (predicate is None or predicate(c))]
             for claim in mine:
                 limit = claim["since"] + MAX_LIFETIME_S
                 claim["expires"] = max(claim["expires"], min(now + step, limit))

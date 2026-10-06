@@ -107,6 +107,8 @@ def machine_looks_fine(monkeypatch):
         Finding(name="memory a model may use", good=True, said="96G of 128G (75%)"),
         Finding(name="models on this machine", good=True, said="2 file(s)")])
     monkeypatch.setattr(joining, "_server_here", lambda: "/opt/fake/bin/llama-server")
+    monkeypatch.setattr(joining.automatic_clusters, "ensure",
+                        lambda path, **kw: memberships(path)[0])
 
 
 @pytest.fixture
@@ -144,7 +146,7 @@ class TestJoin:
 
         assert not in_cluster(key)
         monkeypatch.setattr(joining, "join_by_passphrase",
-                            lambda words, group, path: join_cluster(words, group=group, path=path))
+                            lambda words, group, path, **kw: join_cluster(words, group=group, path=path))
         joined = join_machine(name="larch", passphrase=WORDS, group="home", port=tcp,
                               root=tmp_path / "root", cluster_key_path=key, start=start,
                               discovery_port=udp, say=said.append)
@@ -169,15 +171,6 @@ class TestJoin:
         assert "joined cluster 'home'" in text
         assert f"discovery port {udp}" in text
         assert "larch" in text and "quince-2b.gguf:8099" in text, "it prints what the fleet sees"
-
-    def test_no_cluster_and_no_passphrase_is_a_refusal_not_a_daemon(self, tmp_path, key, udp):
-        started = []
-        with pytest.raises(JoinError) as left:
-            join_machine(passphrase="", port=_free_tcp(), root=tmp_path, cluster_key_path=key,
-                         start=lambda *a: started.append(a) or 1, discovery_port=udp,
-                         say=lambda s: None)
-        assert "passphrase" in str(left.value)
-        assert started == [], "nothing may start on a machine that cannot announce"
 
     @pytest.mark.slow
 
@@ -565,7 +558,7 @@ class TestThePage:
     def test_the_join_button_runs_the_same_join(self, page, monkeypatch):
 
         monkeypatch.setattr(fleet_ui, "join_by_passphrase",
-                            lambda words, group, path: join_cluster(words, group=group, path=path))
+                            lambda words, group, path, **kw: join_cluster(words, group=group, path=path))
         s, cookie = page
         status, body, _ = s.call("/ui/fleet/join", method="POST", body={}, cookie=cookie)
         assert status == 400, "an empty form must not start anything"
