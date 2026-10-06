@@ -26,7 +26,7 @@ def coding_browser(tmp_path, monkeypatch, playwright):
     page = browser.new_page()
     page.route("**/ui/chat", lambda route: route.fulfill(json={"models": [{"model": "chat-model", "local": True}]}))
     page.route("**/ui/coding/catalogue", lambda route: route.fulfill(json={
-        "ok": True, "harnesses": [{"name": "codex", "available": True}],
+        "ok": True, "harnesses": [{"name": "pi", "available": True}, {"name": "codex", "available": True}],
         "roles": [{"name": "read-only", "summary": "Inspect without editing"}],
         "default_role": "read-only", "context": 262144,
         "default_model": "test-model", "models": [{"name": "Fixture coding model", "ref": "test-model"}]}))

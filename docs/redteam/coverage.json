@@ -1,9 +1,9 @@
 {
- "surfaces": 736,
+ "surfaces": 738,
  "by_status": {
-  "covered": 418,
+  "covered": 421,
   "partial": 199,
-  "uncovered": 54,
+  "uncovered": 53,
   "n/a": 65,
   "unmapped": 0
  },
@@ -81,12 +81,12 @@
   "parser": {
    "covered": 68,
    "partial": 0,
-   "uncovered": 50,
+   "uncovered": 49,
    "n/a": 0,
    "unmapped": 0
   },
   "route": {
-   "covered": 76,
+   "covered": 78,
    "partial": 58,
    "uncovered": 0,
    "n/a": 0,
@@ -100,7 +100,7 @@
    "unmapped": 0
   },
   "spawn": {
-   "covered": 43,
+   "covered": 44,
    "partial": 63,
    "uncovered": 0,
    "n/a": 2,
@@ -6178,16 +6178,6 @@
    "note": "a crafted model-repository listing, card, document, mailbox, WAV or archive reaches the reader; only tests/test_hub_modelfile.py attacks one"
   },
   {
-   "id": "parser:hub/remote.py",
-   "kind": "parser",
-   "source": "hub/remote.py",
-   "trust": "files, pages and archives from outside",
-   "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
-   "status": "uncovered",
-   "tests": [],
-   "note": "a crafted model-repository listing, card, document, mailbox, WAV or archive reaches the reader; only tests/test_hub_modelfile.py attacks one"
-  },
-  {
    "id": "parser:hub/scan.py",
    "kind": "parser",
    "source": "hub/scan.py",
@@ -7368,6 +7358,21 @@
    "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
    "status": "covered",
    "tests": [
+    "tests/test_fleet_conversation_settings_routes.py::test_defaults_endpoint_exposes_the_persisted_settings_source",
+    "tests/test_fleet_conversation_settings_routes.py::test_conversation_mutations_require_ui_authority",
+    "tests/test_fleet_conversation_settings_routes.py::test_invalid_updates_return_400_without_changing_the_chat"
+   ],
+   "note": "socket requests reject missing UI authority and foreign origins; invalid settings and unknown fields preserve persisted history"
+  },
+  {
+   "id": "route:fleet/conversation_routes.py:/ui/conversations/defaults",
+   "kind": "route",
+   "source": "fleet/conversation_routes.py:ConversationRoutes._conversations",
+   "trust": "network peer or local browser",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "covered",
+   "tests": [
+    "tests/test_fleet_conversation_settings_routes.py::test_defaults_endpoint_exposes_the_persisted_settings_source",
     "tests/test_fleet_conversation_settings_routes.py::test_conversation_mutations_require_ui_authority",
     "tests/test_fleet_conversation_settings_routes.py::test_invalid_updates_return_400_without_changing_the_chat"
    ],
@@ -7890,6 +7895,19 @@
     "tests/test_fleet_found_route.py::test_a_machine_in_a_cluster_asks_for_the_list_behind_its_sign_in"
    ],
    "note": ""
+  },
+  {
+   "id": "route:fleet/routes.py:/ui/credentials",
+   "kind": "route",
+   "source": "fleet/routes.py:SettingsRoutes.route",
+   "trust": "browser session on this machine behind the UI header",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "covered",
+   "tests": [
+    "tests/test_fleet_credentials.py::test_ui_saves_multiple_named_credentials_without_returning_values",
+    "tests/test_fleet_credentials.py::test_joined_credential_management_requires_a_signed_in_session"
+   ],
+   "note": "credential values are saved without being returned; joined credential management requires a signed-in session"
   },
   {
    "id": "route:fleet/routes.py:/ui/fit",
@@ -10011,6 +10029,18 @@
     "tests/test_net_scan.py"
    ],
    "note": ""
+  },
+  {
+   "id": "spawn:pi.py:launch",
+   "kind": "spawn",
+   "source": "pi.py:launch",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_pi_harness.py::test_pi_launch_is_offline_and_uses_the_policy_extension"
+   ],
+   "note": "Pi runs offline with ml-stack's tool-policy extension and an explicit local model endpoint"
   },
   {
    "id": "spawn:platform.py:launch",
