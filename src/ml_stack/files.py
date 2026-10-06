@@ -16,9 +16,15 @@ import tempfile
 from collections.abc import Callable, Iterator, Mapping, Set
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
-__all__ = ["UNVERSIONED", "CrossDevice", "promote", "prune_orphans", "read_json", "records_in",
+if os.name == "nt":
+    from ml_stack.files_windows import open_read, replace
+else:
+    open_read = None
+    replace = os.replace
+
+__all__ = ["UNVERSIONED", "CrossDevice", "promote", "prune_orphans", "read_json", "reading", "records_in",
            "sha256_file", "version_of", "versioned", "write_json", "write_text", "writing"]
 
 #: A record with no version key.
@@ -37,7 +43,7 @@ def promote(source: Path | str, target: Path | str) -> Path:
     """
     source, target = Path(source), Path(target)
     try:
-        source.replace(target)
+        replace(source, target)
     except OSError as exc:
         if exc.errno != errno.EXDEV:
             raise
@@ -103,9 +109,15 @@ def version_of(record: Any) -> int:
 def read_json(path: Path, default: Any) -> Any:
     """What ``path`` holds, or ``default`` when it is missing or is not JSON."""
     try:
-        return json.loads(Path(path).read_text(encoding="utf-8"))
+        with reading(path) as handle:
+            return json.load(handle)
     except (OSError, ValueError):
         return default
+
+
+def reading(path: Path | str) -> TextIO:
+    """Open a UTF-8 snapshot while allowing atomic replacement of its path."""
+    return open(path, encoding="utf-8", opener=open_read)
 
 
 def prune_orphans(directory: Path, live: Set[str], suffix: str = ".json") -> list[str]:
@@ -129,7 +141,8 @@ def prune_orphans(directory: Path, live: Set[str], suffix: str = ".json") -> lis
 def records_in(path: str | Path, key: str) -> list[dict[str, Any]]:
     """The list of mappings a JSON file holds under ``key``, or the file itself when it is
     a list. Raises ``ValueError`` naming the file when there are none."""
-    held = json.loads(Path(path).expanduser().read_text(encoding="utf-8"))
+    with reading(Path(path).expanduser()) as handle:
+        held = json.load(handle)
     found = held.get(key) if isinstance(held, Mapping) else held
     if not isinstance(found, list) or not found:
         raise ValueError(f"{path}: no {key}")

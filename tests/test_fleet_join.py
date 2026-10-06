@@ -44,7 +44,7 @@ from ml_stack.fleet.join import (
 )
 from ml_stack.http import Server
 from ml_stack.platform import process_group_kwargs
-from tests.cluster_support import join as join_cluster
+from tests.cluster_support import join as join_cluster, key_for
 
 WORDS = "quince larch marlow"
 DEVICE = {"gpu": "Pellard P40", "vram_total_gb": 24.0, "vram_free_gb": 20.5,
@@ -562,6 +562,7 @@ class TestThePage:
         monkeypatch.setattr(fleet_ui, "join_by_passphrase",
                             lambda words, group, path, **kw: join_cluster(words, group=group, path=path))
         s, cookie = page
+        original = memberships(s.keyfile)
         status, body, _ = s.call("/ui/fleet/join", method="POST", body={}, cookie=cookie)
         assert status == 400, "an empty form must not start anything"
 
@@ -569,7 +570,10 @@ class TestThePage:
                                  body={"passphrase": "other words here", "group": "lab"})
         assert status == 200, body
         assert body["group"] == "lab" and not body["started"], "this daemon is the daemon"
-        assert [m.group for m in memberships(s.keyfile)] == ["lab", "home"]
+        held = memberships(s.keyfile)
+        assert [m.group for m in held] == ["home", "lab"]
+        assert held[0] == original[0]
+        assert held[1].key == key_for("other words here", "lab")
         assert any("already running as 'studio'" in line for line in body["said"])
         assert {c["name"] for c in body["checks"]} >= {"llama-server"}
         assert "larch" in [p["name"] for p in body["peers"]]

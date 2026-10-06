@@ -153,7 +153,7 @@ def test_a_passphrase_under_five_characters_is_refused_before_anything_is_sent(m
 def test_a_machine_that_finds_nobody_refuses_join_and_creates_no_key(tmp_path, udp):
     with pytest.raises(DiscoveryError, match="No machine"):
         joining.join_existing(WORDS, "lab", tmp_path / "b" / "cluster.key",
-                              timeout_s=1.0, port=udp)
+                              options=joining.JoinOptions(mode="prod", timeout_s=1.0, port=udp))
     assert memberships(tmp_path / "b" / "cluster.key") == []
 
 

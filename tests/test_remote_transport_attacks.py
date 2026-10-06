@@ -9,7 +9,7 @@ import pytest
 
 from ml_stack.fleet import project_client, wsl_network
 from ml_stack.http import Sealed, ServerError
-from ml_stack.workspace import remote
+from ml_stack.workspace import remote, tokens
 from ml_stack.workspace.identity import Denied
 
 
@@ -17,6 +17,7 @@ from ml_stack.workspace.identity import Denied
 def workspace(tmp_path, monkeypatch):
     monkeypatch.setattr(remote, "load_cluster_key", lambda _path: bytes(range(32)))
     monkeypatch.setattr(remote, "memberships", lambda _path: [])
+    tokens.prepare(tmp_path)
     monkeypatch.setattr(remote.home, "state", lambda *_args: tmp_path)
     return remote.RemoteWorkspace("http://127.0.0.1:8770", "a" * 32)
 
@@ -94,7 +95,7 @@ def test_project_source_redirect_stays_on_exact_authority(monkeypatch, target):
 
     monkeypatch.setattr(project_client, "open_stream", redirect)
     with pytest.raises(project_client.ProjectError, match="cannot redirect"):
-        project_client.read(SimpleNamespace(base_url="http://127.0.0.1:8770", token="secret"), "/workspace/v1/projects", 100)
+        project_client.read(SimpleNamespace(base_url="http://127.0.0.1:8770", token="secret", timeout=30), "/workspace/v1/projects", 100)
     assert not followed
 
 
@@ -112,7 +113,7 @@ def test_project_source_sealed_wire_and_plaintext_boundary(monkeypatch, length):
         yield SimpleNamespace(read=read, status=200, headers={remote.sealing.HEADER: "2"}, sealed=Sealed(key, nonce))
 
     monkeypatch.setattr(project_client, "open_stream", reply)
-    peer = SimpleNamespace(base_url="http://127.0.0.1:8770", token="secret")
+    peer = SimpleNamespace(base_url="http://127.0.0.1:8770", token="secret", timeout=30)
     if length > limit:
         with pytest.raises(project_client.ProjectError, match="size limit"):
             project_client.read(peer, "/workspace/v1/projects", limit)
@@ -130,7 +131,7 @@ def test_project_source_requires_authenticated_sealed_response(monkeypatch, head
 
     monkeypatch.setattr(project_client, "open_stream", reply)
     with pytest.raises((project_client.ProjectError, ServerError)):
-        project_client.read(SimpleNamespace(base_url="http://127.0.0.1:8770", token="secret"), "/workspace/v1/projects", 100)
+        project_client.read(SimpleNamespace(base_url="http://127.0.0.1:8770", token="secret", timeout=30), "/workspace/v1/projects", 100)
 
 
 @pytest.mark.parametrize("override", [{"source_hash": "../../escape"}, {"archive_sha256": "wrong"},
@@ -141,13 +142,13 @@ def test_project_catalogue_schema_is_checked_before_snapshot_url(monkeypatch, ov
     project = {"id": "a" * 32, "name": "App", "source_machine": "source-a",
                "authority_machine": "", "board_host": "", "source_hash": "b" * 64,
                "archive_sha256": "c" * 64, "size_bytes": 10, "files": 1, **override}
-    monkeypatch.setattr(project_client, "read", lambda *_args: json.dumps({"machine": "source-a", "projects": [project]}).encode())
+    monkeypatch.setattr(project_client, "read", lambda *_args, **_kwargs: json.dumps({"machine": "source-a", "projects": [project]}).encode())
     with pytest.raises((project_client.ProjectError, OSError)):
         project_client.catalogue(SimpleNamespace())
 
 
 @pytest.mark.parametrize("projects", [[None], [1], [{}], ["project"], "projects"])
 def test_project_catalogue_rejects_invalid_members_without_type_crash(monkeypatch, projects):
-    monkeypatch.setattr(project_client, "read", lambda *_args: json.dumps({"machine": "source-a", "projects": projects}).encode())
+    monkeypatch.setattr(project_client, "read", lambda *_args, **_kwargs: json.dumps({"machine": "source-a", "projects": projects}).encode())
     with pytest.raises(project_client.ProjectError):
         project_client.catalogue(SimpleNamespace())

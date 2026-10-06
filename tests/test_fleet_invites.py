@@ -19,7 +19,7 @@ from ml_stack.fleet.ui import UI
 
 @pytest.fixture
 def invitation():
-    members = [Membership("lab", b"eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHg=")]
+    members = [Membership("lab", base64.urlsafe_b64encode(b"x" * 32).rstrip(b"="))]
     clock = [1000]
     store = Invitations(lambda: members, lambda: ("https://192.168.2.59:8770", "a" * 64))
     store.clock = lambda: clock[0]
@@ -56,13 +56,13 @@ def test_atomic_single_use_and_no_key_in_invite(invitation):
 def test_expiry_revocation_and_membership_binding(invitation):
     store, data, fields, members, clock = invitation
     fields = claim(store, data, fields)
-    members[:] = [Membership("lab", b"different")]
+    members[:] = [Membership("lab", base64.urlsafe_b64encode(b"y" * 32).rstrip(b"="))]
     with pytest.raises(ValueError, match="membership changed"):
         store.exchange("redeem", fields)
     store.revoke(data["id"])
     with pytest.raises(ValueError, match="revoked"):
         store.exchange("challenge", fields)
-    members[:] = [Membership("lab", b"original")]
+    members[:] = [Membership("lab", base64.urlsafe_b64encode(b"x" * 32).rstrip(b"="))]
     minted = store.mint("lab")
     clock[0] += 601
     with pytest.raises(ValueError, match="expired"):
@@ -92,7 +92,8 @@ def test_expired_challenge_and_certificate_rotation(invitation):
 
 @pytest.mark.parametrize("origin", ["http://192.168.2.59:8770", "https://127.0.0.1:8770", "https://8.8.8.8:8770"])
 def test_mint_requires_reachable_private_tls(origin):
-    store = Invitations(lambda: [Membership("lab", b"key")], lambda: (origin, "a" * 64))
+    store = Invitations(lambda: [Membership("lab", base64.urlsafe_b64encode(b"x" * 32).rstrip(b"="))],
+                        lambda: (origin, "a" * 64))
     with pytest.raises(ValueError):
         store.mint("lab")
 

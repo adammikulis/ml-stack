@@ -13,6 +13,11 @@ from ml_stack.workspace.identity import Denied
 PROJECT = "a" * 32
 
 
+class RejectLocalWorkspace:
+    def __init__(self, *args, **kwargs):
+        pytest.fail("created a split local board")
+
+
 class Remote:
     host = "http://127.0.0.1:8770"
     project_id = PROJECT
@@ -45,7 +50,7 @@ def test_normal_cli_sends_to_saved_canonical_board(project, monkeypatch):
     connection.bind(remote, project, "mac", "default")
     monkeypatch.chdir(project)
     monkeypatch.setattr(connection, "RemoteWorkspace", lambda *a, **k: remote)
-    monkeypatch.setattr(cli, "Workspace", lambda: pytest.fail("created a split local board"))
+    monkeypatch.setattr(cli, "Workspace", RejectLocalWorkspace)
     args = SimpleNamespace(cmd="send", agent="", token_file="", label="helper", to="pc", type="status",
                            body="connected", subject="", reply_to=0, ttl=0, json=True)
     assert cli._runner(cli._send)(args) == 0
@@ -78,7 +83,7 @@ def test_offline_canonical_connection_does_not_fall_back(project, monkeypatch):
     def offline(*args, **kwargs):
         raise Denied("canonical host offline")
     monkeypatch.setattr(connection, "RemoteWorkspace", offline)
-    monkeypatch.setattr(cli, "Workspace", lambda: pytest.fail("created a split local board"))
+    monkeypatch.setattr(cli, "Workspace", RejectLocalWorkspace)
     assert cli._runner(cli._agents)(SimpleNamespace(cmd="agents", agent="", token_file="", json=True)) == 3
 
 

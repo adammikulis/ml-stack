@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import signal
 import subprocess
 import sys
 import time
@@ -12,7 +11,8 @@ import time
 import pytest
 from workspace_kit import SRC, STRIPPED, Kit, clean_env, cli, run_python
 
-from ml_stack.workspace import ChainBroken, Denied, RateLimited, Refused, Workspace
+from ml_stack.platform import process_group_kwargs
+from ml_stack.workspace import ChainBroken, Denied, RateLimited, Refused, Workspace, tokens
 from ml_stack.workspace.chain import ChainLog
 
 
@@ -80,12 +80,19 @@ def test_a_sender_killed_mid_stream_leaves_a_log_that_still_verifies(kit):
     token = kit.agent("doomed")
     proc = subprocess.Popen([sys.executable, "-c", SEND_MANY, "doomed", "100000"],
                             env={**os.environ, "ML_STACK_WORKSPACE_HOME": str(kit.base),
-                                 "PYTHONPATH": SRC, "ML_STACK_WORKSPACE_TOKEN": token})
-    deadline = time.monotonic() + 60
-    while len(kit.ws.bus.log.rows()) < 5 and time.monotonic() < deadline:
-        time.sleep(0.05)
-    proc.send_signal(signal.SIGKILL)
-    proc.wait()
+                                 "PYTHONPATH": SRC, "ML_STACK_WORKSPACE_TOKEN": token},
+                            **process_group_kwargs())
+    try:
+        deadline = time.monotonic() + 60
+        while len(kit.ws.bus.log.rows()) < 5 and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert proc.poll() is None
+        proc.kill()
+        proc.wait(timeout=10)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait(timeout=10)
     before = len(kit.ws.bus.log.rows())
     assert before >= 5
     assert kit.ws.bus.log.verify().ok
@@ -112,8 +119,8 @@ def test_the_registry_stores_a_hash_so_reading_it_does_not_give_an_identity(kit)
     worker = kit.agent("worker")
     stored = (kit.base / "agents.json").read_text()
     assert worker.rsplit(".", 1)[1] not in stored
-    assert oct((kit.base / "agents.json").stat().st_mode & 0o777) == "0o600"
-    assert oct(kit.base.stat().st_mode & 0o777) == "0o700"
+    assert tokens.problem(kit.base / "agents.json") == ""
+    assert tokens.problem(kit.base) == ""
 
 
 def test_roles_limit_who_can_mint_and_revoke(kit):

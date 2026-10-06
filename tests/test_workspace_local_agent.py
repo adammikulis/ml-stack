@@ -698,6 +698,8 @@ def test_a_coding_worker_is_registered_once_before_its_native_harness_starts(kit
 
 
 def test_a_project_coding_launch_starts_its_issue_queue(kit, monkeypatch, tmp_path):
+    from test_device_agent import owned_launcher
+
     from ml_stack.net import git
     from ml_stack.workspace import localprofile as lp
 
@@ -709,7 +711,9 @@ def test_a_project_coding_launch_starts_its_issue_queue(kit, monkeypatch, tmp_pa
     monkeypatch.setattr(ls.jobs, "detach", sleeper)
     monkeypatch.setattr(ls.issuepump, "configure_and_start",
                         lambda ws, token, name, repo, folder: started.append((name, repo, folder)))
-    parent = kit.agent("queue-parent")
+    parent = owned_launcher(kit, "queue-parent")
+    assert tokens.load(kit.base, "queue-parent") == parent
+    assert kit.ws.registry._load()["queue-parent"]["minted_by"] == "local-account"
     from ml_stack.workspace import project as projects
     kit.ws.registry.set_project(kit.ws.auth(kit.owner), "queue-parent", projects.describe(project))
     got = ls.start(kit.ws, ls.Ask(name="queue-worker", profile="coding", project=str(project),

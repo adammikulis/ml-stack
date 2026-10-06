@@ -10,7 +10,7 @@ from pathlib import Path
 
 from ml_stack.files import writing
 from ml_stack.sentinel import human
-from ml_stack.windows_private import problem as windows_problem, restrict
+from ml_stack.windows_private import problem as windows_problem, restrict, validate
 from ml_stack.workspace.identity import PREFIX, TOKEN_ENV, Denied, valid_id
 
 __all__ = ["AGENT_ENV", "OWNER_FILE", "directory", "inside_repo", "load", "prepare", "problem",
@@ -37,6 +37,9 @@ def prepare(base: Path) -> Path:
     """The token directory, made owner-only; ValueError when it is a symlink or sits inside a
     git work tree."""
     path = directory(base)
+    if os.name == "nt":
+        validate(base)
+        validate(path)
     try:
         info = path.lstat()
     except FileNotFoundError:

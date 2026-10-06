@@ -43,14 +43,15 @@ def test_person_start_binds_model_independent_default(tmp_path, monkeypatch):
     from ml_stack.workspace import localstart
     kit = Kit(tmp_path / "ws")
     monkeypatch.setattr(device_agent, "device_id", lambda: "1234567890abcdef")
-    got = localstart.start(kit.ws, localstart.Ask(), pick=PICK, spawn=sleeper,
+    got = localstart.start(kit.ws, localstart.Ask(ctx=65536), pick=PICK, spawn=sleeper,
                            authority=localstart.Authority(person_token=kit.owner))
     try:
         assert got.name == "local-agent"
+        assert localagent.load(kit.ws, got.name).ctx == 65536
         account = account_for(kit.ws, got.name)
         assert account["device_id"] == "1234567890abcdef"
         with pytest.raises(ValueError, match="same name to change models"):
-            localstart.start(kit.ws, localstart.Ask(), pick=replace(PICK, ref="other-model"), spawn=sleeper)
+            localstart.start(kit.ws, localstart.Ask(ctx=65536), pick=replace(PICK, ref="other-model"), spawn=sleeper)
     finally:
         localstart.stop(kit.ws, got.name, wait_s=5)
     assert account_for(kit.ws, got.name) == account
@@ -68,10 +69,11 @@ def test_saved_delegated_coding_seat_survives_model_restart(tmp_path, monkeypatc
     monkeypatch.setattr(localprofile, "admit", lambda *args: ("", ""))
     monkeypatch.setattr(localstart.jobs, "detach", sleeper)
     monkeypatch.setattr(device_agent, "device_id", lambda: "1234567890abcdef")
-    got = localstart.start(kit.ws, localstart.Ask(name="named-worker", profile="coding"),
+    got = localstart.start(kit.ws, localstart.Ask(name="named-worker", profile="coding", ctx=65536),
                            pick=PICK, authority=localstart.Authority(person_token=kit.owner))
     try:
         assert localagent.load(kit.ws, got.name).identity == identity
+        assert localagent.load(kit.ws, got.name).ctx == 65536
         assert kit.ws.registry.role_of(got.name) == ""
         assert account_for(kit.ws, identity)["base_id"].startswith("local-device-")
         assert kit.ws.registry.info(identity)["model"] == PICK.name

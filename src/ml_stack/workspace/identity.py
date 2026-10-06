@@ -4,17 +4,20 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import math
 import os
 import re
 import secrets
+import stat
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ml_stack.files import read_json, write_json
+from ml_stack.files import read_json, writing
+from ml_stack.windows_private import problem as windows_problem, restrict
 from ml_stack.workspace import device_metadata
 from ml_stack.workspace.chain import held
 from ml_stack.workspace.modelid import (
@@ -104,8 +107,45 @@ class Registry:
         return dict(agents)
 
     def _save(self, agents: Mapping[str, Any]) -> None:
-        write_json(self.path, {"version": VERSION, "agents": dict(agents)})
-        self.path.chmod(0o600)
+        base = self.path.parent
+        self._storage()
+        base.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if os.name == 'nt':
+            restrict(base)
+            if self.path.exists():
+                restrict(self.path)
+        else:
+            if base.stat().st_uid != os.getuid() or (self.path.exists() and self.path.stat().st_uid != os.getuid()):
+                raise Denied('agent registry storage belongs to another user')
+            base.chmod(0o700)
+        with writing(self.path) as tmp:
+            restrict(tmp) if os.name == 'nt' else tmp.chmod(0o600)
+            tmp.write_text(json.dumps({"version": VERSION, "agents": dict(agents)},
+                                      indent=2, ensure_ascii=False), encoding='utf-8')
+
+    def _storage(self):
+        owned = False
+        for path in (self.path, *self.path.parents):
+            try:
+                info = path.lstat()
+            except FileNotFoundError:
+                continue
+            if stat.S_ISLNK(info.st_mode) or (os.name == 'nt'
+                    and info.st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT):
+                raise Denied('agent registry storage cannot be a redirected path')
+            if path == self.path and not stat.S_ISREG(info.st_mode):
+                raise Denied('agent registry storage requires a plain file')
+            if path == self.path.parent and not stat.S_ISDIR(info.st_mode):
+                raise Denied('agent registry storage requires a plain directory')
+            if path in (self.path, self.path.parent) or not owned:
+                if os.name == 'nt':
+                    reason = windows_problem(path)
+                    if reason not in ('', 'has unrestricted Windows access',
+                                      'Windows permissions grant access to another account'):
+                        raise Denied('agent registry storage ownership could not be verified')
+                elif info.st_uid != os.getuid():
+                    raise Denied('agent registry storage belongs to another user')
+                owned = True
 
     def ids(self) -> list[str]:
         """Every registered id."""

@@ -151,7 +151,7 @@ def test_catalogue_uses_real_modelinfo_paths_and_coding_profile(monkeypatch, tmp
     assert result["default_model"] == str(installed.path)
     selection = calls[0]["selection"]
     assert selection.coding is True and selection.search is False
-    assert selection.context == coding_routes.LIMIT
+    assert selection.context == 0
     assert calls[0]["installed"] == [installed]
 
 
@@ -160,7 +160,7 @@ def test_launch_adapter_forwards_exact_context_and_mtp_head(monkeypatch):
 
     calls = []
     monkeypatch.setitem(coding.HARNESSES, "codex", lambda argv, **options: calls.append(argv) or 0)
-    assert coding.launch_coding_agent("/models/qwen.gguf", "read-only", "/project", context=262144,
+    assert coding.launch_coding_agent("/models/qwen.gguf", "read-only", "/project", harness="codex", context=262144,
                                      draft="/models/mtp-qwen.gguf") == 0
     assert calls[0][calls[0].index("--ctx") + 1] == "262144"
     assert calls[0][calls[0].index("--draft") + 1] == "/models/mtp-qwen.gguf"

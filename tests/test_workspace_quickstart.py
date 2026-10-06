@@ -270,8 +270,12 @@ def test_agent_env_and_flag_find_the_right_token_and_one_cannot_pose_as_another(
     swapped = child(["whoami", "--agent", "codex"], base)
     assert swapped.returncode == 3 and "another agent" in swapped.stderr
     assert ws.registry._load() == before
-    assert child(["whoami", "--agent", "../lead"], base).returncode == 3
-    assert child(["whoami", "--agent", ".owner"], base).returncode == 3
+    token_files = {path.name: path.read_bytes() for path in tokens.directory(base).iterdir()}
+    for name in ("../lead", ".owner"):
+        bad_id = child(["whoami", "--agent", name], base)
+        assert bad_id.returncode == 2 and "not a usable agent id" in bad_id.stderr
+    assert ws.registry._load() == before
+    assert {path.name: path.read_bytes() for path in tokens.directory(base).iterdir()} == token_files
 
 
 def test_doctor_passes_a_good_setup_and_names_each_broken_state(base, ws):
