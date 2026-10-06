@@ -118,9 +118,10 @@ class Guarded:
     runs out or its step count is spent, and asks with thinking set as the person chose."""
 
     def __init__(self, client: Any, *, effort: str, limits: tuple[float, int],
-                 stop: Callable[[], bool], ctx: int = 0) -> None:
+                 stop: Callable[[], bool], ctx: int = 0, max_output_tokens: int = 0) -> None:
         seconds, steps = limits
         self.ctx = ctx
+        self.max_output_tokens = max_output_tokens
         self.client, self.think, self.steps, self.stop = client, le.thinks(effort), steps, stop
         self.deadline, self.used, self.seconds = time.monotonic() + seconds, 0, seconds
 
@@ -134,6 +135,8 @@ class Guarded:
         self.used += 1
         if self.ctx:
             lp.trim(messages, self.ctx)
+        if self.max_output_tokens and not {"n_predict", "max_tokens", "max_completion_tokens"}.intersection(kwargs):
+            kwargs["n_predict"] = self.max_output_tokens
         return self.client.chat(messages, **{**kwargs, "think": self.think})
 
     def __getattr__(self, name: str) -> Any:

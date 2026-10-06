@@ -1,18 +1,15 @@
-"""Effort: how much a local agent's model thinks and may write per reply. It is compute only:
-it never changes the role, the tools or the caps on steps, calls and seconds."""
+"""Reasoning effort levels and automatic task selection."""
 
 from __future__ import annotations
 
 import re
 
-__all__ = ["AUTO", "DEFAULT", "DEFAULT_MAX", "LEVELS", "TOKENS", "clamp", "pick_for", "thinks", "valid"]
+__all__ = ["AUTO", "DEFAULT", "DEFAULT_MAX", "LEVELS", "clamp", "pick_for", "thinks", "valid"]
 
 LEVELS = ("off", "low", "medium", "high")
 AUTO = "auto"
 DEFAULT = "off"
 DEFAULT_MAX = "medium"
-TOKENS = {"off": 2048, "low": 4096, "medium": 8192, "high": 16384}
-"""The most tokens one reply may hold at each level."""
 _HARD = re.compile(r"\b(plan|diagnos\w*|debug\w*|review|design|investigat\w*|why)\b", re.I)
 _EASY = re.compile(r"\b(status|list|lookup|look up|show|what is|which|count)\b", re.I)
 

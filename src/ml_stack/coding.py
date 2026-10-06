@@ -37,6 +37,10 @@ def launch_coding_agent(model: str, role: str, project: str | Path, harness: str
         argv += ["--ctx", str(context)]
     if harness == "pi" and (max_turns := options.pop("max_turns", 0)):
         argv += ["--max-turns", str(max_turns)]
+    if harness == "pi":
+        for key, flag in (("max_output_tokens", "--max-output-tokens"), ("effort", "--effort")):
+            if key in options:
+                argv += [flag, str(options.pop(key))]
     if draft := options.pop("draft", ""):
         argv += ["--draft", draft]
     if options.get("name"):
