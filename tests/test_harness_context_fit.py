@@ -6,6 +6,8 @@ import pytest
 from ml_stack import harness, harnessing
 from ml_stack.serve.serving import Config, Serving
 
+pytestmark = pytest.mark.redteam
+
 
 def fit(**over):
     return SimpleNamespace(**({"context": 8192, "verdict": "yellow", "n_gpu_layers": "auto",
