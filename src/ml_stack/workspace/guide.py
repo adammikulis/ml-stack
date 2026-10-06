@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shlex
 import shutil
 import subprocess
@@ -14,9 +15,11 @@ from ml_stack.files import read_json, write_json
 from ml_stack.log import say
 from ml_stack.sentinel import human
 from ml_stack.workspace import coordinator_client, coordinator_config, onboard, tokens
+from ml_stack.workspace.chain import held
+from ml_stack.workspace.identity import HUMAN, Denied
 from ml_stack.workspace.service import Workspace
 
-__all__ = ["Plan", "Talk", "clipboard", "connect", "walk"]
+__all__ = ["Plan", "Talk", "agent_connect", "clipboard", "connect", "walk"]
 
 COPIERS = (["pbcopy"], ["wl-copy"], ["xclip", "-selection", "clipboard"], ["clip.exe"])
 
@@ -178,9 +181,42 @@ def _connect_one(ws: Workspace, hint: str, plan: Plan, talk: Talk) -> str:
 
 
 def _ensure(ws: Workspace) -> None:
-    if not ws.registry.ids():
+    if not any(ws.registry.info(name)["role"] == HUMAN for name in ws.registry.ids()):
         tokens.store(ws.base, tokens.OWNER_FILE, ws.init("owner"))
         say(f"First use: created the workspace in {ws.base}. No secret is shown on screen.")
+
+
+def agent_connect(ws: Workspace, name: str, found: dict[str, str]) -> dict[str, str]:
+    """Initialize a local project agent or authenticate its saved identity."""
+    if os.name == "nt":
+        tokens.prepare(ws.base)
+    for path in (ws.base, ws.registry.path):
+        if (path.exists() or path.is_symlink()) and (why := tokens.problem(path)):
+            raise Denied(f"workspace storage {path}: {why}")
+    tokens.prepare(ws.base)
+    with held(ws.base / "agent-connect.lock"):
+        created = name not in ws.registry.ids()
+        try:
+            token = tokens.load(ws.base, name)
+            who = ws.auth(token)
+        except Denied:
+            token = ws.registry.bootstrap_agent(name, found,
+                                               (ws.limits.mints_per_identity, ws.limits.agents_live))
+            tokens.store(ws.base, name, token)
+            ws.audit("agent.bootstrap", name, project=found["key"])
+        who = ws.auth(token)
+        if who.role == HUMAN:
+            raise Denied("agent connect needs an agent identity")
+        scope = ws.registry.info(who.parent or who.id)["project"]
+        if not found.get("key") or scope.get("key") != found["key"]:
+            raise Denied("this identity is not authorized for this project; use its authorized invite")
+        if created:
+            ws.board.place(who.id, scope)
+        boards, _ = ws.board.store.state()
+        if not any(board["project"] == found["key"] and (who.parent or who.id) in board["members"]
+                   for board in boards.values()):
+            raise Denied("this identity has no membership in the project board")
+        return {"id": who.id, "project": scope["name"], "state": "connected"}
 
 
 def connect(ws: Workspace, plan: Plan, talk: Talk | None = None) -> list[str]:

@@ -1,8 +1,10 @@
 """The rails around Claude Code and Codex on a local model: the role policy, the hook, the session files."""
 
 import json
+import base64
 import os
 import subprocess
+import shlex
 import sys
 import threading
 import time
@@ -30,6 +32,10 @@ def _hook(event, payload, *args, env=None):
 
 def _verdict(done):
     return json.loads(done.stdout)["hookSpecificOutput"]
+
+
+def _command_text(command):
+    return base64.b64decode(command.rsplit(" ", 1)[1]).decode("utf-16-le") if os.name == "nt" else command
 
 
 class TestPolicy:
@@ -158,13 +164,24 @@ class TestSessionFiles:
             path = files.write("settings.json", claude.settings(pre, "post-cmd", harnessing.WAIT_S))
             files.lock()
             assert tree not in path.parents and files.path not in (tree, *tree.parents)
-            assert not os.access(path, os.W_OK) and not os.access(files.path, os.W_OK)
+            assert not os.access(path, os.W_OK)
+            if os.name == "nt":
+                assert tokens.problem(files.path) == ""
+                with pytest.raises(PermissionError):
+                    path.write_text("replace protected settings")
+            else:
+                assert not os.access(files.path, os.W_OK)
             text = path.read_text()
             for secret in ("ANTHROPIC", "sk-", "TOKEN", "KEY", "password"):
                 assert secret not in text
             hooks = json.loads(text)["hooks"]
-            assert "ml_stack.harnesshook" in hooks["PreToolUse"][0]["hooks"][0]["command"]
-            assert "--role approve-first" in hooks["PreToolUse"][0]["hooks"][0]["command"]
+            command = hooks["PreToolUse"][0]["hooks"][0]["command"]
+            command = _command_text(command)
+            if os.name == "nt":
+                assert "'--role' 'approve-first'" in command
+            else:
+                assert "--role approve-first" in command
+            assert "ml_stack.harnesshook" in command
             assert "disableAllHooks" not in text
         finally:
             files.release()
@@ -179,7 +196,24 @@ class TestSessionFiles:
     def test_the_hook_command_names_this_interpreter_and_quotes_its_paths(self, tmp_path):
         odd = tmp_path / "a dir"
         cmd = harnessing.hook_command("pre", role="plan-and-go", label="x y", root=odd, protect=["/p q"])
-        assert cmd.startswith(sys.executable) and "'x y'" in cmd and "'/p q'" in cmd
+        if os.name == "nt":
+            script = _command_text(cmd)
+            assert script.startswith("& '" + sys.executable + "'")
+            assert "'x y'" in script and "'/p q'" in script
+        else:
+            args = shlex.split(cmd)
+            assert args[0] == sys.executable and "x y" in args and "/p q" in args
+
+    def test_generated_hook_executes_with_quoted_project_paths(self, tmp_path):
+        odd = tmp_path / "a dir & user's project"
+        odd.mkdir()
+        cmd = harnessing.hook_command("pre", role="read-only", label="x y", root=odd, protect=[])
+        payload = {"tool_name": "Read", "tool_input": {"file_path": str(odd / "source.py")}, "cwd": str(odd)}
+        done = subprocess.run(cmd if os.name == "nt" else shlex.split(cmd), input=json.dumps(payload),
+                              capture_output=True, text=True, timeout=60, check=False,
+                              env={**os.environ, "PYTHONPATH": SRC})
+        assert done.returncode == 0, done.stderr
+        assert _verdict(done)["permissionDecision"] == "allow"
 
 
 class TestAdmission:
@@ -263,7 +297,8 @@ class TestLaunch:
         assert seen["model"] == harnessing.DEFAULT_MODEL and seen["want"].ctx == 262144 and seen["want"].slots == 1
         assert seen["env"]["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] == "262144"
         assert seen["env"]["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] == "262144"
-        assert "--role plan-and-go" in seen["settings"]["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+        command = _command_text(seen["settings"]["hooks"]["PreToolUse"][0]["hooks"][0]["command"])
+        assert ("'--role' 'plan-and-go'" if os.name == "nt" else "--role plan-and-go") in command
         assert not Path(seen["command"][2]).exists() and seen["released"]
 
     def test_codex_gets_its_own_home_with_the_provider_and_the_hook_flag(self, monkeypatch, tmp_path):
@@ -314,17 +349,18 @@ class TestWorkspaceCommands:
         assert harnesshook.nudge(hostile) == "nudge text"
         assert hostile in Path(f"{exe}.argv").read_text().splitlines()
 
-    def test_a_failed_announcement_says_the_command_that_joins(self, monkeypatch):
+    def test_a_failed_announcement_identifies_the_workspace_trust_check(self, monkeypatch):
         said = []
         monkeypatch.setenv("PATH", "/nonexistent")
         assert harnessid.announce(harnessid.Seat("l", "claude-code"), "t", said.append) is False
-        assert "ml-stack-workspace connect" in said[0]
+        assert "selected authority and device trust" in said[0]
 
 
 class TestSeat:
     @pytest.fixture(autouse=True)
     def _own_workspace(self, monkeypatch, tmp_path):
         clean_env(monkeypatch, tmp_path)
+        monkeypatch.setattr(harnessid.project_connection, "auto_attach", lambda *a: None, raising=False)
 
     @pytest.fixture
     def person(self, monkeypatch):
@@ -340,7 +376,7 @@ class TestSeat:
         assert len(harnessid.agent_name("x" * 80, "codex")) <= 48
         assert harnessid.agent_name("m", "codex", "mine") == "mine"
 
-    def test_a_person_started_launcher_mints_places_and_revokes_without_printing_a_token(self, person, tmp_path):
+    def test_a_launcher_connects_a_persistent_agent_without_printing_a_token(self, person, tmp_path):
         from ml_stack.workspace import Workspace, tokens
 
         said = []
@@ -348,16 +384,15 @@ class TestSeat:
         project.mkdir()
         seat = harnessid.invite("local-test-codex", project, "claude-code", said.append)
         ws = Workspace()
-        assert seat.minted and ws.registry.role_of("local-test-codex") == "agent"
+        assert seat.persistent and not seat.minted and ws.registry.role_of("local-test-codex") == "agent"
         token_file = tokens.directory(ws.base) / "local-test-codex"
-        assert token_file.stat().st_mode & 0o777 == 0o600
+        assert tokens.problem(token_file) == ""
         secret = token_file.read_text().strip()
         assert secret not in "".join(said) and seat.flags() == ["--agent", "local-test-codex"]
-        assert seat.revoke() is True and not token_file.exists()
-        from ml_stack.workspace import Denied
-
-        with pytest.raises(Denied):
-            ws.auth(secret)
+        assert seat.revoke() is False and token_file.exists()
+        assert ws.auth(secret).id == "local-test-codex"
+        again = harnessid.invite("local-test-codex", project, "claude-code", said.append)
+        assert again.persistent and tokens.load(ws.base, again.name) == secret
 
     def test_the_seat_is_on_the_project_board_with_the_quiet_defaults(self, person, tmp_path):
         from ml_stack.workspace import Workspace
@@ -369,17 +404,18 @@ class TestSeat:
         assert any("local-test-codex" in b["members"] for k, b in boards.items() if k != "#general")
         assert not subs.get("local-test-codex")
 
-    def test_a_person_started_launcher_records_the_verified_model_and_an_agent_one_does_not(self, person, monkeypatch, tmp_path):
+    def test_a_launcher_records_its_model_as_claimed(self, person, monkeypatch, tmp_path):
         from ml_stack.workspace import Workspace
 
         seat = harnessid.invite("local-test-codex", tmp_path, "claude-code", lambda _: None)
         assert seat.record_model("qwen-27b", "codex") is True
         assert "qwen-27b" in json.dumps(Workspace(seat.base).registry.info("local-test-codex"))
+        assert Workspace(seat.base).registry.info(seat.name)["model_state"] == "claimed"
         monkeypatch.setenv("CLAUDECODE", "1")
-        assert seat.record_model("other", "codex") is False
+        assert seat.record_model("other", "codex") is True
         assert harnessid.Seat("x", "p").record_model("m", "codex") is False
 
-    def test_ending_the_session_revokes_the_identity_and_removes_the_files(self, person, monkeypatch, tmp_path):
+    def test_ending_the_session_keeps_identity_and_removes_harness_files(self, person, monkeypatch, tmp_path):
         from ml_stack.workspace import Denied, Workspace, tokens
 
         seen = {}
@@ -399,15 +435,45 @@ class TestSeat:
 
         assert codex.launch(["--codex", str(binary), "--project", str(tmp_path / "proj")], say=lambda _: None,
                             run_codex=run) == 0
-        with pytest.raises(Denied):
-            Workspace().auth(seen["token"])
-        assert not (tokens.directory(Workspace().base) / "local-qwen-codex").exists()
+        assert Workspace().auth(seen["token"]).id == "local-qwen-codex"
+        assert (tokens.directory(Workspace().base) / "local-qwen-codex").exists()
         assert not seen["home"].exists()
 
-    def test_an_agent_launcher_requires_an_authenticated_parent_instead_of_using_a_label(self, monkeypatch, tmp_path):
+    def test_an_agent_launcher_initializes_itself_without_a_parent_credential(self, monkeypatch, tmp_path):
         monkeypatch.setenv("CLAUDECODE", "1")
-        with pytest.raises(ValueError, match="workspace identity could not be created"):
-            harnessid.invite("local-test-codex", tmp_path, "claude-code", lambda _: None)
+        seat = harnessid.invite("local-test-codex", tmp_path, "claude-code", lambda _: None)
+        assert seat.name == "local-test-codex" and seat.persistent
+
+    @pytest.mark.parametrize("authority", ["selected", "discovered", "coordinator"])
+    def test_remote_launcher_uses_selected_authority_without_local_bootstrap(self, monkeypatch, tmp_path, authority):
+        calls = []
+        class Remote:
+            base = tmp_path
+            def token(self, **kwargs):
+                return "saved-session"
+            def call(self, operation, token, *args):
+                calls.append((operation, args))
+                return {"id": "device-worker"}
+            def ensure(self, base, name, **kwargs):
+                calls.append(("ensure", kwargs))
+                return "device-worker"
+        remote = Remote()
+        canonical = authority != "coordinator"
+        connection = {"host": "https://192.0.2.1", "project_id": "a" * 32}
+        selected = connection if authority == "selected" else None
+        monkeypatch.setattr(harnessid.project_connection, "selected", lambda *a: selected)
+        monkeypatch.setattr(harnessid.project_connection, "auto_attach",
+                            lambda *a: connection if authority == "discovered" else None, raising=False)
+        monkeypatch.setattr(harnessid.project_connection, "RemoteWorkspace", lambda *a, **k: remote)
+        monkeypatch.setattr(harnessid.coordinator_client, "client", lambda *a: remote)
+        monkeypatch.setattr(harnessid, "authoritative", lambda *a: {"key": "a" * 32, "name": "project"})
+        monkeypatch.setattr(harnessid.limits, "root", lambda: tmp_path)
+        monkeypatch.setattr(harnessid, "Workspace", lambda *a: pytest.fail("local fallback"))
+        seat = harnessid.invite("worker", tmp_path, "", lambda _: None)
+        assert seat.name == "device-worker" and seat.persistent
+        assert seat.record_model("test-model", "test-harness")
+        assert calls[-1][0] == ("claim_model" if canonical else "ensure")
+        assert not seat.revoke()
 
     def test_a_fake_endpoint_cannot_verify_a_delegated_agents_model(self, monkeypatch, tmp_path):
         from ml_stack.testing import FakeLlamaServer, Served

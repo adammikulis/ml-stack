@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections.abc import Callable
 from http.client import HTTPException
 from pathlib import Path
 
@@ -22,17 +23,21 @@ class Seat:
     base: Path | None = None
     issuer: Identity | None = None
     managed_inbox: bool = False
+    persistent: bool = False
+    record_claim: Callable[[str, str], object] | None = None
 
     def flags(self) -> list[str]:
         """The workspace command flags this session's messages carry."""
         return ["--agent", self.parent, "--label", self.name] if self.parent else ["--agent", self.name]
 
     def record_model(self, alias: str, harness: str, server: str = "") -> bool:
-        """Record a private child's served model as claimed; only a person can verify it.
-        False on an unminted seat or a refusal."""
-        if not self.minted:
+        """Record a connected agent's model as claimed; False on an inactive seat or refusal."""
+        if not self.minted and not self.persistent:
             return False
         try:
+            if self.record_claim is not None:
+                self.record_claim(Path(alias).name, harness)
+                return True
             ws = Workspace(self.base)
             if server:
                 who = ws.auth(tokens.load(ws.base, self.name))
@@ -40,7 +45,7 @@ class Seat:
                     return False
                 ws.claim_model(tokens.load(ws.base, self.name), Path(alias).name, harness)
             else:
-                ws.set_model(self.name, alias, harness, verified=True)
+                ws.claim_model(tokens.load(ws.base, self.name), alias, harness)
         except (Denied, ValueError, OSError, HTTPException):
             return False
         return True

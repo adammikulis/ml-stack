@@ -7,8 +7,9 @@ import re
 from pathlib import Path
 
 from ml_stack.memory.project import detect
+from ml_stack.fleet.projects import identity
 
-__all__ = ["clean", "describe"]
+__all__ = ["authoritative", "clean", "describe"]
 
 NAME_MAX = 40
 
@@ -25,3 +26,9 @@ def describe(path: str = "", *, none: bool = False, start: Path | None = None) -
         return {}
     found = detect(start, explicit=Path(path) if path else None)
     return {} if found is None else {"key": found.key, "name": clean(found.name) or "project"}
+
+
+def authoritative(path: str = "", *, start: Path | None = None) -> dict[str, str]:
+    """Return the Fleet project identity and display name of the current checkout."""
+    found = detect(start, explicit=Path(path) if path else None)
+    return {} if found is None else {"key": identity(found.root), "name": clean(found.name) or "project"}

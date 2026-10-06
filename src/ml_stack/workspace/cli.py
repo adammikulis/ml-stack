@@ -82,19 +82,40 @@ def _label(args: argparse.Namespace) -> str:
 
 
 def _token(args: argparse.Namespace) -> str:
-    return tokens.resolve(limits.root(), token_file=args.token_file, agent=args.agent)
+    connection = _project_connection()
+    if connection is not None:
+        return _context(args, connection)[1]
+    base = limits.root()
+    agent = args.agent or os.environ.get(tokens.AGENT_ENV, "")
+    remote = coordinator_client.client(base)
+    if agent and not args.token_file and remote:
+        args.agent = remote.ensure(base, agent, project=project.authoritative())
+    elif agent and not args.token_file:
+        ws = Workspace(base)
+        try:
+            ws.auth(tokens.load(base, agent))
+        except Denied:
+            guide.agent_connect(ws, agent, project.describe())
+    return tokens.resolve(base, token_file=args.token_file, agent=args.agent)
 
 
-def _context(args: argparse.Namespace):
-    connection = project_connection.selected()
+def _project_connection(cwd: Path | None = None):
+    return project_connection.selected(cwd) or project_connection.auto_attach(cwd)
+
+
+def _context(args: argparse.Namespace, connection=None):
+    connection = connection or _project_connection()
     if connection is None:
         return Workspace(), _token(args)
     remote = project_connection.RemoteWorkspace(connection["host"], connection["project_id"],
                                                 cluster=connection.get("cluster", ""),
                                                 cluster_key=Path(connection["cluster_key"])
                                                 if connection.get("cluster_key") else None)
-    token = remote.token(agent=args.agent or connection.get("agent", ""),
+    token = remote.token(agent=args.agent or os.environ.get(tokens.AGENT_ENV, "") or connection.get("agent", ""),
                          token_file=getattr(args, "token_file", ""))
+    if not connection.get("agent"):
+        who = remote.call("whoami", token)
+        project_connection.bind(remote, Path(connection["root"]), who["id"], connection.get("cluster", ""))
     return project_connection.CanonicalWorkspace(remote, token), token
 
 
@@ -296,6 +317,29 @@ def _setup(args: argparse.Namespace, ws: Workspace) -> int:
 
 
 def _connect(args: argparse.Namespace, ws: Workspace) -> int:
+    agent = args.agent or os.environ.get(tokens.AGENT_ENV, "")
+    if agent:
+        if args.no_project or args.one_agent or args.remote or args.code_only or args.name:
+            raise Denied("agent connect takes --agent and --project; invite options need a person")
+        connection = _project_connection()
+        if connection is not None:
+            canonical, token = _context(args, connection)
+            who = canonical.auth(token)
+            info = canonical.registry.info(who.id)
+            if info.get("project", {}).get("key") != connection["project_id"]:
+                raise Denied("this identity is not authorized for the canonical project")
+            _show(args, {"id": who.id, "project": connection["project_id"], "state": "connected"})
+            return 0
+        found = project.describe(args.project)
+        remote = coordinator_client.client(ws.base)
+        if remote:
+            found = project.authoritative(args.project)
+            name = remote.ensure(ws.base, agent, project=found)
+            result = {"id": name, "project": found.get("name", ""), "state": "connected"}
+        else:
+            result = guide.agent_connect(ws, agent, found)
+        _show(args, result)
+        return 0
     plan = guide.Plan([args.name] if args.name else [], 0.0 if args.no_live else args.live_seconds,
                       args.wait_seconds, shared=not args.one_agent,
                       project=project.describe(args.project, none=args.no_project),
@@ -458,7 +502,7 @@ LIVE = [flag("--no-live", action="store_true", help="skip the live check"),
         flag("--live-seconds", type=float, default=120.0, help="how long the live check waits"),
         flag("--wait-seconds", type=float, default=600.0, help="how long to wait for a join")]
 BARE: tuple[tuple[str, str, list[Any], Callable[[argparse.Namespace, Workspace], int]], ...] = (
-    ("connect", "ONE command for the person: copy a paste block, wait for the agent, check it",
+    ("connect", "initialize or reconnect --agent ID; without an agent, share a person-approved invite",
      [flag("--name", default="", help="a suggested id for the agent; it may pick its own"),
       flag("--project", default="", help="the project folder (default: the git root you are in)"),
       flag("--no-project", action="store_true", help="connect without naming a project"),
@@ -466,6 +510,7 @@ BARE: tuple[tuple[str, str, list[Any], Callable[[argparse.Namespace, Workspace],
            help="a single-use code (default: one paste for up to 10 agents, one hour)"),
       flag("--remote", action="store_true", help="require an active shared host and include its authority"),
       flag("--code-only", action="store_true", help="print and copy the invite, then exit without waiting"),
+      flag("--label", default="", help="the helper label under this agent identity"),
       *LIVE], _connect),
     ("join", "an agent redeems an invite code and saves its private token", [
         flag("code"), flag("--name", default="", help="a short id for yourself, e.g. codex"),
@@ -665,11 +710,12 @@ def _guarded(run: Callable[[argparse.Namespace], int | None]) -> Callable[[argpa
 
 def _runner(handler: Handler) -> Callable[[argparse.Namespace], int]:
     def run(args: argparse.Namespace) -> int:
-        remote = coordinator_client.client(limits.root())
-        if args.cmd == 'task-dematerialize' and (remote or project_connection.selected() is not None):
-            raise Denied('native task checkout recovery runs only on its local coordinator')
-        if remote and project_connection.selected() is not None:
+        connection = _project_connection()
+        if connection and coordinator_config.load(limits.root()).get("mode") == "remote":
             raise Denied("select one workspace authority before dispatching commands")
+        remote = None if connection else coordinator_client.client(limits.root())
+        if args.cmd == 'task-dematerialize' and (remote or connection):
+            raise Denied('native task checkout recovery runs only on its local coordinator')
         if remote:
             options = next(options for name, _help, options, _fn in TABLE if name == args.cmd)
             for field in ('body', 'text', 'payload'):
@@ -678,7 +724,7 @@ def _runner(handler: Handler) -> Callable[[argparse.Namespace], int]:
             result = remote.command(coordinator_client.argv_for(args, [*COMMON, *options]),
                                     _token(args), request_id=args.request_id)
         else:
-            ws, token = _context(args)
+            ws, token = _context(args, connection)
             if isinstance(ws, Workspace) and handler is not _init:
                 ws.registry._record_device(ws.auth(token).id, onboard.device_metadata.current())
             result = handler(args, ws, token)
@@ -717,12 +763,17 @@ COMMANDS.add("remote", _guarded(_remote), help="attach and use one shared projec
              options=remote_cli.OPTIONS)
 def _bare(handler: Callable[[argparse.Namespace, Workspace], int]) -> Callable[[argparse.Namespace], int]:
     def run(args):
-        if coordinator_client.client(limits.root()) and handler is not _join:
-            raise Denied('this is a local-only operation; this device uses a shared coordinator')
-        if project_connection.selected() is not None:
+        connection = _project_connection()
+        if handler is _connect and (args.agent or os.environ.get(tokens.AGENT_ENV, "")):
+            if connection is not None:
+                return handler(args, None)
+            return handler(args, Workspace())
+        if connection is not None:
             if handler in {_brief, _hook_snippet}:
                 return handler(args, None)
             raise Denied("this command is unavailable in a canonical project; use its shared board")
+        if coordinator_client.client(limits.root()) and handler is not _join:
+            raise Denied('this is a local-only operation; this device uses a shared coordinator')
         return handler(args, Workspace())
     return _guarded(run)
 
