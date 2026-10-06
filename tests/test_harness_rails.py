@@ -240,7 +240,7 @@ class TestLaunch:
     @pytest.fixture(autouse=True)
     def _quiet(self, monkeypatch, tmp_path):
         monkeypatch.setattr(codex.tokens, "load", lambda base, agent: "assigned-test-seat")
-        monkeypatch.setattr(harnessid, "invite", lambda name, project, parent, say: harnessid.Seat(name, parent, base=tmp_path / "workspace"))
+        monkeypatch.setattr(harnessid, "invite", lambda name, project, parent, say, **kwargs: harnessid.Seat(name, parent, base=tmp_path / "workspace"))
         monkeypatch.setattr(harnessid, "announce", lambda *a, **k: True)
         monkeypatch.setattr(claude, "alias_of", lambda url, model: "qwen-27b")
         monkeypatch.setattr(codex, "alias_of", lambda url, model: "qwen-27b")
@@ -462,8 +462,8 @@ class TestCodingAgent:
         monkeypatch.setattr(harnessing, "serving", _fake_serving(seen))
         monkeypatch.setattr(codex, "alias_of", lambda url, model: "qwen-27b")
         monkeypatch.setattr(harnessid, "announce", lambda *a, **k: True)
-        monkeypatch.setattr(harnessid, "invite", lambda name, project, parent, say: seen.update(
-            name=name, project=project) or harnessid.Seat(name, parent, base=tmp_path / "workspace"))
+        monkeypatch.setattr(harnessid, "invite", lambda name, project, parent, say, *, claim: seen.update(
+            name=name, project=project, claim=claim) or harnessid.Seat(name, parent, base=tmp_path / "workspace"))
         binary = tmp_path / "codex"
         binary.write_text("#!/bin/sh\n")
         (tmp_path / "proj").mkdir()
@@ -478,6 +478,7 @@ class TestCodingAgent:
                                           harness_args=["exec", "go"], say=lambda _: None, run_codex=run) == 0
         assert seen["model"] == harnessing.DEFAULT_MODEL == "Qwen3.8-27B-UD-Q4_K_XL.gguf"
         assert seen["name"] == "local-qwen-27b-codex" and seen["project"] == (tmp_path / "proj").resolve()
+        assert seen["claim"] == ("qwen-27b", "codex")
         assert "reviewer" in seen["agents"] and seen["command"][-2:] == ["exec", "go"]
         assert "workspace-write" in seen["command"]
 
