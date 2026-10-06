@@ -52,7 +52,7 @@ def invite(name: str, project_dir: Path, parent: str, say: Callable[[str], None]
         say(f"error: {name!r} is not a usable agent id (a-z, 0-9, . _ -; up to {LONGEST})")
         raise ValueError("the coding agent needs a usable workspace identity")
     try:
-        connection = project_connection.selected(project_dir)
+        connection = project_connection.selected(project_dir) or project_connection.auto_attach(project_dir)
         if connection is not None:
             remote = project_connection.RemoteWorkspace(
                 connection["host"], connection["project_id"], cluster=connection.get("cluster", ""),

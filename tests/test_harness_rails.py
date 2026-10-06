@@ -360,6 +360,7 @@ class TestSeat:
     @pytest.fixture(autouse=True)
     def _own_workspace(self, monkeypatch, tmp_path):
         clean_env(monkeypatch, tmp_path)
+        monkeypatch.setattr(harnessid.project_connection, "auto_attach", lambda *a: None, raising=False)
 
     @pytest.fixture
     def person(self, monkeypatch):
@@ -443,8 +444,8 @@ class TestSeat:
         seat = harnessid.invite("local-test-codex", tmp_path, "claude-code", lambda _: None)
         assert seat.name == "local-test-codex" and seat.persistent
 
-    @pytest.mark.parametrize("canonical", [True, False])
-    def test_remote_launcher_uses_selected_authority_without_local_bootstrap(self, monkeypatch, tmp_path, canonical):
+    @pytest.mark.parametrize("authority", ["selected", "discovered", "coordinator"])
+    def test_remote_launcher_uses_selected_authority_without_local_bootstrap(self, monkeypatch, tmp_path, authority):
         calls = []
         class Remote:
             base = tmp_path
@@ -457,8 +458,12 @@ class TestSeat:
                 calls.append(("ensure", kwargs))
                 return "device-worker"
         remote = Remote()
-        selected = {"host": "https://192.0.2.1", "project_id": "a" * 32} if canonical else None
+        canonical = authority != "coordinator"
+        connection = {"host": "https://192.0.2.1", "project_id": "a" * 32}
+        selected = connection if authority == "selected" else None
         monkeypatch.setattr(harnessid.project_connection, "selected", lambda *a: selected)
+        monkeypatch.setattr(harnessid.project_connection, "auto_attach",
+                            lambda *a: connection if authority == "discovered" else None, raising=False)
         monkeypatch.setattr(harnessid.project_connection, "RemoteWorkspace", lambda *a, **k: remote)
         monkeypatch.setattr(harnessid.coordinator_client, "client", lambda *a: remote)
         monkeypatch.setattr(harnessid, "authoritative", lambda *a: {"key": "a" * 32, "name": "project"})

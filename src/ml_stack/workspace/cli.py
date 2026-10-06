@@ -81,12 +81,15 @@ def _label(args: argparse.Namespace) -> str:
 
 
 def _token(args: argparse.Namespace) -> str:
+    connection = _project_connection()
+    if connection is not None:
+        return _context(args, connection)[1]
     base = limits.root()
     agent = args.agent or os.environ.get(tokens.AGENT_ENV, "")
     remote = coordinator_client.client(base)
     if agent and not args.token_file and remote:
         args.agent = remote.ensure(base, agent, project=project.authoritative())
-    elif agent and not args.token_file and not project_connection.selected():
+    elif agent and not args.token_file:
         ws = Workspace(base)
         try:
             ws.auth(tokens.load(base, agent))
@@ -95,16 +98,23 @@ def _token(args: argparse.Namespace) -> str:
     return tokens.resolve(base, token_file=args.token_file, agent=args.agent)
 
 
-def _context(args: argparse.Namespace):
-    connection = project_connection.selected()
+def _project_connection(cwd: Path | None = None):
+    return project_connection.selected(cwd) or project_connection.auto_attach(cwd)
+
+
+def _context(args: argparse.Namespace, connection=None):
+    connection = connection or _project_connection()
     if connection is None:
         return Workspace(), _token(args)
     remote = project_connection.RemoteWorkspace(connection["host"], connection["project_id"],
                                                 cluster=connection.get("cluster", ""),
                                                 cluster_key=Path(connection["cluster_key"])
                                                 if connection.get("cluster_key") else None)
-    token = remote.token(agent=args.agent or connection.get("agent", ""),
+    token = remote.token(agent=args.agent or os.environ.get(tokens.AGENT_ENV, "") or connection.get("agent", ""),
                          token_file=getattr(args, "token_file", ""))
+    if not connection.get("agent"):
+        who = remote.call("whoami", token)
+        project_connection.bind(remote, Path(connection["root"]), who["id"], connection.get("cluster", ""))
     return project_connection.CanonicalWorkspace(remote, token), token
 
 
@@ -310,9 +320,9 @@ def _connect(args: argparse.Namespace, ws: Workspace) -> int:
     if agent:
         if args.no_project or args.one_agent or args.remote or args.code_only or args.name:
             raise Denied("agent connect takes --agent and --project; invite options need a person")
-        connection = project_connection.selected()
+        connection = _project_connection()
         if connection is not None:
-            canonical, token = _context(args)
+            canonical, token = _context(args, connection)
             who = canonical.auth(token)
             info = canonical.registry.info(who.id)
             if info.get("project", {}).get("key") != connection["project_id"]:
@@ -695,9 +705,10 @@ def _guarded(run: Callable[[argparse.Namespace], int | None]) -> Callable[[argpa
 
 def _runner(handler: Handler) -> Callable[[argparse.Namespace], int]:
     def run(args: argparse.Namespace) -> int:
-        remote = coordinator_client.client(limits.root())
-        if remote and project_connection.selected() is not None:
+        connection = _project_connection()
+        if connection and coordinator_config.load(limits.root()).get("mode") == "remote":
             raise Denied("select one workspace authority before dispatching commands")
+        remote = None if connection else coordinator_client.client(limits.root())
         if remote:
             options = next(options for name, _help, options, _fn in TABLE if name == args.cmd)
             for field in ('body', 'text', 'payload'):
@@ -706,7 +717,7 @@ def _runner(handler: Handler) -> Callable[[argparse.Namespace], int]:
             result = remote.command(coordinator_client.argv_for(args, [*COMMON, *options]),
                                     _token(args), request_id=args.request_id)
         else:
-            ws, token = _context(args)
+            ws, token = _context(args, connection)
             result = handler(args, ws, token)
         _show(args, result)
         _held_note(result)
@@ -743,16 +754,17 @@ COMMANDS.add("remote", _guarded(_remote), help="attach and use one shared projec
              options=remote_cli.OPTIONS)
 def _bare(handler: Callable[[argparse.Namespace, Workspace], int]) -> Callable[[argparse.Namespace], int]:
     def run(args):
+        connection = _project_connection()
         if handler is _connect and (args.agent or os.environ.get(tokens.AGENT_ENV, "")):
-            if project_connection.selected() is not None:
+            if connection is not None:
                 return handler(args, None)
             return handler(args, Workspace())
-        if coordinator_client.client(limits.root()) and handler is not _join:
-            raise Denied('this is a local-only operation; this device uses a shared coordinator')
-        if project_connection.selected() is not None:
+        if connection is not None:
             if handler in {_brief, _hook_snippet}:
                 return handler(args, None)
             raise Denied("this command is unavailable in a canonical project; use its shared board")
+        if coordinator_client.client(limits.root()) and handler is not _join:
+            raise Denied('this is a local-only operation; this device uses a shared coordinator')
         return handler(args, Workspace())
     return _guarded(run)
 

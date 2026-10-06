@@ -60,18 +60,20 @@ not vetoes. A red you can explain is a change; a red you cannot is a bug.
 
 ## Scoped merge gates and background verification
 
-Every development integration batch requires independent review of each branch and the affected
-tests selected by `scripts/test quick` or explicit reviewed selectors. Subagents run only the
-checks affected by their changes. The main coordinator assembles the reviewed batch in an
-isolated integration worktree and runs the structural checks against its combined tree:
+Agents test their own changed behavior with reviewed explicit affected selectors through
+`scripts/test`. Include relevant browser, subprocess and packaging tests for changed surfaces.
+Report the exact tree, commands, results and limitations. Documentation-only changes need
+consistency review and clean diffs. Workers do not run shared gates or full suites.
+
+The main coordinator independently reviews each branch and assembles the reviewed integration
+batch in an isolated worktree. It runs shared structural/security checks once on the combined
+tree before the primary fast-forward integration and publication: `scripts/test gate`,
 `scripts/budgets`, `scripts/redteam_coverage.py --check`, clean generated references, layer and
-wiring checks, serving-bypass checks, and the human-only floor. These gates precede the primary
-checkout's fast-forward integration. Include the relevant browser, subprocess and packaging
-tests when those surfaces change. Repeat affected checks when a subsequent change or remote
-reconciliation changes their surface; run full structural checks and full suites through main
-coordination per batch or schedule, not at every intermediate commit. Record the exact tree,
-commands and results. Documentation-only changes need consistency review and clean diffs, not
-unrelated test runs. Do not raise budgets or weaken guards to clear a gate.
+wiring checks, serving-bypass checks, and the human-only floor. Repeat incremental affected
+checks when remote reconciliation or a subsequent change affects their surface. Main coordination
+also handles full end-to-end verification and schedules full and full red-team suites in the
+background. Run only one background full suite at a time. Do not repeat shared checks for every
+leaf branch or intermediate commit. Do not raise budgets or weaken guards to clear a check.
 
 Full and full red-team runs execute in the background after a reviewed batch or on a schedule.
 They do not block every scoped merge or publication, and a missing cold selector cache is not
@@ -233,7 +235,7 @@ needs more than that, the missing piece is a command or a parameter here.
 The main session plans, writes the briefs, lands branches, and does what an agent cannot: a
 decision that needs the whole conversation, a conflict between two agents' work, a check on a
 claim before it is relayed. Everything else -- reading a subsystem, writing the code and its
-tests, running the suite, merging its own branch -- goes to a subagent, one per branch, in its
+tests for its own changes -- goes to a subagent, one per branch, in its
 own worktree. It does a piece itself only when handing it off would cost more: a one-line edit, a
 change that needs what only this conversation knows, a thing an agent has failed at twice.
 
@@ -450,17 +452,19 @@ ml-stack never sees or stores the password, and never installs a passwordless `s
 
 ## Running the tests
 
-Follow **Scoped merge gates and background verification** above. Use `scripts/test quick`
-for affected selection, or reviewed explicit `scripts/test all tests/<affected-file>…` selectors
-when slow browser/process checks are required. Invalid selectors fail before admission; never
+Follow **Scoped merge gates and background verification** above. Workers use reviewed explicit
+`scripts/test all tests/<affected-file>…` selectors for their own changes, including relevant
+slow browser/process checks. The main agent owns `scripts/test quick`: its cold-map recording
+and fallback can start full runs. Invalid selectors fail before admission; never
 replace a missing selector with an unreviewed omission. Do not run a full suite after every
 intermediate commit or require full Linux testing for a local merge while Linux is paused.
 
 The maintained tiers are `fast` (neither slow nor heavy), `full` (not slow), `slow` (only slow)
 and `all` (including slow). `tests/README.md` describes their mechanics; the policy above
 controls when each is authorized. Run the relevant slow tests for packaging, page and Fleet
-changes. Use `-n 0` when a failure requires sequential ordering; otherwise use broker-granted
-workers, not a fixed worker count or bare `pytest -n N`.
+changes. Scoped runs default to one worker. Use `-n 1` for sequential ordering; explicit `-n 0`
+requests an automatic pool up to broker capacity. Explicit worker ceilings remain effective.
+Never run bare `pytest -n N` outside maintained admission.
 
 Agents share the machine. `scripts/test` and, when Linux resumes, `scripts/test-on-linux`
 acquire maintained CPU admission; inspect `scripts/testslots.py status` to see ownership.

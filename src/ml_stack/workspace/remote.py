@@ -111,7 +111,7 @@ class RemoteWorkspace:
         if not valid_id(name):
             raise Denied("select a valid local agent identity")
         if not self.base.exists() and not self.base.is_symlink():
-            self.base.mkdir(parents=True, mode=0o700)
+            self.base.mkdir(parents=True, mode=0o700, exist_ok=True)
             tokens.prepare(self.base)
         self._safe_storage(self.base)
         lock = self.base / "remote-sessions.lock"

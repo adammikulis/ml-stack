@@ -27,6 +27,30 @@ PROJECT = "a" * 32
 OTHER = "b" * 32
 
 
+@pytest.mark.parametrize("discovered", [False, True])
+def test_project_authority_routes_before_global_coordinator_discovery(monkeypatch, discovered):
+    connection = {"host": "https://192.0.2.1", "project_id": PROJECT, "agent": "worker"}
+    monkeypatch.setattr(project_connection, "selected", lambda *a: None if discovered else connection)
+    monkeypatch.setattr(project_connection, "auto_attach", lambda *a: connection, raising=False)
+    monkeypatch.setattr(cli.coordinator_config, "load", lambda *a: {})
+    monkeypatch.setattr(cli.coordinator_client, "client", lambda *a: pytest.fail("global discovery"))
+    monkeypatch.setattr(cli, "_context", lambda args, chosen=None: (chosen, "project-session"))
+    args = SimpleNamespace(json=True)
+    seen = []
+    run = cli._runner(lambda args, ws, token: seen.append((ws, token)) or {"state": "connected"})
+    assert run(args) == 0
+    assert seen == [(connection, "project-session")]
+
+
+def test_unavailable_selected_project_cannot_fall_back_to_global_authority(monkeypatch):
+    from ml_stack.workspace.identity import Denied
+    def selected(*args):
+        raise Denied("selected project unavailable")
+    monkeypatch.setattr(project_connection, "selected", selected)
+    monkeypatch.setattr(cli.coordinator_client, "client", lambda *a: pytest.fail("authority fallback"))
+    assert cli._runner(lambda *a: pytest.fail("unavailable project dispatch"))(SimpleNamespace(json=True)) == 3
+
+
 def test_canonical_client_recovers_and_remembers_device_scoped_identity(tmp_path, monkeypatch):
     remote = RemoteWorkspace.__new__(RemoteWorkspace)
     remote.base, remote.project_id = tmp_path / "sessions", PROJECT
@@ -136,6 +160,17 @@ def test_canonical_recovery_serializes_read_ensure_and_store(tmp_path, monkeypat
     assert not errors and results == ["mlws1.worker.secret1"] * 2
     assert count == ["ensure"]
     assert tokens.load(first.base, "worker") == results[0]
+
+
+def test_canonical_first_use_accepts_directory_created_by_another_client(tmp_path, monkeypatch):
+    remote = RemoteWorkspace.__new__(RemoteWorkspace)
+    remote.base, remote.project_id = tmp_path / "sessions", PROJECT
+    tokens.prepare(remote.base)
+    existing = type(remote.base).exists
+    monkeypatch.setattr(type(remote.base), "exists", lambda path: False if path == remote.base else existing(path))
+    monkeypatch.setattr(remote, "_device_transport", lambda: None)
+    monkeypatch.setattr(remote, "_request", lambda *a: {"id": "worker", "token": "mlws1.worker.saved"})
+    assert remote.token(agent="worker") == "mlws1.worker.saved"
 
 
 @pytest.fixture
