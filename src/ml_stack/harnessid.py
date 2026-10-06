@@ -16,7 +16,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from ml_stack.person import HumanRequired
-from ml_stack.workspace import Denied, Workspace, onboard, tokens
+from ml_stack.workspace import Denied, Workspace, automatic_connection, onboard, tokens
 from ml_stack.workspace.harness_seat import Seat
 from ml_stack.workspace.identity import valid_name
 from ml_stack.workspace.project import describe
@@ -60,6 +60,9 @@ def invite(name: str, project_dir: Path, parent: str, say: Callable[[str], None]
         say(f"error: {name!r} is not a usable agent id (a-z, 0-9, . _ -; up to {LONGEST})")
         raise ValueError("the coding agent needs a usable workspace identity")
     try:
+        canonical = automatic_connection.startup(project_dir, name, parent)
+        if canonical is not None:
+            return canonical
         ws = Workspace()
         try:
             onboard.setup(ws, [name], [name] if ws.registry.role_of(name) else [], onboard.TOKEN_S)

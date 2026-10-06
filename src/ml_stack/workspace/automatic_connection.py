@@ -4,11 +4,13 @@ import time
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from ml_stack import person, worktreerules
 from ml_stack.fleet.discovery import memberships
 from ml_stack.fleet.project_client import catalogue
 from ml_stack.fleet.projects import identity
 from ml_stack.fleet.remote import Peer
-from ml_stack.workspace.identity import Denied
+from ml_stack.workspace.harness_seat import Seat
+from ml_stack.workspace.identity import AGENT, Denied
 from ml_stack.workspace.project_connection import bind, selected
 from ml_stack.workspace.remote import RemoteWorkspace
 
@@ -107,3 +109,43 @@ def connect(root: Path, name: str, *, model="", harness="", cluster_key=None,
     joined = remote.enroll(name, model=model, harness=harness,
                            authority_machine=choice["authority_machine"])
     return bind(remote, root, joined["id"], choice["cluster"])
+
+
+def startup(root: Path, name: str, parent: str = "") -> Seat | None:
+    """Acquire a canonical project seat once when a native harness starts."""
+    if not worktreerules.checkouts(root):
+        return None
+    prior = selected(root)
+    choice = discover(root)
+    if choice is None and prior is None:
+        return None
+    if prior and prior["project_id"] != identity(root):
+        raise Denied("this checkout does not match its canonical Board project")
+    if prior and choice and (prior["host"], prior["project_id"]) != (choice["host"], choice["project_id"]):
+        raise Denied("this project already names another canonical Board")
+    configuration = prior or choice
+    remote = RemoteWorkspace(configuration["host"], configuration["project_id"],
+                             cluster=configuration.get("cluster", ""),
+                             cluster_key=Path(configuration["cluster_key"])
+                             if configuration.get("cluster_key") else None)
+    agent_started = bool(person.marked())
+    if agent_started and not prior:
+        raise Denied("an agent-started native session requires its parent's canonical Board connection")
+    if prior and prior.get("agent"):
+        actor = parent if agent_started else prior["agent"]
+        if agent_started and actor != prior["agent"]:
+            raise Denied("the native session parent does not match this project's connected agent")
+        who = remote.call("whoami", remote.token(agent=actor))
+        if who.get("id") != actor or who.get("role") != AGENT:
+            raise Denied("native sessions delegate from their authenticated project agent")
+        made = remote.delegate(actor, name)
+        return Seat(made["id"], minted=True, base=remote.base,
+                    remote=remote, lifecycle_base=remote.base)
+    if agent_started or choice is None:
+        raise Denied("this native session has no authenticated project parent")
+    made = remote.enroll(f"native-{name}"[:48], model="", harness="",
+                         authority_machine=choice["authority_machine"])
+    bind(remote, root, made["id"], choice["cluster"])
+    child = remote.delegate(made["id"], name)
+    return Seat(child["id"], minted=True, base=remote.base,
+                remote=remote, lifecycle_base=remote.base)

@@ -112,3 +112,70 @@ def test_discovery_refuses_elapsed_budget(found, tmp_path, monkeypatch):
     monkeypatch.setattr(automatic.time, "monotonic", lambda: next(times))
     with pytest.raises(Denied, match="time limit"):
         automatic.discover(tmp_path)
+
+
+@pytest.fixture
+def startup_remote(found, tmp_path, monkeypatch):
+    found.append(peer("node-a"))
+    monkeypatch.setattr(automatic.worktreerules, "checkouts", lambda root: (root, root / ".git"))
+    monkeypatch.setattr(automatic, "selected", lambda root: None)
+    monkeypatch.setattr(automatic.person, "marked", lambda: "")
+    events = []
+    class Remote:
+        def __init__(self, host, project, **kwargs):
+            self.host, self.project_id, self.base = host, project, tmp_path / "private"
+        def enroll(self, name, *, model, harness, authority_machine):
+            events.append(("enroll", name, model, harness, authority_machine))
+            return {"id": "native-parent"}
+        def delegate(self, parent, name):
+            events.append(("delegate", parent, name))
+            return {"id": f"{parent}/{name}"}
+        def token(self, *, agent):
+            events.append(("token", agent))
+            return "private-test-capability"
+        def call(self, operation, token):
+            events.append((operation, token))
+            return {"id": "connected-parent", "role": "agent"}
+    monkeypatch.setattr(automatic, "RemoteWorkspace", Remote)
+    monkeypatch.setattr(automatic, "bind", lambda remote, root, agent, cluster: events.append(("bind", agent)))
+    return events
+
+
+def test_native_person_start_creates_durable_parent_and_revocable_child(startup_remote, tmp_path):
+    seat = automatic.startup(tmp_path, "worker")
+    assert seat.name == "native-parent/worker"
+    assert seat.remote is not None
+    assert seat.lifecycle_base == seat.remote.base
+    assert startup_remote == [("enroll", "native-worker", "", "", "node-a"),
+                              ("bind", "native-parent"),
+                              ("delegate", "native-parent", "worker")]
+
+
+@pytest.mark.redteam
+def test_native_agent_start_cannot_mint_an_unrelated_project_parent(startup_remote, tmp_path, monkeypatch):
+    monkeypatch.setattr(automatic.person, "marked", lambda: "ML_STACK_AGENT")
+    with pytest.raises(Denied, match="parent.*connection"):
+        automatic.startup(tmp_path, "worker", "local-parent")
+    assert startup_remote == []
+
+
+def test_native_agent_start_delegates_from_its_authenticated_project_parent(startup_remote, tmp_path, monkeypatch):
+    monkeypatch.setattr(automatic.person, "marked", lambda: "ML_STACK_AGENT")
+    monkeypatch.setattr(automatic, "selected", lambda root: {
+        "host": "https://node-a:8770", "project_id": PROJECT,
+        "cluster": "development", "agent": "connected-parent"})
+    seat = automatic.startup(tmp_path, "worker", "connected-parent")
+    assert seat.name == "connected-parent/worker"
+    assert startup_remote[-1] == ("delegate", "connected-parent", "worker")
+    assert not any(event[0] == "enroll" for event in startup_remote)
+
+
+@pytest.mark.redteam
+def test_native_agent_cannot_select_another_connected_parent(startup_remote, tmp_path, monkeypatch):
+    monkeypatch.setattr(automatic.person, "marked", lambda: "ML_STACK_AGENT")
+    monkeypatch.setattr(automatic, "selected", lambda root: {
+        "host": "https://node-a:8770", "project_id": PROJECT,
+        "cluster": "development", "agent": "connected-parent"})
+    with pytest.raises(Denied, match="parent does not match"):
+        automatic.startup(tmp_path, "worker", "foreign-parent")
+    assert startup_remote == []

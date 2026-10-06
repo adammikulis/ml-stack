@@ -31,7 +31,7 @@ from ml_stack.speech import service as speech
 from ml_stack.speech.protocols import ProviderError
 from ml_stack.speech.service import as_json, transcribe
 
-from . import commands, invite_routes, projects as project_routes
+from . import commands, invite_routes, project_enrollment, projects as project_routes
 from .availability import Availability, parse_window
 from .deciding import MAX_REQUEST, Deciding
 from .device import device_report
@@ -401,7 +401,8 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
             if not (path == "/health" and here and "Authorization" not in self.headers) \
                     and not self._guard():
                 return
-            if self._extension() or project_routes.answer(self, daemon.projects, parsed):
+            if self._extension() or project_routes.answer(self, daemon.projects, parsed,
+                                                        cluster_key_path=cluster_key_path):
                 return
             if path == "/health":
                 status = runner.status()
@@ -583,7 +584,7 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
             return got
 
         def _workspace(self, body: bytes) -> bool:
-            match = re.fullmatch(r"/workspace/v1/projects/([a-f0-9]{32})/(join|board)",
+            match = re.fullmatch(r"/workspace/v1/projects/([a-f0-9]{32})/(join|board|enroll)",
                                  urllib.parse.urlparse(self.path).path)
             if not match:
                 return False
@@ -594,7 +595,18 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
             elif opening is None or not opening[2]:
                 self._send(403, {"error": "project agent capabilities require sealed fleet requests"})
             else:
-                code, reply = host.answer(match[1], match[2], self._object(body))
+                request = self._object(body)
+                cluster, cluster_id = project_enrollment.authenticated_cluster(opening, cluster_key_path)
+                if match[2] == "enroll":
+                    if not project_enrollment.admit(self.connection, opening, cluster_key_path, request):
+                        self._send(403, {"error": "automatic project enrollment requires the active Dev cluster over TLS"})
+                        return True
+                    code, reply = host.enroll(match[1], request, cluster=cluster, cluster_id=cluster_id)
+                else:
+                    code, reply = host.answer(match[1], match[2], request,
+                                              cluster=cluster, cluster_id=cluster_id,
+                                              dev_admission=project_enrollment.visible(
+                                                  self.connection, opening, cluster_key_path))
                 self._send(code, reply)
             return True
 
