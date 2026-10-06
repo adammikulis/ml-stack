@@ -222,7 +222,7 @@ def test_technical_phrases_that_look_like_people_are_stood_down(tmp_path, monkey
     """Named technical phrases are not refused just because Presidio reads them as people."""
     class Engine:
         def analyze(self, text, language):
-            for phrase in ("Git metadata", "Cloud Files", "Bea Marlow",
+            for phrase in ("Git metadata", "Cloud Files", "LM Studio", "Bea Marlow",
                            "Cloud Files " + "Bea Marlow"):
                 start = text.find(phrase)
                 if start >= 0:
@@ -232,11 +232,13 @@ def test_technical_phrases_that_look_like_people_are_stood_down(tmp_path, monkey
     monkeypatch.setattr(hook, "recogniser", Engine)
     where = repo(tmp_path, graph={"nodes": []})
     code, said = check(where, tmp_path, **{"recovery.md": (
+        "LM Studio manages local models.\n"
         "Git metadata still points at the original checkout.\n"
         "Cloud Files placeholders remain in the old worktree.\n"
         "Cloud Files " + "Bea Marlow" + " is in the log.\n"
         "Bea Marlow owns the sample checkout.\n")})
     assert code == 1
+    assert "LM Studio" not in said
     assert "Git metadata" not in said
     assert not any("Cloud Files" in line and "Bea Marlow" not in line
                    for line in said.splitlines())
@@ -248,6 +250,9 @@ def test_the_technical_phrase_rule_does_not_clear_similar_person_names():
     rules = hook.shapes()
     assert rules.in_context("Git metadata") == "context_product: Git metadata"
     assert rules.in_context("Cloud Files") == "context_product: Cloud Files"
+    assert rules.in_context("LM Studio") == "context_product: LM Studio"
+    assert rules.in_context("LM Studio " + "Bea Marlow") is None
+    assert rules.in_context("Bea Marlow " + "LM Studio") is None
     assert rules.in_context("Git " + "Marlow") is None
     assert rules.in_context("Cloud " + "Marlow") is None
     assert rules.in_context("Cloud Files " + "Bea Marlow") is None
