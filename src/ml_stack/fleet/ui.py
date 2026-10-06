@@ -224,7 +224,7 @@ class UI:
             self._join_lock.release()
 
     def join(self, passphrase: str, group: str, source: str, mode: str | None = None, *,
-             existing: bool = False) -> tuple[dict[str, Any], str]:
+             existing: bool = False, cluster_mode: str | None = None) -> tuple[dict[str, Any], str]:
         """Join a cluster, and sign the person in. Returns ``(state, session id)``."""
         group = require_name(group)
         held = self.throttle.blocked_for(source)
@@ -233,10 +233,12 @@ class UI:
         try:
             with self.join_guard():
                 if mode is not None:
-                    cluster_action(mode, passphrase, group, self.cluster_key_path, port=self.discovery_port)
+                    cluster_action(mode, passphrase, group, self.cluster_key_path,
+                                   port=self.discovery_port, cluster_mode=cluster_mode)
                 else:
                     joiner = join_existing if existing else join_by_passphrase
-                    joiner(passphrase, group, self.cluster_key_path, port=self.discovery_port)
+                    joiner(passphrase, group, self.cluster_key_path, port=self.discovery_port,
+                           mode=cluster_mode)
                 recovery.remember(passphrase, group, self.cluster_key_path)
         except DiscoveryError:
             self.throttle.failed(source)

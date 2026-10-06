@@ -253,7 +253,8 @@ class SetupRoutes:
                 raise DiscoveryError("existing cluster selection must be true or false")
             state, sid = ui.join(str(req.get("passphrase") or ""),
                                  require_name(req.get("group")), self.client_ip,
-                                 mode=req.get("mode"), existing=req.get("existing") is True)
+                                 mode=req.get("mode"), existing=req.get("existing") is True,
+                                 cluster_mode=req.get("cluster_mode"))
         except DiscoveryError as exc:
             self.send(429 if "attempts" in str(exc) or "busy" in str(exc) else 400,
                       {"error": str(exc)})
@@ -727,9 +728,11 @@ class ClusterRoutes:
                 group = require_name(req.get("group"))
                 with ui.join_guard():
                     if req.get("mode") is not None:
-                        cluster_action(str(req["mode"]), words, group, ui.cluster_key_path, port=ui.discovery_port)
+                        cluster_action(str(req["mode"]), words, group, ui.cluster_key_path,
+                                       port=ui.discovery_port, cluster_mode=req.get("cluster_mode"))
                     else:
-                        join_by_passphrase(words, group, ui.cluster_key_path, port=ui.discovery_port)
+                        join_by_passphrase(words, group, ui.cluster_key_path, port=ui.discovery_port,
+                                           mode=req.get("cluster_mode"))
             except DiscoveryError as exc:
                 self.send(400, {"error": str(exc)})
                 return True
