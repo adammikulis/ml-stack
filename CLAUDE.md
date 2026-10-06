@@ -637,3 +637,8 @@ It refuses a person it has never seen, not merely a list of known names. Invente
 `PYTHON` from the environment, so a machine holding a local database of names can wrap them with
 an untracked `.git/hooks/` script that exports those and execs the tracked one — the installer
 leaves such a wrapper alone.
+
+## Dependencies and root causes
+
+- Never modify application code, remove imports, or create local mock implementations to bypass a missing package or dependency. If a library is required, install it with the appropriate package manager and retry.
+- When behavior is broken, trace the failing path and fix the underlying cause. Do not add narrowly scoped workarounds that leave the root behavior broken; add regression coverage for the corrected behavior.

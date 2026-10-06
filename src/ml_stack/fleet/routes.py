@@ -12,7 +12,14 @@ from typing import Any
 from ml_stack.log import say
 from ml_stack.ui import assets as ui_assets
 
-from . import component_routes, invite_routes, lan_clusters, project_client, recovery
+from . import (
+    component_routes,
+    credential_routes,
+    invite_routes,
+    lan_clusters,
+    project_client,
+    recovery,
+)
 from .chat_routes import ChatRoutes
 from .discovery import (
     DiscoveryError,
@@ -358,6 +365,8 @@ class SettingsRoutes:
     def route(self) -> bool:
         if self.path == "/ui/settings":
             return self._settings()
+        if self.path == "/ui/credentials":
+            return credential_routes.route(self) or super().route()
         if self.path == "/ui/libraries":
             return self._libraries()
         if self.path == "/ui/uninstall":

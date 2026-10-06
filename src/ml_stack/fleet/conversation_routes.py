@@ -1,6 +1,7 @@
 """Saved conversation listing, lookup and updates behind the daemon UI guard."""
 from __future__ import annotations
 
+from .conversation_settings import DEFAULTS
 from .room_routes import _origin_ok
 
 
@@ -31,6 +32,9 @@ class ConversationRoutes:
         return request
 
     def _conversations(self) -> bool:
+        if self.path == "/ui/conversations/defaults" and self.method == "GET":
+            self.send(200, {"settings": DEFAULTS})
+            return True
         store = self.ui.conversations
         if store is None:
             self.send(501, {"error": "no chat store on this daemon"})

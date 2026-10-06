@@ -1,7 +1,7 @@
 """The entry the workspace runner calls to start a local-model coding agent.
 
-``launch_coding_agent(model, role, project)`` runs Codex (or Claude Code) on a model served through
-the broker's lease: 262,144 tokens on one slot, a role that sets the harness's sandbox and approval
+``launch_coding_agent(model, role, project)`` runs Pi (or another supported coding harness) on a model served through
+the broker's lease: a context selected for this device, a role that sets the harness's sandbox and approval
 mode, a PreToolUse hook through the destructive-action classifier, and a workspace identity minted
 for the session, placed on the project's board and revoked when the session ends.
 """
@@ -11,15 +11,15 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from ml_stack import claude, codex, harnessing
+from ml_stack import claude, codex, harnessing, pi
 from ml_stack.log import say as default_say
 
 __all__ = ["HARNESSES", "launch_coding_agent"]
 
-HARNESSES = {"codex": codex.launch, "claude": claude.launch}
+HARNESSES = {"pi": pi.launch, "codex": codex.launch, "claude": claude.launch}
 
 
-def launch_coding_agent(model: str, role: str, project: str | Path, harness: str = "codex",
+def launch_coding_agent(model: str, role: str, project: str | Path, harness: str = "pi",
                         **options: Any) -> int:
     """Run ``harness`` on ``model`` in ``project`` under ``role``; returns the harness's exit code.
 
@@ -35,6 +35,8 @@ def launch_coding_agent(model: str, role: str, project: str | Path, harness: str
     argv = [model or harnessing.DEFAULT_MODEL, "--role", role, "--project", str(project)]
     if context := options.pop("context", 0):
         argv += ["--ctx", str(context)]
+    if harness == "pi" and (max_turns := options.pop("max_turns", 0)):
+        argv += ["--max-turns", str(max_turns)]
     if draft := options.pop("draft", ""):
         argv += ["--draft", draft]
     if options.get("name"):

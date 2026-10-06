@@ -23,7 +23,7 @@ from pathlib import Path
 from ml_stack import harnessid, home, hub
 from ml_stack.chatpolicy import APPROVE_FIRST, ROLE_NAMES
 from ml_stack.harnesshook import WAIT_S
-from ml_stack.serve import chat_template, leases, profile, wired
+from ml_stack.serve import chat_template, leases, profile, suggest, wired
 from ml_stack.serve.recent import note
 from ml_stack.serve.serving import Config, Serving, drafted, served, serving_params
 
@@ -48,7 +48,7 @@ __all__ = [
     "window_of",
 ]
 
-DEFAULT_CTX = 262144
+DEFAULT_CTX = 0
 DEFAULT_MODEL = "Qwen3.8-27B-UD-Q4_K_XL.gguf"
 DEFAULT_ROLE = APPROVE_FIRST
 PARENT = "claude-code"
@@ -72,7 +72,7 @@ def parser(name: str, what: str, port: int, slots: int) -> argparse.ArgumentPars
     ap.add_argument("--slots", type=int, default=slots,
                     help="conversations the server holds at once (default: %(default)s)")
     ap.add_argument("--ctx", type=int, default=DEFAULT_CTX,
-                    help="tokens served in all, split across the slots (default: %(default)s)")
+                    help="tokens served in all, split across slots (default: largest safe fit for this device and model)")
     ap.add_argument("--role", default=DEFAULT_ROLE,
                     help="read-only, approve-first or plan-and-go: what the hooks let a call do "
                          "(default: %(default)s)")
@@ -151,7 +151,14 @@ def config_for(found: str, want: Want, say: Callable[[str], None]):
     over ``slots`` slots, q8_0 KV cache."""
     port, slots, draft = want.port, want.slots, want.draft
     whole = chat_template.trained_context(found)
-    each = (min(want.ctx, whole) if whole else want.ctx) // max(1, slots)
+    requested = want.ctx
+    if not requested:
+        fit = suggest.suggest(found, goal="long-context", max_verdict="yellow")
+        requested = fit.context
+        if requested <= 0:
+            raise ValueError(f"{Path(found).name} has no context that fits this device's memory")
+        say(f"automatically selected {requested:,} context tokens for this device and model")
+    each = (min(requested, whole) if whole else requested) // max(1, slots)
     measured = None if want.no_profile else profile.profile_for(found)
     if measured is not None:
         config = measured.config(port=port, slots=slots, model=found)

@@ -164,7 +164,9 @@ class Manager:
         home.mkdir(parents=True, exist_ok=True, mode=0o700)
         with graph.opened(self.store.root) as store:
             previous = store.get_doc(f"coding:{conversation.id}", {})
-        turn.session = previous.get("session", "") if previous.get("fingerprint") == fingerprint else ""
+        turn.session = (previous.get("session", "") if previous.get("fingerprint") == fingerprint else "")
+        if settings["harness"] == "pi":
+            turn.session = ""
         if not turn.session and conversation.messages:
             prompt = "Previous conversation:\n" + "\n\n".join(
                 f"{message.role}: {message.content}" for message in conversation.messages) + "\n\nNew request:\n" + prompt
@@ -173,7 +175,9 @@ class Manager:
                 return
             turn.emit({"state": "starting"})
             harness = settings["harness"]
-            if harness == "codex":
+            if harness == "pi":
+                args = []
+            elif harness == "codex":
                 args = ["exec", "--json", "--color", "never", "--skip-git-repo-check", "-"]
                 if turn.session:
                     args = ["exec", "resume", "--json", "--skip-git-repo-check", turn.session, "-"]
@@ -181,10 +185,14 @@ class Manager:
                 args = ["--print", "--verbose", "--output-format", "stream-json", "--include-partial-messages"]
                 if turn.session:
                     args += ["--resume", turn.session]
+            launch_options = {}
+            if harness == "pi":
+                launch_options["max_turns"] = self._max_turns()
             result = coding.launch_coding_agent(conversation.model, settings["role"] or roles.DEFAULT,
                 settings["project"], harness=harness, context=settings["context"], draft=settings.get("draft", "auto"), name=f"chat-{conversation.id}",
                 harness_args=args, seat_factory=self._seat, say=lambda text: turn.emit({"status": text}),
-                **{f"run_{harness}": lambda command, env: self._process(turn, command, env, (home, harness, prompt, settings["project"]))})
+                **{f"run_{harness}": lambda command, env: self._process(turn, command, env, (home, harness, prompt, settings["project"]))},
+                **launch_options)
             if result and not turn.cancelled.is_set():
                 raise RuntimeError(turn.error or f"{harness} exited with status {result}")
         except (OSError, RuntimeError, ValueError, SystemExit) as error:
@@ -199,6 +207,9 @@ class Manager:
                 store.put_doc(f"coding:{conversation.id}", {"version": 1, "session": turn.session,
                     "fingerprint": fingerprint, "state": turn.state, "updated": time.time()})
             turn.emit({"state": turn.state, "done": True})
+
+    def _max_turns(self):
+        return 60
 
     def _event(self, turn, row, harness) -> None:
         payload = coding_events.event(row, harness)
@@ -231,11 +242,15 @@ class Manager:
                     shutil.copytree(path, destination, dirs_exist_ok=True)
                 elif not destination.exists():
                     shutil.copy2(path, destination)
-        else:
+        elif harness == "claude":
             environment["CLAUDE_CONFIG_DIR"] = str(home)
             temporary = home
+        else:
+            temporary = None
         if turn.cancelled.is_set():
             return 0
+        if harness == "pi":
+            command = [*command, "--", prompt]
         with (home / "stderr.log").open("w") as errors:
             process = platform.start_process(command, env=environment, cwd=folder, stdin=subprocess.PIPE,
                                        stdout=subprocess.PIPE, stderr=errors, text=True, bufsize=1)
@@ -243,8 +258,11 @@ class Manager:
             turn.state = "running"
             turn.emit({"state": turn.state})
             try:
-                process.stdin.write(prompt)
-                process.stdin.close()
+                if harness == "pi":
+                    process.stdin.close()
+                else:
+                    process.stdin.write(prompt)
+                    process.stdin.close()
                 while line := process.stdout.readline(MAX_EVENT + 1):
                     if len(line) > MAX_EVENT:
                         raise RuntimeError("the harness emitted an oversized event")

@@ -94,3 +94,16 @@ def test_failed_lease_cleanup_publishes_stopped_status_and_preserves_grant(board
     assert 'lease cleanup failed' in status['detail']
     assert 'execution configuration changed' in str(raised.value.__context__)
     assert board.board.get(board.parent, board.task['id'])['state'] == 'queued'
+
+
+def test_pi_worker_is_accepted_and_waits_for_a_canonical_allocation(board, monkeypatch, tmp_path):
+    agent = task_worker.la.load(board.ws, 'native-worker')
+    task_worker.la.save(board.ws, replace(agent, harness='pi'))
+    stop = tmp_path / 'stop'
+    held = task_worker.localloop.Held(None, {'id': 'native-grant'}, lambda: None)
+    monkeypatch.setattr(task_worker.la, 'stop_file', lambda *_: stop)
+    monkeypatch.setattr(task_worker.localloop, 'lease_model', lambda *_: held)
+    monkeypatch.setattr(task_worker, 'assigned', lambda *_: None)
+    monkeypatch.setattr(task_worker.time, 'sleep', lambda _: stop.touch())
+    task_worker.run(board.ws, agent.name)
+    assert task_worker.la.status_of(board.ws, agent.name)['state'] == 'stopped'

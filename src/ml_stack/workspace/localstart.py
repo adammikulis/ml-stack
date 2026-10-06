@@ -58,7 +58,7 @@ class Ask:
     ctx: int = 0
     project: str = ""
     orders_from: tuple[str, ...] = la.DEFAULT_ORDERS_FROM
-    harness: str = lh.CODEX
+    harness: str = lh.PI
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,6 +134,11 @@ def _start(ws: Workspace, ask: Ask, *, pick: localmodel.Pick | None = None,
         ask.model, selection=localmodel.Selection(coding=prof.name == "coding", context=ctx))
     if not chosen.ok:
         raise Unavailable(chosen.problem, chosen.hint)
+    if not ctx:
+        try:
+            ctx = localmodel.context_for(chosen, coding=prof.name == "coding")
+        except (OSError, ValueError) as error:
+            raise Unavailable(str(error)) from error
     if prof.name == "coding":
         return _coding(ws, ask, chosen, ctx, folder_)
     problem, hint = lp.admit(chosen.ref or chosen.name, ctx)
@@ -164,14 +169,14 @@ def _start(ws: Workspace, ask: Ask, *, pick: localmodel.Pick | None = None,
 
 
 def _coding(ws: Workspace, ask: Ask, chosen: localmodel.Pick, ctx: int, project: str) -> Started:
-    """A coding agent runs on the Codex harness, whose seat mints its own identity and serves the
-    model at 256K through the broker; this detaches it and records the pid."""
+    """A coding agent runs on its selected native harness with an automatically fitted context,
+    and records its process and workspace identity."""
     problem, hint = lp.admit(chosen.ref or chosen.name, ctx)
     if problem:
         raise Unavailable(problem, hint)
     role = roles.get(ask.role).name
-    if ask.harness not in ("codex", "claude"):
-        raise ValueError("coding harness is codex or claude")
+    if ask.harness not in ("pi", "codex", "claude"):
+        raise ValueError("coding harness is pi, codex or claude")
     name = la.check_name(ask.name or "local-coding")
     with held(la.folder(ws) / "start.lock"):
         have = la.load(ws, name)

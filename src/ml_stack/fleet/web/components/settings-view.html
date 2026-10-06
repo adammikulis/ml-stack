@@ -24,6 +24,7 @@ settings-view [aria-busy="true"] { opacity:.8; }
       </div>
     </div>
     <button id="settings-save">Save</button>
+    <div class="group" id="settings-credentials"></div>
     <div class="group" id="settings-wired">
       <h2>GPU memory</h2>
       <wired-memory></wired-memory>
@@ -170,11 +171,57 @@ settings-view [aria-busy="true"] { opacity:.8; }
       this.save.disabled = false;
       this.note.replaceChildren();
       this.drawLibraries().catch(error => this.libraryError(error));
+      this.drawCredentials().catch(error => {
+        this.querySelector("#settings-credentials").replaceChildren(
+          el("h2", {}, "API credentials"), el("div", {class:"err"}, error.message));
+      });
       this.drawUpdates(status).catch(() => { status.textContent = "Could not check for updates right now."; });
       this.drawRemoval().catch(error => {
         this.querySelector("#settings-removal").replaceChildren(el("h2", {}, "Remove ml-stack"),
           el("div", {class:"err"}, error.message));
       });
+    }
+
+    async drawCredentials() {
+      const target = this.querySelector("#settings-credentials");
+      const result = await api("/ui/credentials");
+      if (M.refused(result)) return;
+      if (!result.ok) throw Error(result.error || "Could not load API credentials.");
+      const rows = result.credentials || [];
+      const name = el("input", {type:"text", autocomplete:"off", maxlength:"64", placeholder:"HF_TOKEN, ANTHROPIC_API_KEY, OPENAI_API_KEY"});
+      const value = el("input", {type:"password", autocomplete:"new-password", placeholder:"Paste a token or API key"});
+      const listed = el("div", {class:"hint"}, rows.length
+        ? rows.map(row => `${row.name} · ${row.present ? row.source : "not set"}`).join("\n")
+        : "No saved credentials.");
+      const note = el("div", {role:"status", "aria-live":"polite"});
+      const save = el("button", {class:"ghost small", type:"button"}, "Save credential");
+      const remove = el("button", {class:"ghost small", type:"button"}, "Remove credential");
+      save.onclick = async () => {
+        save.disabled = true;
+        try {
+          const saved = await api("/ui/credentials", {method:"POST", body:JSON.stringify({name:name.value, value:value.value})});
+          if (!saved.ok) throw Error(saved.error || "Could not save credential.");
+          value.value = "";
+          note.textContent = `${saved.saved} saved. The value is not shown again.`;
+          await this.drawCredentials();
+        } catch (error) { note.textContent = error.message; }
+        finally { save.disabled = false; }
+      };
+      remove.onclick = async () => {
+        remove.disabled = true;
+        try {
+          const deleted = await api("/ui/credentials", {method:"DELETE", body:JSON.stringify({name:name.value})});
+          if (!deleted.ok) throw Error(deleted.error || "Could not remove credential.");
+          note.textContent = deleted.removed ? `${deleted.name} removed.` : `${name.value} was not saved here.`;
+          value.value = "";
+          await this.drawCredentials();
+        } catch (error) { note.textContent = error.message; }
+        finally { remove.disabled = false; }
+      };
+      target.replaceChildren(el("h2", {}, "API credentials"),
+        el("div", {class:"hint"}, "Save multiple named tokens or API keys for Hugging Face, Claude, Codex, and other providers. Values are stored locally and never displayed."),
+        listed, el("label", {}, "Credential name", name), el("label", {}, "Token or API key", value),
+        el("div", {class:"settings-toolbar"}, save, remove), note);
     }
 
     async apply() {
