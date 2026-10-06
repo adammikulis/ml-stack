@@ -109,7 +109,7 @@ def test_singletons_converge_on_same_cluster_regardless_of_offer_order(tmp_path,
         path = tmp_path / f"device-{index}.key"
         discovery.adopt(member, path)
         rows = [("127.0.0.1", offer(other.key)) for other in reversed(members)]
-        monkeypatch.setattr(automatic, "offers", lambda port: rows)
+        monkeypatch.setattr(automatic, "offers", lambda port, rows=rows: rows)
         assert automatic.ensure(path) == winner
         assert discovery.memberships(path) == [winner]
 
