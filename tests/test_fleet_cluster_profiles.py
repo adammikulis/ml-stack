@@ -11,22 +11,19 @@ from ml_stack.fleet.onboard import joining
 KEY = base64.urlsafe_b64encode(bytes(range(32))).rstrip(b"=")
 
 
-def test_legacy_single_key_retains_production_profile(tmp_path):
+def test_legacy_single_key_is_not_adopted(tmp_path):
     path = tmp_path / "cluster.key"
     path.write_text(KEY.decode())
-    discovery.group_path(path).write_text("laboratory")
-    held = discovery.memberships(path)
-    assert len(held) == 1
-    assert (held[0].group, held[0].key, held[0].mode) == ("laboratory", KEY, "prod")
-    assert json.loads(discovery.clusters_path(path).read_text())[0]["mode"] == "prod"
+    path.with_suffix(".group").write_text("laboratory")
+    assert discovery.memberships(path) == []
+    assert not discovery.clusters_path(path).exists()
 
 
-def test_mode_less_membership_list_retains_production_profile(tmp_path):
+def test_mode_less_membership_list_is_not_adopted(tmp_path):
     path = tmp_path / "cluster.key"
     discovery.clusters_path(path).write_text(json.dumps([
         {"group": "laboratory", "key": KEY.decode(), "join": "secret"}]))
-    assert discovery.memberships(path) == [
-        discovery.Membership("laboratory", KEY, join="secret", mode="prod")]
+    assert discovery.memberships(path) == []
 
 
 @pytest.mark.parametrize("field,value", [
@@ -55,9 +52,9 @@ def test_recovery_round_trip_preserves_cluster_profile(tmp_path, mode):
     assert discovery.memberships(restored) == [member]
 
 
-def test_mode_less_recovery_preserves_explicit_admission():
-    member = recovery.parse_recovery(json.dumps({"group": "laboratory", "key": KEY.decode()}))
-    assert member.mode == "prod"
+def test_mode_less_recovery_is_refused():
+    with pytest.raises(discovery.DiscoveryError, match="valid cluster recovery"):
+        recovery.parse_recovery(json.dumps({"group": "laboratory", "key": KEY.decode()}))
 
 
 @pytest.mark.parametrize("mode", [None, "development", "PROD", 42, []])

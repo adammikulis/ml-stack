@@ -228,13 +228,15 @@ def agent_connect(ws: Workspace, name: str, found: dict[str, str]) -> dict[str, 
         scope = ws.registry.info(who.parent or who.id)["project"]
         if not found.get("key") or scope.get("key") != found["key"]:
             raise Denied("this identity is not authorized for this project; use its authorized invite")
-        if created:
-            ws.board.place(who.id, scope)
+        entry = ws.registry._load().get(who.id, {})
+        local = (who.role == AGENT and not who.parent and entry.get("minted_by") == "local-account"
+                 and not entry.get("session_device"))
+        if created or local:
+            ws.board.place(who.id, scope, initial_only=not created)
         boards, _ = ws.board.store.state()
         if not any(board["project"] == found["key"] and (who.parent or who.id) in board["members"]
                    for board in boards.values()):
             raise Denied("this identity has no membership in the project board")
-        entry = ws.registry._load().get(who.id, {})
         if entry.get("minted_by") == "local-account" and not entry.get("session_device"):
             coordinator_bootstrap.ensure_host(ws, token)
         return {"id": who.id, "project": scope["name"], "state": "connected"}

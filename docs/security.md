@@ -14,6 +14,11 @@ for anything that acts for a person, with what is built and what is not).
 `ML_STACK_CACHE`, every machine that holds the cluster key, `huggingface.co`, `github.com`
 and the Python packages the user installed.
 
+Development is the default cluster mode and trusts nearby ml-stack devices for automatic
+admission. A local-network device can obtain the Development cluster key through the
+advertised pinned TLS endpoint without a passphrase or person approval. Production requires
+explicit admission and preserves an explicitly recorded Production profile.
+
 **Not trusted.** Anything that arrives over a network from a name or address the user did not
 choose to trust: a web page, a model repository's file list, a downloaded archive, a
 redirect, a GGUF file, a machine that has not proved it holds the cluster key, and anybody
@@ -22,8 +27,9 @@ else on the LAN.
 **A cluster member is fully trusted.** The daemon runs the command line a peer sends it
 (`POST /jobs`), downloads what a peer names (`POST /models/get`) and writes files a peer
 sends (`PUT /files/*`). Holding the cluster key is the same as having a shell on every machine
-in the cluster. What stands between the LAN and that is the cluster key, 256 random bits that
-no passphrase derives. The passphrase is only a password for the join handshake, which locks out a
+in the cluster. Production admission protects its cluster key, 256 random bits that
+no passphrase derives. Development admission extends this trust to nearby devices through
+its automatic TLS handshake. The passphrase is only a password for the Production join handshake, which locks out a
 source that keeps failing, so it is at least 5 characters; `ml-stack-peers init` makes a key with
 no passphrase. A job a peer submits is limited to an allowlist of ml-stack commands
 (`docs/fleet.md`).
@@ -60,7 +66,9 @@ system's keystore.
 
 ## Who can do what
 
-**Somebody on the LAN who holds no key.** Can see that a daemon is there and hear beacons. Cannot
+**Somebody on the LAN who holds no key.** Can see that a daemon is there and hear beacons.
+Development offers automatic admission over pinned TLS; Production requires explicit admission.
+Until admitted, this device cannot
 run a job, read or write a file, learn the name or device report from `/health`, or open the
 web interface. Can send requests; one that is not correctly signed is refused, and an address
 with ten failures in a minute is locked out for a minute. Can try passphrase guesses against the join

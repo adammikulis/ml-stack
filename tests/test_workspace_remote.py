@@ -317,6 +317,7 @@ def test_canonical_first_use_accepts_directory_created_by_another_client(tmp_pat
     remote = RemoteWorkspace.__new__(RemoteWorkspace)
     remote.base, remote.project_id = tmp_path / "sessions", PROJECT
     tokens.prepare(remote.base)
+    assert tokens.problem(remote.base) == ""
     existing = type(remote.base).exists
     monkeypatch.setattr(type(remote.base), "exists", lambda path: False if path == remote.base else existing(path))
     monkeypatch.setattr(remote, "_device_transport", lambda: None)

@@ -20,6 +20,7 @@ from ml_stack.log import say, warn
 from ml_stack.sentinel import human
 from ml_stack.sentinel.human import HumanRequired
 from ml_stack.workspace import (
+    automatic_connection,
     backlog,
     chat,
     coordinator_client,
@@ -86,7 +87,8 @@ def _label(args: argparse.Namespace) -> str:
 
 
 def _token(args: argparse.Namespace) -> str:
-    connection = _project_connection()
+    agent = args.agent or os.environ.get(tokens.AGENT_ENV, "")
+    connection = _project_connection() if agent else project_connection.selected()
     if connection is not None:
         return _context(args, connection)[1]
     base = limits.root()
@@ -115,7 +117,12 @@ def _local_token(args: argparse.Namespace) -> str:
 
 
 def _project_connection(cwd: Path | None = None):
-    return project_connection.selected(cwd) or project_connection.auto_attach(cwd)
+    saved = project_connection.selected(cwd)
+    if saved:
+        return saved
+    if coordinator_config.load(limits.root()).get("mode") == "remote":
+        return project_connection.auto_attach(cwd)
+    return automatic_connection.local_project(cwd) or project_connection.auto_attach(cwd)
 
 
 _CONNECTION_UNSET = object()
@@ -126,6 +133,7 @@ def _context(args: argparse.Namespace, connection=_CONNECTION_UNSET):
         connection = _project_connection()
     if connection is None:
         return Workspace(), _local_token(args)
+    connection = automatic_connection.cli_connection(args, connection, _local_token, Workspace)
     remote = project_connection.RemoteWorkspace(connection["host"], connection["project_id"],
                                                 cluster=connection.get("cluster", ""),
                                                 cluster_key=Path(connection["cluster_key"])
@@ -811,7 +819,9 @@ COMMANDS.add("remote", _guarded(_remote), help="attach and use one shared projec
 def _bare(handler: Callable[[argparse.Namespace, Workspace], int]) -> Callable[[argparse.Namespace], int]:
     def run(args):
         requested = getattr(args, "project", "") if handler is _connect else ""
-        connection = _project_connection(Path(requested) if requested else None)
+        root = Path(requested) if requested else None
+        agent = args.agent or os.environ.get(tokens.AGENT_ENV, "")
+        connection = _project_connection(root) if agent else project_connection.selected(root)
         if handler is _connect and (args.agent or os.environ.get(tokens.AGENT_ENV, "")):
             if connection is not None:
                 return handler(args, None)

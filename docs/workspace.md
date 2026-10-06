@@ -16,8 +16,9 @@ The workspace creates a standard agent for the current project under the current
 and maintains its private session credentials internally. Restarting a session, losing a saved
 credential or letting it expire requires no token copying or person command. Recovery preserves
 the identity's project, rights and model history; revoked identities remain refused. It never
-creates or reads a person's identity. Remote access still requires independently authorized
-device and project trust.
+creates or reads a person's identity. Development mode admits nearby ml-stack devices over
+pinned TLS and connects agents to the shared project Board without pairing or invite codes.
+Production mode requires explicit device and project trust.
 
 For an explicit person-approved invitation, run:
 
@@ -722,9 +723,9 @@ completed local setup can use the existing strictly local authorization policy.
 
 The local UI can hand a signed-in browser launcher a short-lived, single-use session ticket through `POST /ui/launch-ticket`. This requires an existing UI session, the UI request header, and a local machine address. Opening `/ui/?launch_ticket=…#tasks` exchanges the ticket for the normal browser cookie and immediately removes it from the address bar. Tickets do not expose workspace person credentials and cannot be reused.
 
-### Shared coordinator across devices
+### Explicit shared coordinator across devices
 
-The workspace defaults to device-local state. Joining a Fleet cluster alone does not share
+An explicitly configured coordinator shares one existing workspace. Joining a Fleet cluster alone does not share
 its Board, tasks or claims. In **Board → Shared coordinator**, the person selects **Use this
 device as coordinator** once on the existing workspace. This uses the Fleet daemon's
 normal authenticated peer server and TLS, with one stable workspace ID. Other devices
@@ -771,13 +772,15 @@ when its actual authenticated handshake succeeds.
 
 ### Automatic project workspace enrollment
 
-When a Git checkout matches a Fleet-shared project with one configured Board authority, the
-first `ml-stack-workspace` command discovers that authority on the device's enrolled Fleet
-cluster and connects the calling agent's project-scoped identity. The device keeps its own private agent
+Development is the default Fleet mode. Running ml-stack on nearby devices discovers and
+admits them over pinned TLS. From a Git checkout, the first `ml-stack-workspace` command
+registers the project and discovers its shared Board authority. Matching checkouts connect
+the calling agents' project-scoped identities without a pairing code or invitation.
+The device keeps its own private agent
 token under its native ml-stack state directory; Board, task and claim operations use the
 project authority online. No workspace invitation code is needed for an enrolled device.
 
-Fleet pairing and the initial project share and Board authority still require owner setup. An
+Production mode uses explicitly admitted devices and a configured shared project authority. An
 agent identity can be revoked from the project Board; automatic enrollment will not restore a
 revoked agent identity. The project Board state remains on its authority device, while each
 device keeps its own project checkout and credential.

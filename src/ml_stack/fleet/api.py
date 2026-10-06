@@ -626,7 +626,7 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
             return got
 
         def _workspace(self, body: bytes) -> bool:
-            match = re.fullmatch(r"/workspace/v1/projects/([a-f0-9]{32})/(join|board|ensure|enroll)",
+            match = re.fullmatch(r"/workspace/v1/projects/([a-f0-9]{32})/(join|board|ensure|enroll|renew)",
                                  urllib.parse.urlparse(self.path).path)
             if not match:
                 return False
@@ -639,11 +639,12 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
             else:
                 request = self._object(body)
                 cluster, cluster_id = project_enrollment.authenticated_cluster(opening, cluster_key_path)
-                if match[2] == "enroll":
+                if match[2] in {"enroll", "renew"}:
                     if not project_enrollment.admit(self.connection, opening, cluster_key_path, request):
                         self._send(403, {"error": "automatic project enrollment requires the active Dev cluster over TLS"})
                         return True
-                    code, reply = host.enroll(match[1], request, cluster=cluster, cluster_id=cluster_id)
+                    enroll = host.enroll if match[2] == "enroll" else host.renew
+                    code, reply = enroll(match[1], request, cluster=cluster, cluster_id=cluster_id)
                 else:
                     code, reply = host.answer(match[1], match[2], request,
                                               device=self._workspace_device,

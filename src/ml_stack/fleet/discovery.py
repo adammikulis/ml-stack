@@ -17,7 +17,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict, Unpack
 
 from ml_stack import home, http, macauth, sealing
 from ml_stack.files import write_json
@@ -137,11 +137,6 @@ def check_name(name: str) -> str:
     return name
 
 
-def group_path(path: Path | str | None = None) -> Path:
-    """Where the group name is recorded, beside the key."""
-    return key_path(path).with_suffix(".group")
-
-
 def cluster_group(path: Path | str | None = None) -> str | None:
     """The cluster this machine answers as, or None."""
     rows = memberships(path)
@@ -190,35 +185,17 @@ def memberships(path: Path | str | None = None) -> list[Membership]:
     try:
         raw = json.loads(clusters_path(path).read_text())
     except (OSError, ValueError):
-        return _adopt_single(path)
+        return []
     for row in raw if isinstance(raw, list) else []:
         try:
             group, key, join = row["group"], row["key"].encode("ascii"), row.get("join", "")
-            member = Membership(group=group, key=key, join=join, mode=row.get("mode", "prod"))
+            member = Membership(group=group, key=key, join=join, mode=row["mode"])
         except (KeyError, TypeError, AttributeError, ValueError, DiscoveryError):
             continue
         if key and group not in seen:
             seen.add(group)
             out.append(member)
     return out
-
-
-def _adopt_single(path: Path | str | None = None) -> list[Membership]:
-    """The one cluster written before the list existed, moved into the list."""
-    try:
-        key = key_path(path).read_text().strip()
-    except OSError:
-        return []
-    if not key:
-        return []
-    try:
-        group = group_path(path).read_text().strip()
-    except OSError:
-        group = ""
-    rows = [Membership(group=group or DEFAULT_CLUSTER, key=key.encode(), mode="prod")]
-    with contextlib.suppress(OSError):
-        _write_memberships(rows, path)
-    return rows
 
 
 def _write_memberships(rows: list[Membership],
@@ -484,20 +461,28 @@ def _native_socket(*, broadcast: bool = False, bind: tuple[str, int] | None = No
     return s
 
 
+class AdvertiserOptions(TypedDict, total=False):
+    group: str | None
+    port: int | None
+    interval_s: float
+    cluster: str
+    refresh: Callable[[Beacon], None] | None
+
+
 class Advertiser:
     """Answers 'who is out there' on behalf of one daemon."""
 
-    def __init__(self, beacon: Beacon, key: bytes, *,
-                 group: str | None = None, port: int | None = None,
-                 interval_s: float = 10.0, cluster: str = "",
-                 refresh: Callable[[Beacon], None] | None = None) -> None:
+    def __init__(self, beacon: Beacon, key: bytes, **options: Unpack[AdvertiserOptions]) -> None:
+        if extra := options.keys() - AdvertiserOptions.__annotations__.keys():
+            raise TypeError(f"unknown advertiser options: {', '.join(sorted(extra))}")
         beacon.instance = beacon.instance or secrets.token_hex(8)
         self.beacon = beacon
         self.key = key
-        self.refresh = refresh
-        self.group = group or default_group()
+        self.refresh = options.get("refresh")
+        self.group = options.get("group") or default_group()
+        port = options.get("port")
         self.port = port if port is not None else default_port()
-        self.interval_s = interval_s
+        self.interval_s = options.get("interval_s", 10.0)
         self._stop = threading.Event()
         self._threads: list[threading.Thread] = []
         self._sock: socket.socket | wsl_network.DiscoverySocket | None = None
@@ -508,7 +493,7 @@ class Advertiser:
         self.undelivered = 0
         self.last_error = ""
         self._said: set[str] = set()
-        self.cluster = cluster
+        self.cluster = options.get("cluster", "")
         self.joinable = False
         self.mode = "dev"
         """The cluster's name; a machine that asks to join it is told where to shake hands."""

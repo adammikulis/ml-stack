@@ -54,6 +54,11 @@ def prepare(base: Path) -> Path:
     if _windows_mount(path):
         raise ValueError(f"{path} is on a Windows-mounted filesystem; keep workspace tokens "
                          "under the WSL home directory")
+    if os.name != "nt":
+        why = problem(base)
+        if why not in {"", "missing"} and not why.startswith("mode "):
+            raise ValueError(f"{base}: {why}")
+    base.mkdir(parents=True, exist_ok=True, mode=0o700)
     path.mkdir(parents=True, exist_ok=True, mode=0o700)
     if os.name == "nt":
         if _redirected(base.lstat()):
