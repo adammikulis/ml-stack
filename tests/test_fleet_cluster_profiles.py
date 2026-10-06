@@ -99,3 +99,17 @@ def test_production_server_refuses_automatic_admission_to_secondary_development_
 def test_membership_key_requires_canonical_256_bit_encoding(key):
     with pytest.raises(ValueError):
         discovery.Membership("laboratory", key, mode="prod")
+
+
+@pytest.mark.parametrize("requested", [None, "dev", "prod"])
+def test_offline_membership_respects_explicit_admission_mode(tmp_path, monkeypatch, requested):
+    path = tmp_path / "cluster.key"
+    member = discovery.adopt(discovery.Membership("laboratory", KEY, mode="dev"), path)
+    monkeypatch.setattr(joining, "find_joiners", lambda *_args, **_kwargs: [])
+    options = joining.JoinOptions(mode=requested)
+    if requested == "prod":
+        with pytest.raises(discovery.DiscoveryError, match="differs from the requested mode"):
+            joining.join_by_passphrase("cedar lantern meadow", "laboratory", path, options=options)
+    else:
+        assert joining.join_by_passphrase("cedar lantern meadow", "laboratory", path, options=options) == member
+    assert discovery.memberships(path) == [member]
