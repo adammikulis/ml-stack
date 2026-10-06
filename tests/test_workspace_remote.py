@@ -580,3 +580,58 @@ def test_foreign_canonical_authority_cannot_be_replaced_by_local_invite(reposito
     with pytest.raises(ValueError, match="another workspace authority"):
         host.invite(project.id)
     assert project.authority_machine == "mac"
+
+
+@pytest.mark.parametrize('action', ['join', 'enroll'])
+def test_fresh_remote_capability_storage_is_private_before_request(tmp_path, monkeypatch, action):
+    remote = RemoteWorkspace.__new__(RemoteWorkspace)
+    remote.base, remote.host, remote.project_id = tmp_path / 'remote', 'http://127.0.0.1:9', PROJECT
+    remote.cluster, remote.cluster_id = 'fixture', 'c' * 64
+    def request(operation, payload):
+        assert tokens.problem(remote.base) == ''
+        assert tokens.problem(tokens.directory(remote.base)) == ''
+        if remote_module.os.name != 'nt':
+            assert remote.base.stat().st_mode & 0o777 == 0o700
+            assert tokens.directory(remote.base).stat().st_mode & 0o777 == 0o700
+        return {'id': 'worker', 'token': 'mlws1.worker.fixture', 'project_id': PROJECT}
+    monkeypatch.setattr(remote, '_request', request)
+    result = (remote.join('invitation', 'worker') if action == 'join' else
+              remote.enroll('worker', model='fixture', harness='codex', authority_machine='fixture'))
+    path = tokens.directory(remote.base) / 'worker'
+    assert tokens.problem(path) == ''
+    if remote_module.os.name != 'nt':
+        assert path.stat().st_mode & 0o777 == 0o600
+    assert tokens.read_file(path) == 'mlws1.worker.fixture'
+    assert result['id'] == 'worker'
+
+
+@pytest.mark.redteam
+@pytest.mark.parametrize('action', ['join', 'enroll'])
+@pytest.mark.parametrize('unsafe', ['base-mode', 'base-symlink', 'token-directory-mode'])
+@pytest.mark.skipif(remote_module.os.name == 'nt', reason='POSIX mode and symlink fixture')
+def test_remote_capability_request_refuses_unsafe_existing_storage(tmp_path, monkeypatch, action, unsafe):
+    remote = RemoteWorkspace.__new__(RemoteWorkspace)
+    remote.base = tmp_path / 'remote'
+    if unsafe == 'base-symlink':
+        target = tmp_path / 'target'
+        target.mkdir(mode=0o700)
+        remote.base.symlink_to(target, target_is_directory=True)
+    else:
+        remote.base.mkdir(mode=0o700)
+        if unsafe == 'base-mode':
+            remote.base.chmod(0o755)
+        else:
+            tokens.directory(remote.base).mkdir(mode=0o755)
+            tokens.directory(remote.base).chmod(0o755)
+    monkeypatch.setattr(remote, '_request', lambda *args: pytest.fail('unsafe storage must precede issuance'))
+    with pytest.raises(Denied, match='project session storage'):
+        if action == 'join':
+            remote.join('invitation', 'worker')
+        else:
+            remote.enroll('worker', model='fixture', harness='codex', authority_machine='fixture')
+    assert not (tokens.directory(remote.base) / 'worker').exists()
+    if unsafe == 'base-symlink':
+        assert remote.base.is_symlink()
+    else:
+        unsafe_path = remote.base if unsafe == 'base-mode' else tokens.directory(remote.base)
+        assert unsafe_path.stat().st_mode & 0o777 == 0o755

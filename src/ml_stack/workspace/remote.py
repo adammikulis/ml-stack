@@ -89,6 +89,7 @@ class RemoteWorkspace:
             raise Denied(f"project board unavailable: {exc}") from exc
 
     def join(self, code: str, name: str, *, model: str = "", harness: str = "") -> dict:
+        self._prepare_storage()
         result = self._request("join", {"code": code, "name": name,
                                         "model": model, "harness": harness})
         name, token = str(result["id"]), str(result["token"])
@@ -98,6 +99,7 @@ class RemoteWorkspace:
 
     def enroll(self, name: str, *, model: str, harness: str, authority_machine: str) -> dict:
         """Save a newly issued private Dev project agent capability."""
+        self._prepare_storage()
         result = self._request("enroll", {"name": name, "model": model,
                                           "harness": harness, "cluster": self.cluster, "cluster_id": self.cluster_id,
                                           "authority_machine": authority_machine})
@@ -149,14 +151,17 @@ class RemoteWorkspace:
             raise Denied("select the local agent identity with --agent NAME")
         if not valid_id(name):
             raise Denied("select a valid local agent identity")
-        if not self.base.exists() and not self.base.is_symlink():
-            self.base.mkdir(parents=True, mode=0o700, exist_ok=True)
-            tokens.prepare(self.base)
-        self._safe_storage(self.base)
+        self._prepare_storage()
         lock = self.base / "remote-sessions.lock"
         self._safe_storage(lock)
         with held(lock):
             return self._session_token(name)
+
+    def _prepare_storage(self) -> None:
+        self._safe_storage(self.base)
+        self.base.mkdir(parents=True, mode=0o700, exist_ok=True)
+        tokens.prepare(self.base)
+        self._safe_storage(self.base)
 
     def _safe_storage(self, path: Path) -> None:
         for candidate in (self.base, tokens.directory(self.base), path):
