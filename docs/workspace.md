@@ -162,9 +162,10 @@ A local message bus, shared notes, per-agent scratch folders and an ownership re
 separate agent processes and a lead session coordinate through ml-stack instead of through a
 person relaying text and instead of colliding on scratch files, ports, branches and servers.
 
-    ml-stack workspace init                         # a person, at a terminal, once (setup does this)
-    ml-stack workspace mint lead-1 --role lead      # prints that agent's token once
-    export ML_STACK_WORKSPACE_TOKEN=...             # per agent process (or --agent NAME)
+An agent connects under its own identity using the device's existing trusted project
+authentication. Its private capability stays in local state; the person does not initialize
+the agent, copy a token or relay a command.
+
     ml-stack workspace send reviewer task "check the lease tests"
     ml-stack workspace watch --once --timeout 600   # run in the background; exits on a message
     ml-stack workspace claim port 8081 --pid $$     # released when this shell exits
@@ -555,7 +556,7 @@ agent processes, 2000 messages, send p99 58 ms, nothing refused. Every limit bel
 | Unread inbox | 500 per recipient (`inbox_pending`), 100 from any one sender (`unread_per_sender`) | the sender is refused with "N has 500 unread messages" (`why: inbox-full`) or "already has 100 unread messages waiting for N" (`why: sender-share`); broadcasts and board posts are not counted | `inbox`, `status` (`fullest_inboxes`) |
 | Message and note size | 16 KiB body, 200 character subject, 8 KiB note, 500 notes per agent | `Refused`, exit 3 | the refusal text |
 | Retention | 7 days of messages (`retention_s`) | `gc` drops the oldest rows; the chain continues from the last dropped row; readers re-read the file | `audit-verify` (rows, head) |
-| Claim TTL | 15 minutes, renewed by `heartbeat`; one renewal adds at most 1 hour and no claim lives past 8 hours from when it was taken | the claim is released the next time anyone reads the registry and audited as `claim.expired` or `claim.dead-pid`; another agent that takes it is audited as `claim.stolen` with the previous owner | `claims` lists `expires_in_s` and `expiring_soon` (true in the last 5 minutes or a third of the TTL, whichever is shorter) |
+| Claim lifetime | 15 minutes, renewed by `heartbeat`; one renewal adds at most 1 hour and no claim lives past 8 hours from when it was taken | the claim is released the next time anyone reads the registry and audited as `claim.expired` or `claim.dead-pid`; another agent that takes it is audited as `claim.stolen` with the previous owner | `claims` lists `expires_in_s` and `expiring_soon` (true in the last 5 minutes or a third of the TTL, whichever is shorter) |
 | Token TTL | 24 hours (`token_ttl_s`) | the token stops authenticating; mint a new one | `whoami` |
 | Delegation | a human mints anyone, a lead mints `agent` tokens, an agent mints nothing; a lead or agent that mints holds at most 16 live identities (`mints_per_identity`) and the workspace at most 64 (`agents_live`) | the mint is refused (`Denied`) | `status` (agents) |
 | Keystore reads | 600 per hour per user, backoff from 480 | `KeystoreBusy` naming the hour | `ml-stack-security keystore` |
@@ -689,6 +690,19 @@ remain and expired IDs are refused. An interrupted request with an uncertain out
 is never silently executed again. Inspect shared state before issuing a new operation.
 This capability has local two-root/socket proof; a Windows machine is connected only
 when its actual authenticated handshake succeeds.
+
+### Automatic project workspace enrollment
+
+When a Git checkout matches a Fleet-shared project with one configured Board authority, the
+first `ml-stack-workspace` command discovers that authority on the device's enrolled Fleet
+cluster and creates a project-scoped device identity. The device keeps its own private agent
+token under its native ml-stack state directory; Board, task and claim operations use the
+project authority online. No workspace invitation code is needed for an enrolled device.
+
+Fleet pairing and the initial project share and Board authority still require owner setup. A
+device token can be revoked from the project Board; automatic enrollment will not restore a
+revoked device identity. The project Board state remains on its authority device, while each
+device keeps its own project checkout and credential.
 
 For a generic invitation from your own terminal, run `ml-stack-workspace connect --code-only --no-project`.
 It prints and copies the bounded code immediately, without waiting for a join or implying failure.

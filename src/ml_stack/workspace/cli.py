@@ -87,11 +87,17 @@ def _token(args: argparse.Namespace) -> str:
 def _context(args: argparse.Namespace):
     connection = project_connection.selected()
     if connection is None:
-        return Workspace(), _token(args)
+        connection = project_connection.auto_attach()
+        if connection is None:
+            return Workspace(), _token(args)
     remote = project_connection.RemoteWorkspace(connection["host"], connection["project_id"],
                                                 cluster=connection.get("cluster", ""),
                                                 cluster_key=Path(connection["cluster_key"])
                                                 if connection.get("cluster_key") else None)
+    if not connection.get("agent"):
+        joined = remote.join_device()
+        connection = project_connection.bind(remote, Path(connection["root"]), joined["id"],
+                                             connection.get("cluster", ""))
     token = remote.token(agent=args.agent or connection.get("agent", ""),
                          token_file=getattr(args, "token_file", ""))
     return project_connection.CanonicalWorkspace(remote, token), token
@@ -710,7 +716,8 @@ def _bare(handler: Callable[[argparse.Namespace, Workspace], int]) -> Callable[[
     def run(args):
         if coordinator_client.client(limits.root()) and handler is not _join:
             raise Denied('this is a local-only operation; this device uses a shared coordinator')
-        if project_connection.selected() is not None:
+        if (project_connection.selected() is not None
+                or project_connection.auto_attach() is not None):
             if handler in {_brief, _hook_snippet}:
                 return handler(args, None)
             raise Denied("this command is unavailable in a canonical project; use its shared board")

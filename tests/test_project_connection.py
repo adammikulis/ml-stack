@@ -6,6 +6,7 @@ import pytest
 
 from ml_stack import home
 from ml_stack.files import write_json
+from ml_stack.fleet import discovery, project_client, remote
 from ml_stack.workspace import cli, project_connection as connection
 from ml_stack.workspace.identity import Denied
 
@@ -92,3 +93,28 @@ def test_unsupported_privileged_operation_is_explicitly_refused():
     ws = connection.CanonicalWorkspace(Remote(), "project-agent-capability")
     with pytest.raises(Denied, match="local fallback is disabled"):
         ws.mint("project-agent-capability", "lead", "lead")
+
+
+def test_auto_discovery_selects_only_the_project_authority(monkeypatch):
+    member = SimpleNamespace(group="home", key=b"cluster-key")
+    host = SimpleNamespace(base_url="https://host.local:8770",
+                           beacon=SimpleNamespace(machine="authority-machine"))
+    source = SimpleNamespace(base_url="https://source.local:8770",
+                             beacon=SimpleNamespace(machine="source-machine"))
+    monkeypatch.setattr(discovery, "memberships", lambda: [member])
+    monkeypatch.setattr(remote.Peer, "discover", classmethod(lambda cls, **kwargs: [host, source]))
+    monkeypatch.setattr(project_client, "catalogue", lambda peer: {"projects": [
+        {"id": PROJECT, "authority_machine": "authority-machine"}]})
+    assert connection._find_authority(PROJECT) == ("home", host.base_url)
+
+
+def test_auto_discovery_refuses_conflicting_project_authorities(monkeypatch):
+    member = SimpleNamespace(group="home", key=b"cluster-key")
+    hosts = [SimpleNamespace(base_url=f"https://host-{i}.local:8770",
+                             beacon=SimpleNamespace(machine=f"machine-{i}")) for i in range(2)]
+    monkeypatch.setattr(discovery, "memberships", lambda: [member])
+    monkeypatch.setattr(remote.Peer, "discover", classmethod(lambda cls, **kwargs: hosts))
+    monkeypatch.setattr(project_client, "catalogue", lambda peer: {"projects": [
+        {"id": PROJECT, "authority_machine": peer.beacon.machine}]})
+    with pytest.raises(Denied, match="conflicting workspace authorities"):
+        connection._find_authority(PROJECT)

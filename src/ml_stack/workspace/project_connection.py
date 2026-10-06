@@ -5,6 +5,7 @@ from pathlib import Path
 
 from ml_stack import home
 from ml_stack.files import read_json, write_json
+from ml_stack.net import git
 from ml_stack.workspace.chain import held
 from ml_stack.workspace.identity import AGENT, Denied, Identity
 from ml_stack.workspace.remote import RemoteWorkspace
@@ -72,14 +73,66 @@ def selected(cwd: Path | None = None) -> dict | None:
                                or (authority.get("host") and configured["host"] != authority["host"])):
                 raise Denied("checkout and saved board connection disagree")
             if configured:
-                return configured
+                return {**configured, "root": str(root)}
             if authority.get("host"):
                 return {"host": authority["host"], "project_id": metadata["project_id"],
-                        "agent": "", "cluster": authority.get("cluster", "")}
+                        "agent": "", "cluster": authority.get("cluster", ""), "root": str(root)}
             raise Denied("this shared checkout has no canonical board connection; attach it before using workspace commands")
         if configured:
-            return configured
+            return {**configured, "root": str(root)}
     return None
+
+
+def _find_authority(project_id: str) -> tuple[str, str] | None:
+    from ml_stack.fleet.discovery import memberships
+    from ml_stack.fleet.project_client import catalogue
+    from ml_stack.fleet.remote import Peer
+    from ml_stack.http import ServerError
+
+    candidates = []
+    for member in memberships():
+        peers = Peer.discover(key=member.key, group=member.group, timeout_s=1)
+        published = []
+        for peer in peers:
+            try:
+                rows = catalogue(peer)["projects"]
+            except (OSError, ValueError, ServerError):
+                continue
+            published.extend(row for row in rows if row["id"] == project_id)
+        authorities = {row["authority_machine"] for row in published if row["authority_machine"]}
+        if len(authorities) > 1:
+            raise Denied("this project has conflicting workspace authorities on the Fleet network")
+        if not authorities:
+            continue
+        authority = next(iter(authorities))
+        hosts = [peer for peer in peers if peer.beacon and peer.beacon.machine == authority]
+        if len(hosts) != 1:
+            raise Denied("the project's workspace authority is missing or ambiguous on this Fleet network")
+        candidates.append((member.group, hosts[0].base_url))
+    if not candidates:
+        return None
+    if len(set(candidates)) != 1:
+        raise Denied("this project appears on more than one Fleet cluster; select one workspace authority")
+    return candidates[0]
+
+
+def auto_attach(cwd: Path | None = None) -> dict | None:
+    """Discover and join this Git project's one workspace through an enrolled Fleet cluster."""
+    from ml_stack.fleet.projects import identity
+
+    current = (cwd or Path.cwd()).resolve()
+    try:
+        root = Path(git.run(["rev-parse", "--show-toplevel"], cwd=current).stdout.strip()).resolve()
+        project_id = identity(root)
+    except (OSError, ValueError, git.GitFailed):
+        return None
+    authority = _find_authority(project_id)
+    if authority is None:
+        return None
+    cluster, host = authority
+    remote = RemoteWorkspace(host, project_id, cluster=cluster)
+    joined = remote.join_device(home.machine_id())
+    return bind(remote, root, joined["id"], cluster)
 
 
 class Operations:

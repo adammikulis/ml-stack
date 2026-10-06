@@ -109,6 +109,33 @@ def test_expired_or_reused_invite_is_refused(host):
     assert host.answer(PROJECT, "join", {**body, "name": "second"})[0] == 403
 
 
+def test_paired_device_auto_join_is_scoped_idempotent_and_proof_bound(host):
+    installation = "a" * 16
+    code, first = host.answer(PROJECT, "device", {"installation": installation})
+    assert code == 201
+    assert first["id"] == f"device-{installation}"
+    ws = host.workspace(PROJECT)
+    assert ws.registry.info(first["id"])["project"]["key"] == PROJECT
+    assert host.answer(PROJECT, "device", {"installation": installation})[0] == 403
+    code, again = host.answer(PROJECT, "device", {"installation": installation,
+                                                    "token": first["token"]})
+    assert code == 201 and again == first
+    assert host.answer(PROJECT, "device", {"installation": "invalid"})[0] == 400
+    owner = tokens.read_file(tokens.directory(ws.base) / tokens.OWNER_FILE)
+    ws.revoke(owner, first["id"])
+    assert host.answer(PROJECT, "device", {"installation": installation,
+                                            "token": first["token"]})[0] == 403
+
+
+def test_device_enrollment_does_not_initialize_a_human_identity(host):
+    ws = host.workspace(PROJECT)
+    private_owner = tokens.directory(ws.base) / tokens.OWNER_FILE
+    private_owner.unlink()
+    host.prepare = lambda project_id: pytest.fail("device enrollment must not prepare authority")
+    assert host.answer(PROJECT, "device", {"installation": "d" * 16})[0] == 201
+    assert not private_owner.exists()
+
+
 def test_registered_agent_is_not_online_without_authenticated_remote_contact(host):
     ws = host.workspace(PROJECT)
     owner = tokens.read_file(tokens.directory(ws.base) / tokens.OWNER_FILE)
@@ -148,6 +175,10 @@ def test_signed_sealed_fleet_and_agent_capabilities_both_required(host, tmp_path
     monkeypatch.setattr("ml_stack.workspace.remote.load_cluster_key", lambda path: key)
     try:
         remote = RemoteWorkspace(base, PROJECT)
+        device = remote.join_device("c" * 16)
+        assert device["id"] == f"device-{'c' * 16}"
+        assert remote.call("whoami", remote.token(agent=device["id"]))["project"]["key"] == PROJECT
+        assert remote.join_device("c" * 16)["id"] == device["id"]
         invite = host.invite(PROJECT)
         connected = remote.join(invite["code"], "mac")
         assert "token" not in connected
