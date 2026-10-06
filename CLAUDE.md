@@ -2,21 +2,17 @@
 
 ## Comments and docstrings
 
-Write what the code does. Never why it was written that way.
-
-**Banned:** rationale, war stories, "deliberately", "on purpose", "the reason is", "this is what
-X's lesson looks like", explanations of what would happen if the code were different, arguments
-against changing it, anything that reads as a message to a future reader about a decision.
+Write concise comments that help a reader understand the code.
 
 **Allowed:**
 - A one-line docstring on a public function saying what it returns.
 - A short docstring on a module saying what is in it.
-- A comment only where the mechanics are genuinely non-obvious — an API that behaves
-  unexpectedly, a magic constant, a workaround for a specific bug. One line.
+- A short comment explaining a non-obvious security, compatibility, or correctness invariant,
+  an unexpected API behavior, a magic constant, or a specific workaround.
 
-Stale prose is worse than none: it is confidently wrong and nobody notices. If a decision needs
-recording, it goes in a commit message, not in the file. Default to fewer words; if a docstring
-is longer than the function, delete most of it.
+Avoid duplicating the code in prose or recording temporary history in comments. Put decision
+history in the commit message. Prefer fewer words, but keep the context needed to preserve an
+invariant when changing the code.
 
 ## Commit messages
 
@@ -232,9 +228,6 @@ tests, running the suite, merging its own branch -- goes to a subagent, one per 
 own worktree. It does a piece itself only when handing it off would cost more: a one-line edit, a
 change that needs what only this conversation knows, a thing an agent has failed at twice.
 
-**Claude subagents run Sonnet. Opus is banned**, for every agent the main session starts,
-whatever the difficulty or the task; a brief never names an Opus model.
-
 **Delegate by capability and difficulty.** Select an available model and harness using the
 work's required capabilities, measured benchmark/task evidence, context needs, latency,
 resource availability and expected cost. The brief names the exact model/runtime and the
@@ -246,6 +239,9 @@ with correctness. Benchmark claims name the run, environment and artifact; model
 change the authenticated worker identity. Economic accounts aggregate independently verified
 contributions by model family across devices; exact workers, devices and model loads remain
 provenance, and a family switch does not rebucket historical awards.
+
+For Claude agents, use Haiku for read-only or exploratory work, Sonnet for most work, and Opus
+only when Sonnet has failed on the task.
 
 Reasoning effort, response output tokens, context length, tool/model turns, wall time, and
 CPU/GPU or memory admission are independent settings. Do not derive an answer cap from a
@@ -291,8 +287,10 @@ hour; run it again in the same project and you get the same open code) or start 
 
 Routine project and development package installation is normal authorized work, not a
 high-risk action or a reason to ask permission. When a command fails because a package is
-missing, identify the persistent project environment, install the dependency with the project's
-package manager, and rerun the command. If project code imports it on a normal execution path,
+missing, identify the per-device development environment, install the dependency with the
+project's package manager, and rerun the command. This applies on Windows, Linux/WSL and macOS.
+Use editable installs for local development when they keep the active checkout and environment
+in sync. If project code imports a package on a normal execution path,
 add it to the required dependency set; if it belongs to an optional feature, add it to that
 feature and its setup path. Keep the canonical environment complete through the repository's
 setup scripts and manifests. Do not stop at a missing-package message, route around it with a
@@ -383,10 +381,10 @@ preservation checks before removal; an unregistered directory is not proof that 
   `git merge --ff-only <branch>`. This is explicitly permitted integration, not permission to
   edit files, stage changes or create commits there. Resolve rebases/conflicts in an isolated
   integration worktree first. Never merge into `main` without the owner's explicit instruction.
-- Live runtimes use an immutable built wheel or pinned runtime tree with matching distribution
-  metadata. Never install an editable checkout or point a running worker at a changing checkout.
-  Replace only owned processes at a coordinated safe boundary, preserving their identity and
-  setup; do not interrupt another process's active work.
+- Packaged releases and stable service runtimes use an immutable built wheel or pinned runtime
+  tree with matching distribution metadata. Local development environments may use an editable
+  checkout on any supported OS. Replace only owned processes at a coordinated safe boundary,
+  preserving their identity and setup; do not interrupt another process's active work.
 - A brief to a subagent names the worktree rule and gives it a branch (the Agent tool's worktree
   isolation does the first half). A subagent told to commit nothing still commits on its own
   branch by named files before it reports — staged-and-uncommitted is the state that leaks — and
@@ -435,13 +433,13 @@ an environment built from scratch must do the same. A test that stripped the age
 reach the keystore: give it the file keyring. Nothing in the repo pops more than one dialog; a
 notice goes through `sentinel/heads_up.py` only, and `ML_STACK_NOTIFY=off` silences all of it.
 
-## System settings are human-only
+## System settings and service setup
 
-Changing a machine setting (the wired memory limit `iogpu.wired_limit_mb`, a boot-time daemon,
-a guard or sentinel policy, a role, a saved rule, a quarantine release) is done by a person at
-their own screen or terminal: never offered to a model, role, MCP or chat tool, workspace agent or
-channel message. A privileged step goes through the operating system's own administrator prompt;
-ml-stack never sees or stores the password, and never installs a passwordless `sudoers` rule.
+When the owner requests setup, agents may configure per-user services, startup entries, and
+application settings through the supported tooling. Changes that affect the whole operating
+system, require administrator privileges, alter security policy, or access the OS keystore need
+the person's direct authorization and the operating system's own administrator prompt. Never
+read or store an administrator password or install a passwordless `sudoers` rule.
 
 ## Running the tests
 
@@ -468,13 +466,12 @@ the machine holds: such a test is marked `live_api` or `live_net` and skipped un
 `ML_STACK_LIVE_API=1` or `ML_STACK_LIVE_NET=1` is set by a person (`tests/README.md`, *Live
 services*). Do not set either one.
 
-### Commit before you mutate
+### Regression and mutation checks
 
-A test you rely on is one you have watched fail: break the behaviour it covers and see it go red.
-`git checkout -- <file>` and `git restore <file>` restore the *last commit*, so every uncommitted
-edit in the file goes with the mutation, the fix included. Commit the fix first, apply the
-mutation, watch it fail, restore with `git restore --source=HEAD -- <file>`, and confirm
-`git diff` is empty and the test green. Never mutate a file holding uncommitted work.
+For a reported bug, add or update a focused test that reproduces the failure. Use `scripts/mutate`
+when mutation testing is useful; it tests a disposable copy of tracked files. Do not create a
+commit solely to make a test fail. If a tool requires committed input, commit the named files on
+the task branch first and preserve any unrelated work.
 
 ## Driving a browser
 
@@ -486,20 +483,12 @@ browser through the claude-in-chrome tools to test this project's pages: that wi
 their primary display and every click takes their screen. Drive your own Chromium through
 playwright, or run headless and read screenshots.
 
-## One thing on the GPU at a time
+## GPU and model concurrency
 
-Never put two pieces of work on the GPU at once -- not a question beside a reading, not two
-benchmark rows, not a smoke test while a long run is going. Serve one slot and let the second
-request wait.
-
-Two at once is more than twice as slow, and it takes the meaning out of every number either one
-produces: a row measured under load cannot be compared with a row measured alone, and neither can
-be trusted afterwards. Measured 2026-09-09, one machine, Qwen3.8-Flash-Next: a one-line reply
-asked on a second slot while an extraction ran took 81s, against a second or two alone, and the
-extraction was slowed too. So: `--parallel 1` unless something genuinely needs concurrent
-conversations, and a program that reads and answers over the same model does both through the
-same server, one after the other. `ml-stack-serve status` says how many slots a server has; check
-it before starting a run that will take hours.
+Acquire model work through the broker and follow its memory admission and slot limits. Run
+independent work concurrently when the broker admits it and available devices have capacity.
+Serialize requests that share a one-slot server, and keep benchmark comparisons free of unrelated
+load. Check `ml-stack-serve status` before long runs; do not launch model servers by hand.
 
 ## Driving a model on this machine
 
@@ -518,17 +507,20 @@ admits against memory, queues, picks the port, applies the measured profile, and
 too. This paragraph is the explanation, not the enforcement: a `Lease` cannot be made outside the
 broker's grant (`ml_stack.serve.grant`), `tests/test_serve_no_bypass.py` and the hard
 `server-starts` budget gate fail on a new spawn site, and the bash guard refuses `llama-server`
-by hand and `up` flags that would skip the lease. The owner's default 27B quant is
-`Qwen3.8-27B-UD-Q4_K_XL.gguf` (16.7 GB), not Q4_K_M.
+by hand and `up` flags that would skip the lease. Let the broker admit model and context based on
+the available device memory.
 
 ## Which models to test with, and the defaults the owner wants
 
 Owner's standing choices (2026-10-03); do not ask again.
 
-- **Live tests and demos use the newest Qwen family** (Qwen3.8 at the time of writing; look at
-  what `ml-stack-models list` and the Hugging Face cache actually hold and name the exact id in
-  the report) For large-model tests use the dense Qwen3.8-27B (`Qwen3.8-27B-UD-Q4_K_XL.gguf`); Flash-Next holds too much memory on this machine. For small and day-to-day tests prefer a smaller Qwen3.8 model. Do not use gpt-oss: it is
-  too old. Old results stay as history, not as a matrix row.
+- **Select test and demo models by task fit and available resources.** Consider output quality,
+  speed, context, memory admission, and models already downloaded on the device. Do not require a
+  vendor or architecture family by default; name the exact model, context, and device in results.
+  Keep benchmark comparisons on the same model and settings.
+- **The current requested local service model** is `ThinkingCap-Qwen3.8-27B-IQ4_XS.gguf` at
+  128K context when admitted by available memory. If it does not fit a device, select the best
+  suitable cached model rather than downloading a duplicate copy.
 - **MTP (multi-token prediction) draft heads are on by default** whenever the served model has a
   matching trusted head and the managed llama.cpp build supports it; there is a documented
   opt-out, and paths that cannot use it (one-token decisions, logprob scoring if incompatible)
@@ -548,28 +540,20 @@ Owner's standing choices (2026-10-03); do not ask again.
 
 ## Saying that something works
 
-Drive it the way a person does before you say it works: open the interface, click through the
-screen, type into the box, press the button, read what comes back.
-
-**A request is not a person.** `curl` against a route proves the route answers. It does not prove
-there is a button that reaches it, that the button is on a screen anyone can find, that the reply
-renders, or that the next screen follows. Every bug that has shipped here has been on the side of
-the line `curl` does not cross.
-
-**A green suite is not a person either.** The tests were written against the same understanding
-that wrote the code, so they agree with it by construction: they catch a change that breaks
-something, not something that was never right. If you have not driven it, say what you did
-instead, in the same breath as the claim: "the route answers, I have not opened the screen".
-Never let "it works" stand for "the parts I checked did not fail". This applies hardest to
-anything a person only does once — first run, setup, an uninstall — the paths with no second
-chance to notice.
+For a user-facing interface claim, exercise the flow a person uses: open the interface, click
+through the screen, enter input, submit it, and inspect the result. For backend, API, command-line,
+or library changes, verify the affected boundary with its relevant tests or direct invocation.
+An API response alone does not prove a user-facing flow works. Keep those claims distinct and
+report the checks actually performed. For first-run or setup changes, verify the documented
+command and resulting state.
 
 ## Reporting a problem
 
-Fix it. Then say what you fixed. A problem you found and did not fix is only worth raising if you
-are **actually blocked**: you need a decision only the owner can make, you need hardware or an
-account you do not have, or fixing it would go outside what was asked. Say which of those it is,
-in one line.
+Fix problems needed to complete the authorized task. Install routine missing dependencies and
+repair setup gaps in that scope. Keep unrelated findings as separate follow-up work instead of
+expanding the current change. Report a blocker only when it requires an owner-only decision,
+unavailable hardware or account access, or an action outside the authorized scope; name the exact
+condition and what would unblock it.
 
 **Say it short.** A few lines, the result or the question first, findings as a list. Prose that
 has to be mined for its content is work handed back. **If it is a decision, ask it** -- through
@@ -579,31 +563,11 @@ want your view" and "let me know how you want to proceed" are deferring dressed 
 If you cannot write it as one question with options, it is not a decision but a judgement that
 is yours: make it and say what you chose.
 
-**Nothing you could change is a blocker.** Not existing code, not code you did not write, not a
-function that returns the wrong thing on one platform, not a missing branch, not a test that was
-never written -- and not something this repository does not have yet: a dependency nobody has
-taken, a tool that is not installed, a setting nothing wires, a helper nobody wrote. Those are
-the work: add it and write the straightforward code, because downloading costs nothing. Never
-leave something unfixed on purpose, and never write worse code to avoid adding something --
-string-matching a file a parser would read, a hand-rolled version compare, a shape copied because
-importing the real one would mean a new name in `pyproject.toml`. A test-only dependency is not
-bound by `dependencies = []`, a promise about what a *user* installs; put it in the `test` extra
-and in the line CI installs. Upgrade on the same terms: a package below its pin is the
-environment being wrong, not a version to code around, so upgrade it, run the suite, and say what
-moved. `ml-stack-doctor` reports what is below its pin and `ml_stack.installed` holds the check.
-
-Watch for the passive voice that turns a bug into weather: "the field is simply absent", "psutil
-isn't available there", "that platform doesn't expose it". Every one of those is a sentence about
-something you could have changed. If it is genuinely impossible, say why in terms of the thing
-that makes it impossible, not what currently happens. The bar for mentioning a problem at all is
-the bar for a commit: it changes what someone would do next.
-
-**A measurement that names a cause we control is a task, not a finding.** "Precision was low
-because the model selected everything it read" names a prompt, a flag or a setting, so the
-sentence is not finished until it says what was changed and what the re-measurement showed. Write
-the fix, run the smoke, queue the sampled run, and report cause, change and number together. A
-cause we cannot control (the weights, the hardware, an upstream PR) is reported as such, with
-what would change it.
+Do not leave a relevant regression, security issue, or missing prerequisite unresolved. Install
+routine dependencies in the active development environment; declare them in the appropriate
+required dependency set, optional extra, test extra, or setup script. Upgrade a package when the
+task or project pin requires it, then run the affected checks. Do not expand a task to include
+unrelated defects or measurements; record those as separate follow-up work when useful.
 
 ## Never a real person
 
@@ -626,7 +590,8 @@ condition of using the code. The hook does not read those files. `scripts/hooks/
 `no-real-names` on staged files, `commit-msg` on the message — and is worth installing:
 
     python scripts/install-hooks.py
-    pip install -e '.[privacy]' && python -m spacy download en_core_web_sm
+    # Activate the project environment first.
+    python -m pip install '.[privacy]' && python -m spacy download en_core_web_sm
 
 It refuses a person it has never seen, not merely a list of known names. Invented names go in
 `tests/known-fixtures.txt`. Both hooks read `NAMES_GRAPH`, `NAMES_SCRAPE`, `NAMES_FIXTURES` and

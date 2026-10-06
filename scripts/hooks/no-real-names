@@ -23,7 +23,8 @@
 # `$0` is resolved through the .git/hooks symlink and `../../src` put on the path.
 #
 # Install:  scripts/install-hooks.sh
-#           pip install -e '.[privacy]' && python -m spacy download en_core_web_sm
+#           activate the project environment; then run:
+#           python -m pip install '.[privacy]' && python -m spacy download en_core_web_sm
 # Override: SKIP_NAME_CHECK=1 git commit ...   only after reading what it flagged.
 
 [ -n "$SKIP_NAME_CHECK" ] && exit 0

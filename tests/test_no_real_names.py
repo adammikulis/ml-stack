@@ -345,7 +345,8 @@ def test_a_clean_commit_is_still_refused_without_presidio(tmp_path):
                                notes="The kiln needs firing before the studio opens.\n")
     assert code == 1, said
     assert "presidio is not installed" in said
-    assert "pip install -e '.[privacy]'" in said
+    assert "Activate the project environment" in said
+    assert "python -m pip install '.[privacy]'" in said
     assert "python -m spacy download en_core_web_sm" in said
 
 
