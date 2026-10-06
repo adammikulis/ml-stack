@@ -6,13 +6,22 @@ import json
 from pathlib import Path
 
 import pytest
+from workspace_kit import Kit, clean_env
 
 from ml_stack import claude, harnessid
 
 
 @pytest.fixture(autouse=True)
-def _no_workspace(monkeypatch):
-    monkeypatch.setattr(harnessid, "invite", lambda name, project, parent, say, **kwargs: harnessid.Seat(name, parent))
+def _no_workspace(monkeypatch, tmp_path):
+    from ml_stack.workspace import harness_seat, tokens
+
+    kit = Kit(clean_env(monkeypatch, tmp_path))
+    def invite(name, project, parent, say, *, claim):
+        token = kit.agent(name)
+        tokens.store(kit.base, name, token)
+        monkeypatch.setattr(harness_seat, 'reported_models', lambda url: [claim[0]])
+        return harnessid.Seat(name, minted=True, base=kit.base, issuer=kit.ws.auth(kit.owner))
+    monkeypatch.setattr(harnessid, "invite", invite)
     monkeypatch.setattr(harnessid, "announce", lambda *a, **k: True)
 
 
@@ -61,7 +70,7 @@ def test_launch_leases_the_best_settings_and_runs_claude_inside_it(monkeypatch, 
         assert not seen.get("released"), "claude runs inside the lease"
         return 7
 
-    code = claude.launch(["kestrel", "--port", "8899", "--claude", str(binary), "--",
+    code = claude.launch(["kestrel", "--ctx", "32768", "--port", "8899", "--claude", str(binary), "--",
                           "--print", "hello"], say=lambda _: None, run_claude=run_claude)
     assert code == 7
     assert seen["lease"]["port"] == 8899 and seen["lease"]["parallel"] == 1, "one conversation, one slot"
@@ -225,7 +234,7 @@ class TestJoiningAServerAlreadyUp:
         binary.chmod(0o755)
         said: list[str] = []
         where: dict = {}
-        claude.launch(["quince-2b", "--port", "8123", "--claude", str(binary)],
+        claude.launch(["quince-2b", "--ctx", "32768", "--port", "8123", "--claude", str(binary)],
                       say=said.append,
                       run_claude=lambda cmd, env: where.update(env=env) or 0)
         assert seen["model"] == "/models/quince-2b-Q4_K_M.gguf"

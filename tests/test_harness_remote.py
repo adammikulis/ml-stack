@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from ml_stack import harness_remote, harnesshook
-from ml_stack.workspace import integration_git as repo, worktree_lifecycle
+from ml_stack.workspace import integration_git as repo, remote_cli, worktree_lifecycle
 from ml_stack.workspace.claims import Conflict
 from ml_stack.workspace.identity import AGENT, Denied, Identity
 
@@ -145,7 +145,8 @@ def test_native_reservation_uses_actual_remote_capability_api(setup, monkeypatch
     remote = RemoteWorkspace.__new__(RemoteWorkspace)
     remote.host, remote.project_id, remote.base = setup.remote.host, setup.remote.project_id, setup.remote.base
     remote.cluster = 'fixture-cluster'
-    tokens.store(remote.base, 'worker', 'fixture-agent-capability')
+    capability = 'mlws1.worker.fixture-agent-capability'
+    tokens.store(remote.base, 'worker', capability)
     requests = []
     def request(action, payload):
         requests.append((action, payload))
@@ -157,7 +158,7 @@ def test_native_reservation_uses_actual_remote_capability_api(setup, monkeypatch
     operation = requests[-1][1]
     assert operation['operation'] == 'native.reserve'
     assert operation['args'] == [[('area', 'source.py')]]
-    assert operation['agent_token'] == 'fixture-agent-capability'
+    assert operation['agent_token'] == capability
 
 
 @pytest.mark.parametrize('command, expected', [
@@ -289,3 +290,43 @@ def test_canonical_cli_release_preserves_recreated_exact_claim(setup):
     harness_remote.cli_command(setup.remote, 'fixture', cli_args(cmd='release', key=target))
     assert harness_remote.claims().who('file', target)
     assert harness_remote.claims().who('area', target)
+
+
+@pytest.fixture
+def direct_cli(tmp_path, monkeypatch):
+    calls = []
+    info = {'id': 'worker', 'role': 'agent', 'can': ['read', 'claim'], 'project': {'key': 'a' * 32}}
+    def call(operation, token, **kwargs):
+        calls.append((operation, kwargs))
+        assert operation in ('whoami', 'native.heartbeat')
+        return info if operation == 'whoami' else []
+    remote = SimpleNamespace(host='http://127.0.0.1:9', project_id='a' * 32, base=tmp_path / 'remote',
+                             token=lambda **kwargs: 'fixture', call=call,
+                             native_reserve=lambda name, resources: calls.append(('native.reserve', resources)),
+                             native_release=lambda name, kind, key: calls.append(('native.release', (kind, key))))
+    monkeypatch.setattr(remote_cli, 'RemoteWorkspace', lambda *args, **kwargs: remote)
+    monkeypatch.setattr(harness_remote.project_connection, 'selected', lambda: None)
+    monkeypatch.setattr(harness_remote.limits, 'root', lambda: tmp_path / 'physical')
+    args = SimpleNamespace(action='claim', arguments=['branch', 'worker/change'], host=remote.host,
+                           project_id=remote.project_id, cluster_key='', cluster='', name='', agent='worker',
+                           token_file='', model='', harness='', label='lifecycle', project_root=str(tmp_path), ttl=0)
+    return args, calls
+
+
+def test_direct_branch_claim_release_use_native_dispatch(direct_cli):
+    args, calls = direct_cli
+    remote_cli.run(args)
+    args.action = 'release'
+    remote_cli.run(args)
+    assert ('native.reserve', [('branch', 'worker/change')]) in calls
+    assert ('native.release', ('branch', 'worker/change')) in calls
+    args.agent = ''
+    with pytest.raises(Denied, match='explicit agent'):
+        remote_cli.run(args)
+
+
+def test_direct_heartbeat_forwards_bounded_ttl(direct_cli):
+    args, calls = direct_cli
+    args.action, args.arguments, args.ttl = 'heartbeat', [], 19
+    assert remote_cli.run(args) == {'renewed': 0, 'capped': []}
+    assert ('native.heartbeat', {'ttl_s': 19}) in calls
