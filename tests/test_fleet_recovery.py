@@ -103,7 +103,8 @@ def test_export_then_import_joins_a_fresh_machine_with_the_same_key(tmp_path, ks
     assert stat.S_IMODE(file.stat().st_mode) == 0o600
     assert "run commands on every machine" in file.read_text().splitlines()[1]
     body = json.loads("\n".join(ln for ln in file.read_text().splitlines() if not ln.startswith("#")))
-    assert body == {"group": "lab", "key": memberships(first)[0].key.decode()}
+    member = memberships(first)[0]
+    assert body == {"group": "lab", "key": member.key.decode(), "mode": member.mode}
     assert main(["--cluster-key", str(second), "recovery", "import", str(file)]) == 0
     assert [(m.group, m.key) for m in memberships(second)] == [(m.group, m.key) for m in memberships(first)]
     assert recovery.recall("lab", second) is None

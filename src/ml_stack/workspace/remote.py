@@ -46,15 +46,18 @@ class RemoteWorkspace:
         if key is None:
             raise Denied("join the host's cluster before attaching its project board")
         self.cluster = rows[0].group if rows else cluster
+        self.mode = rows[0].mode if rows else "prod"
         self.cluster_id = hashlib.sha256(key).hexdigest()
         self.fleet_token = derive_token(key)
         self.device_cert = ""
+        self.authority_machine = ""
         if parts.scheme == "https":
             peers = Peer.discover(key=key, timeout_s=2)
             matched = [peer for peer in peers if peer.base_url.rstrip("/") == self.host]
             if len(matched) != 1:
                 raise Denied("the project host was not authenticated by cluster discovery; check its address and cluster")
             self.device_cert = matched[0].beacon.cert if matched[0].beacon else ""
+            self.authority_machine = getattr(matched[0].beacon, "machine", "")
         label = hashlib.sha256(f"{self.host}/{project_id}".encode()).hexdigest()
         self.base = home.state("workspace-remote", label)
 
@@ -109,6 +112,24 @@ class RemoteWorkspace:
         path = tokens.store(self.base, name, token)
         return {"id": name, "project_id": self.project_id, "host": self.host,
                 "token_file": str(path), "state": "connected"}
+
+    def renew(self, agent: str, authority_machine: str) -> dict:
+        """Renew the existing private automatic capability for the current Dev cluster."""
+        if (self.mode != "dev" or not self.device_cert or not authority_machine
+                or authority_machine != self.authority_machine):
+            raise Denied("agent renewal requires its authenticated Dev project authority")
+        self._prepare_storage()
+        lock = self.base / "remote-sessions.lock"
+        self._safe_storage(lock)
+        with held(lock):
+            token = tokens.load(self.base, agent)
+            result = self._request("renew", {"agent_token": token, "cluster": self.cluster,
+                                             "cluster_id": self.cluster_id,
+                                             "authority_machine": authority_machine})
+            if (result.get("id") != agent or result.get("project_id") != self.project_id
+                    or result.get("cluster_id") != self.cluster_id):
+                raise Denied("agent renewal returned another identity or project cluster")
+            return result
 
     def call(self, operation: str, token: str, *args, **kwargs):
         return self._request("board", {"agent_token": token, "operation": operation,

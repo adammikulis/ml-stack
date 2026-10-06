@@ -30,8 +30,14 @@ def _saved() -> dict:
         raise Denied("canonical board connection record is unreadable; local fallback is disabled") from exc
 
 
-def bind(remote: RemoteWorkspace, root: Path, agent: str, cluster: str = "") -> dict:
+def bind(remote: RemoteWorkspace, root: Path, agent: str, cluster: str = "", *, local_agent: str = "") -> dict:
     """Bind a local project root to an authenticated canonical board identity."""
+    prior = selected(root)
+    if (prior and prior.get("agent") == agent and prior["host"] == remote.host
+            and prior["project_id"] == remote.project_id and getattr(remote, "mode", "prod") == "dev"
+            and (prior.get("cluster_id") or prior.get("local_agent"))
+            and prior.get("cluster_id") != remote.cluster_id):
+        remote.renew(agent, remote.authority_machine)
     who = remote.call("whoami", remote.token(agent=agent))
     if who.get("role") != AGENT or who.get("project", {}).get("key") != remote.project_id:
         raise Denied("connect using this project's scoped agent identity")
@@ -46,6 +52,10 @@ def bind(remote: RemoteWorkspace, root: Path, agent: str, cluster: str = "") -> 
         raise Denied("this checkout already names another canonical board")
     made = {"host": remote.host, "project_id": remote.project_id, "agent": agent,
             "cluster": cluster, "cluster_key": remote.cluster_key}
+    if who.get("project", {}).get("cluster_id"):
+        made["cluster_id"] = who["project"]["cluster_id"]
+    if local_agent:
+        made["local_agent"] = local_agent
     with held(path.with_suffix(".lock")):
         connections = _saved()
         existing = connections.get(str(root))

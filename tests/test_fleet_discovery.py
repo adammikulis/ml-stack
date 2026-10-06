@@ -774,7 +774,7 @@ class TestBelongingToSeveralClusters:
         assert [m.group for m in memberships(anchor)] == ["home"]
         assert memberships(anchor)[0].key != first, "the passphrase did not change"
 
-    def test_a_machine_set_up_before_the_list_existed_is_still_in_its_cluster(
+    def test_a_key_without_current_membership_does_not_join_a_cluster(
             self, tmp_path):
         from ml_stack.fleet.discovery import cluster_group, in_cluster, load_cluster_key
         from tests.cluster_support import key_for
@@ -783,11 +783,11 @@ class TestBelongingToSeveralClusters:
         key = key_for(self.WORDS, "ml-stack")
         anchor.write_text(key.decode() + "\n")
 
-        assert in_cluster(anchor)
-        assert load_cluster_key(anchor) == key
-        assert cluster_group(anchor) == "ml-stack"
+        assert not in_cluster(anchor)
+        assert load_cluster_key(anchor) is None
+        assert cluster_group(anchor) is None
 
-    def test_the_group_it_was_set_up_with_survives(self, tmp_path):
+    def test_a_legacy_group_file_does_not_restore_membership(self, tmp_path):
         from ml_stack.fleet.discovery import cluster_group
         from tests.cluster_support import key_for
 
@@ -795,19 +795,19 @@ class TestBelongingToSeveralClusters:
         anchor.write_text(key_for(self.WORDS, "garage").decode())
         (tmp_path / "cluster.group").write_text("garage\n")
 
-        assert cluster_group(anchor) == "garage"
+        assert cluster_group(anchor) is None
 
-    def test_the_old_key_is_moved_into_the_list_once(self, tmp_path):
+    def test_current_memberships_never_adopt_an_old_key(self, tmp_path):
         from ml_stack.fleet.discovery import leave, memberships
         from tests.cluster_support import join, key_for
 
         anchor = tmp_path / "cluster.key"
         anchor.write_text(key_for(self.WORDS, "ml-stack").decode())
-        assert len(memberships(anchor)) == 1
-        assert (tmp_path / "cluster.json").exists()
+        assert memberships(anchor) == []
+        assert not (tmp_path / "cluster.json").exists()
 
         join(self.WORDS, group="lab", path=anchor)
-        assert {m.group for m in memberships(anchor)} == {"ml-stack", "lab"}
+        assert {m.group for m in memberships(anchor)} == {"lab"}
 
         leave("ml-stack", path=anchor)
         leave("lab", path=anchor)

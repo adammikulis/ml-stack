@@ -38,7 +38,6 @@ _WHERE = {
     "create_cluster_key": "discovery",
     "derive_token": "discovery",
     "discover": "discovery",
-    "group_path": "discovery",
     "in_cluster": "discovery",
     "join_by_passphrase": "onboard.joining",
     "key_path": "discovery",
@@ -125,7 +124,6 @@ draft_beside: Any
 eligible: Any
 families: Any
 family_of: Any
-group_path: Any
 how_many: Any
 in_cluster: Any
 join_by_passphrase: Any
@@ -197,7 +195,6 @@ __all__ = [
     'eligible',
     'families',
     'family_of',
-    'group_path',
     'how_many',
     'in_cluster',
     'is_unfiltered',

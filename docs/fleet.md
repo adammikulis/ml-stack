@@ -91,11 +91,18 @@ training job starts beside it. The dispatcher counts as a peer through `here()`.
 
 ## Joining the fleet
 
-Three lines on a new machine:
+Development is the default mode. Start the Fleet daemon on each device with
+`ml-stack-traind`; nearby devices discover one another and join the same Development cluster
+over pinned TLS. No passphrase, pairing code or recovery file is needed. Running a workspace
+command from matching Git checkouts connects agents to the shared project Board.
+Memberships and recovery files record their mode explicitly. Legacy key-only files and
+records without a mode are not imported. Explicit Production memberships retain Production admission.
+
+For explicit Production enrollment on a new machine:
 
 ```
 pip install git+https://github.com/adammikulis/ml-stack
-ml-stack-fleet join --group "Cedar lab" --persist
+ml-stack-fleet join --group "Cedar lab" --mode prod --persist
 ml-stack-fleet status
 ```
 
@@ -335,4 +342,3 @@ The tools are `serve_status`, `serve_up`, `serve_down`, `models_find`, `models_f
 measurement never block the call -- each returns a log path and a pid, and `bench_status`
 follows it. Joining a fleet is a command a person runs (`ml-stack-fleet join`), never an MCP tool. With `pip install 'ml-stack[mcp]'` the SDK's server is used; without it the
 command speaks the protocol itself.
-

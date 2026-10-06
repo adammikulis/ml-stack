@@ -446,6 +446,25 @@ class Registry:
             self._save(agents)
         return name, f"{PREFIX}{name}.{secret}"
 
+    def renew_dev_project(self, token: str, project_id: str, cluster: str, cluster_id: str) -> Identity:
+        """Bind a live automatic project capability to its authenticated Dev cluster."""
+        if (not re.fullmatch("[a-f0-9]{32}", project_id)
+                or not isinstance(cluster, str) or not 1 <= len(cluster) <= 128
+                or not re.fullmatch("[a-f0-9]{64}", cluster_id)):
+            raise ValueError("invalid project cluster scope")
+        with held(self.path.with_name("agents.lock")):
+            who = self.authenticate(token)
+            agents = self._load()
+            entry = agents[who.id]
+            scope = entry.get("project", {})
+            if (who.role != AGENT or who.parent or entry.get("session_device")
+                    or entry.get("minted_by") != "dev-cluster"
+                    or scope.get("key") != project_id or not scope.get("cluster_id")):
+                raise Denied("cluster renewal requires this project's live automatic Dev agent")
+            entry["project"] = {**scope, "cluster": cluster, "cluster_id": cluster_id}
+            self._save(agents)
+            return who
+
     def mint(self, by: Identity, name: str, role: str, ttl_s: float) -> str:
         """A new token for ``name``, if ``by`` may mint that role."""
         if role not in ROLES:

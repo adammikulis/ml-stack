@@ -276,7 +276,7 @@ class BoardApi:
         self.ws.audit("board.add", who.id, board=name, member=member)
         return {"added": member, "to": name}
 
-    def place(self, member: str, project: dict[str, str]) -> list[str]:
+    def place(self, member: str, project: dict[str, str], *, initial_only: bool = False) -> list[str]:
         """Put a newly joined agent on its project's board. It is subscribed to nothing: its
         inbox carries direct messages and mentions, and `#announcements` arrives as a roll-up."""
         who = Identity(member, AGENT)
@@ -285,6 +285,12 @@ class BoardApi:
             name = self.store.project_board(project)
             with self.store.locked():
                 boards = self.store.state()[0]
+                if initial_only and any(row.get("kind") == "board"
+                                        and row.get("op") == "leave"
+                                        and row.get("name") == name
+                                        and row.get("who") == member
+                                        for row in self.store.log.rows()):
+                    return names
                 try:
                     self._admit(who, name, member, boards)
                 except Refused:

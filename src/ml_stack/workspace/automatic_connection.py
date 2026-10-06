@@ -1,17 +1,22 @@
 """Automatic Dev project discovery and canonical Board attachment."""
 
+import hashlib
+import ipaddress
 import json
+import os
 import time
 from pathlib import Path
 from urllib.parse import urlsplit
 
 from ml_stack import person, sealing, worktreerules
-from ml_stack.fleet.discovery import derive_token, memberships
+from ml_stack.fleet import automatic_clusters
+from ml_stack.fleet.discovery import derive_token, memberships, primary_ip
 from ml_stack.fleet.launch import HTTP_PORT
 from ml_stack.fleet.project_client import catalogue
 from ml_stack.fleet.projects import identity
 from ml_stack.fleet.remote import Peer
 from ml_stack.http import ServerError, ServerUnreachable, open_stream
+from ml_stack.workspace import device_agent, tokens
 from ml_stack.workspace.harness_seat import Seat
 from ml_stack.workspace.identity import AGENT, Denied
 from ml_stack.workspace.project_connection import bind, selected
@@ -19,6 +24,76 @@ from ml_stack.workspace.remote import RemoteWorkspace
 
 MAX_PEERS = 8
 DISCOVERY_SECONDS = 10.0
+ADMISSION_SECONDS = 25.0
+
+
+def _device_address(peer, declared):
+    """Whether a Board origin names its authenticated discovery endpoint."""
+    if declared == peer.base_url:
+        return True
+    try:
+        observed, named = urlsplit(peer.base_url), urlsplit(declared)
+        if (named.scheme != "https" or observed.scheme != "https" or named.port != observed.port
+                or named.username or named.password or named.path not in ("", "/")
+                or named.query or named.fragment):
+            return False
+        return (ipaddress.ip_address(observed.hostname).is_loopback
+                and named.hostname == primary_ip())
+    except ValueError:
+        return False
+
+
+def settle(member, cluster_key=None, port=None):
+    """Converge visible Dev devices before choosing a project authority."""
+    deadline = time.monotonic() + ADMISSION_SECONDS
+    while True:
+        member = automatic_clusters.ensure(cluster_key, mode="dev", port=port)
+        offered = automatic_clusters.offers(port)
+        cluster_id = hashlib.sha256(member.key).hexdigest()
+        if all(row["cluster_id"] == cluster_id for host, row in offered):
+            return member
+        if time.monotonic() >= deadline:
+            raise Denied("nearby Dev devices have not converged; retry when their cluster discovery is ready")
+        time.sleep(0.1)
+
+
+def cli_connection(args, connection, local_token, workspace):
+    """Resolve this command's authenticated local agent on its Dev Board."""
+    if getattr(args, "token_file", ""):
+        return connection
+    if connection.get("automatic"):
+        local = workspace()
+        actor = device_agent.owned_local(local, local_token(args))
+        metadata = local.registry.info(actor.id)
+        claim = (getattr(args, "model", "") or metadata["model"],
+                 getattr(args, "harness", "") or metadata["harness"])
+        connection = attach(Path(connection["root"]), actor.id, connection, claim=claim)
+        args.agent = connection["agent"]
+    elif connection.get("local_agent"):
+        requested = args.agent or os.environ.get(tokens.AGENT_ENV, "")
+        if requested == connection["local_agent"]:
+            actor = device_agent.owned_local(workspace(), local_token(args))
+            if actor.id != requested:
+                raise Denied("the local agent does not match this project's saved identity")
+            args.agent = connection["agent"]
+    return refresh(connection, args.agent or os.environ.get(tokens.AGENT_ENV, ""))
+
+
+def refresh(connection: dict, actor: str) -> dict:
+    """Renew a saved automatic Dev connection when its cluster key changes."""
+    if (not connection.get("agent") or actor not in {connection["agent"], connection.get("local_agent")}
+            or not (connection.get("cluster_id") or connection.get("local_agent"))):
+        return connection
+    key_path = Path(connection["cluster_key"]) if connection.get("cluster_key") else None
+    rows = memberships(key_path)
+    if not rows or rows[0].mode != "dev":
+        return connection
+    if connection.get("cluster_id") == hashlib.sha256(rows[0].key).hexdigest():
+        return connection
+    remote = RemoteWorkspace(connection["host"], connection["project_id"],
+                             cluster_key=key_path, cluster=rows[0].group)
+    return bind(remote, Path(connection["root"]), connection["agent"], rows[0].group,
+                local_agent=connection.get("local_agent", ""))
 
 
 def _boards(peer, document, project_id):
@@ -80,7 +155,9 @@ def discover(root: Path, *, cluster_key=None, cluster="", port=None):
         return None
     if len(members) != 1:
         raise Denied("select this project's Dev cluster with --cluster NAME")
-    member = members[0]
+    member = settle(members[0], cluster_key, port)
+    if cluster and member.group != cluster:
+        raise Denied("the selected Dev cluster changed during project discovery")
     _register(root, member, project_id)
     deadline = time.monotonic() + DISCOVERY_SECONDS
     peers = Peer.discover(key=member.key, group=member.group, timeout=2,
@@ -110,7 +187,7 @@ def discover(root: Path, *, cluster_key=None, cluster="", port=None):
         peer, row = hosts[0]
         declared = {candidate["board_host"] for _, candidate in found
                     if candidate["authority_machine"] == authority and candidate["board_host"]}
-        if len(declared) != 1 or next(iter(declared)) != peer.base_url:
+        if len(declared) != 1 or not _device_address(peer, next(iter(declared))):
             raise Denied("the canonical Board address does not match its authenticated device")
     else:
         peer, row = min(found, key=lambda item: (item[1]["machine"], item[0].base_url))
@@ -121,23 +198,40 @@ def discover(root: Path, *, cluster_key=None, cluster="", port=None):
             "cluster_key": str(cluster_key) if cluster_key else ""}
 
 
+def local_project(cwd: Path | None = None):
+    """Discover the canonical Dev Board for the checkout containing this directory."""
+    checkout = worktreerules.checkouts(cwd or Path.cwd())
+    if checkout is None:
+        return None
+    root = checkout[0]
+    choice = discover(root)
+    return {**choice, "root": str(root), "agent": "", "automatic": True} if choice else None
+
+
 def connect(root: Path, name: str, *, claim=("", ""), cluster_key=None, cluster=""):
     """Attach this project to its authenticated Dev Board with an agent capability."""
     choice = discover(root, cluster_key=cluster_key, cluster=cluster)
     if choice is None:
         raise Denied("no authenticated Dev device advertises this project's Board")
+    return attach(root, name, choice, claim=claim)
+
+
+def attach(root: Path, name: str, choice: dict, *, claim=("", "")):
+    """Attach an agent to the selected authenticated project authority."""
     prior = selected(root)
     if prior and (prior["host"], prior["project_id"]) != (choice["host"], choice["project_id"]):
         raise Denied("this project already names another canonical Board")
     remote = RemoteWorkspace(choice["host"], choice["project_id"],
-                             cluster_key=cluster_key, cluster=choice["cluster"])
-    if prior and prior.get("agent") and (not name or prior["agent"] == name):
-        return bind(remote, root, prior["agent"], choice["cluster"])
+                             cluster_key=Path(choice["cluster_key"]) if choice.get("cluster_key") else None,
+                             cluster=choice["cluster"])
+    if prior and prior.get("agent") and (not name or name in (prior["agent"], prior.get("local_agent"))):
+        return bind(remote, root, prior["agent"], choice["cluster"],
+                    local_agent=prior.get("local_agent", ""))
     if not name:
         raise Denied("select your own agent name with --name NAME")
     joined = remote.enroll(name, model=claim[0], harness=claim[1],
                            authority_machine=choice["authority_machine"])
-    return bind(remote, root, joined["id"], choice["cluster"])
+    return bind(remote, root, joined["id"], choice["cluster"], local_agent=name)
 
 
 def startup(root: Path, name: str, parent: str = "", *, claim=("", "")) -> Seat | None:

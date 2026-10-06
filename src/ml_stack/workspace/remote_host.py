@@ -118,13 +118,14 @@ class WorkspaceHost:
             Rates(ws.base / "enrollment", 10, 600, ws.clock).admit("dev-cluster")
             wanted = str(body.get("name") or "")
             onboard.pick_name(ws, wanted)
-            model = clean_model(str(body.get("model") or ""))
+            model = str(body.get("model") or "")
+            if model:
+                model = clean_model(model)
             harness = clean_harness(str(body.get("harness") or ""))
-            if not model or not harness:
-                raise ValueError("agent enrollment requires model and harness claims")
             scope = {"key": project_id, "name": project.name, "cluster": cluster, "cluster_id": cluster_id}
             name, token = ws.registry.enroll_project(wanted.strip().lower(), scope, onboard.TOKEN_S)
-            ws.registry.record_model(name, model, harness, CLAIMED)
+            if model or harness:
+                ws.registry.record_model(name, model, harness, CLAIMED)
             ws.board.place(name, scope)
             ws.audit("remote.enroll", name, project_id=project_id,
                      admission="dev-cluster", model=model, harness=harness)
@@ -134,6 +135,28 @@ class WorkspaceHost:
             return 403, {"error": str(exc)}
         except RateLimited as exc:
             return 429, {"error": str(exc)}
+        except (ValueError, TypeError) as exc:
+            return 400, {"error": str(exc)}
+
+    def renew(self, project_id: str, body: dict, *, cluster: str = "", cluster_id: str = "") -> tuple[int, dict]:
+        """Renew an existing automatic capability under authenticated Dev admission."""
+        try:
+            if len(json.dumps(body).encode()) > 32 * 1024:
+                return 413, {"error": "workspace operation exceeds the size limit"}
+            project = self.projects.get(project_id)
+            if (not cluster or not cluster_id or body.get("cluster") != cluster
+                    or body.get("cluster_id") != cluster_id):
+                raise Denied("agent renewal requires its authenticated Dev cluster")
+            if (body.get("authority_machine") != self.projects.machine
+                    or project.authority_machine != self.projects.machine or not project.board_host):
+                raise Denied("agent renewal requires the selected local project authority")
+            ws = self.workspace(project_id)
+            who = ws.registry.renew_dev_project(str(body.get("agent_token") or ""),
+                                                 project_id, cluster, cluster_id)
+            ws.audit("remote.renew", who.id, project_id=project_id, admission="dev-cluster")
+            return 200, {"id": who.id, "project_id": project_id, "cluster_id": cluster_id}
+        except Denied as exc:
+            return 403, {"error": str(exc)}
         except (ValueError, TypeError) as exc:
             return 400, {"error": str(exc)}
 

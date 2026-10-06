@@ -28,6 +28,7 @@ def found(monkeypatch):
     monkeypatch.setattr(automatic, "_register", lambda *args: None)
     monkeypatch.setattr(automatic, "memberships", lambda path: [
         SimpleNamespace(group="development", key=b"key", mode="dev")])
+    monkeypatch.setattr(automatic, "settle", lambda member, *args: member)
     monkeypatch.setattr(automatic.Peer, "discover", lambda **kwargs: nodes)
     monkeypatch.setattr(automatic, "catalogue", lambda node, **kwargs: node.document)
     return nodes
@@ -58,6 +59,26 @@ def test_competing_authorities_are_refused(found, tmp_path):
 @pytest.mark.redteam
 def test_advertised_authority_address_requires_matching_authenticated_peer(found, tmp_path):
     found.append(peer("node-a", "node-a", "https://node-b:8770"))
+    with pytest.raises(Denied, match="address"):
+        automatic.discover(tmp_path)
+
+
+def test_local_authority_accepts_its_lan_origin_from_loopback_discovery(found, tmp_path, monkeypatch):
+    node = peer("node-a", "node-a", "https://192.168.40.2:8770")
+    node.base_url = "https://127.0.0.1:8770"
+    found.append(node)
+    monkeypatch.setattr(automatic, "primary_ip", lambda: "192.168.40.2")
+    assert automatic.discover(tmp_path)["host"] == node.base_url
+
+
+@pytest.mark.parametrize("origin", ["https://192.168.40.3:8770", "https://192.168.40.2:8771",
+                                    "http://192.168.40.2:8770", "https://192.168.40.2:8770/other",
+                                    "https://user@192.168.40.2:8770"])
+def test_local_origin_alias_requires_same_device_and_tls_port(found, tmp_path, monkeypatch, origin):
+    node = peer("node-a", "node-a", origin)
+    node.base_url = "https://127.0.0.1:8770"
+    found.append(node)
+    monkeypatch.setattr(automatic, "primary_ip", lambda: "192.168.40.2")
     with pytest.raises(Denied, match="address"):
         automatic.discover(tmp_path)
 
@@ -95,7 +116,7 @@ def test_enrollment_binds_returned_agent_identity(found, tmp_path, monkeypatch):
             events.append((name, kwargs))
             return {"id": "worker-1"}
     monkeypatch.setattr(automatic, "RemoteWorkspace", Remote)
-    monkeypatch.setattr(automatic, "bind", lambda remote, root, agent, cluster: {
+    monkeypatch.setattr(automatic, "bind", lambda remote, root, agent, cluster, **kwargs: {
         "host": remote.host, "agent": agent, "cluster": cluster})
     result = automatic.connect(tmp_path, "worker", claim=("test-model", "codex"))
     assert result["agent"] == "worker-1"
