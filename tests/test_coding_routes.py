@@ -69,7 +69,7 @@ def test_cancel_stops_native_process_and_the_next_turn_can_start(coding_api):
     server, conversation, _kit = coding_api
     assert post(server, conversation.id, "start", {"message": "wait until cancelled"})[0] == 202
     deadline = time.monotonic() + 10
-    while server.ui.coding_turns.status(conversation.id)["state"] != "running":
+    while server.ui.coding_turns.status(conversation.id)["session"] != SESSION:
         assert time.monotonic() < deadline
         time.sleep(.02)
     assert post(server, conversation.id, "start", {"message": "second"})[0] == 400
@@ -78,7 +78,9 @@ def test_cancel_stops_native_process_and_the_next_turn_can_start(coding_api):
     assert finished(server, conversation.id)["state"] == "cancelled"
     assert time.monotonic() - began < 5
     assert post(server, conversation.id, "start", {"message": "continue inspection"})[0] == 202
-    assert finished(server, conversation.id)["state"] == "completed"
+    resumed = finished(server, conversation.id)
+    assert resumed["state"] == "completed"
+    assert resumed["session"] == SESSION
 
 
 @pytest.mark.parametrize("body", [{"message": []}, {"message": ""}, {"message": "hello", "role": "admin"},
@@ -147,7 +149,10 @@ def test_catalogue_uses_real_modelinfo_paths_and_coding_profile(monkeypatch, tmp
     result = coding_routes.catalogue()
     assert result["models"] == [{"name": installed.name, "ref": str(installed.path)}]
     assert result["default_model"] == str(installed.path)
-    assert calls[0]["coding"] is True and calls[0]["search"] is False
+    selection = calls[0]["selection"]
+    assert selection.coding is True and selection.search is False
+    assert selection.context == coding_routes.LIMIT
+    assert calls[0]["installed"] == [installed]
 
 
 def test_launch_adapter_forwards_exact_context_and_mtp_head(monkeypatch):

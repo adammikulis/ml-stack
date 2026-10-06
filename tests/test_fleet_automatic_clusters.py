@@ -30,6 +30,31 @@ def test_receive_rejects_response_identity_mismatch(monkeypatch, changed):
         automatic.receive("127.0.0.1", offer())
 
 
+@pytest.mark.redteam
+@pytest.mark.parametrize("key", [b"!" * 43, b"=" * 43])
+def test_receive_refuses_malformed_key_with_matching_advertised_digest(monkeypatch, key):
+    monkeypatch.setattr(automatic.secrets, "token_hex", lambda count: NONCE)
+    answer = {"mode": "dev", "group": "development", "key": key.decode(), "nonce": NONCE}
+    monkeypatch.setattr(joining._Call, "post", lambda self, step, body: (200, answer))
+    with pytest.raises(discovery.DiscoveryError, match="invalid key"):
+        automatic.receive("127.0.0.1", offer(key))
+
+
+@pytest.mark.redteam
+def test_ensure_preserves_membership_after_malformed_automatic_key(tmp_path, monkeypatch):
+    path = tmp_path / "device.key"
+    member = discovery.adopt(discovery.Membership("development", KEY), path)
+    key = b"!" * 43
+    offered = offer(key)
+    monkeypatch.setattr(automatic, "offers", lambda port: [("127.0.0.1", offered)])
+    monkeypatch.setattr(automatic.secrets, "token_hex", lambda count: NONCE)
+    answer = {"mode": "dev", "group": "development", "key": key.decode(), "nonce": NONCE}
+    monkeypatch.setattr(joining._Call, "post", lambda self, step, body: (200, answer))
+    assert offered["cluster_id"] < hashlib.sha256(member.key).hexdigest()
+    assert automatic.ensure(path) == member
+    assert discovery.memberships(path) == [member]
+
+
 def test_receive_pins_advertised_certificate_and_binds_nonce(monkeypatch):
     captured = []
     monkeypatch.setattr(automatic.secrets, "token_hex", lambda count: NONCE)

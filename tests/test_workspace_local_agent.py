@@ -6,6 +6,7 @@ from __future__ import annotations
 import contextlib
 import http.client
 import json
+import os
 import stat
 import subprocess
 import sys
@@ -118,6 +119,7 @@ def test_an_id_that_is_not_downloaded_is_refused():
 @pytest.fixture
 def kit(monkeypatch, tmp_path):
     monkeypatch.setattr(localmodel, "context_for", lambda pick, coding=False: 262144 if coding else 32768)
+    monkeypatch.setattr(device_agent, "device_id", lambda: "abcdef0123456789")
     k = Kit(clean_env(monkeypatch, tmp_path))
     k.limits(sends_per_window=1000)
     tokens.store(k.base, tokens.OWNER_FILE, k.owner)
@@ -399,11 +401,13 @@ def test_a_model_that_cannot_be_leased_fails_in_one_line(kit):
 # -- the routes ---------------------------------------------------------------------------
 @pytest.fixture
 def served(kit, monkeypatch):
-    monkeypatch.setattr(device_agent, "device_id", lambda: "abcdef0123456789")
     monkeypatch.setattr(localmodel, "choose", lambda asked="auto", **kw: PICK)
     monkeypatch.setattr(ls.jobs, "detach", sleeper)
+    monkeypatch.setattr(ls.lp, "admit", lambda *_: ("", ""))
     tokens.store(kit.base, tokens.OWNER_FILE, kit.owner)
     listener = localroute.serve(kit.ws)
+    listener.project = kit.base.parent / "project"
+    listener.project.mkdir()
     listener.start()
     yield listener
     listener.stop()
@@ -428,7 +432,10 @@ def post(served, route, body, **how):
         h["Origin"] = f"http://127.0.0.1:{port}"
     if cookie:
         h["Cookie"] = f"{localroute.COOKIE}={served.session}"
-    return request(port, "POST", f"/agents/{route}", {"name": "local-r"} if body is None else body, h)
+    data = {"name": "local-r"} if body is None else dict(body)
+    if route == "start":
+        data.setdefault("project", str(served.project))
+    return request(port, "POST", f"/agents/{route}", data, h)
 
 
 def test_start_and_stop_need_the_persons_session_origin_and_json(served):
@@ -436,7 +443,7 @@ def test_start_and_stop_need_the_persons_session_origin_and_json(served):
     assert post(served, "start", {}, origin=False)[0] == 403
     assert post(served, "start", {}, ctype="text/plain")[0] == 400
     wrong = post(served, "start", {})
-    assert wrong[0] == 200
+    assert wrong[0] == 200, wrong[1]
     status, _ = request(served.port, "POST", "/agents/start", {}, {
         "Content-Type": "application/json", "Origin": "http://evil.example",
         "Cookie": f"{localroute.COOKIE}={served.session}"})
@@ -458,7 +465,10 @@ def test_the_page_start_list_and_stop_round_trip_with_hostile_input_refused(serv
     ok = post(served, "start", {"role": roles.DEFAULT, "effort": "low", "max_effort": "high", "name": "local-r", "max_output_tokens": 23456})
     assert ok[0] == 200 and json.loads(ok[1])["name"] == "local-r"
     from ml_stack.workspace.device_accounts import account_for
-    assert account_for(kit.ws, "local-r")["base_id"].startswith("local-device-")
+    worker = la.load(kit.ws, "local-r")
+    assert account_for(kit.ws, worker.identity)["base_id"].startswith("local-device-")
+    parent = kit.ws.auth(tokens.load(kit.base, worker.identity)).parent
+    assert parent.startswith("local-app-launcher-")
     listed = json.loads(request(served.port, "GET", "/agents/list")[1])["agents"]
     assert [a["name"] for a in listed] == ["local-r"]
     assert '"token":' not in json.dumps(listed)
@@ -846,12 +856,21 @@ def test_stop_retains_worker_when_broker_is_unavailable(kit, monkeypatch):
 
 
 def test_exact_downloaded_model_path_resolves_cache_symlinks_without_basename_fallback(tmp_path):
-    blob=tmp_path/'blob'
-    blob.write_bytes(b'GGUF installed fixture')
     snapshot=tmp_path/'snapshot'
-    snapshot.mkdir()
     model=snapshot/'Qwen3.8-27B-Q4_K_M.gguf'
-    model.symlink_to(blob)
+    if os.name == 'nt':
+        backing=tmp_path/'backing'
+        backing.mkdir()
+        blob=backing/model.name
+        blob.write_bytes(b'GGUF installed fixture')
+        subprocess.run(['cmd', '/c', 'mklink', '/J', str(snapshot), str(backing)],
+                       check=True, capture_output=True)
+        assert snapshot.resolve() == backing.resolve()
+    else:
+        blob=tmp_path/'blob'
+        blob.write_bytes(b'GGUF installed fixture')
+        snapshot.mkdir()
+        model.symlink_to(blob)
     candidate=replace(info(model.name,18),path=model)
     for asked in (str(model),str(blob)):
         pick=localmodel.choose(asked,installed=[candidate],

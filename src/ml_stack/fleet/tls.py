@@ -19,6 +19,7 @@ import json
 import os
 import shutil
 import ssl
+import stat
 import subprocess
 import tempfile
 import time
@@ -26,6 +27,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ml_stack.files import write_json
+from ml_stack.windows_private import problem as windows_problem, restrict
 
 __all__ = ["ENV", "Identity", "TlsUnavailable", "disabled", "identity", "pinned_context",
            "server_context"]
@@ -117,13 +119,42 @@ def _make(name: str, now: float, days: float) -> tuple[bytes, bytes]:
         return _with_openssl(name, days)
 
 
+def _plain(path: Path) -> None:
+    for candidate in (path, *path.parents):
+        try:
+            info = candidate.lstat()
+        except FileNotFoundError:
+            continue
+        if stat.S_ISLNK(info.st_mode) or (os.name == "nt" and
+                info.st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT):
+            raise TlsUnavailable(f"TLS path is a symlink or Windows reparse point: {candidate}")
+
+
+def _private(path: Path, mode: int) -> None:
+    _plain(path)
+    if os.name == "nt":
+        restrict(path)
+        if reason := windows_problem(path):
+            raise TlsUnavailable(f"TLS path {path} {reason}")
+    else:
+        path.chmod(mode)
+
+
 def identity(root: Path, name: str, *, now: float | None = None,
              days: float = VALID_DAYS, renew_days: float = RENEW_DAYS) -> Identity:
-    """This daemon's certificate under ``root``, made on first use and made again when fewer
-    than ``renew_days`` of it are left. The key is mode 0600 in a directory that is 0700."""
+    """Return this daemon's certificate and account-private key, renewing near expiry."""
     now = time.time() if now is None else now
+    _plain(root)
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    _private(root, 0o700)
     certfile, keyfile, meta = root / "cert.pem", root / "key.pem", root / "cert.json"
+    for path in (certfile, keyfile, meta):
+        _plain(path)
+    if keyfile.exists():
+        reason = (windows_problem(keyfile) if os.name == "nt" else
+                  "permits another account" if keyfile.stat().st_mode & 0o077 else "")
+        if reason:
+            raise TlsUnavailable(f"TLS private key {keyfile} {reason}")
     with contextlib.suppress(OSError, ValueError, KeyError):
         held = json.loads(meta.read_text())
         if float(held["not_after"]) - now > renew_days * 86400 and keyfile.is_file():
@@ -136,7 +167,7 @@ def identity(root: Path, name: str, *, now: float | None = None,
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "wb") as out:
             out.write(data)
-        path.chmod(0o600)
+        _private(path, 0o600)
     not_after = now + days * 86400
     write_json(meta, {"not_after": not_after, "fingerprint": hashlib.sha256(der).hexdigest()})
     return Identity(certfile, keyfile, der, not_after)

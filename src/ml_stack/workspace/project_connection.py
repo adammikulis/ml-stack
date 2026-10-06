@@ -5,6 +5,8 @@ from pathlib import Path
 
 from ml_stack import home
 from ml_stack.files import read_json, write_json
+from ml_stack.fleet import discovery, project_client, projects, remote
+from ml_stack.http import ServerError
 from ml_stack.net import git
 from ml_stack.workspace.chain import held
 from ml_stack.workspace.identity import AGENT, Denied, Identity
@@ -84,18 +86,13 @@ def selected(cwd: Path | None = None) -> dict | None:
 
 
 def _find_authority(project_id: str) -> tuple[str, str] | None:
-    from ml_stack.fleet.discovery import memberships
-    from ml_stack.fleet.project_client import catalogue
-    from ml_stack.fleet.remote import Peer
-    from ml_stack.http import ServerError
-
     candidates = []
-    for member in memberships():
-        peers = Peer.discover(key=member.key, group=member.group, timeout_s=1)
+    for member in discovery.memberships():
+        peers = remote.Peer.discover(key=member.key, group=member.group, timeout_s=1)
         published = []
         for peer in peers:
             try:
-                rows = catalogue(peer)["projects"]
+                rows = project_client.catalogue(peer)["projects"]
             except (OSError, ValueError, ServerError):
                 continue
             published.extend(row for row in rows if row["id"] == project_id)
@@ -118,12 +115,10 @@ def _find_authority(project_id: str) -> tuple[str, str] | None:
 
 def auto_attach(cwd: Path | None = None) -> dict | None:
     """Discover this Git project's one workspace through an enrolled Fleet cluster."""
-    from ml_stack.fleet.projects import identity
-
     current = (cwd or Path.cwd()).resolve()
     try:
         root = Path(git.run(["rev-parse", "--show-toplevel"], cwd=current).stdout.strip()).resolve()
-        project_id = identity(root)
+        project_id = projects.identity(root)
     except (OSError, ValueError, git.GitFailed):
         return None
     authority = _find_authority(project_id)

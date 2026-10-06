@@ -44,12 +44,18 @@ def test_android_grant_contains_only_scoped_session(enrolled):
 @pytest.mark.parametrize("change", ["revoke", "expire", "membership", "certificate", "endpoint"])
 def test_session_invalidates_with_authority(enrolled, change):
     store, grant, members, clock = enrolled
-    if change == "revoke": store.revoke(grant["device_id"])
-    if change == "expire": clock[0] = grant["expires"]
-    if change == "membership": members.clear()
-    if change == "certificate": store.origin = lambda: (grant["endpoint"], "b" * 64)
-    if change == "endpoint": store.origin = lambda: ("https://192.168.2.60:8770", "a" * 64)
-    with pytest.raises(ValueError): store.authorize(grant["token"])
+    if change == "revoke":
+        store.revoke(grant["device_id"])
+    if change == "expire":
+        clock[0] = grant["expires"]
+    if change == "membership":
+        members.clear()
+    if change == "certificate":
+        store.origin = lambda: (grant["endpoint"], "b" * 64)
+    if change == "endpoint":
+        store.origin = lambda: ("https://192.168.2.60:8770", "a" * 64)
+    with pytest.raises(ValueError):
+        store.authorize(grant["token"])
 
 
 def test_invitation_kind_is_bound_and_restart_invalidates(enrolled):
@@ -58,7 +64,8 @@ def test_invitation_kind_is_bound_and_restart_invalidates(enrolled):
     with pytest.raises(ValueError, match="kind changed"):
         store.exchange("challenge", {"id": data["id"], "kind": "android", "platform": "android", "device_name": "phone"})
     replacement = Invitations(store.members, store.origin)
-    with pytest.raises(ValueError): replacement.authorize(grant["token"])
+    with pytest.raises(ValueError):
+        replacement.authorize(grant["token"])
 
 
 def handler(grant, path="/companion/v1/status", method="GET"):
@@ -89,11 +96,16 @@ def test_status_omits_computer_capabilities_paths_and_secrets(enrolled):
 def test_route_authentication_refuses_inappropriate_authority(enrolled, change):
     store, grant, _, _ = enrolled
     request = handler(grant)
-    if change == "plain": request.connection = object()
-    if change == "public": request.client_address = ("8.8.8.8", 4)
-    if change == "missing": request.headers = {}
-    if change == "cluster": request.headers = {"Authorization": "Bearer cluster-secret"}
-    if change == "revoked": store.revoke(grant["device_id"])
+    if change == "plain":
+        request.connection = object()
+    if change == "public":
+        request.client_address = ("8.8.8.8", 4)
+    if change == "missing":
+        request.headers = {}
+    if change == "cluster":
+        request.headers = {"Authorization": "Bearer cluster-secret"}
+    if change == "revoked":
+        store.revoke(grant["device_id"])
     assert companion_routes.answer(ui(store), request)
     assert request.replies[0][0] == 403
 
@@ -115,7 +127,8 @@ def test_owner_controls_android_enrollment_and_revocation(enrolled):
     assert store.authorize(grant["token"])
     owner.authed = lambda cookie: True
     assert ui_route(route)
-    with pytest.raises(ValueError): store.authorize(grant["token"])
+    with pytest.raises(ValueError):
+        store.authorize(grant["token"])
 
 
 def test_machine_token_browser_session_cannot_enroll_android(enrolled):
@@ -183,6 +196,7 @@ def test_chat_rejects_extra_authority_and_unavailable_targets(enrolled, body):
 
 def test_real_tls_dispatcher_refuses_phone_credentials_on_computer_routes(enrolled, tmp_path):
     import http.client
+
     from ml_stack.fleet import tls
     from ml_stack.fleet.api import Daemon, make_handler
     from ml_stack.fleet.framing import LimitedServer

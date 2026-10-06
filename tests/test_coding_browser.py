@@ -62,7 +62,7 @@ def test_shared_composer_saves_coding_settings_and_resumes_native_session(coding
     composer.fill("inspect the brakes")
     composer.press("Enter")
     expect(page.locator("chat-view #chat-messages")).to_contain_text("Inspected: inspect the brakes")
-    expect(page.locator("chat-view #chat-cancel")).to_be_hidden()
+    expect(page.get_by_role("button", name="Stop", exact=True)).to_be_hidden()
     assert page.locator("chat-view textarea").count() == 1
     assert not page.locator("chat-view #chat-options").evaluate("node => node.open")
     cid = page.locator("chat-view").evaluate("node => node.open")
@@ -82,7 +82,7 @@ def test_shared_composer_saves_coding_settings_and_resumes_native_session(coding
     composer.fill("inspect the sensors")
     composer.press("Enter")
     expect(page.locator("chat-view #chat-messages")).to_contain_text("Inspected: inspect the sensors")
-    expect(page.locator("chat-view #chat-cancel")).to_be_hidden()
+    expect(page.get_by_role("button", name="Stop", exact=True)).to_be_hidden()
     assert len(served.ui.conversations.get(cid).messages) == 4
 
 
@@ -103,9 +103,9 @@ def test_reload_reattaches_running_coding_turn_and_stop_keeps_the_conversation(c
     composer.press("Enter")
     expect(page.locator("chat-view #chat-status")).to_contain_text("running")
     page.reload()
-    expect(page.locator("chat-view #chat-cancel")).to_be_visible()
-    page.locator("chat-view #chat-cancel").click()
-    expect(page.locator("chat-view #chat-cancel")).to_be_hidden()
+    expect(page.get_by_role("button", name="Stop", exact=True)).to_be_visible()
+    page.get_by_role("button", name="Stop", exact=True).click()
+    expect(page.get_by_role("button", name="Stop", exact=True)).to_be_hidden()
     assert served.ui.coding_turns.status(saved.id)["state"] == "cancelled"
     composer.fill("continue inspection")
     composer.press("Enter")

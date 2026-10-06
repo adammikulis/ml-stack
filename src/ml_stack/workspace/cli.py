@@ -308,6 +308,10 @@ def _claim(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
 
 
 def _worktrees(args, ws, token):
+    if args.cleanup:
+        who = ws.auth(token)
+        ws._may(who, 'claim')
+        return worktree_lifecycle.cleanup(ws.base, who.id, args.cleanup, ws.claims)
     return worktree_lifecycle.pending(ws.base, ws.auth(token).id, _label(args))
 
 
@@ -703,7 +707,8 @@ TABLE: tuple[tuple[str, str, list[Any], Handler], ...] = (
         flag("--pid", type=int, default=0, help="release when this process is gone"),
         flag("--note", default="")], _claim),
     ("release", "give a claim up", CLAIM, lambda a, w, t: w.release(t, a.kind, a.key)),
-    ("worktrees", "inspect your unfinished coding checkout scopes", [], _worktrees),
+    ("worktrees", "inspect or clean your landed coding checkout scopes",
+     [flag("--cleanup", default="", help="remove an owned landed checkout and record its cleanup proof")], _worktrees),
     ("heartbeat", "renew every claim you hold", [flag("--ttl", type=float, default=0.0)], _heartbeat),
     ("who", "who owns this?", CLAIM,
      lambda a, w, t: w.who_owns(a.kind, a.key) or {"owner": None}),

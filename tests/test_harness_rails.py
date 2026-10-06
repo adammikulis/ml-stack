@@ -1,10 +1,10 @@
 """The rails around Claude Code and Codex on a local model: the role policy, the hook, the session files."""
 
-import json
 import base64
+import json
 import os
-import subprocess
 import shlex
+import subprocess
 import sys
 import threading
 import time
@@ -335,9 +335,21 @@ class TestWorkspaceCommands:
     def _fake_workspace(self, tmp_path, monkeypatch):
         exe = tmp_path / "bin" / "ml-stack-workspace"
         exe.parent.mkdir()
-        exe.write_text('#!/bin/sh\nprintf "%s\\n" "$@" > "$0.argv"\necho nudge text\n')
-        exe.chmod(0o755)
-        monkeypatch.setenv("PATH", f"{exe.parent}:{os.environ['PATH']}")
+        script = ('import sys\nfrom pathlib import Path\n'
+                  'Path(sys.argv[0] + ".argv").write_text("\\n".join(sys.argv[1:]))\n'
+                  'print("nudge text")\n')
+        if sys.platform == "win32":
+            from distlib.scripts import ScriptMaker
+
+            maker = ScriptMaker(None, str(exe.parent))
+            maker.variants = {""}
+            maker.executable = sys.executable
+            maker.script_template = script
+            exe = Path(maker.make("ml-stack-workspace = unused:main")[0])
+        else:
+            exe.write_text(f"#!{sys.executable}\n{script}")
+            exe.chmod(0o755)
+        monkeypatch.setenv("PATH", f"{exe.parent}{os.pathsep}{os.environ['PATH']}")
         return exe
 
     def test_a_hostile_label_is_one_argument_and_never_a_shell_line(self, tmp_path, monkeypatch):
@@ -416,7 +428,7 @@ class TestSeat:
         assert harnessid.Seat("x", "p").record_model("m", "codex") is False
 
     def test_ending_the_session_keeps_identity_and_removes_harness_files(self, person, monkeypatch, tmp_path):
-        from ml_stack.workspace import Denied, Workspace, tokens
+        from ml_stack.workspace import Workspace, tokens
 
         seen = {}
         monkeypatch.setattr(harnessing, "serving", _fake_serving(seen))

@@ -165,22 +165,24 @@ class Invitations:
             expected = proof(row["secret"], fields, row["fingerprint"])
             if not hmac.compare_digest(expected, str(fields.get("proof", ""))):
                 raise ValueError("invitation proof did not match")
-            if row["kind"] == "android":
-                if len(self.devices) >= 128:
-                    raise ValueError("revoke an Android device before enrolling another")
-                ident, token = secrets.token_hex(16), encode(secrets.token_bytes(32))
-                expires = int(self.clock()) + 3600
-                endpoint, fingerprint = self.origin()
-                self.devices[ident] = {"token": hashlib.sha256(token.encode()).digest(),
-                    "binding": row["binding"], "group": member.group, "expires": expires,
-                    "endpoint": endpoint, "fingerprint": fingerprint, "device_name": fields["device_name"]}
-                payload = {"kind": "android", "device_id": ident, "token": token, "expires": expires,
-                    "capabilities": ["fleet.status", "chat"], "endpoint": endpoint,
-                    "fingerprint": fingerprint, "group": member.group}
-            else:
-                payload = {"kind": "computer", "group": member.group, "key": member.key.decode()}
+            payload = self._grant(row, fields, member)
             self.rows.pop(fields["id"], None)
             grant = json.dumps(payload, separators=(",", ":")).encode()
             signature = hmac.new(row["secret"], ("ml-stack-invite-grant/v1\n" + fields["challenge"] + "\n").encode() + grant,
                                  hashlib.sha256).hexdigest()
             return {"grant_data": encode(grant), "proof": signature}
+
+    def _grant(self, row: dict, fields: dict, member: Any) -> dict[str, Any]:
+        if row["kind"] != "android":
+            return {"kind": "computer", "group": member.group, "key": member.key.decode()}
+        if len(self.devices) >= 128:
+            raise ValueError("revoke an Android device before enrolling another")
+        ident, token = secrets.token_hex(16), encode(secrets.token_bytes(32))
+        expires = int(self.clock()) + 3600
+        endpoint, fingerprint = self.origin()
+        self.devices[ident] = {"token": hashlib.sha256(token.encode()).digest(),
+            "binding": row["binding"], "group": member.group, "expires": expires,
+            "endpoint": endpoint, "fingerprint": fingerprint, "device_name": fields["device_name"]}
+        return {"kind": "android", "device_id": ident, "token": token, "expires": expires,
+            "capabilities": ["fleet.status", "chat"], "endpoint": endpoint,
+            "fingerprint": fingerprint, "group": member.group}

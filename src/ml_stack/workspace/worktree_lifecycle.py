@@ -10,6 +10,16 @@ from ml_stack.workspace.chain import held
 from ml_stack.workspace.identity import Denied
 
 
+def scopes(base: Path, owner: str, label: str = '') -> list[dict]:
+    database = base / 'worktree-lifecycle.db'
+    if not database.exists():
+        return []
+    with held(base / 'worktree-lifecycle.lock'), GraphStore(database) as graph:
+        return [row['attrs'] for row in graph.nodes('worktree-lifecycle')
+                if row['attrs']['owner'] == owner
+                and (not label or row['attrs']['label'] in ('', label))]
+
+
 def remember(base: Path, owner: str, label: str, path: str) -> None:
     """Record an authenticated worker's reserved or materialized coding checkout."""
     found = worktreerules.checkouts(path)
@@ -27,24 +37,79 @@ def remember(base: Path, owner: str, label: str, path: str) -> None:
              'primary': str(primary) if primary else '', 'branch': branch, 'development': development}
     with held(base / 'worktree-lifecycle.lock'), GraphStore(base / 'worktree-lifecycle.db') as graph:
         previous = next((row['attrs'] for row in graph.nodes('worktree-lifecycle') if row['id'] == key), {})
+        if not found and previous.get('primary'):
+            value.update({name: previous[name] for name in ('primary', 'branch', 'development')})
         branches = sorted(set(previous.get('branches', [])) | ({branch} if branch else set()))
         commits = sorted(set(previous.get('commits', [])) | ({commit} if commit else set()))
         graph.upsert_node({'id': key, 'kind': 'worktree-lifecycle', 'label': label,
                            'attrs': {**value, 'branches': branches, 'commits': commits}})
 
 
+def checkpoint(base: Path, owner: str) -> None:
+    """Capture current commits from the authenticated worker's surviving scopes."""
+    for scope in scopes(base, owner):
+        path = Path(scope['path'])
+        if path.exists():
+            remember(base, owner, scope['label'], str(path))
+
+
+def record_cleanup(base: Path, path: Path, commit: str, landed: str,
+                   primary: Path, development: str) -> None:
+    """Record a completed maintained removal with its captured source and landed commits."""
+    with held(base / 'worktree-lifecycle.lock'), GraphStore(base / 'worktree-lifecycle.db') as graph:
+        for row in graph.nodes('worktree-lifecycle'):
+            scope = row['attrs']
+            if scope['path'] == str(path):
+                if path.exists():
+                    raise Denied('cleanup proof requires an absent checkout')
+                if scope['primary'] and Path(scope['primary']) != primary:
+                    raise Denied('cleanup proof repository differs from the attributed checkout')
+                if not repo.ancestor(primary, commit, landed):
+                    raise Denied('cleanup proof requires the exact source commit to be landed')
+                attrs = {**scope, 'primary': str(primary), 'development': development,
+                         'commits': sorted(set(scope['commits']) | {commit}),
+                         'cleanup': {'commit': commit, 'landed': landed}}
+                graph.upsert_node({**row, 'attrs': attrs})
+
+
+def cleanup(base: Path, owner: str, path: str, claims, *, claim_owner: str = '') -> dict:
+    """Remove a claimed landed checkout and record its final commit after verified cleanup."""
+    target = Path(path).resolve()
+    owned = [scope for scope in scopes(base, owner) if scope['path'] == str(target)]
+    if not owned or not target.exists():
+        raise Denied('cleanup requires this worker\'s existing attributed checkout')
+    claim = claims.who('worktree', str(target))
+    if not claim or claim['owner'] != (claim_owner or owner):
+        raise Denied('cleanup requires the live checkout claim of this worker')
+    checkpoint(base, owner)
+    owned = [scope for scope in scopes(base, owner) if scope['path'] == str(target)]
+    source = owned[0]
+    primary = Path(source['primary'])
+    if worktreerules.checkouts(target) != (target, primary):
+        raise Denied('cleanup checkout identity changed')
+    branch = repo.git(target, 'branch', '--show-current')
+    if branch not in source['branches'] or branch in ('main', source['development']):
+        raise Denied('cleanup requires an attributed isolated branch')
+    locked = target / repo.git(target, 'rev-parse', '--git-path', 'locked')
+    if locked.exists():
+        raise Denied('cleanup preserves locked worktrees')
+    commit = repo.git(target, 'rev-parse', 'HEAD')
+    landed = repo.git(primary, 'rev-parse', f"refs/heads/{source['development']}")
+    repo.remove_merged(primary, target, branch, landed)
+    record_cleanup(base, target, commit, landed, primary, source['development'])
+    return {'path': str(target), 'commit': commit, 'landed': landed, 'cleanup_verified': True}
+
+
 def pending(base: Path, owner: str, label: str = '') -> list[dict]:
     """Inspect the worker's durable scopes without removing files or Git references."""
-    database = base / 'worktree-lifecycle.db'
-    if not database.exists():
-        return []
-    with held(base / 'worktree-lifecycle.lock'), GraphStore(database) as graph:
-        scopes = [row['attrs'] for row in graph.nodes('worktree-lifecycle')
-                  if row['attrs']['owner'] == owner
-                  and (not label or row['attrs']['label'] in ('', label))]
     result = []
-    for scope in scopes:
+    database = base / 'worktree-lifecycle.db'
+    for scope in scopes(base, owner, label):
         path = Path(scope['path'])
+        if scope['primary'] and path.exists():
+            remember(base, scope['owner'], scope['label'], str(path))
+            scope = next(row for row in scopes(base, owner, label) if row['path'] == str(path)
+                         and row['label'] == scope['label'])
         if not scope['primary']:
             found = worktreerules.checkouts(path)
             if not found or found[0] == found[1]:
@@ -67,6 +132,8 @@ def pending(base: Path, owner: str, label: str = '') -> list[dict]:
             reasons.append('recorded commits are not landed: ' + ', '.join(unlanded))
         if path.exists():
             reasons.append('checkout remains')
+        elif not scope.get('cleanup'):
+            reasons.append('verified cleanup proof is missing')
         if any(line.startswith('worktree ') and Path(line[9:]).resolve() == path
                for line in registered):
             reasons.append('worktree registration remains')

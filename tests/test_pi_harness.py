@@ -93,6 +93,32 @@ def test_pi_extension_denies_writes_and_reports_exhausted_turns(tmp_path):
     assert not (tmp_path / "output.py").exists()
 
 
+def test_pi_post_checkpoint_failure_stops_the_session(tmp_path):
+    import json
+    import shutil
+    import subprocess
+    import sys
+
+    import pytest
+
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node is required by Pi")
+    hook = tmp_path / "policy.mjs"
+    hook.write_text(pi.extension({"python": sys.executable, "role": "plan-and-go",
+        "label": "missing-checkpoint-identity", "root": str(tmp_path), "protected": []}))
+    driver = tmp_path / "driver.mjs"
+    driver.write_text(
+        'import extension from "./policy.mjs";\n'
+        'const handlers={}; extension({on:(name,fn)=>handlers[name]=fn});\n'
+        'const state={}; const ctx={abort:()=>state.aborted=true,shutdown:()=>state.stopped=true};\n'
+        'handlers.tool_result({},ctx); console.log(JSON.stringify(state));\n')
+    done = subprocess.run([node, str(driver)], capture_output=True, text=True, timeout=30, check=True)
+    rows = [json.loads(line) for line in done.stdout.splitlines()]
+    assert rows[0] == {"type": "error", "message": "Pi mutation checkpoint failed"}
+    assert rows[1] == {"aborted": True, "stopped": True}
+
+
 def test_pi_provider_payload_preserves_explicit_output_budget(tmp_path):
     import json
     import shutil

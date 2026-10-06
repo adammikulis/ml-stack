@@ -6,8 +6,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from ml_stack.memory.project import detect
 from ml_stack.fleet.projects import identity
+from ml_stack.memory.project import detect
 
 __all__ = ["authoritative", "clean", "describe"]
 

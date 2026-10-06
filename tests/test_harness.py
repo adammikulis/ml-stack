@@ -82,6 +82,7 @@ def test_session_leases_the_best_settings_and_the_command_prints_the_answer(fake
     class Server:
         adopted = False
         base_url = "http://127.0.0.1:8899"
+        adopted = False
 
     @contextlib.contextmanager
     def fake_serve(model, manager=None, **lease):

@@ -7,8 +7,14 @@ import select
 import ssl
 from typing import Any
 
-from .chat import ChatError, reply_text, targets
 from ml_stack.gate import QueueTimeout, turn
+
+from .chat import ChatError, reply_text, targets
+
+try:
+    from . import sdk_chat
+except ImportError:
+    sdk_chat = None
 
 
 class _Control:
@@ -69,7 +75,8 @@ def _chat(ui: Any, handler: Any, raw: bytes | None, token: str, available: list)
         if target is None:
             raise ValueError("choose an available local chat model")
         ui.invitations.permit(handler.client_address[0])
-        from .sdk_chat import stream
+        if sdk_chat is None:
+            raise ImportError("install ml-stack[agents] for Android chat")
     except (ValueError, ImportError) as exc:
         handler._send(400, {"error": str(exc)})
         return
@@ -83,7 +90,7 @@ def _chat(ui: Any, handler: Any, raw: bytes | None, token: str, available: list)
         control = _Control(ui, handler, token)
         with turn(target.url, cancelled=control.is_set):
             ui.invitations.authorize(token)
-            with_stream = stream(target, {"model": target.model, "messages": messages,
+            with_stream = sdk_chat.stream(target, {"model": target.model, "messages": messages,
                                          "stream": True}, control=control)
             try:
                 for frame in with_stream:

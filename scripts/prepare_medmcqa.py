@@ -32,7 +32,7 @@ def convert(row: dict[str, Any]) -> dict[str, Any] | None:
     return {"id": case_id, "group": case_id, "kind": "choice",
             "question": "Which option correctly answers this medical exam question?",
             "state": question.strip(),
-            "options": dict(zip(LETTERS, (choice.strip() for choice in choices))),
+            "options": dict(zip(LETTERS, (choice.strip() for choice in choices), strict=True)),
             "label": LETTERS[answer]}
 
 

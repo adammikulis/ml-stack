@@ -1,4 +1,4 @@
-"""Native Windows ownership and access checks for workspace token files."""
+"""Native Windows account-private file and directory permissions."""
 
 import sys
 from pathlib import Path
@@ -21,6 +21,8 @@ def _user():
 
 def restrict(path: Path) -> None:
     """Grant this process's account exclusive access to a token file or directory."""
+    if path.is_symlink() or path.is_junction():
+        raise ValueError("private storage cannot be a Windows reparse point")
     user = _user()
     acl = win32security.ACL()
     flags = (win32security.OBJECT_INHERIT_ACE | win32security.CONTAINER_INHERIT_ACE
@@ -36,6 +38,8 @@ def restrict(path: Path) -> None:
 def problem(path: Path) -> str:
     """Describe token ownership or access grants that permit another account."""
     try:
+        if path.is_symlink() or path.is_junction():
+            return "is a Windows reparse point"
         descriptor = win32security.GetNamedSecurityInfo(
             str(path), win32security.SE_FILE_OBJECT,
             win32security.OWNER_SECURITY_INFORMATION | win32security.DACL_SECURITY_INFORMATION)

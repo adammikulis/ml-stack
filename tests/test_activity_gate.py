@@ -121,8 +121,9 @@ def test_runner_writes_local_evidence_without_user_activity(repo, monkeypatch, c
         assert payload["run"]["root"] == str(repo.resolve())
         assert payload["run"]["tree_after"] == payload["refs"]["tree"]
         if os.name == "nt":
-            from ml_stack.workspace.windows_tokens import _user
             import win32security
+
+            from ml_stack.workspace.windows_tokens import _user
 
             descriptor = win32security.GetNamedSecurityInfo(
                 str(artifact), win32security.SE_FILE_OBJECT, win32security.OWNER_SECURITY_INFORMATION)

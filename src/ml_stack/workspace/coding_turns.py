@@ -42,6 +42,7 @@ class Turn:
     streamed: bool = False
     error: str = ""
     output: Any = None
+    cancellation: Any = None
 
     def emit(self, payload: dict) -> None:
         if self.output is not None:
@@ -61,8 +62,8 @@ class Turn:
         if process is None:
             return
         if isinstance(process, multiprocessing.process.BaseProcess):
-            process.terminate()
-            process.join(timeout=2)
+            self.cancellation.set()
+            process.join(timeout=3)
             if process.is_alive():
                 kill_process_tree(process.pid, grace_s=1)
                 process.kill()
@@ -109,7 +110,8 @@ class Manager:
             self.store.append(cid, "user", prompt)
             context = multiprocessing.get_context("spawn")
             messages = context.Queue(maxsize=128)
-            process = context.Process(target=worker, args=(str(self.store.root), turn.conversation, conversation, prompt, messages), daemon=True)
+            turn.cancellation = context.Event()
+            process = context.Process(target=worker, args=(str(self.store.root), turn.conversation, conversation, prompt, messages, turn.cancellation), daemon=True)
             turn.process = process
             process.start()
             threading.Thread(target=self._collect, args=(turn, messages), daemon=True).start()
@@ -291,10 +293,20 @@ class Manager:
                             shutil.copy2(path, destination)
 
 
-def worker(root, cid, conversation, prompt, output) -> None:
+def worker(root, cid, conversation, prompt, output, cancellation) -> None:
     turn = Turn(cid, output=output)
+    finished = threading.Event()
+    def watch():
+        while not finished.is_set():
+            if cancellation.wait(.1):
+                turn.cancel()
+                return
+    threading.Thread(target=watch, daemon=True).start()
     def stop(signum, frame):
         turn.cancelled.set()
         raise InterruptedError("The coding turn was cancelled")
     signal.signal(signal.SIGTERM, stop)
-    Manager(Conversations(root))._run(turn, conversation, prompt)
+    try:
+        Manager(Conversations(root))._run(turn, conversation, prompt)
+    finally:
+        finished.set()

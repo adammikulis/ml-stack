@@ -1,7 +1,7 @@
 """Two device roots use authenticated Fleet transport and one authoritative graph."""
 
-import concurrent.futures
 import base64
+import concurrent.futures
 import json
 import os
 import subprocess
@@ -14,14 +14,15 @@ import pytest
 from workspace_kit import Kit, clean_env
 
 from ml_stack.fleet.api import Daemon, make_handler
-from ml_stack.fleet import tls
-from ml_stack.fleet.onboard.requests import Device, Devices
+from ml_stack.fleet import projects, tls
 from ml_stack.hub.peerbook import PeerBook
 from ml_stack.fleet.discovery import derive_token, mint_cluster
 from ml_stack.fleet.jobs import JobRunner
+from ml_stack.fleet.onboard.requests import Device, Devices
 from ml_stack.fleet.remote import Peer
 from ml_stack.http import Server, ServerError
-from ml_stack.workspace import cli, coordinator, coordinator_config, tokens
+from ml_stack.net import git
+from ml_stack.workspace import cli, coordinator, coordinator_client, coordinator_config, tokens
 from ml_stack.workspace.coordination import workspace_id
 from ml_stack.workspace.coordinator_client import Remote
 from ml_stack.workspace.identity import Denied
@@ -55,10 +56,20 @@ def shared(tmp_path, monkeypatch, installed_metadata):
     membership = mint_cluster('default', tmp_path / 'cluster.key')
     monkeypatch.setenv('ML_STACK_CLUSTER_KEY', str(tmp_path / 'cluster.key'))
     fleet_token = derive_token(membership.key)
+    kit.project_dir = tmp_path / 'shared-project'
+    kit.project_dir.mkdir()
+    git.run(['init', str(kit.project_dir)])
+    git.run(['remote', 'add', 'origin', 'https://example.invalid/shared-project.git'], cwd=kit.project_dir)
+    kit.project_scope = {'key': projects.identity(kit.project_dir), 'name': 'shared-project'}
+    hosted = projects.ProjectRegistry(tmp_path / 'projects', 'coordinator-device')
+    hosted._projects[kit.project_scope['key']] = projects.Project(
+        id=kit.project_scope['key'], name=kit.project_scope['name'], root=str(kit.project_dir),
+        source_machine=hosted.machine, authority_machine=hosted.machine, shared=True)
+    hosted._save()
     device = Device('d' * 64, 'paired-device', 'paired-host', '127.0.0.1', 1,
                     mine=True, secret=base64.urlsafe_b64encode(b'd' * 32).decode())
     server = Server(('127.0.0.1', 0), make_handler(Daemon(
-        runner, tmp_path / 'files', fleet_token, devices=lambda: [device])))
+        runner, tmp_path / 'files', fleet_token, devices=lambda: [device], projects=hosted)))
     threading.Thread(target=server.serve_forever, daemon=True).start()
     peer = Peer(f'http://127.0.0.1:{server.server_address[1]}', fleet_token)
     kit.remote = Remote({'workspace': identity, 'endpoint': peer.base_url}, peer)
@@ -186,14 +197,20 @@ def test_declared_cli_arguments_roundtrip_without_credentials(shared):
 
 
 def test_installed_cli_on_second_device_reads_shared_state_without_local_fallback(shared, installed_metadata):
-    sent = shared.remote.command(['send', 'alice', 'task', 'Shared CLI task'], shared.bob)
+    remote = coordinator_client.client(shared.device)
+    agent = remote.ensure(shared.device, 'second-device', project=shared.project_scope)
+    sent = shared.remote.command(['send', agent, 'task', 'Shared CLI task'], shared.bob)
     environment = {**os.environ, 'ML_STACK_WORKSPACE_HOME': str(shared.device),
-                   'PYTHONPATH': str(installed_metadata), 'ML_STACK_WORKSPACE_AGENT': 'alice'}
+                   'PYTHONPATH': str(installed_metadata), 'ML_STACK_WORKSPACE_AGENT': agent}
     result = subprocess.run([sys.executable, '-m', 'ml_stack.workspace.cli', 'inbox', '--json'],
-                            env=environment, capture_output=True, text=True, timeout=15, check=True)
+                            cwd=shared.project_dir, env=environment, capture_output=True, text=True, timeout=15)
+    assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout)[0]['seq'] == sent['seq']
+    registration = shared.ws.registry._load()[agent]
+    assert registration['session_device'] == 'd' * 64
+    assert registration['project'] == shared.project_scope
     denied = subprocess.run([sys.executable, '-m', 'ml_stack.workspace.cli', 'init', '--json'],
-                            env=environment, capture_output=True, text=True, timeout=15)
+                            cwd=shared.project_dir, env=environment, capture_output=True, text=True, timeout=15)
     assert denied.returncode == 3
     assert not (shared.device / 'agents.json').exists()
 

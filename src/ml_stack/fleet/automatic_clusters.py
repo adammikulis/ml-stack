@@ -34,7 +34,10 @@ def receive(host: str, offer: dict) -> discovery.Membership:
             or result.get("nonce") != nonce or not isinstance(key, str) or len(key) != 43
             or hashlib.sha256(key.encode()).hexdigest() != offer["cluster_id"]):
         raise discovery.DiscoveryError("automatic cluster response does not match its advertised identity")
-    return discovery.Membership(result["group"], key.encode(), mode="dev")
+    try:
+        return discovery.Membership(result["group"], key.encode(), mode="dev")
+    except ValueError as error:
+        raise discovery.DiscoveryError("automatic cluster response contains an invalid key") from error
 
 
 def ensure(path: Path | str | None = None, *, mode: str | None = None,

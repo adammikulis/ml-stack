@@ -1,8 +1,8 @@
 """A coding harness's workspace agent identity and its lifecycle."""
 from __future__ import annotations
 
-from dataclasses import dataclass
 from collections.abc import Callable
+from dataclasses import dataclass
 from http.client import HTTPException
 from pathlib import Path
 

@@ -23,13 +23,13 @@ from typing import Any
 
 from ml_stack import home, macauth, sentinel
 from ml_stack.files import write_text
+from ml_stack.fleet.onboard.requests import Devices
 from ml_stack.hub import default_roots
 from ml_stack.log import say, warn
 from ml_stack.platform import on_quit
 from ml_stack.serve import canaries, guarded
 from ml_stack.serve.leases import lease_file
 from ml_stack.speech import service as speech
-from ml_stack.fleet.onboard.requests import Devices
 
 from . import (
     automatic_clusters,

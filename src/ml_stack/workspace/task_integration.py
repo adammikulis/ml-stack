@@ -6,8 +6,8 @@ from pathlib import Path
 from uuid import uuid4
 
 from ml_stack.graph.store import GraphStore
-from ml_stack.workspace import integration_git as repo
-from ml_stack.workspace import integration_staging
+from ml_stack.workspace import integration_git as repo, integration_staging
+from ml_stack.workspace import worktree_lifecycle
 from ml_stack.workspace.chain import held
 from ml_stack.workspace.claims import Conflict
 from ml_stack.workspace.identity import HUMAN, Denied, Identity
@@ -208,7 +208,14 @@ class DevelopmentIntegration:
             claim = self.ws.who_owns('worktree', str(path))
             if path.exists() and (not claim or claim['owner'] != self.record['owner']):
                 raise Denied('cleanup requires the live worktree claim of this integration owner')
+            for scope in worktree_lifecycle.scopes(self.ws.base, self.record['owner']):
+                if scope['path'] == str(path) and path.exists():
+                    worktree_lifecycle.remember(self.ws.base, scope['owner'], scope['label'], str(path))
+            commit = repo.git(path, 'rev-parse', 'HEAD') if path.exists() else ''
             repo.remove_merged(self.primary, path, branch, tip, lock_reason=self.record['id'])
+            if commit:
+                worktree_lifecycle.record_cleanup(self.ws.base, path, commit, tip,
+                                                 self.primary, self.development)
         with held(self.ws.base / 'coordination.lock'), GraphStore(self.ws.base / 'coordination.db') as graph, graph.transaction():
             scope = {**self.worktree, 'state': 'cleaned', 'landed_commit': tip}
             save(graph, 'task-worktree', scope)

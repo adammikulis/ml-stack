@@ -49,8 +49,8 @@ def test_missing_checkout_does_not_hide_surviving_branch(setup):
         kit.ws.announce(kit.sender, 'done', 'Complete', label='helper')
     assert repo.git(kit.primary, 'rev-parse', 'worker/change')
     repo.git(kit.primary, 'branch', '-d', 'worker/change')
-    assert kit.ws.announce(kit.sender, 'done', 'Complete', label='helper')
-    assert lifecycle.pending(kit.base, 'worker', 'helper') == []
+    with pytest.raises(Denied, match='cleanup proof is missing'):
+        kit.ws.announce(kit.sender, 'done', 'Complete', label='helper')
 
 
 def test_foreign_checkout_and_primary_are_not_completion_scopes(setup):
@@ -102,8 +102,7 @@ def test_branch_changes_remain_tracked_until_every_attributed_branch_is_removed(
 def test_cached_done_rechecks_reappeared_branch(setup):
     kit = setup
     claim(kit)
-    repo.git(kit.primary, 'worktree', 'remove', str(kit.checkout))
-    repo.git(kit.primary, 'branch', '-d', 'worker/change')
+    lifecycle.cleanup(kit.base, 'worker', str(kit.checkout), kit.ws.claims)
     kit.ws.announce(kit.sender, 'done', 'Complete', label='helper')
     repo.git(kit.primary, 'branch', 'worker/change')
     with pytest.raises(Denied, match='branches remain'):
@@ -138,7 +137,8 @@ def test_deleted_unique_branch_does_not_prove_recorded_work_landed(setup):
     with pytest.raises(Denied, match='recorded commits are not landed'):
         kit.ws.announce(kit.sender, 'done', 'Complete', label='helper')
     repo.git(kit.primary, 'merge', '--ff-only', unique)
-    assert kit.ws.announce(kit.sender, 'done', 'Complete', label='helper')
+    with pytest.raises(Denied, match='cleanup proof is missing'):
+        kit.ws.announce(kit.sender, 'done', 'Complete', label='helper')
 
 
 @pytest.mark.redteam
@@ -159,8 +159,7 @@ def test_harness_stop_uses_authenticated_owner_and_refuses_lingering_scope(setup
     rail = harnesshook.Rail('plan-and-go', 'worker', roots=[str(kit.checkout)])
     result = harnesshook.stop(rail)
     assert result['decision'] == 'block' and str(kit.checkout) in result['reason']
-    repo.git(kit.primary, 'worktree', 'remove', str(kit.checkout))
-    repo.git(kit.primary, 'branch', '-d', 'worker/change')
+    lifecycle.cleanup(kit.base, 'worker', str(kit.checkout), kit.ws.claims)
     assert harnesshook.stop(rail) == {}
 
 
@@ -221,7 +220,8 @@ def test_materialized_reservation_retains_branch_and_commit_after_removal(setup)
     with pytest.raises(Denied, match='recorded commits are not landed'):
         kit.ws.announce(kit.sender, 'done', 'Complete', label='helper')
     repo.git(kit.primary, 'merge', '--ff-only', unique)
-    assert kit.ws.announce(kit.sender, 'done', 'Complete', label='helper')
+    with pytest.raises(Denied, match='cleanup proof is missing'):
+        kit.ws.announce(kit.sender, 'done', 'Complete', label='helper')
 
 
 @pytest.mark.redteam
@@ -300,3 +300,92 @@ def test_launcher_exception_survives_failed_exit_inspection(setup, monkeypatch):
                             lambda self: (_ for _ in ()).throw(RuntimeError('fixture inspection failed')))
         raise OSError('fixture process failed')
     assert any('checkout inspection failed:' in line for line in messages)
+
+
+@pytest.mark.redteam
+def test_claim_before_final_commit_cannot_complete_after_lost_checkout_and_branch(setup):
+    kit = setup
+    claim(kit)
+    (kit.checkout / 'source.py').write_text('value = 2\n')
+    repo.git(kit.checkout, 'add', 'source.py')
+    repo.git(kit.checkout, 'commit', '-m', 'feat: uncaptured final commit')
+    repo.git(kit.primary, 'worktree', 'remove', str(kit.checkout))
+    repo.git(kit.primary, 'branch', '-D', 'worker/change')
+    lifecycle.remember(kit.base, 'worker', 'helper', str(kit.checkout))
+    with pytest.raises(Denied, match='cleanup proof is missing'):
+        kit.ws.announce(kit.sender, 'done', 'Complete', label='helper')
+
+
+@pytest.mark.redteam
+def test_pretool_invalidates_old_cleanup_proof_when_tool_removes_its_final_commit(setup, monkeypatch):
+    from ml_stack import harness_claims, harnesshook
+    from ml_stack.workspace import tokens
+    from ml_stack.workspace.project import describe
+
+    kit = setup
+    claim(kit)
+    lifecycle.cleanup(kit.base, 'worker', str(kit.checkout), kit.ws.claims)
+    repo.git(kit.primary, 'worktree', 'add', '-b', 'worker/change', str(kit.checkout))
+    tokens.store(kit.base, 'worker', kit.sender)
+    repo.git(kit.primary, 'remote', 'add', 'origin', 'https://example.test/fixture.git')
+    kit.ws.registry.set_project(kit.ws.auth(kit.owner), 'worker', describe(str(kit.checkout)))
+    harness_claims.reserve('Write', {'file_path': str(kit.checkout / 'source.py')},
+                           str(kit.checkout), 'worker', [str(kit.checkout)])
+    (kit.checkout / 'source.py').write_text('value = 2\n')
+    repo.git(kit.checkout, 'add', 'source.py')
+    repo.git(kit.checkout, 'commit', '-m', 'feat: vanished tool commit')
+    repo.git(kit.primary, 'worktree', 'remove', str(kit.checkout))
+    repo.git(kit.primary, 'branch', '-D', 'worker/change')
+    monkeypatch.setattr(harnesshook, 'nudge', lambda _: '')
+    assert harnesshook.post('worker', harnesshook.Rail('plan-and-go', 'worker', [str(kit.checkout)])) == {}
+    with pytest.raises(Denied, match='cleanup proof is missing'):
+        kit.ws.announce(kit.sender, 'done', 'Complete')
+
+
+def test_posttool_captures_final_commit_and_cleanup_proves_it_landed(setup, monkeypatch):
+    from ml_stack import harnesshook
+    from ml_stack.workspace import tokens
+
+    kit = setup
+    claim(kit)
+    tokens.store(kit.base, 'worker', kit.sender)
+    (kit.checkout / 'source.py').write_text('value = 2\n')
+    repo.git(kit.checkout, 'add', 'source.py')
+    repo.git(kit.checkout, 'commit', '-m', 'feat: captured final commit')
+    commit = repo.git(kit.checkout, 'rev-parse', 'HEAD')
+    monkeypatch.setattr(harnesshook, 'nudge', lambda _: '')
+    harnesshook.post('worker', harnesshook.Rail('plan-and-go', 'worker', [str(kit.checkout)]))
+    assert commit in lifecycle.scopes(kit.base, 'worker')[0]['commits']
+    with pytest.raises(Denied, match='commits outside'):
+        lifecycle.cleanup(kit.base, 'worker', str(kit.checkout), kit.ws.claims)
+    assert kit.checkout.exists()
+    repo.git(kit.primary, 'merge', '--ff-only', commit)
+    result = lifecycle.cleanup(kit.base, 'worker', str(kit.checkout), kit.ws.claims)
+    assert result['cleanup_verified'] and result['commit'] == commit
+    assert kit.ws.announce(kit.sender, 'done', 'Complete', label='helper')
+
+
+@pytest.mark.redteam
+def test_cleanup_never_takes_a_foreign_live_claim(setup):
+    kit = setup
+    claim(kit)
+    kit.ws.release(kit.sender, 'worktree', str(kit.checkout))
+    foreign = kit.agent('foreign')
+    kit.ws.claim(foreign, 'worktree', str(kit.checkout))
+    with pytest.raises(Denied, match='live checkout claim'):
+        lifecycle.cleanup(kit.base, 'worker', str(kit.checkout), kit.ws.claims)
+    assert kit.checkout.exists()
+    assert kit.ws.who_owns('worktree', str(kit.checkout))['owner'] == 'foreign'
+
+
+def test_authenticated_worktree_cleanup_cli_records_the_exact_landed_commit(setup):
+    from types import SimpleNamespace
+
+    from ml_stack.workspace import cli
+
+    kit = setup
+    claim(kit)
+    args = SimpleNamespace(cleanup=str(kit.checkout), label='helper')
+    result = cli._worktrees(args, kit.ws, kit.sender)
+    assert result['cleanup_verified']
+    assert lifecycle.pending(kit.base, 'worker') == []

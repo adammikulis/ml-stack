@@ -12,14 +12,20 @@ from workspace_kit import Kit, clean_env
 from ml_stack.fleet import device_auth
 from ml_stack.fleet.api import Daemon, make_handler
 from ml_stack.fleet.jobs import JobRunner
-from ml_stack.fleet.remote import Peer
 from ml_stack.fleet.onboard.requests import Device
 from ml_stack.fleet.onboard.web import Call
-from ml_stack.workspace import coordinator, coordinator_client, coordinator_config, device_sessions, tokens
-from ml_stack.workspace.coordination import workspace_id
-from ml_stack.workspace.identity import AGENT, Denied
+from ml_stack.fleet.remote import Peer
 from ml_stack.http import Server, ServerError
+from ml_stack.workspace import (
+    coordinator,
+    coordinator_client,
+    coordinator_config,
+    device_sessions,
+    tokens,
+)
+from ml_stack.workspace.coordination import workspace_id
 from ml_stack.workspace.coordinator_client import Remote
+from ml_stack.workspace.identity import AGENT, Denied
 from ml_stack.workspace.remote_host import WorkspaceHost
 
 
@@ -221,7 +227,7 @@ def test_enrolled_device_never_creates_local_authority_without_unique_coordinato
     base = tmp_path / 'workspace'
     monkeypatch.setattr(coordinator_client, 'load_cluster_key', lambda: b'enrolled')
     monkeypatch.setattr(coordinator_client, 'discover', lambda: [(None, {})] * count)
-    with pytest.raises(Denied, match='unavailable|ambiguous'):
+    with pytest.raises(Denied, match=r'unavailable|ambiguous'):
         coordinator_client.client(base)
     assert not (base / 'agents.json').exists()
     assert not coordinator_config.load(base)

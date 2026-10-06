@@ -68,7 +68,13 @@ export default function (pi) {{
     const answer = result.hookSpecificOutput || {{}};
     if (answer.permissionDecision === "deny") return {{block:true,reason:"ml-stack: " + (answer.permissionDecisionReason || "blocked by policy")}};
   }});
-  pi.on("tool_result", () => {{ call(["post","--label",cfg.label],{{}}); }});
+  pi.on("tool_result", (_event, ctx) => {{
+    const result = call(["post","--label",cfg.label,"--root",cfg.root],{{}});
+    if (result.failed) {{
+      console.log(JSON.stringify({{type:"error",message:"Pi mutation checkpoint failed"}}));
+      ctx.abort(); ctx.shutdown();
+    }}
+  }});
 }}
 '''
 

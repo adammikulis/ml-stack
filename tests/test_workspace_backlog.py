@@ -7,7 +7,14 @@ import pytest
 from workspace_kit import Kit, clean_env
 
 from ml_stack.net import git
-from ml_stack.workspace import backlog, issuepump, localagent as la, localcli, project as projects, tokens
+from ml_stack.workspace import (
+    backlog,
+    issuepump,
+    localagent as la,
+    localcli,
+    project as projects,
+    tokens,
+)
 from ml_stack.workspace.identity import Denied
 from ml_stack.workspace.taskboard import TaskBoard
 

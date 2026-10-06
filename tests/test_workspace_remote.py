@@ -19,7 +19,7 @@ from ml_stack.fleet.projects import ProjectRegistry
 from ml_stack.fleet.remote import Peer
 from ml_stack.http import Server, ServerError, request_json
 from ml_stack.workspace import cli, project_connection, remote as remote_module, tokens
-from ml_stack.workspace.identity import AGENT, HUMAN, LEAD
+from ml_stack.workspace.identity import AGENT, HUMAN, LEAD, Denied
 from ml_stack.workspace.remote import RemoteWorkspace
 from ml_stack.workspace.remote_host import WorkspaceHost
 
@@ -35,7 +35,7 @@ def test_project_authority_routes_before_global_coordinator_discovery(monkeypatc
     monkeypatch.setattr(cli.coordinator_config, "load", lambda *a: {})
     monkeypatch.setattr(cli.coordinator_client, "client", lambda *a: pytest.fail("global discovery"))
     monkeypatch.setattr(cli, "_context", lambda args, chosen=None: (chosen, "project-session"))
-    args = SimpleNamespace(json=True)
+    args = SimpleNamespace(json=True, cmd="status")
     seen = []
     run = cli._runner(lambda args, ws, token: seen.append((ws, token)) or {"state": "connected"})
     assert run(args) == 0
@@ -69,6 +69,48 @@ def test_agent_connect_selects_explicit_project_instead_of_current_board(tmp_pat
     assert cli._bare(cli._connect)(args) == (3 if unavailable else 0)
     assert seen and all(path == requested for path in seen)
     assert results == ([] if unavailable else [{"id": "worker", "project": "requested-board", "state": "connected"}])
+
+
+@pytest.mark.parametrize("owned", [False, True])
+def test_foreign_credential_recovery_requires_owned_local_identity(tmp_path, monkeypatch, owned):
+    from ml_stack.workspace import guide, tokens
+    from ml_stack.workspace.identity import Denied
+    from ml_stack.workspace.service import Workspace
+    monkeypatch.setattr(guide.coordinator_bootstrap, "ensure_host", lambda ws, token: None)
+    ws = Workspace(tmp_path / "private-workspace")
+    found = {"key": "project", "name": "project"}
+    guide.agent_connect(ws, "worker", found)
+    rows = ws.registry._load()
+    if not owned:
+        rows["worker"]["minted_by"] = "legacy-person"
+        ws.registry._save(rows)
+    before = ws.registry.path.read_bytes()
+    tokens.store(ws.base, "worker", "mlws1.foreign.credential")
+    if owned:
+        guide.agent_connect(ws, "worker", found)
+        assert ws.auth(tokens.load(ws.base, "worker")).id == "worker"
+    else:
+        with pytest.raises(Denied, match="another agent"):
+            guide.agent_connect(ws, "worker", found)
+        assert ws.registry.path.read_bytes() == before
+
+
+def test_own_agent_connect_hosts_local_workspace_automatically(tmp_path, monkeypatch):
+    from ml_stack.workspace import guide, tokens
+    from ml_stack.workspace.service import Workspace
+    ws = Workspace(tmp_path / "private-workspace")
+    hosted = []
+    def ensure(workspace, token):
+        assert workspace is ws
+        who = ws.auth(token)
+        assert who.id == "worker" and who.role == "agent"
+        boards, _ = ws.board.store.state()
+        assert any("worker" in row["members"] for row in boards.values())
+        hosted.append(token)
+    monkeypatch.setattr(guide.coordinator_bootstrap, "ensure_host", ensure)
+    found = {"key": "project", "name": "project"}
+    assert guide.agent_connect(ws, "worker", found)["id"] == "worker"
+    assert hosted == [tokens.load(ws.base, "worker")]
 
 
 def test_local_runner_discovers_authority_once(monkeypatch):
@@ -124,8 +166,6 @@ def test_canonical_client_recovers_and_remembers_device_scoped_identity(tmp_path
     remote = RemoteWorkspace.__new__(RemoteWorkspace)
     remote.base, remote.project_id = tmp_path / "sessions", PROJECT
     requests = []
-    transports = []
-    monkeypatch.setattr(remote, "_device_transport", lambda: transports.append("device"))
     def request(action, payload):
         requests.append((action, payload))
         return {"id": "worker-peer", "token": "mlws1.worker-peer.saved", "project_id": PROJECT}
@@ -137,7 +177,7 @@ def test_canonical_client_recovers_and_remembers_device_scoped_identity(tmp_path
     assert requests[0][1]["project"] == {"key": PROJECT}
     assert requests[0][1]["agent_token"] == ""
     assert remote.token(agent="worker-peer") == token
-    assert len(requests) == 1 and len(transports) == 2
+    assert len(requests) == 1
     (tokens.directory(remote.base) / "worker-peer").unlink()
     assert remote.token(agent="worker") == token
     assert requests[-1][1]["name"] == "worker"
@@ -148,6 +188,9 @@ def test_canonical_client_recovers_expiry_and_preserves_outage_failure(tmp_path,
     remote = RemoteWorkspace.__new__(RemoteWorkspace)
     remote.base, remote.project_id = tmp_path / "sessions", PROJECT
     tokens.store(remote.base, "worker", "mlws1.worker.saved")
+    with remote_module.GraphStore(remote.base / "remote-sessions.db") as graph:
+        graph.upsert_node({"id": "session:worker", "kind": "remote-session", "label": "worker",
+                           "attrs": {"name": "worker", "id": "worker"}})
     requests = []
     monkeypatch.setattr(remote, "_device_transport", lambda: None)
     def call(operation, token):
@@ -179,6 +222,45 @@ def test_canonical_recovery_refuses_unsafe_credential_storage(tmp_path, monkeypa
     from ml_stack.workspace.identity import Denied
     with pytest.raises(Denied, match="project session storage"):
         remote.token(agent="worker")
+
+
+def test_canonical_transport_is_per_identity_including_delegated_and_explicit_tokens(tmp_path, monkeypatch):
+    remote = RemoteWorkspace.__new__(RemoteWorkspace)
+    remote.base, remote.project_id, remote.fleet_token = tmp_path / "sessions", PROJECT, "dev-mac"
+    tokens.prepare(remote.base)
+    with remote_module.GraphStore(remote.base / "remote-sessions.db") as graph:
+        graph.upsert_node({"id": "session:paired", "kind": "remote-session", "label": "paired.agent",
+                           "attrs": {"name": "paired", "id": "paired.agent"}})
+    monkeypatch.setattr(remote, "_device_transport", lambda: "device-mac")
+    for name, expected in [("paired.agent", "device-mac"), ("dev-parent", "dev-mac"),
+                           ("paired.agent/child", "device-mac"), ("dev-parent/child", "dev-mac")]:
+        token = f"{tokens.PREFIX}{name}.secret"
+        path = tokens.store(remote.base, name, token)
+        explicit = remote.token(token_file=str(path))
+        assert remote._transport("board", {"agent_token": explicit}) == expected
+        assert remote.fleet_token == "dev-mac"
+    assert remote._transport("ensure", {}) == "device-mac"
+    assert remote._transport("enroll", {}) == "dev-mac"
+
+
+@pytest.mark.parametrize("paired, saved", [(False, True), (True, True), (False, False), (True, False)])
+def test_delegated_credentials_never_recover_as_paired_top_identity(tmp_path, monkeypatch, paired, saved):
+    from ml_stack.workspace.identity import Denied
+    remote = RemoteWorkspace.__new__(RemoteWorkspace)
+    remote.base, remote.project_id = tmp_path / "sessions", PROJECT
+    tokens.prepare(remote.base)
+    if paired:
+        with remote_module.GraphStore(remote.base / "remote-sessions.db") as graph:
+            graph.upsert_node({"id": "session:parent", "kind": "remote-session", "label": "parent",
+                               "attrs": {"name": "parent", "id": "parent"}})
+    if saved:
+        tokens.store(remote.base, "parent/child", f"{tokens.PREFIX}parent/child.expired")
+    def expired(*args):
+        raise Denied("expired delegation") from ServerError("expired", status=403)
+    monkeypatch.setattr(remote, "call", expired)
+    monkeypatch.setattr(remote, "_request", lambda *a: pytest.fail("delegation became another identity"))
+    with pytest.raises(Denied):
+        remote.token(agent="parent/child")
 
 
 def test_canonical_recovery_serializes_read_ensure_and_store(tmp_path, monkeypatch):
@@ -214,7 +296,7 @@ def test_canonical_recovery_serializes_read_ensure_and_store(tmp_path, monkeypat
     def run(remote):
         try:
             results.append(remote.token(agent="worker"))
-        except Exception as error:
+        except (Denied, ServerError, OSError) as error:
             errors.append(error)
     workers = [threading.Thread(target=run, args=(first,), name="first-client"),
                threading.Thread(target=run, args=(second,), name="second-client")]
@@ -408,11 +490,9 @@ def test_remote_client_never_reuses_global_or_human_token_files(monkeypatch, tmp
     monkeypatch.setenv("ML_STACK_WORKSPACE_TOKEN", "global-human-token")
     monkeypatch.delenv(tokens.AGENT_ENV, raising=False)
     remote = RemoteWorkspace("http://127.0.0.1:8770", PROJECT)
-    with pytest.raises(PermissionError, match="attach a project agent"):
+    with pytest.raises(PermissionError, match="select the local agent identity"):
         remote.token()
-    owner = tmp_path / ".owner"
-    owner.write_text("private-human-token")
-    owner.chmod(0o600)
+    owner = tokens.store(tmp_path, tokens.OWNER_FILE, "private-human-token")
     with pytest.raises(PermissionError, match="only private project agent"):
         remote.token(token_file=str(owner))
 

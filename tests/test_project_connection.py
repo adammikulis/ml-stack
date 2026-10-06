@@ -46,7 +46,7 @@ def test_normal_cli_sends_to_saved_canonical_board(project, monkeypatch):
     monkeypatch.chdir(project)
     monkeypatch.setattr(connection, "RemoteWorkspace", lambda *a, **k: remote)
     monkeypatch.setattr(cli, "Workspace", lambda: pytest.fail("created a split local board"))
-    args = SimpleNamespace(agent="", token_file="", label="helper", to="pc", type="status",
+    args = SimpleNamespace(cmd="send", agent="", token_file="", label="helper", to="pc", type="status",
                            body="connected", subject="", reply_to=0, ttl=0, json=True)
     assert cli._runner(cli._send)(args) == 0
     operation, token, values, kwargs = remote.calls[-1]
@@ -79,7 +79,7 @@ def test_offline_canonical_connection_does_not_fall_back(project, monkeypatch):
         raise Denied("canonical host offline")
     monkeypatch.setattr(connection, "RemoteWorkspace", offline)
     monkeypatch.setattr(cli, "Workspace", lambda: pytest.fail("created a split local board"))
-    assert cli._runner(cli._agents)(SimpleNamespace(agent="", token_file="", json=True)) == 3
+    assert cli._runner(cli._agents)(SimpleNamespace(cmd="agents", agent="", token_file="", json=True)) == 3
 
 
 def test_corrupt_connection_record_disables_local_fallback(project):

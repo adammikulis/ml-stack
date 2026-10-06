@@ -259,9 +259,17 @@ def test_agent_env_and_flag_find_the_right_token_and_one_cannot_pose_as_another(
     via_flag = child(["whoami", "--json", "--agent", "lead"], base)
     assert json.loads(via_flag.stdout) == {"id": "lead", "role": "lead", "project": {}, "model": "unknown",
                                            "model_state": "", "harness": ""}
+    scope = project.describe()
+    owner = ws.auth(tokens.read_file(tokens.directory(base) / tokens.OWNER_FILE))
+    for name in ("codex", "lead"):
+        ws.registry.set_project(owner, name, scope)
+        ws.board.place(name, scope)
+    before = ws.registry._load()
+    assert before["codex"]["minted_by"] != "local-account"
     (base / "tokens" / "codex").write_text((base / "tokens" / "lead").read_text())
     swapped = child(["whoami", "--agent", "codex"], base)
     assert swapped.returncode == 3 and "another agent" in swapped.stderr
+    assert ws.registry._load() == before
     assert child(["whoami", "--agent", "../lead"], base).returncode == 3
     assert child(["whoami", "--agent", ".owner"], base).returncode == 3
 
@@ -541,7 +549,8 @@ def test_brief_names_the_flags_and_shows_no_path_or_secret(base, team):
     assert done.returncode == 0
     text = done.stdout
     assert "--agent worker --label scout" in text and "data written by another agent" in text
-    assert len(text.strip().splitlines()) == 4 and str(base) not in text and "mlws1" not in text
+    assert len(text.strip().splitlines()) == 5 and str(base) not in text and "mlws1" not in text
+    assert "Local runtime device:" in text and "provenance grants no permissions" in text
 
 
 def test_a_message_or_note_cannot_carry_the_token_directory(base, team):

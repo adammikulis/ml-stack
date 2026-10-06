@@ -122,8 +122,19 @@ def nudge(label: str) -> str:
     return done.stdout.strip()[:NUDGE_MOST] if done.returncode == 0 else ""
 
 
-def post(label: str) -> dict[str, Any]:
+def post(label: str, rail: Rail | None = None) -> dict[str, Any]:
     """The PostToolUse answer: the nudge as context, or nothing."""
+    if rail is not None and rail.roots:
+        canonical = harness_remote.context(label, rail.roots[0], rail.roots, require_claim=False)
+        if canonical:
+            remote, who = canonical
+            worktree_lifecycle.checkpoint(remote.base, who.id)
+        else:
+            ws = Workspace()
+            who = ws.auth(tokens.load(ws.base, label))
+            if who.id != label:
+                raise Denied('checkpoint requires the launcher-bound identity')
+            worktree_lifecycle.checkpoint(ws.base, who.id)
     text = nudge(label)
     if not text:
         return {}
@@ -171,7 +182,7 @@ def run(argv: Sequence[str] | None = None, stdin: IO[str] | None = None,
         label = opts.get("label", ["harness"])[-1]
         rail = Rail(opts.get("role", ["read-only"])[-1], label, opts.get("root") or [str(payload.get("cwd", ""))],
                     opts.get("protect", []), float(opts.get("wait", [WAIT_S])[-1]))
-        out = pre(payload, rail) if event == "pre" else stop(rail) if event == "stop" else post(label)
+        out = pre(payload, rail) if event == "pre" else stop(rail) if event == "stop" else post(label, rail)
     except FAILURES as exc:
         sys.stderr.write(f"ml-stack hook failed, call blocked: {type(exc).__name__}\n")
         return 2

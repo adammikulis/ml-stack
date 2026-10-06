@@ -9,8 +9,16 @@ import subprocess
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from ml_stack.person import HumanRequired
-from ml_stack.workspace import Denied, Workspace, automatic_connection, coordinator_client, guide, limits, onboard, project_connection, tokens
+from ml_stack.workspace import (
+    Denied,
+    Workspace,
+    automatic_connection,
+    coordinator_client,
+    guide,
+    limits,
+    project_connection,
+    tokens,
+)
 from ml_stack.workspace.harness_seat import Seat
 from ml_stack.workspace.identity import AGENT_MARKERS, valid_name
 from ml_stack.workspace.project import authoritative, describe

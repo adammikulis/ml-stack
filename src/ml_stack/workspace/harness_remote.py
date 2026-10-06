@@ -192,6 +192,16 @@ def cli_command(remote, token, args):
         raise Denied('canonical claims require the selected exact agent identity')
     who = Identity(expected, AGENT, info.get('parent', ''), tuple(info.get('can', ())))
     if args.cmd == 'worktrees':
+        if getattr(args, 'cleanup', ''):
+            if 'claim' not in who.can:
+                raise Denied('canonical capability has no claim permission')
+            principal = physical_owner(remote, who)
+            store = claims()
+            target = str(Path(args.cleanup).resolve())
+            claim = store.who('worktree', target)
+            if not claim or claim['owner'] != principal.id:
+                raise Denied('cleanup requires the live checkout claim of this canonical worker')
+            return worktree_lifecycle.cleanup(remote.base, who.id, target, store, claim_owner=principal.id)
         return worktree_lifecycle.pending(remote.base, who.id, args.label)
     if args.cmd in ('announce', 'send'):
         require_clean(remote, who)

@@ -136,8 +136,9 @@ def test_stop_uses_canonical_identity_for_local_durable_cleanup(setup):
     assert worktree_lifecycle.pending(setup.remote.base, 'worker')[0]['path'] == str(setup.checkout)
     rail = harnesshook.Rail('plan-and-go', 'worker', roots=[str(setup.checkout)])
     assert harnesshook.stop(rail)['decision'] == 'block'
-    repo.git(setup.primary, 'worktree', 'remove', str(setup.checkout))
-    repo.git(setup.primary, 'branch', '-d', 'worker/change')
+    principal = harness_remote.physical_owner(setup.remote, setup.who)
+    worktree_lifecycle.cleanup(setup.remote.base, setup.who.id, str(setup.checkout),
+                              harness_remote.claims(), claim_owner=principal.id)
     setup.info['can'] = ['read']
     assert harnesshook.stop(rail) == {}
 

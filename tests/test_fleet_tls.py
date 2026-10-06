@@ -2,6 +2,7 @@
 
 import contextlib
 import json
+import os
 import socket
 import threading
 import time
@@ -16,6 +17,7 @@ from ml_stack.fleet.discovery import Beacon, discover, primary_ip
 from ml_stack.fleet.framing import LimitedServer
 from ml_stack.fleet.jobs import JobRunner
 from ml_stack.fleet.remote import Peer, PeerError
+from ml_stack.windows_private import problem as windows_problem, restrict
 
 
 @pytest.fixture(autouse=True)
@@ -55,8 +57,50 @@ def test_a_daemon_makes_a_certificate_once_and_keeps_it(tmp_path):
     first = tls.identity(tmp_path / "tls", "box")
     again = tls.identity(tmp_path / "tls", "box")
     assert again.der == first.der and first.fingerprint == again.fingerprint
-    assert first.keyfile.stat().st_mode & 0o077 == 0
-    assert (tmp_path / "tls").stat().st_mode & 0o077 == 0
+    for path in (first.keyfile, tmp_path / "tls"):
+        if os.name == "nt":
+            assert windows_problem(path) == ""
+        else:
+            assert path.stat().st_mode & 0o077 == 0
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows access control")
+def test_a_private_key_granted_to_another_account_is_refused(tmp_path):
+    import ntsecuritycon
+    import win32security
+
+    ident = tls.identity(tmp_path / "tls", "box")
+    descriptor = win32security.GetNamedSecurityInfo(
+        str(ident.keyfile), win32security.SE_FILE_OBJECT, win32security.DACL_SECURITY_INFORMATION)
+    acl = descriptor.GetSecurityDescriptorDacl()
+    everyone = win32security.CreateWellKnownSid(win32security.WinWorldSid)
+    acl.AddAccessAllowedAce(win32security.ACL_REVISION, ntsecuritycon.FILE_GENERIC_READ, everyone)
+    try:
+        win32security.SetNamedSecurityInfo(
+            str(ident.keyfile), win32security.SE_FILE_OBJECT, win32security.DACL_SECURITY_INFORMATION,
+            None, None, acl, None)
+        with pytest.raises(tls.TlsUnavailable, match="another account"):
+            tls.identity(tmp_path / "tls", "box")
+    finally:
+        restrict(ident.keyfile)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows junctions")
+def test_a_junction_identity_directory_is_refused_without_writing_a_key(tmp_path):
+    import subprocess
+
+    target = tmp_path / "target"
+    target.mkdir()
+    junction = tmp_path / "tls"
+    created = subprocess.run(["cmd", "/c", "mklink", "/J", str(junction), str(target)],
+                             capture_output=True, check=False)
+    assert created.returncode == 0, created.stderr
+    try:
+        with pytest.raises(tls.TlsUnavailable, match="reparse point"):
+            tls.identity(junction, "box")
+        assert list(target.iterdir()) == []
+    finally:
+        junction.rmdir()
 
 
 def test_a_certificate_close_to_its_end_is_made_again(tmp_path):

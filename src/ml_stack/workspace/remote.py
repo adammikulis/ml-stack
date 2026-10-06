@@ -13,8 +13,8 @@ from ml_stack import home, sealing
 from ml_stack.fleet.discovery import derive_token, load_cluster_key, memberships
 from ml_stack.fleet.onboard.lan import require_local_url
 from ml_stack.fleet.remote import Peer
-from ml_stack.http import ServerError, open_stream
 from ml_stack.graph.store import GraphStore
+from ml_stack.http import ServerError, open_stream
 from ml_stack.workspace import coordinator_client, tokens
 from ml_stack.workspace.chain import held
 from ml_stack.workspace.identity import Denied, valid_id
@@ -67,7 +67,7 @@ class RemoteWorkspace:
         url = guard(f"{self.endpoint}/{action}")
         try:
             with open_stream(url, data=json.dumps(payload).encode(), method="POST",
-                             token=self.fleet_token, timeout=30, guard=guard,
+                             token=self._transport(action, payload), timeout=30, guard=guard,
                              headers={"Content-Type": "application/json", sealing.HEADER: "2"}) as response:
                 if not response.headers.get(sealing.HEADER):
                     raise Denied("project board response was not authenticated and sealed")
@@ -177,8 +177,6 @@ class RemoteWorkspace:
         ident = str(session.get("id", name))
         if not valid_id(ident):
             raise Denied("project session record holds an invalid agent identity")
-        if session:
-            self._device_transport()
         try:
             saved = tokens.load(self.base, ident)
         except Denied:
@@ -191,7 +189,10 @@ class RemoteWorkspace:
             except Denied as error:
                 if not isinstance(error.__cause__, ServerError) or error.__cause__.status != 403:
                     raise
-        self._device_transport()
+                if not session:
+                    raise
+        if "/" in ident:
+            raise Denied("delegated project identities need a live parent-authorized credential")
         result = self._request("ensure", {"name": str(session.get("name", name)),
                                          "model": "", "harness": "",
                                          "project": {"key": self.project_id}, "agent_token": saved})
@@ -202,6 +203,25 @@ class RemoteWorkspace:
                                "attrs": {"name": str(session.get("name", name)), "id": ident}})
         return token
 
-    def _device_transport(self) -> None:
-        self.fleet_token = coordinator_client._device_peer(
+    def _transport(self, action: str, payload: dict) -> str:
+        if action == "ensure":
+            return self._device_transport()
+        if action == "board":
+            self._safe_storage(self.base)
+            credential = str(payload.get("agent_token", ""))
+            if credential.startswith(tokens.PREFIX):
+                name = credential[len(tokens.PREFIX):].rsplit(".", 1)[0].split("/", 1)[0]
+                path = self.base / "remote-sessions.db"
+                why = tokens.problem(path)
+                if why not in {"", "missing"} and not why.startswith("mode "):
+                    raise Denied(f"project session records {path}: {why}")
+                if path.exists():
+                    with GraphStore(path) as graph:
+                        if any(node["attrs"].get("id") == name
+                               for node in graph.nodes("remote-session")):
+                            return self._device_transport()
+        return self.fleet_token
+
+    def _device_transport(self) -> str:
+        return coordinator_client._device_peer(
             {"endpoint": self.host, "cert": self.device_cert}).token

@@ -27,7 +27,7 @@ from ml_stack.harnesshook import WAIT_S
 from ml_stack.serve import chat_template, leases, profile, suggest, wired
 from ml_stack.serve.recent import note
 from ml_stack.serve.serving import Config, Serving, drafted, served, serving_params
-from ml_stack.workspace.windows_tokens import restrict as restrict_windows
+from ml_stack.windows_private import restrict as restrict_windows
 
 __all__ = [
     "DEFAULT_CTX",

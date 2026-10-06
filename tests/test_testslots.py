@@ -36,11 +36,13 @@ def _env(tmp_path, budget):
     return {**inherited, "DEV_TEST_SLOTS_DIR": str(tmp_path / "slots"), "DEV_TEST_BUDGET": str(budget), "DEV_TEST_WAIT_S": "60"}
 
 
-def _spawn(tmp_path, budget, want, hold, label, release=None):
+def _spawn(tmp_path, budget, want, hold, label):
     records = tmp_path / "records"
     records.mkdir(exist_ok=True)
+    release = hold if isinstance(hold, Path) else None
+    seconds = 0 if release else hold
     return subprocess.Popen([sys.executable, "-c", CHILD, str(SCRIPT), str(records / f"{label}.json"),
-                             str(want), str(hold), label, str(release) if release else ""],
+                             str(want), str(seconds), label, str(release) if release else ""],
                             env=_env(tmp_path, budget))
 
 
@@ -82,7 +84,7 @@ def test_runs_are_granted_in_arrival_order(tmp_path):
     release = tmp_path / "release"
     processes = []
     try:
-        first = _spawn(tmp_path, 4, 4, 0, "first", release)
+        first = _spawn(tmp_path, 4, 4, release, "first")
         processes.append(first)
         _wait_for_slot(tmp_path, first, "first", 4)
         second = _spawn(tmp_path, 4, 4, 0.3, "second")
