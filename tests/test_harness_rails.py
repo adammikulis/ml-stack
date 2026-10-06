@@ -519,7 +519,8 @@ def test_automatic_context_comes_from_the_device_model_fit(monkeypatch):
     from ml_stack import hub
     monkeypatch.setattr(hub, "located", lambda model, loose=True: Path("qwen.gguf"))
     monkeypatch.setattr(harnessing.chat_template, "trained_context", lambda _: 200000)
-    monkeypatch.setattr(harnessing.suggest, "suggest", lambda *a, **k: SimpleNamespace(context=98304))
+    monkeypatch.setattr(harnessing.suggest, "suggest", lambda *a, **k: SimpleNamespace(context=98304, verdict="yellow", n_gpu_layers="auto",
+                            kv_cache_type="q8_0", flash_attn=True, batch=512))
     monkeypatch.setattr(harnessing.profile, "profile_for", lambda _: None)
     monkeypatch.setattr(hub, "head_choice", lambda *_: None)
     said = []
