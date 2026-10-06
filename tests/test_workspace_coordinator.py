@@ -1,6 +1,7 @@
 """Two device roots use authenticated Fleet transport and one authoritative graph."""
 
 import concurrent.futures
+import base64
 import json
 import os
 import subprocess
@@ -13,6 +14,9 @@ import pytest
 from workspace_kit import Kit, clean_env
 
 from ml_stack.fleet.api import Daemon, make_handler
+from ml_stack.fleet import tls
+from ml_stack.fleet.onboard.requests import Device, Devices
+from ml_stack.hub.peerbook import PeerBook
 from ml_stack.fleet.discovery import derive_token, mint_cluster
 from ml_stack.fleet.jobs import JobRunner
 from ml_stack.fleet.remote import Peer
@@ -51,13 +55,25 @@ def shared(tmp_path, monkeypatch, installed_metadata):
     membership = mint_cluster('default', tmp_path / 'cluster.key')
     monkeypatch.setenv('ML_STACK_CLUSTER_KEY', str(tmp_path / 'cluster.key'))
     fleet_token = derive_token(membership.key)
-    server = Server(('127.0.0.1', 0), make_handler(Daemon(runner, tmp_path / 'files', fleet_token)))
+    device = Device('d' * 64, 'paired-device', 'paired-host', '127.0.0.1', 1,
+                    mine=True, secret=base64.urlsafe_b64encode(b'd' * 32).decode())
+    server = Server(('127.0.0.1', 0), make_handler(Daemon(
+        runner, tmp_path / 'files', fleet_token, devices=lambda: [device])))
     threading.Thread(target=server.serve_forever, daemon=True).start()
     peer = Peer(f'http://127.0.0.1:{server.server_address[1]}', fleet_token)
     kit.remote = Remote({'workspace': identity, 'endpoint': peer.base_url}, peer)
     kit.device = tmp_path / 'windows-device'
     kit.device.mkdir()
-    coordinator_config.save(kit.device, {'mode': 'remote', 'workspace': identity, 'endpoint': peer.base_url})
+    installed_home = tmp_path / 'installed-home'
+    monkeypatch.setenv('ML_STACK_HOME', str(installed_home))
+    certificate = tls.identity(tmp_path / 'tls', 'test-coordinator').beacon
+    Devices(installed_home / 'onboard' / 'devices.json')._write([device])
+    PeerBook(installed_home / 'onboard' / 'peers.json').add({
+        'name': 'test-coordinator', 'url': peer.base_url, 'source': 'pairing',
+        'fingerprint': device.fingerprint, 'certificate': certificate,
+        'device_secret': device.secret})
+    coordinator_config.save(kit.device, {'mode': 'remote', 'workspace': identity,
+                                         'endpoint': peer.base_url, 'cert': certificate})
     tokens.store(kit.device, 'alice', kit.alice)
     try:
         yield kit
@@ -214,8 +230,8 @@ def test_hostile_saved_coordinator_origin_is_refused_before_transport(tmp_path, 
 
     (tmp_path / 'coordinator.json').write_text(json.dumps({
         'version': 1, 'mode': 'remote', 'workspace': 'workspace:' + 'a' * 32, 'endpoint': endpoint}))
-    monkeypatch.setattr(coordinator_client, 'load_cluster_key',
-                        lambda: pytest.fail('hostile configuration reached credential/transport setup'))
+    monkeypatch.setattr(coordinator_client, '_device_peer',
+                        lambda config: pytest.fail('hostile configuration reached credential/transport setup'))
     with pytest.raises(Denied):
         coordinator_client.client(tmp_path)
 
