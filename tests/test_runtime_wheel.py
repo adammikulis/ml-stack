@@ -45,6 +45,7 @@ def test_stamp_records_the_source_and_hashes_every_installed_file(tmp_path):
 
 def test_install_uses_committed_snapshot_and_replaces_same_version(tmp_path, monkeypatch):
     calls = []
+    monkeypatch.setattr(sys, "prefix", str(tmp_path / "runtime-prefix"))
 
     def run(argv, timeout):
         calls.append(argv)
@@ -69,6 +70,7 @@ def test_install_uses_committed_snapshot_and_replaces_same_version(tmp_path, mon
 
 def test_dependency_failure_does_not_replace_the_installed_distribution(tmp_path, monkeypatch):
     calls = []
+    monkeypatch.setattr(sys, "prefix", str(tmp_path / "runtime-prefix"))
 
     def run(argv, timeout):
         calls.append(argv)
@@ -100,14 +102,79 @@ def test_built_wheel_imports_from_an_immutable_install(tmp_path):
     target = tmp_path / "installed"
     subprocess.run([sys.executable, "-m", "pip", "install", "--no-deps", "--no-index",
                     "--target", str(target), str(wheel)], check=True, capture_output=True, text=True)
+    prefix = tmp_path / "runtime-prefix"
+    cached = prefix / "ml-stack-wheels" / COMMIT / wheel.name
+    cached.parent.mkdir(parents=True)
+    shutil.copy2(wheel, cached)
     env = {**os.environ, "PYTHONPATH": str(target)}
-    script = ("import json; from pathlib import Path; from importlib.metadata import version; "
-              "from ml_stack.fleet import runtime_wheel as r; "
+    script = ("import json, os, subprocess, sys; from pathlib import Path; from importlib.metadata import version; "
+              "from ml_stack.fleet import runtime_wheel as r; from ml_stack.fleet.environment import Environment; "
+              f"sys.prefix = {str(prefix)!r}; managed = Environment(Path({str(tmp_path)!r}) / 'managed'); "
+              "result = managed.install(['core']); assert result['core']['ok'], result; "
+              "clean = dict(os.environ); clean.pop('PYTHONPATH', None); "
+              "loaded = subprocess.run([str(managed.python), '-c', "
+              "'from ml_stack.fleet import runtime_wheel as r; print(r.current_wheel()); print(r.wheel_commit(r.current_wheel()))'], "
+              "env=clean, capture_output=True, text=True, check=True); "
               "print(json.dumps([r.__file__, r.source_checkout().as_posix(), "
-              "Path(r.__file__).with_name('built-from').read_text().strip(), version('ml-stack')]))")
+              "Path(r.__file__).with_name('built-from').read_text().strip(), version('ml-stack'), "
+              "str(managed.wheels()), loaded.stdout.splitlines()]))")
     done = subprocess.run([sys.executable, "-c", script], cwd=tmp_path, env=env,
                           check=True, capture_output=True, text=True)
-    installed, source, commit, version = json.loads(done.stdout)
+    installed, source, commit, version, wheels, managed_runtime = json.loads(done.stdout)
     assert Path(installed).is_relative_to(target)
     assert source == str(root) and commit == COMMIT
-    assert version == wheels[0].name.split("-")[1]
+    assert version == wheel.name.split("-")[1]
+    assert Path(wheels) == cached.parent
+    assert Path(managed_runtime[0]).is_relative_to(tmp_path / "managed" / "env")
+    assert managed_runtime[1] == COMMIT
+
+
+def test_current_wheel_requires_matching_immutable_commit(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys, "prefix", str(tmp_path / "prefix"))
+    package = tmp_path / "installed" / "runtime_wheel.py"
+    package.parent.mkdir()
+    package.write_text("")
+    package.with_name("built-from").write_text(COMMIT)
+    monkeypatch.setattr(runtime_wheel, "__file__", str(package))
+    with pytest.raises(OSError, match="unavailable"):
+        runtime_wheel.current_wheel()
+    wheel = _wheel(tmp_path / "ml_stack-0.1.0-py3-none-any.whl")
+    runtime_wheel.stamp(wheel, COMMIT, tmp_path)
+    cached = runtime_wheel.cache_wheel(wheel, COMMIT)
+    assert runtime_wheel.current_wheel() == cached
+    runtime_wheel.stamp(cached, "f" * 40, tmp_path)
+    with pytest.raises(OSError, match="does not match"):
+        runtime_wheel.current_wheel()
+
+
+def test_managed_install_uses_direct_cached_wheel_and_refreshes_same_version(tmp_path, monkeypatch):
+    from ml_stack.fleet.environment import Environment
+    wheel = _wheel(tmp_path / "wheels" / "ml_stack-0.1.0-py3-none-any.whl")
+    environment = Environment(tmp_path)
+    monkeypatch.setattr(environment, "wheels", lambda: wheel.parent)
+    monkeypatch.setattr(environment, "build_environment", lambda: {})
+    calls = []
+    def run(argv, **kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+    monkeypatch.setattr(subprocess, "run", run)
+    assert environment.pip(["install", "--upgrade", "ml-stack[train]"]).returncode == 0
+    assert calls[0][-1] == f"ml-stack[train] @ {wheel.as_uri()}"
+    assert calls[0][4:6] == ["--find-links", str(wheel.parent)]
+    assert calls[1][-4:] == ["install", "--force-reinstall", "--no-deps", str(wheel)]
+
+
+def test_third_party_installs_keep_matching_bundled_wheels(tmp_path, monkeypatch):
+    from ml_stack.fleet.environment import Environment
+    bundled = tmp_path / "bundled-wheels"
+    bundled.mkdir()
+    environment = Environment(tmp_path)
+    monkeypatch.setattr(environment, "wheels", lambda: bundled)
+    monkeypatch.setattr(environment, "build_environment", lambda: {})
+    calls = []
+    def run(argv, **kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+    monkeypatch.setattr(subprocess, "run", run)
+    assert environment.pip(["install", "--no-index", "torch"]).returncode == 0
+    assert calls == [[str(environment.python), "-m", "pip", "install", "--find-links", str(bundled), "--no-index", "torch"]]
