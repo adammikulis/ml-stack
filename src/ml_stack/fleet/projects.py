@@ -135,6 +135,30 @@ class ProjectRegistry:
             except (OSError, git.GitFailed, source.ProjectError):
                 continue
 
+    def register(self, root: Path, expected_project: str) -> dict:
+        """Register a verified local Git project and return its Board metadata."""
+        source.project_id(expected_project)
+        if not root.is_absolute() or len(str(root)) > 2048 or any(ord(c) < 32 for c in str(root)):
+            raise source.ProjectError("Choose an absolute local project path")
+        try:
+            canonical = Path(git.run(["rev-parse", "--show-toplevel"], cwd=root).stdout.strip()).resolve()
+            identifier = identity(canonical)
+            if identifier != expected_project:
+                raise source.ProjectError("Local project identity does not match the requested project")
+            authority = attached_authority(canonical)
+        except (OSError, git.GitFailed) as exc:
+            raise source.ProjectError("Choose an available local Git project") from exc
+        with self.lock:
+            project = self._projects.get(identifier)
+            if project is None:
+                project = Project(id=identifier, name=canonical.name, root=str(canonical),
+                                  source_machine=self.machine, authority_machine=authority.get("machine", ""),
+                                  board_host=authority.get("host", ""))
+                self._projects[identifier] = project
+            self._candidates[identifier] = canonical
+            self._save()
+            return self._board(project)
+
     def candidates(self) -> list[dict]:
         return [{"id": identifier, "name": path.name} for identifier, path in self._candidates.items()]
 
@@ -225,9 +249,11 @@ class ProjectRegistry:
     def boards(self) -> list[dict]:
         """Return registered project Board metadata without checkout paths or source bundles."""
         with self.lock:
-            return [{"id": p.id, "name": p.name, "machine": self.machine,
-                     "authority_machine": p.authority_machine, "board_host": p.board_host}
-                    for p in self._projects.values()]
+            return [self._board(project) for project in self._projects.values()]
+
+    def _board(self, project: Project) -> dict:
+        return {"id": project.id, "name": project.name, "machine": self.machine,
+                "authority_machine": project.authority_machine, "board_host": project.board_host}
 
     def catalogue(self, *, include_boards: bool = False) -> dict:
         code = bootstrap()

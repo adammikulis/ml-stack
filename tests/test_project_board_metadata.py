@@ -98,3 +98,43 @@ def test_catalogue_uses_authenticated_visibility_predicate(repository, tmp_path,
     assert checked == [(connection, sealing, cluster_path)]
     assert bool(responses[0][1]["boards"]) is visible
     assert responses[0][1]["projects"] == []
+
+
+def test_register_native_project_is_metadata_only_and_persistent(repository, tmp_path, monkeypatch):
+    monkeypatch.setattr(source, "build", lambda *args: pytest.fail("metadata built source"))
+    nested = repository / "nested"
+    nested.mkdir()
+    identifier = identity(repository)
+    registry = ProjectRegistry(tmp_path / "registry", "device", host="https://device:8770")
+    assert registry.register(nested, identifier) == {"id": identifier, "name": "project", "machine": "device",
+                                                      "authority_machine": "", "board_host": ""}
+    assert registry.get(identifier).root == str(repository)
+    assert registry.list() == []
+    assert not (registry.root / "project-bundles").exists()
+    with pytest.raises(source.ProjectError, match="not shared"):
+        registry.snapshot(identifier, "")
+    registry.claim_authority(identifier, expected_machine="device")
+    assert registry.register(repository, identifier)["authority_machine"] == "device"
+    loaded = ProjectRegistry(registry.root, "device")
+    assert loaded.get(identifier).board_host == "https://device:8770"
+    assert loaded.list() == []
+
+
+@pytest.mark.redteam
+def test_native_registration_refuses_identity_mismatch_before_mutation(repository, tmp_path):
+    registry = ProjectRegistry(tmp_path / "registry", "device")
+    with pytest.raises(source.ProjectError, match="does not match"):
+        registry.register(repository, "a" * 32)
+    assert registry.boards() == []
+    assert registry.candidates() == []
+    assert not registry.path.exists()
+
+
+@pytest.mark.redteam
+@pytest.mark.parametrize("root", ["relative", "/" + "x" * 2048, "/bad\npath"])
+def test_native_registration_refuses_unbounded_or_relative_path(tmp_path, root):
+    registry = ProjectRegistry(tmp_path / "registry", "device")
+    with pytest.raises(source.ProjectError, match="absolute local project path"):
+        registry.register(type(tmp_path)(root), "a" * 32)
+    assert registry.boards() == []
+    assert not registry.path.exists()
