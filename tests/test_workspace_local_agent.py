@@ -145,7 +145,7 @@ def test_start_mints_a_private_token_records_the_pid_and_a_second_start_changes_
     try:
         assert got.name == "local-agent" and not got.already
         tok = tokens.directory(kit.base) / got.name
-        assert stat.S_IMODE(tok.stat().st_mode) == 0o600
+        assert tokens.problem(tok) == ""
         assert kit.ws.auth(tok.read_text().strip()).role == "agent"
         again = ls.start(kit.ws, ls.Ask(), pick=PICK, spawn=spawn)
         assert again.already and again.pid == got.pid and len(spawned) == 1
@@ -679,6 +679,31 @@ def test_a_coding_worker_is_registered_once_before_its_native_harness_starts(kit
         ls.stop(kit.ws, got.name, release=lambda lease: True, wait_s=5)
 
 
+def test_a_project_coding_launch_starts_its_issue_queue(kit, monkeypatch, tmp_path):
+    from ml_stack.net import git
+    from ml_stack.workspace import localprofile as lp
+
+    project = tmp_path / "repo"
+    project.mkdir()
+    git.run(["init", str(project)])
+    started = []
+    monkeypatch.setattr(lp, "admit", lambda model, ctx: ("", ""))
+    monkeypatch.setattr(ls.jobs, "detach", sleeper)
+    monkeypatch.setattr(ls.issuepump, "configure_and_start",
+                        lambda ws, token, name, repo, folder: started.append((name, repo, folder)))
+    parent = kit.agent("queue-parent")
+    from ml_stack.workspace import project as projects
+    kit.ws.registry.set_project(kit.ws.auth(kit.owner), "queue-parent", projects.describe(project))
+    got = ls.start(kit.ws, ls.Ask(name="queue-worker", profile="coding", project=str(project),
+                                  repo="sample/project", harness="claude"), pick=PICK, parent_token=parent)
+    try:
+        assert started == [(got.name, "sample/project", str(project.resolve()))]
+        worker = la.load(kit.ws, got.name)
+        assert kit.ws.registry.info(worker.identity)["parent"] == "queue-parent"
+    finally:
+        ls.stop(kit.ws, got.name, release=lambda lease: True, wait_s=5)
+
+
 def test_a_shared_server_with_a_smaller_context_than_asked_is_refused():
     from ml_stack.testing.fakes import Served, fake_llama_server
     with fake_llama_server(Served(context=32768)) as fake:
@@ -687,13 +712,13 @@ def test_a_shared_server_with_a_smaller_context_than_asked_is_refused():
         assert localloop.check_context(32768, fake.base_url) == ""
 
 
-def test_start_records_the_started_model_as_verified(kit, monkeypatch):
+def test_start_records_the_configured_model_as_claimed(kit, monkeypatch):
     spawned = []
     got = ls.start(kit.ws, ls.Ask(), pick=PICK,
                    spawn=lambda *a, **k: spawned.append(sleeper(*a, **k)) or spawned[-1])
     try:
         info = kit.ws.whoami_model(got.name)
-        assert info["model"] and info["model_state"] == "verified"
+        assert info["model"] and info["model_state"] == "claimed"
     finally:
         ls.stop(kit.ws, got.name, release=lambda lease: True, wait_s=5)
 

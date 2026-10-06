@@ -12,6 +12,7 @@ from typing import Any
 
 from ml_stack import worktreerules
 from ml_stack.files import read_json, write_json
+from ml_stack.serve.process import pid_exists
 from ml_stack.workspace.chain import held
 from ml_stack.workspace.identity import AGENT, HUMAN, Denied, Identity
 
@@ -36,6 +37,8 @@ class Conflict(RuntimeError):
 
 def alive(pid: int) -> bool:
     """Whether a process with this pid exists."""
+    if os.name == "nt":
+        return pid_exists(pid)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:

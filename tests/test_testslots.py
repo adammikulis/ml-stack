@@ -14,12 +14,19 @@ SCRIPT = ROOT / "scripts" / "testslots.py"
 
 CHILD = r'''
 import importlib.util, json, sys, time
+from pathlib import Path
 spec = importlib.util.spec_from_file_location("testslots", sys.argv[1]); m = importlib.util.module_from_spec(spec); sys.modules["testslots"] = m; spec.loader.exec_module(m)
 log, want, hold, label = sys.argv[2], int(sys.argv[3]), float(sys.argv[4]), sys.argv[5]
 with m.lease(want, min(2, want), label=label, say=lambda s: None) as g:
     t0 = time.time()
-    time.sleep(hold)
-    with open(log, "a") as f:
+    if sys.argv[6]:
+        deadline = time.monotonic() + 30
+        while not Path(sys.argv[6]).exists():
+            assert time.monotonic() < deadline
+            time.sleep(.01)
+    else:
+        time.sleep(hold)
+    with open(log, "w") as f:
         f.write(json.dumps({"label": label, "workers": g.workers, "start": t0, "end": time.time()}) + "\n")
 '''
 
@@ -29,14 +36,31 @@ def _env(tmp_path, budget):
     return {**inherited, "DEV_TEST_SLOTS_DIR": str(tmp_path / "slots"), "DEV_TEST_BUDGET": str(budget), "DEV_TEST_WAIT_S": "60"}
 
 
-def _spawn(tmp_path, budget, want, hold, label):
-    return subprocess.Popen([sys.executable, "-c", CHILD, str(SCRIPT), str(tmp_path / "log.jsonl"), str(want), str(hold), label],
+def _spawn(tmp_path, budget, want, hold, label, release=None):
+    records = tmp_path / "records"
+    records.mkdir(exist_ok=True)
+    return subprocess.Popen([sys.executable, "-c", CHILD, str(SCRIPT), str(records / f"{label}.json"),
+                             str(want), str(hold), label, str(release) if release else ""],
                             env=_env(tmp_path, budget))
 
 
 def _records(tmp_path):
-    p = tmp_path / "log.jsonl"
-    return [json.loads(x) for x in p.read_text().splitlines()] if p.exists() else []
+    return sorted((json.loads(path.read_text()) for path in (tmp_path / "records").glob("*.json")),
+                  key=lambda record: record["start"])
+
+
+def _wait_for_slot(tmp_path, process, label, granted):
+    module = _load()
+    (tmp_path / "slots").mkdir(exist_ok=True)
+    deadline = time.monotonic() + 20
+    while True:
+        assert process.poll() is None
+        with module._mutex(tmp_path / "slots"):
+            if any(slot.data["label"] == label and slot.granted == granted
+                   for slot in module._read(tmp_path / "slots")):
+                return
+        assert time.monotonic() < deadline, label
+        time.sleep(.01)
 
 
 def test_concurrent_grants_never_exceed_the_budget_and_all_runs_finish(tmp_path):
@@ -55,15 +79,26 @@ def test_concurrent_grants_never_exceed_the_budget_and_all_runs_finish(tmp_path)
 
 
 def test_runs_are_granted_in_arrival_order(tmp_path):
-    first = _spawn(tmp_path, 4, 4, 0.8, "first")
-    time.sleep(0.3)
-    second = _spawn(tmp_path, 4, 4, 0.3, "second")
-    time.sleep(0.2)
-    third = _spawn(tmp_path, 4, 4, 0.3, "third")
-    for p in (first, second, third):
-        assert p.wait(timeout=60) == 0
-    order = [r["label"] for r in sorted(_records(tmp_path), key=lambda r: r["start"])]
-    assert order == ["first", "second", "third"]
+    release = tmp_path / "release"
+    processes = []
+    try:
+        first = _spawn(tmp_path, 4, 4, 0, "first", release)
+        processes.append(first)
+        _wait_for_slot(tmp_path, first, "first", 4)
+        second = _spawn(tmp_path, 4, 4, 0.3, "second")
+        processes.append(second)
+        _wait_for_slot(tmp_path, second, "second", 0)
+        third = _spawn(tmp_path, 4, 4, 0.3, "third")
+        processes.append(third)
+        _wait_for_slot(tmp_path, third, "third", 0)
+        release.touch()
+        assert all(process.wait(timeout=60) == 0 for process in processes)
+        assert [record["label"] for record in _records(tmp_path)] == ["first", "second", "third"]
+    finally:
+        for process in processes:
+            if process.poll() is None:
+                process.kill()
+            process.wait(timeout=5)
 
 
 def test_a_killed_holder_frees_its_workers(tmp_path):
@@ -152,17 +187,17 @@ spec = importlib.util.spec_from_file_location("testslots", sys.argv[1]); m = imp
 log = sys.argv[2]
 with m.heavy_lane("t", say=lambda s: None):
     t0 = time.time(); time.sleep(float(sys.argv[3]))
-    with open(log, "a") as f:
+    with open(log, "w") as f:
         f.write(json.dumps({"start": t0, "end": time.time()}) + "\n")
 '''
 
 
 def test_heavy_lanes_limit_concurrent_heavy_work_across_processes(tmp_path):
     env = {**_env(tmp_path, 8), "DEV_TEST_HEAVY_LANES": "2"}
-    procs = [subprocess.Popen([sys.executable, "-c", HEAVY_CHILD, str(SCRIPT), str(tmp_path / "lanes.jsonl"), "0.6"],
-                              env=env) for _ in range(6)]
+    procs = [subprocess.Popen([sys.executable, "-c", HEAVY_CHILD, str(SCRIPT), str(tmp_path / f"lane-{index}.json"), "0.6"],
+                              env=env) for index in range(6)]
     assert all(p.wait(timeout=60) == 0 for p in procs)
-    recs = [json.loads(x) for x in (tmp_path / "lanes.jsonl").read_text().splitlines()]
+    recs = [json.loads(path.read_text()) for path in tmp_path.glob("lane-*.json")]
     assert len(recs) == 6
     for r in recs:
         assert sum(1 for o in recs if o["start"] <= r["start"] + 1e-3 < o["end"]) <= 2, recs

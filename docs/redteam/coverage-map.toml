@@ -14,6 +14,14 @@
 uncovered = 54
 partial = 199
 
+[[group]]
+match = ["spawn:workspace/backlog.py:repository"]
+status = "covered"
+count = 1
+tests = ["tests/test_workspace_backlog.py::test_repository_infers_github_origin_as_argument_vector",
+         "tests/test_workspace_backlog.py::test_repository_rejects_traversal_owner_in_origin"]
+note = "Origin URLs are read with a fixed argv, timeout and checkout directory; hostile URL syntax does not become a repository"
+
 
 [[group]]
 match = ["route:fleet/invite_routes.py:/join/invite/challenge", "route:fleet/invite_routes.py:/join/invite/redeem"]

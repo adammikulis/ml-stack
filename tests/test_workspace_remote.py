@@ -42,6 +42,35 @@ def test_project_authority_routes_before_global_coordinator_discovery(monkeypatc
     assert seen == [(connection, "project-session")]
 
 
+@pytest.mark.parametrize("unavailable", [False, True])
+def test_agent_connect_selects_explicit_project_instead_of_current_board(tmp_path, monkeypatch, unavailable):
+    from ml_stack.workspace.identity import Denied
+    requested = tmp_path / "other-project"
+    current = {"project_id": "current-board"}
+    target = {"project_id": "requested-board"}
+    seen = []
+    def selected(path=None):
+        seen.append(path)
+        if path == requested:
+            if unavailable:
+                raise Denied("requested project unavailable")
+            return target
+        return current
+    monkeypatch.setattr(project_connection, "selected", selected)
+    monkeypatch.setattr(cli.coordinator_client, "client", lambda *a: pytest.fail("global fallback"))
+    canonical = SimpleNamespace(auth=lambda token: SimpleNamespace(id="worker"),
+                                registry=SimpleNamespace(info=lambda name: {"project": {"key": "requested-board"}}))
+    monkeypatch.setattr(cli, "_context", lambda args, connection: (canonical, "session")
+                        if connection is target else pytest.fail("wrong board"))
+    results = []
+    monkeypatch.setattr(cli, "_show", lambda args, result: results.append(result))
+    args = SimpleNamespace(agent="worker", project=str(requested), no_project=False,
+                           one_agent=False, remote=False, code_only=False, name="", json=True)
+    assert cli._bare(cli._connect)(args) == (3 if unavailable else 0)
+    assert seen and all(path == requested for path in seen)
+    assert results == ([] if unavailable else [{"id": "worker", "project": "requested-board", "state": "connected"}])
+
+
 def test_unavailable_selected_project_cannot_fall_back_to_global_authority(monkeypatch):
     from ml_stack.workspace.identity import Denied
     def selected(*args):

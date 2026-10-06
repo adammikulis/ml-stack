@@ -7,7 +7,7 @@ from ml_stack.graph.store import GraphStore
 from ml_stack.home import device_id
 from ml_stack.serve import broker_wire
 from ml_stack.serve.process import pid_exists, started_at
-from ml_stack.workspace import localagent, task_worktrees, tokens
+from ml_stack.workspace import localagent, task_authority, task_worktrees, tokens
 from ml_stack.workspace.chain import held
 from ml_stack.workspace.device_accounts import account_for
 from ml_stack.workspace.identity import HUMAN, Denied
@@ -45,7 +45,7 @@ def assign(ws, token, worker, task, lease_id):
     caller = ws.auth(token)
     child = ws.auth(tokens.load(ws.base, worker))
     if caller.role != HUMAN and child.parent != caller.id:
-        raise Denied("only the person or the worker's registered parent assigns resources")
+        task_authority.authorize(ws, token, worker, task)
     account = account_for(ws, worker)
     if account is None or account["device_id"] != device_id():
         raise Denied("the worker has no person-enrolled account on this device")

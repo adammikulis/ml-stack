@@ -16,10 +16,12 @@ from ml_stack.workspace import (
     issuepump,
     localagent as la,
     localeffort as le,
+    localloop,
     localmodel,
     localprofile as lp,
     localstart as ls,
     plain,
+    task_launch,
     task_scheduler,
     tokens,
 )
@@ -32,14 +34,15 @@ READY_WAIT_S = 180.0
 OPTIONS = [
     flag("action", choices=ACTIONS, help="start a local model as an agent, stop one, or list them"),
     flag("target", nargs="?", default="", metavar="NAME", help="stop: the agent to stop"),
+    flag("--task", default="", help="existing assigned canonical task authorizing worker management"),
     flag("--model", default=localmodel.AUTO, metavar="auto|ID",
          help="auto: the best downloaded Qwen model that fits this machine, or the id "
               "of a downloaded model"),
     flag("--name", default="", help="the agent's workspace name (default: local- and the model's short name)"),
-    flag("--role", default=roles.DEFAULT, choices=list(roles.ROLES),
-         help="what it may do (`/role` in ml-stack-chat describes them); default: %(default)s"),
+    flag("--role", default="", choices=list(roles.ROLES),
+         help="what it may do; coding defaults to plan-and-go, chat to the standard role"),
     flag("--project", default="", metavar="PATH", help="the project folder it works for"),
-    flag("--repo", default="", metavar="OWNER/REPO", help="backlog: repository whose issues this coding worker may select"),
+    flag("--repo", default="", metavar="OWNER/REPO", help="project issue source; defaults to the project's GitHub origin"),
     flag("--issue", type=int, default=0, help="supersede-issue: obsolete repository issue number"),
     flag("--reason", default="", help="supersede-issue: current owner decision superseding the issue"),
     flag("--effort", default=le.DEFAULT, choices=[*le.LEVELS, le.AUTO],
@@ -48,10 +51,10 @@ OPTIONS = [
          help="the most effort the model may give itself with set_effort; default: %(default)s"),
     flag("--orders-from", default=",".join(la.DEFAULT_ORDERS_FROM), metavar="NAMES",
          help="agents it takes tasks from besides the person and any lead (comma list)"),
-    flag("--profile", default="chat", choices=["chat", "coding"],
-         help="chat: 32K context and small per-task caps; coding: 256K context, Qwen3.8-27B and larger caps"),
-    flag("--harness", default="codex", choices=["codex", "claude"], help="native coding harness"),
-    flag("--ctx", default="", metavar="TOKENS", help="context to serve, such as 32768, 32k or 256k (default: the profile's)"),
+    flag("--profile", default="coding", choices=["chat", "coding"],
+         help="coding: durable project task queue; chat: interactive message loop"),
+    flag("--harness", default="claude", choices=["codex", "claude"], help="native coding harness"),
+    flag("--ctx", default="", metavar="TOKENS", help="context to serve (profile default), or such as 32k, 128k or 256k"),
     flag("--for", dest="lease_for", default="", metavar="TEXT",
          help="why the model is leased, one line, shown by `ml-stack-serve status|leases|history`"),
     flag("--no-wait", action="store_true", help="return as soon as the agent is started"),
@@ -82,10 +85,20 @@ def _wait(ws: Workspace, name: str, seconds: float) -> int:
 
 
 def _start(args: argparse.Namespace, ws: Workspace) -> int:
-    if not ws.registry.ids():
-        tokens.store(ws.base, tokens.OWNER_FILE, ws.init("owner"))
+    if args.agent:
+        if not args.task or not (args.name or args.target):
+            raise ValueError('agent start requires an existing worker name and --task')
+        got = task_launch.start(ws, tokens.load(ws.base, args.agent), args.name or args.target, args.task)
+        runner = la.load(ws, got.name)
+        caps = localloop.caps_of(runner)
+        say(f'{got.name}: {runner.model_name}; {runner.ctx} context; {runner.role}; {runner.harness}; '
+            f'effort {runner.effort}, ceiling {runner.max_effort}; '
+            f'{caps.rounds} turns, {caps.calls} tool calls, {caps.steps} model calls, {caps.seconds:g}s wall time')
+        return 0 if args.no_wait else _wait(ws, got.name, READY_WAIT_S)
     selected_profile = lp.profile(args.profile)
-    selected_context = lp.parse_ctx(args.ctx) or selected_profile.ctx
+    selected_context = lp.parse_ctx(args.ctx) or (131072 if selected_profile.name == "coding" else selected_profile.ctx)
+    project = args.project or ("." if selected_profile.name == "coding" else "")
+    selected_role = args.role or (la.PLAN_AND_GO if selected_profile.name == "coding" else roles.DEFAULT)
     pick = localmodel.choose(args.model, selection=localmodel.Selection(
         coding=selected_profile.name == "coding", context=selected_context))
     if not pick.ok:
@@ -95,9 +108,10 @@ def _start(args: argparse.Namespace, ws: Workspace) -> int:
         return 1
     say(f"model: {pick.name} ({pick.note})")
     try:
-        got = ls.start(ws, ls.Ask(args.model, args.name, args.role, args.effort, args.max_effort,
-                                  args.profile, selected_context, args.project, la.check_orders(args.orders_from.split(",")), args.harness), pick=pick,
-                       person_token=tokens.read_file(tokens.directory(ws.base) / tokens.OWNER_FILE))
+        got = ls.start(ws, ls.Ask(args.model, args.name, selected_role, args.effort, args.max_effort,
+                                  args.profile, selected_context, project, la.check_orders(args.orders_from.split(",")), args.harness,
+                                  repo=args.repo), pick=pick,
+                       parent_token=ls.launch_parent(ws, project))
     except ls.Unavailable as err:
         warn(str(err))
         return 1
@@ -114,7 +128,8 @@ def _start(args: argparse.Namespace, ws: Workspace) -> int:
 def _stop(args: argparse.Namespace, ws: Workspace) -> int:
     if not args.target:
         raise ValueError("agent stop needs the agent's name; `agent list` shows them")
-    done = ls.stop(ws, args.target)
+    done = (task_launch.stop(ws, tokens.load(ws.base, args.agent), args.target, args.task)
+            if args.agent else ls.stop(ws, args.target))
     say(f"stopped {done.name}" + (" (it had to be killed)" if done.forced else "")
         + ("; its model lease is released" if done.lease_released else ""))
     for note in done.notes:
@@ -143,7 +158,7 @@ def run(args: argparse.Namespace, ws: Workspace) -> int:
     if args.action == 'schedule':
         if not args.target or not args.agent:
             raise ValueError('agent schedule requires a worker name and --agent registered-parent')
-        return task_scheduler.watch(ws, tokens.load(ws.base, args.agent), la.check_name(args.target))
+        return task_scheduler.watch(ws, tokens.load(ws.base, args.agent), la.check_name(args.target), task=args.task)
     if args.action in ("supersede-issue", "resume-issue"):
         if not args.target:
             raise ValueError("supersede-issue needs the existing worker name")
@@ -156,14 +171,18 @@ def run(args: argparse.Namespace, ws: Workspace) -> int:
         decision(ws, token, args.target, args.issue, args.reason)
         say(f"issue {args.issue}: {args.action} decision recorded")
         return 0
-    human.require_person(f"{args.action} a local agent")
+    if not (args.agent and args.action in ("start", "stop")):
+        human.require_person(f"{args.action} a local agent")
     if args.action == "backlog":
         if not args.target:
             raise ValueError("agent backlog needs the existing worker's name")
         token = tokens.read_file(tokens.directory(ws.base) / tokens.OWNER_FILE)
-        backlog.configure(ws, token, args.target, args.repo, args.project)
+        worker = la.load(ws, args.target)
+        project = args.project or (worker.project if worker else "")
+        repo = args.repo or (backlog.repository(project) if project else "")
+        backlog.configure(ws, token, args.target, repo, project)
         issuepump.start(ws, token, args.target)
-        say(f"{args.target} will work on open issues in {args.repo} when its inbox is empty")
+        say(f"{args.target} is pulling open issues from {repo} into its canonical task queue")
         return 0
     provenance.told(args.lease_for)
     handler: Any = _start if args.action == "start" else _stop

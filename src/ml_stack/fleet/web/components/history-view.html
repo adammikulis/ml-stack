@@ -141,9 +141,9 @@ history-view .history-links { display:flex; flex-wrap:wrap; gap:12px; margin-top
   action(event){
    const refs=event.refs||{},meta=event.meta||{},time=new Date(event.ts*1000);
    const summary=E('summary',{},E('strong',{},event.subject||event.kind),E('span',{class:'badge'},event.outcome||event.kind),meta.model?E('span',{class:'history-count'},meta.model):null,E('time',{datetime:time.toISOString()},time.toLocaleString()));
-   const values={Action:event.kind,Status:event.outcome||'Not recorded',Actor:event.actor,Session:event.session,'Record ID':event.id,...Object.fromEntries(Object.entries(refs).map(([key,value])=>[`Reference · ${key}`,value])),...Object.fromEntries(Object.entries(meta).map(([key,value])=>[`Detail · ${key}`,value]))};
+   const values={Action:event.kind,Status:event.outcome||'Not recorded',Actor:event.actor,Session:event.session,Record:event.id,...Object.fromEntries(Object.entries(refs).map(([key,value])=>[`Reference · ${key}`,value])),...Object.fromEntries(Object.entries(meta).map(([key,value])=>[`Detail · ${key}`,value]))};
    const fields=E('dl');for(const [key,value]of Object.entries(values))fields.append(E('dt',{},key),E('dd',{},typeof value==='object'?W.json(value):String(value??'')));
-   const links=E('div',{class:'history-links'},E('a',{href:'#board'},'Open Board'));
+   const links=E('div',{class:'history-links'},E('a',{href:'#board'},'Open board'));
    for(const [key,value]of Object.entries({...refs,...meta})){
     if(!/url|issue|task/.test(key)||typeof value!=='string')continue;
     try{const url=new URL(value);if(url.protocol==='https:'||url.protocol==='http:')links.append(E('a',{href:url.href,target:'_blank',rel:'noopener noreferrer'},key.replaceAll('_',' ')));}catch{}

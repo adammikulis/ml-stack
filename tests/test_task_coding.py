@@ -10,8 +10,16 @@ import pytest
 from ml_stack.workspace import localagent, task_coding
 
 
+@pytest.fixture
+def native(tmp_path):
+    settings = tmp_path / 'settings.json'
+    settings.write_text(json.dumps({'hooks': {'PreToolUse': [{'matcher': '*', 'hooks': [
+        {'type': 'command', 'command': 'python -m ml_stack.harnesshook pre --role read-only'}]}]}}))
+    return ['claude', '--settings', str(settings)], (tmp_path, 'claude', 'prompt', None)
+
+
 @pytest.mark.redteam
-def test_native_turn_and_output_limits_preserve_authority(monkeypatch):
+def test_native_turn_and_output_limits_preserve_authority(monkeypatch, native):
     agent = localagent.Agent('worker', 'qwen', profile='coding', harness='claude',
                              effort='high', max_effort='low')
     seen = {}
@@ -20,9 +28,13 @@ def test_native_turn_and_output_limits_preserve_authority(monkeypatch):
         return 0
     monkeypatch.setattr(task_coding.Manager, '_process', process)
     manager = task_coding.TaskManager(None, SimpleNamespace(base=None), agent)
-    context = (None, 'claude', 'prompt', None)
-    manager._process(None, ['claude', '--print'], {'AUTHORITY': 'unchanged'}, context)
+    command, context = native
+    manager._process(None, [*command, '--print'], {'AUTHORITY': 'unchanged'}, context)
     assert seen['command'][-2:] == ['--max-turns', '60']
+    settings = json.loads(context[0].joinpath('task-settings.json').read_text())
+    hooks = settings['hooks']['PreToolUse']
+    assert '--protect' in hooks[0]['hooks'][0]['command']
+    assert 'ml_stack.workspace.task_caps' in hooks[1]['hooks'][0]['command']
     assert seen['command'][seen['command'].index('--system-prompt') + 1] == task_coding.BOOTSTRAP
     assert seen['command'][seen['command'].index('--tools') + 1] == 'Read,Edit,Write,Bash,Glob,Grep,Agent'
     assert '--dangerously-skip-permissions' not in seen['command']
@@ -34,16 +46,17 @@ def test_native_turn_and_output_limits_preserve_authority(monkeypatch):
 
 
 @pytest.mark.parametrize('effort, thinking', [('off', False), ('medium', True)])
-def test_native_template_thinking_is_separate_from_output_and_stream(monkeypatch, effort, thinking):
+def test_native_template_thinking_is_separate_from_output_and_stream(monkeypatch, native, effort, thinking):
     agent = localagent.Agent('worker', 'Qwen3.8-27B.gguf', harness='claude', effort=effort)
     seen = {}
     monkeypatch.setattr(task_coding.Manager, '_process',
                         lambda self, turn, command, environment, context: seen.update(environment) or 0)
     manager = task_coding.TaskManager(None, SimpleNamespace(base=None), agent)
-    manager._process(None, ['claude'], {'CLAUDE_CODE_MAX_OUTPUT_TOKENS': '12000',
+    command, context = native
+    manager._process(None, command, {'CLAUDE_CODE_MAX_OUTPUT_TOKENS': '12000',
         'CLAUDE_CODE_EXTRA_BODY': json.dumps({'stream': True, 'max_tokens': 12000,
             'chat_template_kwargs': {'custom': 'kept', 'enable_thinking': not thinking}})},
-        (None, 'claude', 'prompt', None))
+        context)
     body = json.loads(seen['CLAUDE_CODE_EXTRA_BODY'])
     assert body == {'stream': True, 'max_tokens': 12000,
                     'chat_template_kwargs': {'custom': 'kept', 'enable_thinking': thinking}}
@@ -51,30 +64,31 @@ def test_native_template_thinking_is_separate_from_output_and_stream(monkeypatch
     assert 'MAX_THINKING_TOKENS' not in seen
 
 
-def test_native_effort_switch_has_no_generated_output_or_thinking_cap(monkeypatch):
+def test_native_effort_switch_has_no_generated_output_or_thinking_cap(monkeypatch, native):
     agent = localagent.Agent('worker', '/cache/Qwen3.8-27B-UD-Q4_K_XL.gguf', harness='claude', effort='off')
     seen = {}
     monkeypatch.setattr(task_coding.Manager, '_process',
                         lambda self, turn, command, environment, context: seen.update(environment) or 0)
     manager = task_coding.TaskManager(None, SimpleNamespace(base=None), agent)
-    context = (None, 'claude', '', None)
-    manager._process(None, ['claude'], {}, context)
+    command, context = native
+    manager._process(None, command, {}, context)
     assert json.loads(seen['CLAUDE_CODE_EXTRA_BODY'])['chat_template_kwargs']['enable_thinking'] is False
     assert 'MAX_THINKING_TOKENS' not in seen and 'CLAUDE_CODE_MAX_OUTPUT_TOKENS' not in seen
     manager.agent = replace(agent, effort='medium')
-    manager._process(None, ['claude'], seen.copy(), context)
+    manager._process(None, command, seen.copy(), context)
     assert json.loads(seen['CLAUDE_CODE_EXTRA_BODY'])['chat_template_kwargs']['enable_thinking'] is True
-    manager._process(None, ['claude'], {'MAX_THINKING_TOKENS': '0'}, context)
+    manager._process(None, command, {'MAX_THINKING_TOKENS': '0'}, context)
     assert seen['MAX_THINKING_TOKENS'] == '0'
     assert json.loads(seen['CLAUDE_CODE_EXTRA_BODY'])['chat_template_kwargs']['enable_thinking'] is False
 
 
 @pytest.mark.parametrize('body', ['broken', '[]', '{"chat_template_kwargs":[]}'])
-def test_invalid_native_extra_body_does_not_launch(monkeypatch, body):
+def test_invalid_native_extra_body_does_not_launch(monkeypatch, native, body):
     monkeypatch.setattr(task_coding.Manager, '_process', lambda *_: pytest.fail('native launched'))
     manager = task_coding.TaskManager(None, SimpleNamespace(base=None), localagent.Agent('worker', 'qwen'))
+    command, context = native
     with pytest.raises(ValueError):
-        manager._process(None, ['claude'], {'CLAUDE_CODE_EXTRA_BODY': body}, (None, 'claude', '', None))
+        manager._process(None, command, {'CLAUDE_CODE_EXTRA_BODY': body}, context)
 
 
 def test_canonical_stop_cancels_native_turn(tmp_path, monkeypatch):

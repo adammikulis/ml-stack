@@ -32,6 +32,96 @@ def test_source_dedup_graph_artifacts_and_reopened_accepted_outcome(board):
         board.board.create(board.parent, {**board.spec, 'title': 'Changed request'})
 
 
+def test_task_subscriptions_follow_state_changes_and_stop_after_unsubscribe(board):
+    task = board.task['id']
+    board.board.subscribe(board.parent, task)
+    assert board.board.watchers(task) == ['lead']
+    observer = board.agent('observer')
+    board.board.subscribe(observer, task)
+    notices = board.ws.inbox(board.parent, raw=True)
+    assert len(notices) == 1 and 'observer subscribed task' in notices[0]['raw']
+    board.ws.inbox(board.parent, ack=True)
+    board.board.claim(board.child, task, board.allocation['allocation_id'])
+    notices = board.ws.inbox(board.parent, raw=True)
+    assert len(notices) == 1 and notices[0]['type'] == 'status'
+    assert task in notices[0]['raw'] and 'working' in notices[0]['raw']
+    board.ws.inbox(board.parent, ack=True)
+    board.board.unsubscribe(observer, task)
+    notices = board.ws.inbox(board.parent, raw=True)
+    assert len(notices) == 1 and 'observer unsubscribed task' in notices[0]['raw']
+    board.ws.inbox(board.parent, ack=True)
+    board.board.unsubscribe(board.parent, task)
+    board.board.submit(board.child, task, {'artifacts': {'replay.json': 'a' * 64},
+        'checks': [{'name': 'Worker claims tests', 'passed': True}], 'summary': 'Submitted'})
+    assert board.board.watchers(task) == []
+    assert board.ws.inbox(board.parent, raw=True) == []
+
+
+@pytest.mark.redteam
+def test_foreign_parent_cannot_subscribe_a_project_worker(board):
+    observer = board.agent('observer')
+    with pytest.raises(Denied, match='registered project worker parent'):
+        board.board.subscribe(observer, board.task['id'], subscriber=board.ws.auth(board.child).id)
+    assert board.board.watchers(board.task['id']) == []
+
+
+@pytest.mark.redteam
+def test_notice_retry_uses_only_the_authenticated_caller(board, monkeypatch):
+    task = board.task['id']
+    board.board.subscribe(board.parent, task)
+    original = board.ws.send
+    monkeypatch.setattr(board.ws, 'send', lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError('offline')))
+    observer = board.agent('observer')
+    board.board.subscribe(observer, task)
+    monkeypatch.setattr(tokens, 'load', lambda *_args: (_ for _ in ()).throw(AssertionError('foreign credentials')))
+    monkeypatch.setattr(board.ws, 'send', original)
+    board.board.flush_notifications(board.child, task)
+    notice = board.ws.inbox(board.parent, raw=True)[0]
+    assert notice['from'] == board.ws.auth(board.child).id
+    assert 'observer subscribed' in notice['raw']
+
+
+def test_task_notice_remains_queued_when_inbox_delivery_is_rate_limited(board, monkeypatch):
+    task = board.task['id']
+    board.board.subscribe(board.parent, task)
+    observer = board.agent('observer')
+    board.board.subscribe(observer, task)
+    board.ws.inbox(board.parent, ack=True)
+    board.ws.inbox(board.parent, ack=True)
+    original = board.ws.send
+
+    def limited(*args, **kwargs):
+        from ml_stack.workspace.rates import RateLimited
+        raise RateLimited('test limit')
+
+    monkeypatch.setattr(board.ws, 'send', limited)
+    board.board.claim(board.child, task, board.allocation['allocation_id'])
+    board.board.submit(board.child, task, {'artifacts': {'replay.json': 'a' * 64},
+        'checks': [{'name': 'Worker claims tests', 'passed': True}], 'summary': 'Submitted'})
+    with GraphStore(board.base / 'coordination.db') as graph:
+        notices = [row['attrs'] for row in graph.nodes('task-notice')
+                   if row['attrs']['task'] == task and not row['attrs']['delivered']]
+    notices = [row for row in notices if row['recipient'] == 'lead']
+    assert {row['event'] for row in notices} == {'queued-working', 'working-review'}
+    monkeypatch.setattr(board.ws, 'send', original)
+    TaskBoard(board.ws).flush_notifications(board.child, task)
+    delivered = board.ws.inbox(board.parent, raw=True)
+    assert ['working' in row['raw'] for row in delivered] == [True, False]
+    assert 'review' in delivered[1]['raw']
+
+
+def test_unsubscribe_cancels_undelivered_task_notices(board, monkeypatch):
+    task = board.task['id']
+    board.board.subscribe(board.parent, task)
+    monkeypatch.setattr(board.ws, 'send', lambda *_args, **_kwargs: (_ for _ in ()).throw(
+        OSError('temporary delivery failure')))
+    board.board.claim(board.child, task, board.allocation['allocation_id'])
+    board.board.unsubscribe(board.parent, task)
+    monkeypatch.undo()
+    TaskBoard(board.ws).flush_notifications(board.child, task)
+    assert board.ws.inbox(board.parent, raw=True) == []
+
+
 @pytest.mark.redteam
 def test_duplicate_claim_and_released_resource_never_grant_task_ownership(board):
     def claim(_):

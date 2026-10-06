@@ -639,6 +639,14 @@ artifacts, independent outcomes and credit recording. See [Tasks and independent
 for the person workflow, service/API contract, recovery and supported limits. Task outcomes
 are verified separately from Board discussion and worker progress reports.
 
+Follow a canonical task or GitHub issue with `ml-stack-workspace task-subscribe TASK_ID` or
+`ml-stack-workspace issue-subscribe OWNER/REPO#NUMBER`. Use the matching `task-unsubscribe` or
+`issue-unsubscribe` command to stop updates. Issue-driven workers subscribe to each task before
+receiving its assignment notice; the worker gets a subscription status before that assignment.
+Followers are notified when someone subscribes or unsubscribes. Assignment and task state notices
+are persisted and retried by the issue worker if delivery is temporarily refused or rate-limited.
+The task queue remains authoritative when notices are unread.
+
 A scheduler-prepared task worktree can be explicitly handed from its authenticated parent
 to the assigned child. Before a native mutation, the guard checks the graph assignment,
 actual parent relationship, active task lease and live broker allocation, including the

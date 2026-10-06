@@ -47,7 +47,8 @@ def run(ws, name):
             def native(task, project, stopped, checkpoint, runner=agent):
                 return task_coding.perform(ws, runner, task, project, (stopped, checkpoint))
             outcome = task_runtime.execute(board, identity, allocation['task'], allocation['allocation_id'], native,
-                                           stopped=lambda: la.stop_file(ws, name).exists())
+                                           stopped=lambda: la.stop_file(ws, name).exists(),
+                                           wall_s=localloop.caps_of(agent).seconds)
             status.update(state=outcome.get('state', 'review'), detail=outcome.get('blocked_reason', 'Awaiting independent review'),
                           task=allocation['task'])
     finally:

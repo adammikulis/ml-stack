@@ -74,8 +74,13 @@ def collect(root: Path) -> tuple[int, int]:
     A tree whose files are byte-identical to one already counted gets the same answer back
     instead of being collected again.
     """
+    fingerprint = ""
+    if root.resolve() == Path(__file__).resolve().parents[2]:
+        from . import repo_fingerprint
+
+        fingerprint = repo_fingerprint()
     counted = remembered(root, "collect", lambda: list(collect_fresh(root)),
-                         ",".join(f"{n}={installed(n)}" for n in guards(root)))
+                         ",".join(f"{n}={installed(n)}" for n in guards(root)), fingerprint)
     return int(counted[0]), int(counted[1])
 
 

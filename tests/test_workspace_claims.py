@@ -12,6 +12,17 @@ import pytest
 from workspace_kit import Kit, clean_env
 
 from ml_stack.workspace import Conflict, Denied, Workspace
+from ml_stack.workspace import claims
+from ml_stack.workspace.windows_tokens import problem as windows_problem
+
+
+def directory_link(link: Path, target: Path) -> None:
+    if os.name == "nt":
+        created = subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(target)],
+                                 capture_output=True, check=False)
+        assert created.returncode == 0, created.stderr
+    else:
+        link.symlink_to(target, target_is_directory=True)
 
 
 @pytest.fixture
@@ -23,10 +34,17 @@ def test_a_scratch_folder_is_private_and_namespaced_by_agent(kit):
     a, b = kit.agent("alpha"), kit.agent("beta")
     path = kit.ws.scratch_new(a, "build")
     assert path == str(kit.base / "scratch" / "alpha" / "build")
-    assert oct(Path(path).stat().st_mode & 0o777) == "0o700"
-    assert oct((kit.base / "scratch" / "alpha").stat().st_mode & 0o777) == "0o700"
+    for private in (Path(path), kit.base / "scratch" / "alpha"):
+        if os.name == "nt":
+            assert windows_problem(private) == ""
+        else:
+            assert oct(private.stat().st_mode & 0o777) == "0o700"
     assert kit.ws.scratch_new(b, "build") != path
     assert [f["name"] for f in kit.ws.scratch_ls(a)] == ["build"]
+    marker = Path(path) / "inherited.txt"
+    marker.write_text("private scratch content")
+    if os.name == "nt":
+        assert windows_problem(marker) == ""
 
 
 @pytest.mark.parametrize("relative", ["../beta/build/x", "/etc/passwd", "a/../../other",
@@ -45,10 +63,13 @@ def test_a_symlink_inside_a_folder_cannot_lead_out(kit, tmp_path):
     secret = tmp_path / "secret"
     secret.mkdir()
     (secret / "key.txt").write_text("x")
-    (Path(folder) / "door").symlink_to(secret)
+    directory_link(Path(folder) / "door", secret)
     with pytest.raises(Denied):
         kit.ws.scratch_path(a, "build", "door/key.txt")
-    assert kit.ws.scratch_path(a, "build", "plain.txt").endswith("build/plain.txt")
+    assert Path(kit.ws.scratch_path(a, "build", "plain.txt")) == Path(folder) / "plain.txt"
+    before = kit.ws.scratch_ls(a)[0]["bytes"]
+    (secret / "large.bin").write_bytes(b"x" * 2000)
+    assert kit.ws.scratch_ls(a)[0]["bytes"] == before
     kit.ws.scratch_rm(a, "build")
     assert (secret / "key.txt").exists()
 
@@ -59,7 +80,7 @@ def test_a_symlinked_folder_or_agent_directory_is_not_followed(kit, tmp_path):
     elsewhere.mkdir()
     (elsewhere / "keep").write_text("x")
     kit.ws.scratch_new(a, "first")
-    (kit.base / "scratch" / "alpha" / "linked").symlink_to(elsewhere)
+    directory_link(kit.base / "scratch" / "alpha" / "linked", elsewhere)
     with pytest.raises(Denied):
         kit.ws.scratch_path(a, "linked", "keep")
     with pytest.raises(Denied):
@@ -68,10 +89,34 @@ def test_a_symlinked_folder_or_agent_directory_is_not_followed(kit, tmp_path):
     with pytest.raises(Denied):
         kit.ws.scratch_new(a, "linked")
     b = kit.agent("beta")
-    (kit.base / "scratch" / "beta").symlink_to(elsewhere)
+    directory_link(kit.base / "scratch" / "beta", elsewhere)
     with pytest.raises(Denied):
         kit.ws.scratch_new(b, "x")
     assert not (elsewhere / "x").exists()
+
+
+@pytest.mark.redteam
+def test_scratch_root_link_cannot_change_its_target_or_create_agent_files(kit, tmp_path):
+    agent = kit.agent("alpha")
+    target = tmp_path / "outside"
+    target.mkdir()
+    marker = target / "kept.txt"
+    marker.write_text("preserved")
+    if os.name == "nt":
+        import win32security
+
+        security = win32security.OWNER_SECURITY_INFORMATION | win32security.DACL_SECURITY_INFORMATION
+        before = win32security.ConvertSecurityDescriptorToStringSecurityDescriptor(
+            win32security.GetFileSecurity(str(target), security), win32security.SDDL_REVISION_1, security)
+    directory_link(kit.base / "scratch", target)
+    with pytest.raises(Denied, match="plain directory"):
+        kit.ws.scratch_new(agent, "build")
+    assert sorted(path.name for path in target.iterdir()) == ["kept.txt"]
+    assert marker.read_text() == "preserved"
+    if os.name == "nt":
+        after = win32security.ConvertSecurityDescriptorToStringSecurityDescriptor(
+            win32security.GetFileSecurity(str(target), security), win32security.SDDL_REVISION_1, security)
+        assert after == before
 
 
 def test_one_agent_cannot_reach_anothers_folders_but_a_lead_can(kit):
@@ -143,7 +188,7 @@ def test_path_claims_conflict_when_one_contains_the_other(kit, tmp_path):
         kit.ws.claim(b, "worktree", str(tmp_path))
     assert kit.ws.who_owns("file", str(tree / "src" / "y.py"))["owner"] == "alpha"
     link = tmp_path / "alias"
-    link.symlink_to(tree)
+    directory_link(link, tree)
     with pytest.raises(Conflict):
         kit.ws.claim(b, "worktree", str(link))
     kit.ws.claim(b, "file", str(tmp_path / "other.txt"))
@@ -196,6 +241,17 @@ def test_a_claim_is_released_when_its_process_dies(kit):
         if child.poll() is None:
             child.kill()
             child.wait()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows process probes")
+@pytest.mark.redteam
+def test_windows_claim_process_probe_never_sends_a_signal(monkeypatch):
+    def signal_refused(*args):
+        raise AssertionError("process probes must not send Windows console events")
+
+    monkeypatch.setattr(os, "kill", signal_refused)
+    assert claims.alive(os.getpid()) is True
+    assert claims.alive(0) is False
 
 
 def test_a_lead_can_release_an_agents_claim_and_claims_are_listed(kit):

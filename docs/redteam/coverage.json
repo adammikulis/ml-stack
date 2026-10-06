@@ -100,7 +100,7 @@
    "unmapped": 0
   },
   "spawn": {
-   "covered": 43,
+   "covered": 44,
    "partial": 63,
    "uncovered": 0,
    "n/a": 2,
@@ -10483,6 +10483,19 @@
     "tests/test_redteam_spawn.py::test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line"
    ],
    "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
+  },
+  {
+   "id": "spawn:workspace/backlog.py:repository",
+   "kind": "spawn",
+   "source": "workspace/backlog.py:repository",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_workspace_backlog.py::test_repository_infers_github_origin_as_argument_vector",
+    "tests/test_workspace_backlog.py::test_repository_rejects_traversal_owner_in_origin"
+   ],
+   "note": "Origin URLs are read with a fixed argv, timeout and checkout directory; hostile URL syntax does not become a repository"
   },
   {
    "id": "spawn:workspace/guide.py:clipboard",
