@@ -12,8 +12,9 @@ from ml_stack.workspace.boards import ANNOUNCE
 from ml_stack.workspace.claims import Conflict
 from ml_stack.workspace.identity import AGENT, Denied
 from ml_stack.workspace.project_history import adopt
-from ml_stack.workspace.rates import RateLimited
+from ml_stack.workspace.rates import RateLimited, Rates
 from ml_stack.workspace.screen import Refused
+from ml_stack.workspace.modelid import CLAIMED, clean_model, clean_harness
 from ml_stack.workspace.service import Workspace
 
 MAX_REPLY = 512 * 1024
@@ -87,7 +88,44 @@ class WorkspaceHost:
         self.prepare(project_id)
         return adopt(self.workspace(project_id).base, history)
 
-    def answer(self, project_id: str, action: str, body: dict) -> tuple[int, dict]:
+    def enroll(self, project_id: str, body: dict, *, cluster: str = "", cluster_id: str = "") -> tuple[int, dict]:
+        """Issue a project agent capability after authenticated Dev cluster admission."""
+        try:
+            if len(json.dumps(body).encode()) > 32 * 1024:
+                return 413, {"error": "workspace operation exceeds the size limit"}
+            project = self.projects.get(project_id)
+            if not cluster or not cluster_id or body.get("cluster") != cluster:
+                raise Denied("agent enrollment requires its authenticated Dev cluster")
+            if body.get("authority_machine") != self.projects.machine:
+                raise Denied("agent enrollment requires the selected local project authority")
+            if not project.authority_machine:
+                project = self.projects.claim_authority(project_id, expected_machine=self.projects.machine)
+            if project.authority_machine != self.projects.machine or not project.board_host:
+                raise Denied("agent enrollment requires the selected local project authority")
+            ws = self.workspace(project_id)
+            Rates(ws.base / "enrollment", 10, 600, ws.clock).admit("dev-cluster")
+            wanted = str(body.get("name") or "")
+            onboard.pick_name(ws, wanted)
+            model = clean_model(str(body.get("model") or ""))
+            harness = clean_harness(str(body.get("harness") or ""))
+            if not model or not harness:
+                raise ValueError("agent enrollment requires model and harness claims")
+            scope = {"key": project_id, "name": project.name, "cluster": cluster, "cluster_id": cluster_id}
+            name, token = ws.registry.enroll_project(wanted.strip().lower(), scope, onboard.TOKEN_S)
+            ws.registry.record_model(name, model, harness, CLAIMED)
+            ws.board.place(name, scope)
+            ws.audit("remote.enroll", name, project_id=project_id,
+                     admission="dev-cluster", model=model, harness=harness)
+            ws.audit("remote.seen", name, project_id=project_id)
+            return 201, {"id": name, "token": token, "project_id": project_id}
+        except Denied as exc:
+            return 403, {"error": str(exc)}
+        except RateLimited as exc:
+            return 429, {"error": str(exc)}
+        except (ValueError, TypeError) as exc:
+            return 400, {"error": str(exc)}
+
+    def answer(self, project_id: str, action: str, body: dict, *, cluster: str = "", cluster_id: str = "") -> tuple[int, dict]:
         try:
             if len(json.dumps(body).encode()) > 32 * 1024:
                 return 413, {"error": "workspace operation exceeds the size limit"}
@@ -98,13 +136,13 @@ class WorkspaceHost:
                                     claim=(str(body.get("model") or ""),
                                            str(body.get("harness") or "")))
                 token = tokens.load(ws.base, name)
-                self._identity(ws, project_id, token)
+                self._identity(ws, project_id, token, cluster=cluster, cluster_id=cluster_id)
                 ws.audit("remote.seen", name, project_id=project_id)
                 return 201, {"id": name, "token": token, "project_id": project_id}
             if action != "board":
                 return 404, {"error": "no such workspace operation"}
             token = str(body.get("agent_token") or "")
-            who = self._identity(ws, project_id, token)
+            who = self._identity(ws, project_id, token, cluster=cluster, cluster_id=cluster_id)
             ws.audit("remote.seen", who.id, project_id=project_id)
             operation = str(body.get("operation") or "")
             args, kwargs = body.get("args", []), body.get("kwargs", {})
@@ -151,11 +189,14 @@ class WorkspaceHost:
         except (ValueError, TypeError) as exc:
             return 400, {"error": str(exc)}
 
-    def _identity(self, ws: Workspace, project_id: str, token: str) -> Any:
+    def _identity(self, ws: Workspace, project_id: str, token: str, *, cluster: str = "", cluster_id: str = "") -> Any:
         who = ws.auth(token)
         if who.role != AGENT:
             raise Denied("remote workspace access requires a project agent capability")
         name = ws.registry.root_of(who.id)
-        if ws.registry.info(name)["project"].get("key") != project_id:
+        scope = ws.registry.info(name)["project"]
+        if scope.get("cluster") and (scope["cluster"] != cluster or scope.get("cluster_id") != cluster_id):
+            raise Denied("agent capability belongs to another cluster")
+        if scope.get("key") != project_id:
             raise Denied("agent capability belongs to another project")
         return who

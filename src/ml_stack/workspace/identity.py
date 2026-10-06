@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import math
 import os
 import re
 import secrets
@@ -351,6 +352,34 @@ class Registry:
                         "device": device_metadata.current() if minter == HUMAN else dict(agents.get(minter, {}).get("device", {}))}
         self._save(agents)
         return f"{PREFIX}{name}.{secret}"
+
+    def enroll_project(self, name: str, project: dict[str, str], ttl_s: float) -> tuple[str, str]:
+        """Atomically issue a new bounded agent capability for a project."""
+        if not valid_name(name):
+            raise ValueError("invalid project agent name")
+        if (not isinstance(project, dict) or not re.fullmatch("[a-f0-9]{32}", project.get("key", ""))
+                or not isinstance(project.get("name"), str) or len(project["name"]) > 256
+                or set(project) != {"key", "name", "cluster", "cluster_id"}
+                or not isinstance(project.get("cluster"), str) or not 1 <= len(project["cluster"]) <= 128
+                or not isinstance(project.get("cluster_id"), str)
+                or not re.fullmatch("[a-f0-9]{64}", project["cluster_id"])):
+            raise ValueError("invalid project capability scope")
+        if not math.isfinite(ttl_s) or not 0 < ttl_s <= 30 * 86_400:
+            raise ValueError("project agent lifetime must be between zero and 30 days")
+        with held(self.path.with_name("agents.lock")):
+            agents = self._load()
+            if sum(self._live(agents, entry) for entry in agents.values()) >= 64:
+                raise Denied("the workspace holds 64 live identities")
+            wanted = name
+            while name in agents:
+                name = f"{wanted[:40]}-{secrets.token_hex(3)}"
+            secret = secrets.token_urlsafe(32)
+            now = self.clock()
+            agents[name] = {"role": AGENT, "hash": _hash(secret), "created": now,
+                            "minted_by": "dev-cluster", "expires": now + ttl_s,
+                            "revoked": False, "project": dict(project), "can": list(CAPS)}
+            self._save(agents)
+        return name, f"{PREFIX}{name}.{secret}"
 
     def mint(self, by: Identity, name: str, role: str, ttl_s: float) -> str:
         """A new token for ``name``, if ``by`` may mint that role."""

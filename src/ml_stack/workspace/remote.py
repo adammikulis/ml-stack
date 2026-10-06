@@ -43,6 +43,8 @@ class RemoteWorkspace:
         key = rows[0].key if rows else load_cluster_key(cluster_key)
         if key is None:
             raise Denied("join the host's cluster before attaching its project board")
+        self.cluster = rows[0].group if rows else cluster
+        self.cluster_id = hashlib.sha256(key).hexdigest()
         self.fleet_token = derive_token(key)
         if parts.scheme == "https":
             peers = Peer.discover(key=key, timeout_s=2)
@@ -89,9 +91,21 @@ class RemoteWorkspace:
         return {"id": name, "project_id": self.project_id, "host": self.host,
                 "token_file": str(path), "state": "connected"}
 
+    def enroll(self, name: str, *, model: str, harness: str, authority_machine: str) -> dict:
+        """Save a newly issued private Dev project agent capability."""
+        result = self._request("enroll", {"name": name, "model": model,
+                                          "harness": harness, "cluster": self.cluster, "cluster_id": self.cluster_id,
+                                          "authority_machine": authority_machine})
+        name, token = str(result["id"]), str(result["token"])
+        if result.get("project_id") != self.project_id:
+            raise Denied("agent enrollment returned another project")
+        path = tokens.store(self.base, name, token)
+        return {"id": name, "project_id": self.project_id, "host": self.host,
+                "token_file": str(path), "state": "connected"}
+
     def call(self, operation: str, token: str, *args, **kwargs):
         return self._request("board", {"agent_token": token, "operation": operation,
-                                       "args": list(args), "kwargs": kwargs})["result"]
+                                       "args": list(args), "kwargs": kwargs, "cluster": self.cluster})["result"]
 
     def token(self, *, agent: str = "", token_file: str = "") -> str:
         if token_file:
