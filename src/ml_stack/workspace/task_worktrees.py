@@ -42,12 +42,13 @@ def prepare(ws, token: str, worker: str, task: str) -> dict:
         if old:
             if old['worker'] != worker or old['source_project'] != str(source):
                 raise Denied('the task worktree belongs to another assignment')
-            if old.get('state') == 'reserved' and not target.exists() and old['owner'] != caller.id:
+            old_target = Path(old['project'])
+            if old.get('state') == 'reserved' and not old_target.exists() and old['owner'] != caller.id:
                 raise Denied('the reserved task must be reassigned by its recorded parent owner')
-            if old.get('state') == 'reserved' and not target.exists() and old['baseline_commit'] != baseline:
+            if old.get('state') == 'reserved' and not old_target.exists() and old['baseline_commit'] != baseline:
                 old = {**old, 'baseline_commit': baseline}
                 graph.upsert_node({'id': key, 'kind': 'task-worktree', 'label': task, 'attrs': old})
-            if old.get('state') == 'reserved' and not target.exists():
+            if old.get('state') == 'reserved' and not old_target.exists():
                 ws.claim(token, 'worktree', old['project'], ttl_s=86400, note=f'Canonical task {task}')
                 ws.claim(token, 'branch', old['branch'], ttl_s=86400, note=f'Canonical task {task}')
             return old
