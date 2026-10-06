@@ -36,6 +36,7 @@ from ml_stack.workspace import (
     task_integration,
     task_outcomes,
     tokens,
+    trusted,
 )
 from ml_stack.workspace.boardapi import Follow
 from ml_stack.workspace.boards import ANNOUNCE_KINDS, MODES, STYPES
@@ -288,7 +289,7 @@ def _setup(args: argparse.Namespace, ws: Workspace) -> int:
         say(f"token files: {done.directory} (private, never printed)")
         for name in [*done.minted, *done.rotated, *done.kept]:
             say(f"\n--- paste into {name} ---\n{onboard.snippet(name)}")
-        return 1 if any(not f.ok for f in onboard.doctor(ws)) else 0
+        return 1 if any(not f.ok for f in onboard.check(ws)) else 0
     plan = guide.Plan(args.agents, 0.0 if args.no_live else args.live_seconds, args.wait_seconds)
     result = guide.walk(ws, plan)
     return 0 if not plan.live_s or not result["unconfirmed"] else 1
@@ -304,6 +305,8 @@ def _connect(args: argparse.Namespace, ws: Workspace) -> int:
 
 
 def _join(args: argparse.Namespace, ws: Workspace) -> int:
+    if not args.code:
+        return _join_trusted(args, ws)
     if args.coordinator:
         coordinator_client.connect(limits.root(), args.coordinator)
     remote = coordinator_client.client(limits.root())
@@ -314,6 +317,32 @@ def _join(args: argparse.Namespace, ws: Workspace) -> int:
     name = remote.join(limits.root(), args.code, args.name, args.model, args.harness) if remote else onboard.join(
         ws, args.code, args.name, claim=(args.model, args.harness))
     say(f"joined as {name}")
+    return 0
+
+
+def _join_trusted(args: argparse.Namespace, ws: Workspace) -> int:
+    if args.coordinator or args.workspace or coordinator_client.client(limits.root()):
+        raise Denied("a join without a code is local to this machine; with a coordinator, use the "
+                     "invitation from `connect`")
+    name, reused = trusted.join(ws, args.name, (args.model, args.harness), here=project.describe())
+    say(f"{'already joined' if reused else 'joined'} as {name}")
+    return 0
+
+
+def _trust(args: argparse.Namespace, ws: Workspace) -> int:
+    scope = project.describe(args.project) if args.project else {}
+    if args.project and not scope:
+        raise ValueError(f"{args.project} is not inside a project folder")
+    trusted.trust(ws, scope)
+    say(f"this machine is trusted{' for project ' + scope['name'] if scope else ''}: an agent here joins "
+        f"with `ml-stack-workspace join --name ID --model MODEL --harness HARNESS`, no code.\n"
+        f"`ml-stack-workspace untrust-machine` stops new joins; `revoke NAME` stops one agent.")
+    return 0
+
+
+def _untrust(args: argparse.Namespace, ws: Workspace) -> int:
+    say("joins without a code are refused; agents that joined keep their tokens until `revoke NAME`"
+        if trusted.untrust(ws) else "this machine was not trusted")
     return 0
 
 
@@ -464,8 +493,8 @@ BARE: tuple[tuple[str, str, list[Any], Callable[[argparse.Namespace, Workspace],
       flag("--remote", action="store_true", help="require an active shared host and include its authority"),
       flag("--code-only", action="store_true", help="print and copy the invite, then exit without waiting"),
       *LIVE], _connect),
-    ("join", "an agent redeems an invite code and saves its private token", [
-        flag("code"), flag("--name", default="", help="a short id for yourself, e.g. codex"),
+    ("join", "an agent redeems an invite code, or on a trusted machine names itself, and saves its private token", [
+        flag("code", nargs="?", default="", help="the invite code; leave it out on a trusted machine"), flag("--name", default="", help="a short id for yourself, e.g. codex"),
         flag("--coordinator", default="", help="select this enrolled Fleet coordinator before redeeming the invite"),
         flag("--workspace", default="", help="expected coordinator workspace ID; refuses local redemption"),
         flag("--model", default="", help="the exact model id you run as; recorded as claimed"),
@@ -478,6 +507,10 @@ BARE: tuple[tuple[str, str, list[Any], Callable[[argparse.Namespace, Workspace],
         flag("--ttl-hours", type=float, default=720.0, help="how long new tokens last"),
         flag("--yes", action="store_true", help="no questions: token files for the names given"),
         *LIVE], _setup),
+    ("trust-machine", "let agents of this OS user join without a code, standard agent role only; at a terminal",
+     [flag("--project", default="", help="trust only joins from this project folder")], _trust),
+    ("untrust-machine", "stop joins without a code; joined agents keep their tokens; at a terminal", [],
+     _untrust),
     ("board-serve", "serve the read-only Board page on a loopback port; the person's identity, no token in the page",
      [flag("--port", type=int, default=0)], _board_serve),
     ("agent", "start a local model as an agent that takes and gives tasks, stop one, or list them; start and stop at a terminal",

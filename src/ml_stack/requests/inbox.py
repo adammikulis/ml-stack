@@ -148,7 +148,7 @@ def answer(ident: str, choice: str, fingerprint: str, via: str, ctx: Context | N
         person.require_person("answering a request", ctx.terminal, ctx.env)
     elif person.marked(ctx.env):
         raise person.HumanRequired(f"answering a request is for a person; this process was started "
-                                   f"by an agent ({person.marked(ctx.env)} is set)")
+                                   f"by an agent ({person.marked(ctx.env)})")
     done = (ctx.inbox or default()).answer(ident, choice, fingerprint, via)
     _record("request.answered", done, done.state, via, actor="person")
     return done

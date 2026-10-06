@@ -16,7 +16,7 @@ from ml_stack.workspace.identity import AGENT, LEAD, Denied, Identity
 if TYPE_CHECKING:
     from ml_stack.workspace.service import Workspace
 
-__all__ = ["MAX_DEPTH", "ROLE_ENV", "TAINT_ENV", "adopt", "issue", "policy"]
+__all__ = ["MAX_DEPTH", "ROLE_ENV", "TAINT_ENV", "adopt", "announce_milestone", "issue", "policy"]
 
 READ_ONLY, APPROVE_FIRST, PLAN_AND_GO = "read-only", "approve-first", "plan-and-go"
 RANK = {READ_ONLY: 0, APPROVE_FIRST: 1, PLAN_AND_GO: 2}
@@ -47,7 +47,8 @@ def _over(what: str, have: int | float, cap: int | float, key: str) -> Denied:
                   f"(`{key}` in the workspace's limits.json)")
 
 
-def _announce(ws: Workspace, text: str) -> None:
+def announce_milestone(ws: Workspace, text: str) -> None:
+    """Post ``text`` to `#announcements` as a workspace milestone."""
     ws.post(GREETER, ANNOUNCE, "milestone", text, subject="milestone", announce=True)
 
 
@@ -134,7 +135,7 @@ def issue(ws: Workspace, who: Identity, want: tuple[str, float, int],
     info = ws.registry.info(who.id)
     code = ws.invites.create(hint, ttl_s, dict(info["project"]), uses, (who.id, tuple(who.can)))
     ws.audit("agent_invite.create", who.id, uses=uses, ttl_s=ttl_s, depth=depth, policy=how)
-    _announce(ws, f"{who.id} invited a new agent ({uses} use{'s' if uses > 1 else ''}, "
+    announce_milestone(ws, f"{who.id} invited a new agent ({uses} use{'s' if uses > 1 else ''}, "
                   f"{ttl_s / 60:.0f} min)")
     return {"code": code, "uses": uses, "ttl_s": ttl_s, "project": str(info["project"].get("name", ""))}
 
@@ -147,4 +148,4 @@ def adopt(ws: Workspace, issuer: str, name: str, can: tuple[str, ...]) -> None:
     tokens.store(ws.base, name, made)
     info = ws.registry.info(name)
     ws.audit("agent_invite.join", name, issuer=issuer, depth=info["depth"], can=info["can"])
-    _announce(ws, f"{name} joined as {issuer}'s child")
+    announce_milestone(ws, f"{name} joined as {issuer}'s child")

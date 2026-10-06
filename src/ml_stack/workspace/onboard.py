@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ml_stack.person import require_unmarked
 from ml_stack.sentinel import human
 from ml_stack.workspace import agent_invites, tokens
 from ml_stack.workspace.identity import AGENT, HUMAN, LEAD, Denied, Identity, valid_name
@@ -33,6 +34,8 @@ Add this to ~/.claude/settings.json (or the project's .claude/settings.json), me
   }
 }
 `ml-stack-workspace install-hooks --agent NAME` writes the same into ~/.claude/settings.json.
+Under WSL, where only ml-stack-workspace.exe exists, first link the repository's wrapper:
+ln -s /path/to/ml-stack/scripts/ml-stack-workspace ~/.local/bin/ml-stack-workspace
 """,
     "codex": """\
 Add this to ~/.codex/config.toml. Codex runs it when a turn ends, the closest hook it has; between
@@ -75,14 +78,14 @@ def install_hooks(settings: Path, name: str) -> list[str]:
     return [event for event, _, _ in CLAUDE_HOOKS]
 
 
-__all__ = ["DEFAULT_AGENTS", "Finding", "Outcome", "brief", "doctor", "hello", "hook_snippet", "install_hooks",
-           "join", "setup", "snippet"]
+__all__ = ["DEFAULT_AGENTS", "Finding", "Outcome", "brief", "check", "check_claim", "doctor", "hello", "hook_snippet",
+           "install_hooks", "join", "pick_name", "record_claim", "setup", "snippet", "usable"]
 
 DEFAULT_AGENTS = ("lead", "codex")
 SETUP = Identity("setup", HUMAN)
 SOON_S = 86_400.0
 JOIN_RESERVED = frozenset({"admin", "system", "human", "workspace", "owner", "root",
-                           "setup", "agent"})
+                           "setup", "agent", "trusted-machine"})
 TOKEN_S = 30 * 86_400.0
 HELLO = ("workspace ready. Read this with `ml-stack-workspace inbox --ack`, then announce with "
          "`ml-stack-workspace announce joined 'connected'`.")
@@ -174,12 +177,18 @@ def brief(name: str, me: str) -> str:
     return BRIEF.format(me=me, name=name)
 
 
-def pick_name(ws: Workspace, wanted: str) -> str:
-    """The id ``wanted`` becomes: refused when reserved, suffixed when taken."""
+def usable(wanted: str) -> str:
+    """``wanted`` as an id, lower case; ValueError when it is reserved or malformed."""
     name = wanted.strip().lower()
     if not valid_name(name) or name in JOIN_RESERVED or name.startswith(("ml-stack", "doctor-")):
         raise ValueError(f"{wanted!r} cannot be used as a name here; pick another short id such "
                          f"as codex or claude-code")
+    return name
+
+
+def pick_name(ws: Workspace, wanted: str) -> str:
+    """The id ``wanted`` becomes: refused when reserved, suffixed when taken."""
+    name = usable(wanted)
     while ws.registry.role_of(name):
         name = f"{wanted.strip().lower()[:40]}-{secrets.token_hex(2)}"
     return name
@@ -190,10 +199,7 @@ def join(ws: Workspace, code: str, wanted: str, ttl_s: float = 0.0,
     """Redeem an invite under the id ``wanted`` (suffixed when taken): write the agent's token
     file and return the id. Open to an agent; the role is always the standard agent role. A
     ``claim`` of ``(model, harness)`` is recorded as claimed."""
-    model, harness = claim
-    if model:
-        clean_model(model)
-    clean_harness(harness)
+    check_claim(claim)
     tokens.prepare(ws.base)
     if wanted:
         pick_name(ws, wanted)
@@ -209,18 +215,32 @@ def join(ws: Workspace, code: str, wanted: str, ttl_s: float = 0.0,
             ws.registry.set_project(SETUP, name, project)
         ws.board.place(name, project)
         ws.audit("invite.join", name)
-        if model or harness:
-            ws.registry.record_model(name, model, harness, CLAIMED)
-            ws.audit("model.set", name, model=model, verified=False, harness=harness)
+        record_claim(ws, name, claim)
         return name
 
     return ws.invites.redeem(code, take)
 
 
+def check_claim(claim: tuple[str, str]) -> None:
+    """ValueError unless ``claim``'s ``(model, harness)`` can be recorded."""
+    model, harness = claim
+    if model:
+        clean_model(model)
+    clean_harness(harness)
+
+
+def record_claim(ws: Workspace, name: str, claim: tuple[str, str]) -> None:
+    """Record ``name``'s ``(model, harness)`` as claimed, when either is given."""
+    model, harness = claim
+    if model or harness:
+        ws.registry.record_model(name, model, harness, CLAIMED)
+        ws.audit("model.set", name, model=model, verified=False, harness=harness)
+
+
 def setup(ws: Workspace, names: list[str], rotate: list[str], ttl_s: float) -> Outcome:
     """Initialise the workspace if needed and give each of ``names`` a token file; an agent that
-    already has one keeps it unless it is in ``rotate``. A person at a terminal only."""
-    human.require_person("workspace setup")
+    already has one keeps it unless it is in ``rotate``. A person only; no terminal is needed."""
+    require_unmarked("workspace setup")
     wanted = [*dict.fromkeys([*names, *rotate])]
     check_names(wanted)
     for name in wanted:
@@ -298,6 +318,11 @@ def _round_trip(ws: Workspace) -> Finding:
 def doctor(ws: Workspace) -> list[Finding]:
     """Check the whole setup; each failed finding says what to run. A person at a terminal only."""
     human.require_person("workspace doctor")
+    return check(ws)
+
+
+def check(ws: Workspace) -> list[Finding]:
+    """The findings `doctor` prints, without its terminal check."""
     if not ws.registry.ids():
         return [Finding(False, "the workspace is not initialised", "ml-stack-workspace setup")]
     found = [Finding(True, "the workspace is initialised")]
