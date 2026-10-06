@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from pathlib import Path
 
 import pytest
@@ -29,7 +30,7 @@ def model(path: Path, extra: dict | None = None, pad: int = 0) -> Path:
 
 
 def hf_repo(cache: Path, repo: str, files: dict[str, int], rev: str = "abc123") -> Path:
-    """A Hugging Face cache entry: blobs holding the bytes, snapshot symlinks to them."""
+    """A Hugging Face cache entry with snapshot links or Windows copies."""
     top = cache / ("models--" + repo.replace("/", "--"))
     snap = top / "snapshots" / rev
     (top / "refs").mkdir(parents=True, exist_ok=True)
@@ -39,8 +40,21 @@ def hf_repo(cache: Path, repo: str, files: dict[str, int], rev: str = "abc123") 
         model(blob, {"general.name": name}, pad)
         link = snap / name
         link.parent.mkdir(parents=True, exist_ok=True)
-        link.symlink_to(os.path.relpath(blob, link.parent))
+        if os.name == "nt":
+            shutil.copyfile(blob, link)
+        else:
+            link.symlink_to(os.path.relpath(blob, link.parent))
     return snap
+
+
+def symlink(path: Path, target: str | Path, *, directory: bool = False) -> None:
+    """Create a test symlink or report an unavailable Windows privilege."""
+    try:
+        path.symlink_to(target, target_is_directory=directory)
+    except OSError as exc:
+        if getattr(exc, "winerror", None) == 1314:
+            pytest.skip("Windows symlink privilege unavailable")
+        raise
 
 
 def ollama(root: Path, name: str, tag: str, *, projector: bool = False,
@@ -87,7 +101,8 @@ def test_the_hugging_face_cache_is_read_through_its_snapshot_links(tmp_path):
     (one,) = hub.discover([tmp_path])
     assert one.id == "hf:maker/thing-GGUF/thing-Q4_K_M.gguf"
     assert (one.repo, one.quantization, one.source) == ("maker/thing-GGUF", "Q4_K_M", "extra")
-    assert one.path.is_symlink() and one.size_bytes == one.path.stat().st_size
+    assert one.path.is_symlink() == (os.name != "nt")
+    assert one.size_bytes == one.path.stat().st_size
 
 
 def test_a_build_folder_stays_in_the_id(tmp_path):
@@ -107,7 +122,7 @@ def test_a_missing_shard_makes_the_model_incomplete(tmp_path):
 
 def test_a_snapshot_link_to_nothing_is_not_a_model(tmp_path):
     snap = hf_repo(tmp_path, "maker/thing", {"a.gguf": 0})
-    (snap / "b.gguf").symlink_to("../../blobs/gone")
+    symlink(snap / "b.gguf", "../../blobs/gone")
     assert [m.filename for m in hub.discover([tmp_path])] == ["a.gguf"]
 
 
@@ -193,7 +208,7 @@ def test_a_symlink_out_of_every_root_is_not_followed(tmp_path):
     outside = model(tmp_path / "elsewhere" / "secret.gguf")
     root = tmp_path / "models"
     root.mkdir()
-    (root / "link.gguf").symlink_to(outside)
+    symlink(root / "link.gguf", outside)
     assert hub.discover([root]) == []
     (one,) = hub.discover([root, tmp_path / "elsewhere"])
     assert {one.path.name, *(c.name for c in one.copies)} == {"link.gguf", "secret.gguf"}
@@ -204,7 +219,7 @@ def test_a_symlinked_folder_is_not_descended_into(tmp_path):
     model(target / "x.gguf")
     root = tmp_path / "models"
     root.mkdir()
-    (root / "loop").symlink_to(target, target_is_directory=True)
+    symlink(root / "loop", target, directory=True)
     assert hub.discover([root]) == []
 
 

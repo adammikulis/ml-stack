@@ -76,6 +76,7 @@ gguf = ["gguf>=0.10", "numpy>=1.24"]
 graph = ["numpy>=1.24"]
 # `ml-stack-decide`: the embed backend's head
 decide = ["numpy>=1.24", "safetensors>=0.4"]
+decide-data = ["pyarrow>=19"]
 # the pointer backend runs a released checkpoint on torch; its files are downloaded only on request
 decide-pointer = ["ml-stack[decide]", "torch>=2.14", "transformers>=5.17", "peft>=0.21.0",
                   "huggingface_hub>=1.32"]
@@ -129,7 +130,7 @@ all = [
     "ml-stack[agents,train,gguf,graph,store,scrape,vision,pdf,testing,telemetry,plot,fleet-tls,fleet-update,fleet-onboard]",
 ]
 wsl-dev = [
-    "ml-stack[all,test,arrays,audio,claude,coordinator,decide,decide-pointer,gym-drone,guardrails,guard-model,gym,hub,mcp,memory,privacy,redteam,standard,train-lora,web]",
+    "ml-stack[all,test,arrays,audio,claude,coordinator,decide,decide-data,decide-pointer,gym-drone,guardrails,guard-model,gym,hub,mcp,memory,privacy,redteam,standard,train-lora,web]",
 ]
 
 [project.urls]

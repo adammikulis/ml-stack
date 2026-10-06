@@ -1,0 +1,73 @@
+buildscript {
+    repositories { google(); mavenCentral() }
+    dependencies { classpath "com.android.tools.build:gradle:${providers.gradleProperty('androidPlugin').get()}" }
+}
+apply plugin: 'com.android.application'
+
+repositories { google(); mavenCentral() }
+
+def sdkRoot = System.getenv('ANDROID_HOME') ?: System.getenv('ANDROID_SDK_ROOT')
+if (!sdkRoot) throw new GradleException('Set ANDROID_HOME to an SDK whose license the owner has accepted.')
+def platforms = new File(sdkRoot, 'platforms').listFiles()?.findAll { it.name ==~ /android-\d+/ }
+def api = providers.gradleProperty('androidApi').map { it.toInteger() }.getOrElse(
+    platforms?.collect { it.name.substring('android-'.length()).toInteger() }?.max() ?: 0)
+if (api < 30) throw new GradleException('Install an Android SDK platform supporting authentication-bound device credentials.')
+def metadata = file('../../pyproject.toml').getText('UTF-8')
+def release = (metadata =~ /(?m)^version = "([^"]+)"/)[0][1]
+def parts = release.tokenize('.').collect { it.replaceAll(/[^0-9].*$/, '').toInteger() }
+
+android {
+    namespace 'com.mlstack.companion'
+    compileSdk api
+    defaultConfig {
+        applicationId 'com.mlstack.companion'
+        minSdk 30
+        targetSdk api
+        versionName release
+        versionCode parts[0] * 1000000 + parts[1] * 1000 + parts[2]
+    }
+    signingConfigs {
+        preview {
+            if (System.getenv('ANDROID_SIGNING_STORE')) {
+                storeFile file(System.getenv('ANDROID_SIGNING_STORE'))
+                storePassword System.getenv('ANDROID_SIGNING_PASSWORD')
+                keyAlias 'ml-stack-preview'
+                keyPassword System.getenv('ANDROID_SIGNING_PASSWORD')
+            }
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            debuggable false
+            if (System.getenv('ANDROID_SIGNING_STORE')) signingConfig signingConfigs.preview
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation 'com.google.zxing:core:latest.release'
+}
+
+configurations { protocol }
+dependencies { protocol 'org.json:json:latest.release' }
+tasks.register('compileProtocol', JavaCompile) {
+    source = files('src/main/java/com/mlstack/companion/Invite.java',
+                   'src/main/java/com/mlstack/companion/PinnedHttps.java',
+                   'src/main/java/com/mlstack/companion/Enrollment.java',
+                   'src/test/java/com/mlstack/companion/CompanionProtocolTest.java')
+    classpath = configurations.protocol
+    destinationDirectory = layout.buildDirectory.dir('protocol')
+    options.encoding = 'UTF-8'
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+tasks.register('protocolChecks', JavaExec) {
+    dependsOn 'compileProtocol'
+    classpath = configurations.protocol + files(layout.buildDirectory.dir('protocol'))
+    mainClass = 'com.mlstack.companion.CompanionProtocolTest'
+}
