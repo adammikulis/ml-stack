@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import inspect
 import json
+import math
 from pathlib import Path
 from typing import Any
 
 from ml_stack.files import read_json
-from ml_stack.workspace import onboard, tokens
+from ml_stack.workspace import onboard, remote_tasks, tokens
 from ml_stack.workspace.boards import ANNOUNCE
 from ml_stack.workspace.chain import held
 from ml_stack.workspace.claims import Conflict, normal
@@ -171,7 +172,11 @@ class WorkspaceHost:
         token, operation, args, kwargs = request
         if operation in {"whoami", "agents", "claims", "who", "history"} and "read" not in who.can:
             raise Denied("agent capability has no read permission")
-        if operation in {"native.reserve", "native.release"}:
+        if operation == "task.command":
+            if len(args) != 1 or kwargs:
+                raise ValueError("canonical task operation takes one typed command")
+            result = remote_tasks.command(ws, token, self.projects.get(project_id), args[0])
+        elif operation in {"native.reserve", "native.release", "native.heartbeat"}:
             ws._may(who, "claim")
             with held(ws.registry.path.with_name("agents.lock")):
                 current = ws.registry.authenticate(token)
@@ -249,6 +254,14 @@ class WorkspaceHost:
 
     def _native_claims(self, ws, who, project_id, request):
         token, operation, args, kwargs = request
+        if operation == "native.heartbeat":
+            if args or set(kwargs) - {"ttl_s"}:
+                raise ValueError("native heartbeat accepts only a bounded lifetime")
+            ttl = kwargs.get("ttl_s", 0.0)
+            if type(ttl) not in (int, float) or not math.isfinite(ttl) or not 0 <= ttl <= 3600:
+                raise ValueError("native heartbeat lifetime is between zero and 3600 seconds")
+            made = ws.claims.renew(who, ttl_s=ttl)
+            return [public for row in made if (public := self._public_claim(project_id, row)) is not None]
         if operation == "native.release":
             if len(args) != 2 or kwargs:
                 raise ValueError("native release takes a resource kind and relative key")

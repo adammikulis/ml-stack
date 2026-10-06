@@ -7,6 +7,7 @@ from test_project_source import repository  # noqa: F401
 
 from ml_stack.workspace.identity import AGENT, Denied, Registry
 from ml_stack.workspace.remote_host import WorkspaceHost
+from ml_stack.workspace.taskboard import TaskBoard
 
 PROJECT = "a" * 32
 SCOPE = {"key": PROJECT, "name": "fixture-project", "cluster": "dev", "cluster_id": "c" * 64}
@@ -14,7 +15,7 @@ SCOPE = {"key": PROJECT, "name": "fixture-project", "cluster": "dev", "cluster_i
 
 @pytest.fixture
 def enrollment(tmp_path):
-    project = SimpleNamespace(name="fixture-project", authority_machine="local", board_host="https://127.0.0.1:8770")
+    project = SimpleNamespace(id=PROJECT, root=str(tmp_path), name="fixture-project", authority_machine="local", board_host="https://127.0.0.1:8770")
     projects = SimpleNamespace(machine="local", get=lambda identifier: project,
                                workspace_base=lambda identifier: tmp_path / identifier)
     host = WorkspaceHost(projects)
@@ -169,3 +170,28 @@ def test_self_revocation_cleans_exact_claims_and_refuses_replaced_generation(enr
     with pytest.raises(Denied, match="recognised"):
         ws.registry.revoke_self(old, lambda who: host._release_owned_claims(ws, who))
     assert ws.auth(replacement).id == child.id
+
+
+def test_typed_task_commands_bind_full_project_scope_and_idempotency(enrollment):
+    host, _, body = enrollment
+    _, agent = host.enroll(PROJECT, body, cluster="dev", cluster_id="c" * 64)
+    def command(action, payload, request_id="e" * 32):
+        return host.answer(PROJECT, "board", {"agent_token": agent["token"], "operation": "task.command",
+                           "args": [{"action": action, "payload": payload, "request_id": request_id}]},
+                           admission=("dev", "c" * 64, True))
+    spec = {"title": "Typed task", "acceptance": ["Scoped outcome"]}
+    code, created = command("task-create", {"spec": spec})
+    assert code == 200, created
+    ident = created["result"]["id"]
+    assert created["result"]["project"] == SCOPE
+    assert command("task-create", {"spec": spec})[1]["result"]["id"] == ident
+    assert command("task-create", {"spec": {**spec, "title": "Different"}})[0] == 403
+    assert command("task-create", {"spec": {**spec, "project": {"key": "b" * 32}}}, "f" * 32)[0] == 403
+    ws = host.workspace(PROJECT)
+    foreign = TaskBoard(ws).create(agent["token"], {**spec, "project": {"key": "b" * 32}})
+    assert command("task", {"id": foreign["id"]})[0] == 403
+    assert {row["id"] for row in command("tasks", {})[1]["result"]["tasks"]} == {ident}
+    assert command("task-create", {"spec": {**spec, "deps": [foreign["id"]]}}, "f" * 32)[0] == 403
+    assert command("task-claim", {"id": ident, "allocation_id": "untrusted"}, "f" * 32)[0] == 403
+    for action in ("task-integrate", "resource-assign", "task-recover", "mint"):
+        assert command(action, {})[0] == 400
