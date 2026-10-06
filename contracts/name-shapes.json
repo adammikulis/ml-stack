@@ -84,7 +84,7 @@
       "Hugging", "Face", "Slack", "Teams", "Chrome", "Safari", "AI", "ML", "API", "SDK",
       "GPU", "CPU", "Linux", "macOS", "iOS", "Android", "Docker", "Kubernetes", "Nvidia",
       "PyTorch", "Xcode", "Ollama", "Firefox", "Presidio", "Markdown", "JavaScript",
-      "Python", "TypeScript", "Git metadata", "Cloud Files"
+      "Python", "TypeScript", "Git metadata", "Cloud Files", "LM Studio"
     ],
     "headings": [
       "Features", "Bug Fixes", "Performance Improvements", "Reverts", "Documentation",

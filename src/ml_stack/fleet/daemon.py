@@ -28,6 +28,7 @@ from ml_stack.platform import on_quit
 from ml_stack.serve import canaries, guarded
 from ml_stack.serve.leases import lease_file
 from ml_stack.speech import service as speech
+from ml_stack.fleet.onboard.requests import Devices
 
 from . import autostart, invite_client, invite_routes, tls, updates as updating
 from .api import Daemon, make_handler
@@ -221,6 +222,7 @@ def serve_forever(root: Path | str | None = None,
         ui=interface, projects=projects, workspaces=workspaces, schedule=schedule, on_paused=on_paused,
         schedule_path=schedule_path, serving=serving, models=models,
         cluster_key_path=cluster_key_path, tokens=every_token,
+        devices=lambda: Devices(home.state('onboard', 'devices.json')).all(),
         bench=bench_host[0], hosting=hosting,
         decide=Deciding(serving), ui_from_lan=ui_from_lan or setup_from_lan,
         joining=Joining(lambda: memberships(cluster_key_path), fingerprint)))

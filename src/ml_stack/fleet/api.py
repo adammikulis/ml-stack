@@ -31,7 +31,7 @@ from ml_stack.speech import service as speech
 from ml_stack.speech.protocols import ProviderError
 from ml_stack.speech.service import as_json, transcribe
 
-from . import commands, invite_routes, projects as project_routes
+from . import commands, device_auth, invite_routes, projects as project_routes
 from .availability import Availability, parse_window
 from .deciding import MAX_REQUEST, Deciding
 from .device import device_report
@@ -96,6 +96,7 @@ class Daemon:
     models: Models | None = None
     cluster_key_path: Path | str | None = None
     tokens: Callable[[], set[str]] | None = None
+    devices: Callable[[], list] = lambda: []
     bench: BenchHost | None = None
     hosting: Hosting | None = None
     decide: Deciding | None = None
@@ -128,6 +129,8 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
         return {one for one in (own, *(tokens() if tokens else ())) if one}
 
     authenticator = watch_authenticator(Authenticator(secrets_now), sentinel.armed(), Verdict)
+    device_authenticator = Authenticator(lambda: [*secrets_now(),
+                                                  *(device_auth.secret(device) for device in daemon.devices())])
 
     class Handler(Limited, BaseHTTPRequestHandler):
         server_version = "ml-stack-traind/0.1"
@@ -209,9 +212,12 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
         def _guard(self, body: bytes | None = None) -> bool:
             """Whether this request is signed by a secret this machine answers to; the
             answer is sent when it is not. ``body`` is what the request carried."""
-            verdict = authenticator.check(self.command, self.path, self.headers, body,
-                                          self.client_address[0])
+            self._workspace_device = None
+            self._workspace_projects = daemon.projects
+            checking = device_authenticator if self.path.split('?')[0].startswith('/workspace/v1/') else authenticator
+            verdict = checking.check(self.command, self.path, self.headers, body, self.client_address[0])
             if verdict.ok:
+                self._workspace_device = device_auth.identify(daemon.devices(), verdict.secret)
                 mode = self.headers.get(sealing.HEADER, "")
                 self._opening = (sealing.box_key(verdict.secret), verdict, mode == "2",
                                  self.headers) if mode in ("1", "2") else None
@@ -583,7 +589,7 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
             return got
 
         def _workspace(self, body: bytes) -> bool:
-            match = re.fullmatch(r"/workspace/v1/projects/([a-f0-9]{32})/(join|board)",
+            match = re.fullmatch(r"/workspace/v1/projects/([a-f0-9]{32})/(join|board|ensure)",
                                  urllib.parse.urlparse(self.path).path)
             if not match:
                 return False
@@ -594,7 +600,8 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
             elif opening is None or not opening[2]:
                 self._send(403, {"error": "project agent capabilities require sealed fleet requests"})
             else:
-                code, reply = host.answer(match[1], match[2], self._object(body))
+                code, reply = host.answer(match[1], match[2], self._object(body),
+                                          device=self._workspace_device)
                 self._send(code, reply)
             return True
 

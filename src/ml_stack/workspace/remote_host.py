@@ -7,7 +7,7 @@ import json
 from typing import Any
 
 from ml_stack.files import read_json
-from ml_stack.workspace import onboard, tokens
+from ml_stack.workspace import device_sessions, onboard, tokens
 from ml_stack.workspace.boards import ANNOUNCE
 from ml_stack.workspace.claims import Conflict
 from ml_stack.workspace.identity import AGENT, Denied
@@ -87,11 +87,19 @@ class WorkspaceHost:
         self.prepare(project_id)
         return adopt(self.workspace(project_id).base, history)
 
-    def answer(self, project_id: str, action: str, body: dict) -> tuple[int, dict]:
+    def answer(self, project_id: str, action: str, body: dict, *, device=None) -> tuple[int, dict]:
         try:
             if len(json.dumps(body).encode()) > 32 * 1024:
                 return 413, {"error": "workspace operation exceeds the size limit"}
             ws = self.workspace(project_id)
+            if action == 'ensure':
+                if set(body) != {'name', 'model', 'harness', 'project', 'agent_token'}:
+                    raise ValueError('agent registration carries identity labels and project')
+                document = {**body, 'project': {'key': project_id}}
+                name, token = device_sessions.ensure(ws, device, self.projects, document,
+                                                    str(body['agent_token']))
+                self._identity(ws, project_id, token)
+                return 200, {'id': name, 'token': token, 'project_id': project_id}
             if action == "join":
                 name = onboard.join(ws, str(body.get("code") or ""),
                                     str(body.get("name") or ""),
@@ -104,6 +112,7 @@ class WorkspaceHost:
             if action != "board":
                 return 404, {"error": "no such workspace operation"}
             token = str(body.get("agent_token") or "")
+            device_sessions.check(ws, token, device, self.projects)
             who = self._identity(ws, project_id, token)
             ws.audit("remote.seen", who.id, project_id=project_id)
             operation = str(body.get("operation") or "")

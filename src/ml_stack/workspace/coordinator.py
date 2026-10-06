@@ -4,7 +4,7 @@ import json
 import ssl
 
 from ml_stack.fleet.onboard.web import Call
-from ml_stack.workspace import cli, coordinator_calls, coordinator_config, onboard, tokens
+from ml_stack.workspace import cli, coordinator_calls, coordinator_config, device_sessions, onboard, tokens
 from ml_stack.workspace.chain import ChainBroken
 from ml_stack.workspace.claims import Conflict
 from ml_stack.workspace.coordination import workspace_id
@@ -17,7 +17,7 @@ PREFIX = '/workspace/v1/'
 MAX_REQUEST = 32 * 1024
 
 
-def answer(ws, call):
+def answer(ws, call, *, device=None, projects=None):
     method, path, headers = call.method, call.path, call.headers
     body = call.body(MAX_REQUEST)
     if not call.secure:
@@ -30,7 +30,7 @@ def answer(ws, call):
         return 409, {'error': 'coordinator workspace identity changed'}
     if method == 'GET' and path == PREFIX + 'info':
         return 200, {'workspace': identity, 'authority': 'coordinator', 'protocol': 1}
-    if method != 'POST' or path not in (PREFIX + 'call', PREFIX + 'join'):
+    if method != 'POST' or path not in (PREFIX + 'call', PREFIX + 'join', PREFIX + 'ensure'):
         return 405, {'error': 'unsupported coordination operation'}
     if len(body) > MAX_REQUEST:
         return 413, {'error': 'coordination request limit exceeded'}
@@ -40,6 +40,12 @@ def answer(ws, call):
             raise ValueError('a coordination call is an object')
         if document.get('workspace') != identity:
             raise Denied('the requested coordinator workspace does not match')
+        if path == PREFIX + 'ensure':
+            if set(document) != {'workspace', 'name', 'model', 'harness', 'project'}:
+                raise ValueError('agent registration carries identity labels and project')
+            name, token = device_sessions.ensure(ws, device, projects, document,
+                                                headers.get('X-ML-Stack-Workspace-Token', ''))
+            return 200, {'workspace': identity, 'agent': name, 'token': token}
         if path == PREFIX + 'join':
             if set(document) != {'workspace', 'code', 'name', 'model', 'harness'} or any(
                     type(value) is not str for value in document.values()):
@@ -48,6 +54,7 @@ def answer(ws, call):
                                 claim=(document['model'], document['harness']))
             return 200, {'workspace': identity, 'agent': name, 'token': tokens.load(ws.base, name)}
         token = headers.get('X-ML-Stack-Workspace-Token', '')
+        device_sessions.check(ws, token, device, projects)
         handlers = {name: handler for name, _help, _options, handler in cli.TABLE}
         result = coordinator_calls.execute(ws, token, document, cli.COMMANDS.parser(), handlers)
         if len(json.dumps(result, ensure_ascii=True).encode()) > coordinator_calls.MAX_OUTCOME:
@@ -66,9 +73,12 @@ def answer(ws, call):
 
 
 def route(handler, body=None):
+    if handler.path.split('?')[0].startswith(PREFIX + 'projects/'):
+        return False
     encrypted = isinstance(handler.connection, ssl.SSLSocket) or handler.client_address[0] in ('127.0.0.1', '::1')
     call = Call(handler.command, handler.path.split('?')[0], handler.headers,
                 handler.client_address[0], encrypted, lambda _most: body or b'')
-    status, result = answer(Workspace(), call)
+    status, result = answer(Workspace(), call, device=getattr(handler, '_workspace_device', None),
+                            projects=getattr(handler, '_workspace_projects', None))
     handler._send(status, result)
     return True
