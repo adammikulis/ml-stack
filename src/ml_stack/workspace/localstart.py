@@ -34,6 +34,7 @@ from ml_stack.workspace import (
 )
 from ml_stack.workspace.chain import held
 from ml_stack.workspace.identity import AGENT, LEAD, Denied
+from ml_stack.workspace.modelid import clean_model
 from ml_stack.workspace.service import Workspace
 
 __all__ = ["Ask", "Started", "Stopped", "Unavailable", "listing", "start", "stop"]
@@ -225,7 +226,7 @@ def _coding(ws: Workspace, ask: Ask, chosen: localmodel.Pick | None, ctx: int, p
             ws, have, name, projects.describe(project) if project else {}, parent_token)
         agent = replace(agent, identity=identity)
         if not ask.authority:
-            _record_model(ws, identity, chosen)
+            _record_model(ws, identity, chosen, ask.harness)
         la.save(ws, agent)
         if parent_token:
             device_agent.bind_owned_worker(ws, parent_token, name)
@@ -281,13 +282,13 @@ def stop(ws: Workspace, name: str, *, release: Callable[[str], Any] | None = Non
     return Stopped(name, running, forced, freed, notes)
 
 
-def _record_model(ws: Workspace, name: str, chosen: localmodel.Pick) -> None:
-    """Record the model ml-stack started the agent on as verified; only a person's start reaches this."""
+def _record_model(ws: Workspace, name: str, chosen: localmodel.Pick, harness: str = lh.OWN) -> None:
+    """Record the authenticated worker's configured model and harness claim."""
     try:
-        ws.set_model(name, chosen.name, lh.OWN, verified=True, terminal=(True, True), env={})
+        model = clean_model(chosen.name)
     except ValueError:
-        ws.set_model(name, localmodel.short_name(chosen.name), lh.OWN, verified=True,
-                     terminal=(True, True), env={})
+        model = localmodel.short_name(chosen.name)
+    ws.claim_model(tokens.load(ws.base, name), model, harness)
 
 
 def _owns_lease(agent: la.Agent, lease: str) -> bool:

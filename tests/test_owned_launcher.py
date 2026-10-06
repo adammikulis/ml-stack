@@ -69,3 +69,34 @@ def test_device_membership_is_bound_before_worker_process_starts(tmp_path, monke
     pick = localstart.localmodel.Pick(ref='qwen', name='qwen')
     localstart.start(kit.ws, localstart.Ask(name='worker'), pick=pick, spawn=spawn, parent_token=parent)
     assert events == ['bound', 'started']
+
+
+@pytest.mark.redteam
+def test_agent_launch_records_own_child_model_claim_without_person_context(tmp_path, monkeypatch):
+    kit = Kit(clean_env(monkeypatch, tmp_path))
+    parent = kit.agent('launcher')
+    child = kit.ws.delegate(parent, 'worker')
+    monkeypatch.setenv('ML_STACK_AGENT', '1')
+    monkeypatch.setattr(kit.ws, 'set_model', lambda *_args, **_kwargs: pytest.fail('person model setter'))
+    pick = localstart.localmodel.Pick(ref='qwen', name='qwen')
+    localstart._record_model(kit.ws, child['id'], pick, 'claude')
+    info = kit.ws.whoami_model(child['id'])
+    assert (info['model'], info['model_state'], info['harness']) == ('qwen', 'claimed', 'claude')
+    assert kit.ws.whoami_model('launcher')['model'] == ''
+
+
+@pytest.mark.redteam
+def test_launch_claim_preserves_verified_model_and_refuses_changed_model(tmp_path, monkeypatch):
+    from ml_stack.workspace.identity import Denied
+    from ml_stack.workspace.modelid import VERIFIED
+
+    kit = Kit(clean_env(monkeypatch, tmp_path))
+    parent = kit.agent('launcher')
+    child = kit.ws.delegate(parent, 'worker')
+    kit.ws.registry.record_model(child['id'], 'qwen', 'claude', VERIFIED)
+    monkeypatch.setattr(kit.ws, 'set_model', lambda *_args, **_kwargs: pytest.fail('person model setter'))
+    localstart._record_model(kit.ws, child['id'], localstart.localmodel.Pick(name='qwen'), 'claude')
+    assert kit.ws.whoami_model(child['id'])['model_state'] == VERIFIED
+    with pytest.raises(Denied, match='only a person changes'):
+        localstart._record_model(kit.ws, child['id'], localstart.localmodel.Pick(name='other'), 'claude')
+    assert kit.ws.model_of(child['id']) == ('qwen', VERIFIED)

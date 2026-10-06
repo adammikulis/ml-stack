@@ -712,13 +712,13 @@ def test_a_shared_server_with_a_smaller_context_than_asked_is_refused():
         assert localloop.check_context(32768, fake.base_url) == ""
 
 
-def test_start_records_the_started_model_as_verified(kit, monkeypatch):
+def test_start_records_the_configured_model_as_claimed(kit, monkeypatch):
     spawned = []
     got = ls.start(kit.ws, ls.Ask(), pick=PICK,
                    spawn=lambda *a, **k: spawned.append(sleeper(*a, **k)) or spawned[-1])
     try:
         info = kit.ws.whoami_model(got.name)
-        assert info["model"] and info["model_state"] == "verified"
+        assert info["model"] and info["model_state"] == "claimed"
     finally:
         ls.stop(kit.ws, got.name, release=lambda lease: True, wait_s=5)
 
