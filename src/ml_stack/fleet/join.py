@@ -253,7 +253,7 @@ def _started_pid(root: Path | str) -> int | None:
         return None
 
 
-def _enrol_via_daemon(port: int, passphrase: str, group: str, mode: str) -> None:
+def _enrol_via_daemon(port: int, passphrase: str, group: str, mode: str | None) -> None:
     """Add a cluster through the daemon already on ``port``, so it advertises at once.
 
     Writing the key file underneath a running daemon leaves it announcing on the clusters
@@ -280,7 +280,7 @@ def _enrol_via_daemon(port: int, passphrase: str, group: str, mode: str) -> None
     status, body, set_cookie = call("/ui/session", {"passphrase": passphrase, "group": group})
     if status == 200 and set_cookie:
         cookie = set_cookie.split(";")[0]
-    status, body, _ = call("/ui/clusters", {"passphrase": passphrase, "group": group, "mode": mode}, cookie)
+    status, body, _ = call("/ui/clusters", {"passphrase": passphrase, "group": group, "cluster_mode": mode}, cookie)
     if status != 200:
         raise JoinError(f"the daemon on port {port} refused the cluster: "
                         f"{body.get('error', status)}")
@@ -469,10 +469,10 @@ def join_machine(*, name: str = "", passphrase: str = "", group: str = "",
     if passphrase:
         if running is not None:
             (enrol or (lambda words, g: _enrol_via_daemon(
-                port, words, g, mode or cluster_modes.PRODUCTION)))(passphrase, group)
+                port, words, g, mode)))(passphrase, group)
         else:
             join_by_passphrase(passphrase, group, cluster_key_path,
-                               mode=mode or cluster_modes.PRODUCTION)
+                               mode=mode)
         enrolled = next((m for m in memberships(cluster_key_path) if m.group == group), None)
         joined.mode = enrolled.mode if enrolled else mode or cluster_modes.PRODUCTION
         say(f"joined cluster '{group}'")
