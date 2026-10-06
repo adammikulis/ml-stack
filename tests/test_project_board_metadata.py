@@ -23,7 +23,8 @@ def test_metadata_registration_never_exports_source(repository, tmp_path, monkey
     identifier = identity(repository)
     assert registry.candidates() == [{"id": identifier, "name": "project"}]
     assert registry.list() == []
-    assert registry.catalogue()["boards"] == [{"id": identifier, "name": "project", "machine": "device",
+    assert registry.catalogue()["boards"] == []
+    assert registry.catalogue(include_boards=True)["boards"] == [{"id": identifier, "name": "project", "machine": "device",
                                                 "authority_machine": "", "board_host": ""}]
     assert not (tmp_path / "registry" / "project-bundles").exists()
     with pytest.raises(source.ProjectError, match="not shared"):
@@ -63,3 +64,14 @@ def test_authority_claim_refuses_device_or_host_remapping(repository, tmp_path, 
     project = registry.get(identifier)
     assert project.authority_machine == authority.get("machine", "")
     assert project.board_host == authority.get("host", "")
+
+
+@pytest.mark.redteam
+@pytest.mark.parametrize("authority", [[], {"machine": []}, {"host": "x" * 2049}, {"host": "bad\naddress"}])
+def test_malformed_checkout_authority_is_not_registered(repository, tmp_path, authority):
+    write_json(repository / ".ml-stack-project.json", {"kind": "project-checkout",
+                                                        "project_id": identity(repository),
+                                                        "authority": authority})
+    registry = ProjectRegistry(tmp_path / "registry", "device", (repository,))
+    assert registry.boards() == []
+    assert registry.candidates() == []

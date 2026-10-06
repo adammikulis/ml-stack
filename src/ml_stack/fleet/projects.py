@@ -53,7 +53,7 @@ def bootstrap() -> bytes:
 def identity(root: Path) -> str:
     """Return the project identity from checkout metadata or its Git origin."""
     attached = read_json(root / ".ml-stack-project.json", {})
-    if attached.get("kind") == "project-checkout":
+    if isinstance(attached, dict) and attached.get("kind") == "project-checkout":
         return source.project_id(attached["project_id"])
     try:
         origin = git.run(["remote", "get-url", "origin"], cwd=root).stdout.strip()
@@ -68,6 +68,21 @@ def identity(root: Path) -> str:
     if not origin:
         raise source.ProjectError("Project has no Git identity")
     return hashlib.sha256(origin.encode()).hexdigest()[:32]
+
+
+def attached_authority(root: Path) -> dict:
+    """Return validated authority metadata from a managed checkout."""
+    attached = read_json(root / ".ml-stack-project.json", {})
+    if not isinstance(attached, dict) or attached.get("kind") != "project-checkout":
+        return {}
+    authority = attached.get("authority", {})
+    if not isinstance(authority, dict):
+        raise source.ProjectError("Project authority metadata is invalid")
+    for key in ("machine", "host"):
+        value = authority.get(key, "")
+        if not isinstance(value, str) or len(value) > 2048 or any(ord(c) < 32 for c in value):
+            raise source.ProjectError("Project authority metadata is invalid")
+    return authority
 
 
 @dataclass
@@ -111,10 +126,9 @@ class ProjectRegistry:
             try:
                 path = Path(git.run(["rev-parse", "--show-toplevel"], cwd=path).stdout.strip()).resolve()
                 identifier = identity(path)
+                authority = attached_authority(path)
                 self._candidates[identifier] = path
                 if identifier not in self._projects:
-                    attached = read_json(path / ".ml-stack-project.json", {})
-                    authority = attached.get("authority", {})
                     self._projects[identifier] = Project(
                         id=identifier, name=path.name, root=str(path), source_machine=self.machine,
                         authority_machine=authority.get("machine", ""), board_host=authority.get("host", ""))
@@ -145,12 +159,11 @@ class ProjectRegistry:
             root = self._candidates.get(candidate)
             if root is None:
                 raise source.ProjectError("Choose an available local project")
-            attached = read_json(root / ".ml-stack-project.json", {})
+            authority = attached_authority(root)
             identifier = identity(root)
             manifest, packed = source.build(root, identifier)
             source.verify(packed, identifier, manifest["source_hash"])
             prior = self._projects.get(identifier)
-            authority = attached.get("authority", {})
             project = Project(id=identifier, name=name.strip() or root.name, root=str(root),
                               source_machine=self.machine, shared=True, source_hash=manifest["source_hash"],
                               archive_sha256=hashlib.sha256(packed).hexdigest(), size_bytes=manifest["size_bytes"],
@@ -216,14 +229,14 @@ class ProjectRegistry:
                      "authority_machine": p.authority_machine, "board_host": p.board_host}
                     for p in self._projects.values()]
 
-    def catalogue(self) -> dict:
+    def catalogue(self, *, include_boards: bool = False) -> dict:
         code = bootstrap()
-        return {"projects": self.list(), "boards": self.boards(), "machine": self.machine,
+        return {"projects": self.list(), "boards": self.boards() if include_boards else [], "machine": self.machine,
                 "capabilities": ["project-source"],
                 "bootstrap_sha256": hashlib.sha256(code).hexdigest()}
 
 
-def answer(handler, registry: ProjectRegistry | None, parsed) -> bool:
+def answer(handler, registry: ProjectRegistry | None, parsed, *, cluster_key_path: Path | None = None) -> bool:
     """Answer authenticated source catalogue and immutable bundle requests."""
     prefix = "/workspace/v1/projects"
     if not parsed.path.startswith(prefix) or registry is None:
@@ -231,7 +244,11 @@ def answer(handler, registry: ProjectRegistry | None, parsed) -> bool:
     pieces = parsed.path.removeprefix(prefix).strip("/").split("/")
     try:
         if parsed.path == prefix:
-            handler._send(200, registry.catalogue())
+            show_boards = False
+            if cluster_key_path is not None:
+                from .project_enrollment import visible
+                show_boards = visible(handler.connection, handler._sealing(), cluster_key_path)
+            handler._send(200, registry.catalogue(include_boards=show_boards))
         elif pieces == ["bootstrap"]:
             handler._send(200, {}, raw=bootstrap(), content_type="text/x-python")
         elif len(pieces) == 2 and pieces[1] == "snapshot":
