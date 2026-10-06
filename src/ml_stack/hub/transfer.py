@@ -258,7 +258,7 @@ def pull(ref: str, dest: str | Path | None = None, on_progress: Report | None = 
         files = remote.listing(parsed.repo, parsed.revision)
         if parsed.file not in {one.path for one in files}:
             raise NotFound(f"{parsed.repo} has no {parsed.file}")
-        return _snapshot_files(parsed, files, dest, on_progress, cancel, peers)
+        return _snapshot_files(parsed, files, dest, _Run(on_progress, cancel, peers))
     try:
         parsed, chosen = plan(ref)
     except NotFound:
@@ -269,7 +269,7 @@ def pull(ref: str, dest: str | Path | None = None, on_progress: Report | None = 
         if "config.json" not in names or not any(name.lower().endswith(".safetensors")
                                                    for name in names):
             raise
-        return _snapshot_files(parsed, files, dest, on_progress, cancel, peers)
+        return _snapshot_files(parsed, files, dest, _Run(on_progress, cancel, peers))
     folder = destination(dest, parsed)
     _bring(parsed, chosen, folder, _Run(on_progress, cancel, peers))
     return folder / chosen[0].path
@@ -311,24 +311,22 @@ PICKLES = (".bin", ".pt", ".pth", ".ckpt", ".pkl", ".pickle", ".h5", ".msgpack",
 
 
 def snapshot(repo: str, revision: str = "main", on_progress: Report | None = None,
-             cancel: CancelToken | None = None, *, peers: bool | None = None,
-             dest: str | Path | None = None) -> Path:
+             cancel: CancelToken | None = None, *, dest: str | Path | None = None) -> Path:
     """Every file of ``repo`` but its pickle-based weights, in ``<store>/models/owner/repo``;
     returns that folder. For a repository that holds safetensors."""
     parsed = remote.Ref(repo, "", "", revision)
     return _snapshot_files(parsed, remote.listing(repo, revision), dest,
-                           on_progress, cancel, peers)
+                           _Run(on_progress, cancel))
 
 
 def _snapshot_files(parsed: remote.Ref, files: list[RemoteFile], dest: str | Path | None,
-                    on_progress: Report | None, cancel: CancelToken | None,
-                    peers: bool | None) -> Path:
+                    run: _Run) -> Path:
     chosen = [f for f in files
               if not f.path.lower().endswith(PICKLES) and not f.name.startswith(".git")]
     if not chosen:
         raise NotFound(f"{parsed.repo} has no files")
     folder = destination(dest, parsed)
-    _bring(parsed, chosen, folder, _Run(on_progress, cancel, peers))
+    _bring(parsed, chosen, folder, run)
     return folder
 
 

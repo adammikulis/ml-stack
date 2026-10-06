@@ -20,7 +20,8 @@ def listed(monkeypatch):
 @pytest.mark.parametrize("ref", ["hf:maker/model", "hf:maker/model/model-00001-of-00002.safetensors"])
 def test_safetensors_pull_downloads_snapshot(ref, listed, tmp_path):
     files, calls = listed
-    callback = lambda progress: None
+    def callback(progress):
+        pass
     cancel = transfer.CancelToken()
     assert transfer.pull(ref, tmp_path, callback, cancel, peers=False) == tmp_path
     parsed, chosen, folder, run = calls[0]
