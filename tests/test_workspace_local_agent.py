@@ -117,6 +117,7 @@ def test_an_id_that_is_not_downloaded_is_refused():
 # -- start and stop -----------------------------------------------------------------------
 @pytest.fixture
 def kit(monkeypatch, tmp_path):
+    monkeypatch.setattr(localmodel, "context_for", lambda pick, coding=False: 262144 if coding else 32768)
     k = Kit(clean_env(monkeypatch, tmp_path))
     k.limits(sends_per_window=1000)
     tokens.store(k.base, tokens.OWNER_FILE, k.owner)
@@ -575,8 +576,8 @@ def test_with_no_one_to_ask_an_acting_call_and_a_plan_are_denied(kit):
 # -- profiles, context, coding model -------------------------------------------------------
 def test_context_sizes_parse_k_and_profiles_carry_their_caps():
     from ml_stack.workspace import localprofile as lp
-    assert lp.parse_ctx("256k") == lp.parse_ctx("256K") == 262144 == lp.CODING.ctx
-    assert lp.parse_ctx("32768") == lp.CHAT.ctx and lp.parse_ctx("") == 0
+    assert lp.parse_ctx("256k") == lp.parse_ctx("256K") == 262144
+    assert lp.parse_ctx("32768") == 32768 and lp.parse_ctx("") == lp.CODING.ctx == lp.CHAT.ctx == 0
     for bad in ("big", "1", "-5k", "256 k"):
         with pytest.raises(ValueError):
             lp.parse_ctx(bad)
@@ -673,7 +674,7 @@ def test_a_coding_worker_is_registered_once_before_its_native_harness_starts(kit
     got = ls.start(kit.ws, ls.Ask(profile="coding", role=roles.DEFAULT))
     try:
         row = ls.listing(kit.ws)[0]
-        assert got.name == "local-coding" and row["harness"] == "codex" and row["ctx"] == 262144
+        assert got.name == "local-coding" and row["harness"] == "pi" and row["ctx"] == 262144
         assert sorted(kit.ws.registry.ids()) == sorted(["owner", got.name])
     finally:
         ls.stop(kit.ws, got.name, release=lambda lease: True, wait_s=5)
