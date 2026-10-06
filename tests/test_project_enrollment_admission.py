@@ -1,13 +1,14 @@
 """Dev project enrollment transport and immutable cluster scope."""
 
 import hashlib
+import json
 import ssl
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
 
-from ml_stack.fleet import project_enrollment as admission
+from ml_stack.fleet import api, project_enrollment as admission
 from ml_stack.fleet.discovery import derive_token
 
 
@@ -71,3 +72,29 @@ def test_native_registration_requires_local_active_dev_proof(scope):
     assert not admission.local(None, None, "127.0.0.1")
     member.mode = "prod"
     assert not admission.local(opening, None, "127.0.0.1")
+
+
+@pytest.mark.redteam
+@pytest.mark.parametrize("attack", ["remote", "unsealed", "prod", "wrong-project"])
+def test_local_project_route_refuses_unauthorized_registration(scope, tmp_path, monkeypatch, attack):
+    member, opening, _ = scope
+    calls = []
+
+    def register(root, project_id):
+        calls.append((root, project_id))
+        raise ValueError("project identity mismatch")
+
+    monkeypatch.setattr(api.sentinel, "armed", lambda: False)
+    daemon = api.Daemon(None, tmp_path, "fixture-secret", projects=SimpleNamespace(register=register))
+    handler = object.__new__(api.make_handler(daemon))
+    handler.path = "/workspace/v1/local-project"
+    handler.client_address = ("192.168.2.8" if attack == "remote" else "127.0.0.1", 1)
+    if attack == "prod":
+        member.mode = "prod"
+    handler._sealing = lambda: (*opening[:2], False, {}) if attack == "unsealed" else opening
+    replies = []
+    handler._send = lambda status, body: replies.append((status, body))
+    assert handler._project_register(json.dumps({"root": str(tmp_path), "project_id": "a" * 32}).encode())
+    assert replies[0][0] == (400 if attack == "wrong-project" else 403)
+    assert len(calls) == (1 if attack == "wrong-project" else 0)
+    assert str(tmp_path) not in json.dumps(replies)
