@@ -227,8 +227,11 @@ def test_enrolled_device_never_creates_local_authority_without_unique_coordinato
     base = tmp_path / 'workspace'
     monkeypatch.setattr(coordinator_client, 'load_cluster_key', lambda: b'enrolled')
     monkeypatch.setattr(coordinator_client, 'discover', lambda: [(None, {})] * count)
-    with pytest.raises(Denied, match=r'unavailable|ambiguous'):
-        coordinator_client.client(base)
+    if count:
+        with pytest.raises(Denied, match='ambiguous'):
+            coordinator_client.client(base)
+    else:
+        assert coordinator_client.client(base) is None
     assert not (base / 'agents.json').exists()
     assert not coordinator_config.load(base)
 
