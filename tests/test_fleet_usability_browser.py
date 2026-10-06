@@ -127,3 +127,35 @@ def test_navigation_search_shortcuts_no_results_and_mobile_width(usability_page)
     assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
     assert page.locator('fleet-nav a[href="#board"]').count() == 1
     assert not errors
+
+
+def test_settings_queued_install_keeps_navigation_usable_until_ready(usability_page):
+    from playwright.sync_api import expect
+    served, page, errors = usability_page
+    installed = False
+    job = {'id': 'setup-core', 'state': 'queued', 'note': 'Waiting to install', 'result': {}}
+    def libraries(route):
+        if route.request.method == 'POST':
+            route.fulfill(status=202, json={'ok': True, 'job': job})
+        else:
+            route.fulfill(json={'libraries': [{'name': 'core', 'title': 'Training essentials', 'blurb': 'Training tools', 'installed': installed, 'size_mb': 40}]})
+    page.route('**/ui/libraries', libraries)
+    page.route('**/ui/setup/jobs', lambda route: route.fulfill(json={'jobs': [job]}))
+    page.goto(f'http://127.0.0.1:{served.port}/ui/#settings')
+    page.get_by_role('button', name='Libraries & simulators', exact=True).click()
+    page.locator('#lib-core').check()
+    apply = page.get_by_role('button', name='Apply library changes', exact=True)
+    apply.click()
+    expect(apply).to_be_enabled()
+    expect(page.locator('#settings-libs')).to_contain_text('Waiting to install')
+    page.evaluate("location.hash = '#chat'")
+    expect(page.locator('chat-view')).to_be_visible()
+    job.update(state='installing', note='Downloading training tools')
+    page.evaluate("location.hash = '#settings'")
+    page.get_by_role('button', name='Libraries & simulators', exact=True).click()
+    expect(page.locator('#lib-core')).not_to_be_checked()
+    installed = True
+    job.update(state='done', result={'changed': {'core': {'ok': True}}})
+    expect(page.locator('#lib-core')).to_be_checked(timeout=5000)
+    expect(page.locator('#settings-libs')).to_contain_text('Library changes applied')
+    assert not errors

@@ -188,6 +188,8 @@
         const where = await api("/ui/chat");
         if (M.refused(where)) return;
         if (!where.ok) throw new Error(where.error || "Could not read the serving models.");
+        this.runtimeReady = where.runtime_ready !== false;
+        this.runtimeError = where.runtime_error || "The agent runtime is not installed.";
         const available = where.models || [];
         this.chatModels = available;
         const selected = this.picker.value;
@@ -227,7 +229,8 @@
     }
 
     updateReadiness() {
-      this.send.disabled = !this.picker.value || !!this.picker.selectedOptions[0]?.disabled;
+      this.send.disabled = this.runtimeReady === false || !this.picker.value || !!this.picker.selectedOptions[0]?.disabled;
+      if (this.runtimeReady === false && !this.coding.active) this.showError(this.runtimeError);
       this.coding.readiness();
     }
 
@@ -336,8 +339,8 @@
           }
           this.picker.value = one.model;
         }
-        this.updateReadiness();
         this.note.replaceChildren();
+        this.updateReadiness();
         this.coding.reattach();
       } catch (error) { this.showError(error.message); }
     }
@@ -346,6 +349,7 @@
       const text = this.input.value.trim();
       if (!this.outputTokens.checkValidity()) { this.showError("Maximum output tokens must be a positive integer."); return; }
       if (!this.temperature.checkValidity()) { this.showError("Temperature must be between 0 and 2."); return; }
+      if (this.runtimeReady === false && !this.coding.active) { this.showError(this.runtimeError); return; }
       if (!text || !this.picker.value || this.picker.selectedOptions[0]?.disabled || this.request) return;
       this.request = new AbortController();
       this.list.setAttribute("aria-busy", "true");

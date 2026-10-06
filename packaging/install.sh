@@ -8,7 +8,7 @@
 #
 #   (default)   the app: the release zip for this machine, a window, updates from releases
 #   --headless  a venv under ~/.ml-stack, console scripts on PATH, no window
-#   --dev       a git checkout with an editable install, following main
+#   --dev       a git checkout with an immutable install, following 0.2dev
 #   --system    --headless, per machine: starts at boot, no login, as the user who ran it
 #   --uninstall takes it off, and leaves the model cache alone
 #
@@ -31,7 +31,7 @@ REPO="${ML_STACK_REPO:-adammikulis/ml-stack}"
 API="https://api.github.com/repos/$REPO/releases/latest"
 GIT_URL="https://github.com/$REPO"
 PYTHON="3.13"
-EXTRAS="store,hub,web,plot,graph,coordinator"
+EXTRAS="store,hub,web,plot,graph,coordinator,agents"
 MODE="${ML_STACK_MODE:-app}"
 MODELS="${ML_STACK_MODELS:-}"
 REF="${ML_STACK_REF:-}"
@@ -151,9 +151,8 @@ install_app() {
     xattr -dr com.apple.quarantine "$DEST/ml-stack.app" 2>/dev/null || true
     say ""
     say "Installed to $DEST/ml-stack.app"
-    say "Open it, and type the same passphrase you used on your other machines."
-    say "It downloads gemma-4-E2B on first run (2.6G, about 1.5s a question) and offers"
-    say "the bigger models this machine has room for."
+    say "Open it to name this device and choose Dev or Prod."
+    say "Setup downloads continue in the background while you finish onboarding."
     open "$DEST/ml-stack.app" 2>/dev/null || true
   else
     DEST="${ML_STACK_DEST:-$HOME/.local/bin}"
@@ -258,25 +257,29 @@ link_scripts() {
   esac
 }
 
-# -- dev: a checkout that follows main ----------------------------------------
+# -- dev: a checkout that follows development ----------------------------------------
 install_dev() {
   step "developer"
   have git || die "this needs git"
+  TRACK="${ML_STACK_TRACK:-0.2dev}"
   SRC="${ML_STACK_SRC:-$HOME/.local/share/ml-stack/src}"
   if [ -d "$SRC/.git" ]; then
+    [ "$(git -C "$SRC" branch --show-current)" = "$TRACK" ] \
+      || die "$SRC must be on $TRACK; choose a separate ML_STACK_SRC for this install"
     say "updating $SRC"
-    git -C "$SRC" pull --ff-only || say "  it has commits main does not; left alone"
+    git -C "$SRC" pull --ff-only || die "could not fast-forward $SRC"
   else
     say "cloning into $SRC"
     mkdir -p "$(dirname "$SRC")"
-    git clone "$GIT_URL" "$SRC" || die "could not clone $GIT_URL"
+    git clone --branch "$TRACK" "$GIT_URL" "$SRC" || die "could not clone $GIT_URL"
   fi
   make_venv "$(venv_root)"
-  say "editable install of $SRC"
-  (cd "$SRC" && "$BIN/pip" install --quiet -e ".[$EXTRAS]") \
+  say "immutable install of $SRC"
+  (cd "$SRC" && "$BIN/pip" install --quiet ".[$EXTRAS]") \
     || die "pip could not install $SRC"
+  "$BIN/python" -c 'import sys; from pathlib import Path; from ml_stack.fleet.runtime_wheel import install_checkout; code, note = install_checkout(Path(sys.argv[1]), timeout=1800); print(note); raise SystemExit(code)' "$SRC" \
+    || die "could not install the committed runtime from $SRC"
   link_scripts "$BIN"
-  TRACK="${ML_STACK_TRACK:-main}"
 }
 
 # -- per machine: at boot, as the user who installed it -----------------------
@@ -319,7 +322,7 @@ choose_model() {
   WANT="$MODELS"
   if [ -z "$WANT" ]; then
     case "$MODE" in
-      app) WANT=default ;;   # gemma-4-E2B: the smallest that still answers
+      app) WANT=default ;;   # the recommended model for this machine
       *)   WANT=auto ;;      # headless and system are power users: the best that fits
     esac
   fi

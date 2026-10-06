@@ -297,11 +297,16 @@ settings-view [aria-busy="true"] { opacity:.8; }
         try {
           const result = await api("/ui/libraries", {method:"POST", body:JSON.stringify({install, remove})});
           if (!result.ok) throw Error(result.error || "Could not change installed libraries.");
-          const failed = Object.entries(result.changed || {}).filter(([, value]) => !value.ok);
-          if (failed.length) throw Error(failed.map(([name, value]) => `${name}: ${value.error}`).join("; "));
-          await this.drawLibraries();
-          const success = el("div", {class:"ok", role:"status"}, "Library changes applied. Installed simulators are ready to reopen.");
-          libs.append(success);
+          const watch = async () => {
+            const changed = await M.followSetupJob(result.job, job => {
+              out.replaceChildren(el("div", {class:"hint", role:"status"}, `${job.state}: ${job.note}`));
+            });
+            const failed = Object.entries(changed.changed || {}).filter(([, value]) => !value.ok);
+            if (failed.length) throw Error(failed.map(([name, value]) => `${name}: ${value.error}`).join("; "));
+            await this.drawLibraries();
+            libs.append(el("div", {class:"ok", role:"status"}, "Library changes applied. Installed simulators are ready to reopen."));
+          };
+          watch().catch(error => out.replaceChildren(el("div", {class:"err", role:"status"}, error.message)));
         } catch (error) { out.replaceChildren(el("div", {class:"err"}, error.message)); }
         finally {
           apply.disabled = false; apply.textContent = "Apply library changes";
