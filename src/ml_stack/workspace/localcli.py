@@ -95,8 +95,6 @@ def _start(args: argparse.Namespace, ws: Workspace) -> int:
             f'effort {runner.effort}, ceiling {runner.max_effort}; '
             f'{caps.rounds} turns, {caps.calls} tool calls, {caps.steps} model calls, {caps.seconds:g}s wall time')
         return 0 if args.no_wait else _wait(ws, got.name, READY_WAIT_S)
-    if not ws.registry.ids():
-        tokens.store(ws.base, tokens.OWNER_FILE, ws.init("owner"))
     selected_profile = lp.profile(args.profile)
     selected_context = lp.parse_ctx(args.ctx) or (131072 if selected_profile.name == "coding" else selected_profile.ctx)
     project = args.project or ("." if selected_profile.name == "coding" else "")
@@ -112,8 +110,8 @@ def _start(args: argparse.Namespace, ws: Workspace) -> int:
     try:
         got = ls.start(ws, ls.Ask(args.model, args.name, selected_role, args.effort, args.max_effort,
                                   args.profile, selected_context, project, la.check_orders(args.orders_from.split(",")), args.harness,
-                                  args.repo), pick=pick,
-                       person_token=tokens.read_file(tokens.directory(ws.base) / tokens.OWNER_FILE))
+                                  repo=args.repo), pick=pick,
+                       parent_token=ls.launch_parent(ws, project))
     except ls.Unavailable as err:
         warn(str(err))
         return 1

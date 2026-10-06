@@ -111,7 +111,7 @@ def _write(ws: Workspace, route: str, body: bytes) -> tuple[int, Any]:
                                       profile, context,
                                       data.get("project", ""), harness=data.get("harness") or "claude",
                                       repo=data.get("repo", "")),
-                           person_token=tokens.read_file(tokens.directory(ws.base) / tokens.OWNER_FILE))
+                           parent_token=ls.launch_parent(ws, data.get('project', '')))
         except ls.Unavailable as err:
             return 409, {"error": plain.line(err.problem, 300), "hint": plain.line(err.hint, 200)}
         return 200, {"name": got.name, "pid": got.pid, "model": plain.line(got.model, 80),

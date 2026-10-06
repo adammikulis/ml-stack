@@ -4,6 +4,7 @@ command checks for a person at a terminal, the browser route for the person's se
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import os
 import signal
 import time
@@ -18,6 +19,7 @@ from ml_stack.serve.process import pid_exists, started_at
 from ml_stack.workspace import (
     backlog,
     device_agent,
+    guide,
     issuepump,
     localagent as la,
     localeffort as le,
@@ -107,7 +109,19 @@ def start(ws: Workspace, ask: Ask, *, pick=None, spawn=None, person_token="", pa
     result = _start(ws, ask, pick=pick, spawn=spawn, parent_token=parent_token)
     if person_token:
         device_agent.bind_worker(ws, person_token, result.name)
+    elif parent_token:
+        device_agent.bind_owned_worker(ws, parent_token, result.name)
     return result
+
+
+def launch_parent(ws: Workspace, project: str) -> str:
+    """Return the authenticated local launcher agent's token for this project."""
+    found = projects.describe(project)
+    if not found:
+        raise ValueError('local worker launch requires a project')
+    name = 'local-app-launcher-' + hashlib.sha256(found['key'].encode('utf-8')).hexdigest()[:16]
+    connected = guide.agent_connect(ws, name, found)
+    return tokens.load(ws.base, connected['id'])
 
 
 def _worker_identity(ws, have, name, project, parent_token=""):
@@ -155,14 +169,12 @@ def _start(ws: Workspace, ask: Ask, *, pick: localmodel.Pick | None = None,
         raise Unavailable(problem, hint)
     name = la.check_name(ask.name or "local-agent")
     with held(la.folder(ws) / "start.lock"):
-        if not ws.registry.ids():
-            tokens.store(ws.base, tokens.OWNER_FILE, ws.init("owner"))
         have = la.load(ws, name)
         if have is not None and la.alive(have):
             return _running(have, chosen)
         if ws.registry.role_of(name) and have is None:
             raise ValueError(f"{name} is another agent's name; pass a different --name")
-        identity = _worker_identity(ws, have, name, projects.describe(folder_) if folder_ else {})
+        identity = _worker_identity(ws, have, name, projects.describe(folder_) if folder_ else {}, parent_token)
         _record_model(ws, identity, chosen)
         la.stop_file(ws, name).unlink(missing_ok=True)
         agent = la.Agent(name=name, identity=identity, model=chosen.ref, model_name=chosen.name,
