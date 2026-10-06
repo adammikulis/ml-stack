@@ -122,8 +122,9 @@ class Joining:
             group = disc.require_name(body.get("group"))
         except DiscoveryError as exc:
             raise Refusal(400, str(exc)) from None
-        member = next((row for row in self.groups() if row.group == group), None)
-        if member is None or member.mode != "dev":
+        groups = self.groups()
+        member = next((row for row in groups if row.group == group), None)
+        if not groups or groups[0].mode != "dev" or member is None or member.mode != "dev":
             raise Refusal(403, "this cluster requires explicit admission")
         if not transport_tls or self.fingerprint() == PLAIN:
             raise Refusal(403, "automatic cluster admission requires TLS")
@@ -367,30 +368,32 @@ def create_by_passphrase(passphrase: str, group: str,
 
 
 def cluster_action(mode: str, passphrase: str, group: str,
-                   path: Path | str | None = None, *, port: int | None = None) -> Membership:
+                   path: Path | str | None = None, *, port: int | None = None,
+                   cluster_mode: str | None = None) -> Membership:
     """Join an existing cluster or create a new one."""
     if mode == "join":
-        return join_existing(passphrase, group, path, port=port)
+        return join_existing(passphrase, group, path, port=port, mode=cluster_mode)
     if mode == "create":
-        return create_by_passphrase(passphrase, group, path, port=port)
+        return create_by_passphrase(passphrase, group, path, port=port, mode=cluster_mode or "prod")
     raise DiscoveryError("Choose Join existing cluster or Create new cluster.")
 
 
 def join_by_passphrase(passphrase: str, group: str,
                        path: Path | str | None = None, *, timeout_s: float = 1.5,
-                       port: int | None = None, mode: str = "prod") -> Membership:
+                       port: int | None = None, mode: str | None = None) -> Membership:
     """Join a named cluster or create it when no daemon answers."""
     group = disc.require_name(group)
     secret = join_secret(disc.check_length(passphrase), group)
     joiners = find_joiners(group, timeout_s=timeout_s, port=port)
     if not joiners:
         held = next((m for m in disc.memberships(path) if m.group == group), None)
-        return held or disc.mint_cluster(group, path, join=secret, mode=mode)
-    return _accept(joiners, group, secret, path)
+        return held or disc.mint_cluster(group, path, join=secret, mode=mode or "prod")
+    return _accept(joiners, group, secret, path, mode=mode)
 
 
 def join_existing(passphrase: str, group: str, path: Path | str | None = None, *,
-                  timeout_s: float = 1.5, port: int | None = None) -> Membership:
+                  timeout_s: float = 1.5, port: int | None = None,
+                  mode: str | None = None) -> Membership:
     """Join a live cluster without creating a replacement when it disappears."""
     group = disc.require_name(group)
     secret = join_secret(disc.check_length(passphrase), group)
@@ -398,15 +401,17 @@ def join_existing(passphrase: str, group: str, path: Path | str | None = None, *
     if not joiners:
         raise DiscoveryError(f"No machine in '{group}' answered on this network; "
                              "cluster is no longer available; refresh nearby clusters.")
-    return _accept(joiners, group, secret, path)
+    return _accept(joiners, group, secret, path, mode=mode)
 
 
 def _accept(joiners: list[Joiner], group: str, secret: str,
-            path: Path | str | None) -> Membership:
+            path: Path | str | None, *, mode: str | None = None) -> Membership:
     refused: list[Declined] = []
     for one in joiners:
         try:
             held = _shake(one, group, secret, 10.0)
+            if mode is not None and held.mode != mode:
+                raise Declined(403, "the cluster admission mode differs from the requested mode")
             return disc.adopt(Membership(group=held.group, key=held.key, join=secret, mode=held.mode), path)
         except Declined as why:
             refused.append(why)

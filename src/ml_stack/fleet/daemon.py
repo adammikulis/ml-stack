@@ -121,6 +121,8 @@ def serve_forever(root: Path | str | None = None,
     from . import automatic_clusters, cluster_modes
     selected = memberships(cluster_key_path)
     effective_mode = cluster_modes.validate(cluster_mode or (selected[0].mode if selected else "dev"))
+    if selected and selected[0].mode != effective_mode:
+        raise DiscoveryError("select a cluster with the requested mode before starting this daemon")
     if announce:
         selected_member = automatic_clusters.ensure(cluster_key_path, mode=effective_mode)
         effective_mode = selected_member.mode
@@ -309,6 +311,8 @@ def serve_forever(root: Path | str | None = None,
                 advertisers.pop(group).stop()
 
         for group, member in joined.items():
+            if group in advertisers and advertisers[group].key != member.key:
+                advertisers.pop(group).stop()
             if group in advertisers:
                 advertisers[group].mode = member.mode
                 advertisers[group].joinable = member.mode == "dev" or bool(member.join)

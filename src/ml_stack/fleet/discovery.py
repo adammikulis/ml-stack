@@ -214,7 +214,7 @@ def _adopt_single(path: Path | str | None = None) -> list[Membership]:
         group = group_path(path).read_text().strip()
     except OSError:
         group = ""
-    rows = [Membership(group=group or DEFAULT_CLUSTER, key=key.encode())]
+    rows = [Membership(group=group or DEFAULT_CLUSTER, key=key.encode(), mode="prod")]
     with contextlib.suppress(OSError):
         _write_memberships(rows, path)
     return rows
