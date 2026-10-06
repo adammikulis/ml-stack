@@ -10,7 +10,7 @@ from ml_stack.graph.store import GraphStore
 from ml_stack.hub.peerbook import PeerBook
 from ml_stack.fleet import tls
 from ml_stack.fleet.onboard.requests import Devices
-from ml_stack.fleet.discovery import load_cluster_key
+from ml_stack.fleet.discovery import DiscoveryError, load_cluster_key
 from ml_stack.fleet.remote import Peer
 from ml_stack.workspace import coordinator_config, tokens
 from ml_stack.workspace.chain import held
@@ -88,6 +88,11 @@ def _device_peer(config):
 
 
 def client(base):
+    with held(base / 'coordinator-selection.lock'):
+        return _client(base)
+
+
+def _client(base):
     config = coordinator_config.load(base)
     if not config and load_cluster_key() is not None:
         candidates = [(peer, info) for peer, info in discover()]
@@ -103,7 +108,24 @@ def client(base):
         config = coordinator_config.save(base, selected)
     if config.get('mode') != 'remote':
         return None
-    return Remote(config, _device_peer(config))
+    try:
+        peer = _device_peer(config)
+    except Denied:
+        try:
+            found = discover()
+        except (DiscoveryError, http.ServerError, OSError) as error:
+            raise Denied('the selected coordinator device proof is unavailable') from error
+        candidates = [(peer, info) for peer, info in found
+                      if info.get('workspace') == config['workspace']
+                      and peer.base_url.rstrip('/') == config['endpoint'].rstrip('/')
+                      and (not config.get('name') or peer.name == config['name'])]
+        if len(candidates) != 1:
+            raise Denied('the selected coordinator has no unique current enrolled device proof')
+        advertised, _info = candidates[0]
+        selected = {**config, 'cert': advertised.beacon.cert if advertised.beacon else ''}
+        peer = _device_peer(selected)
+        config = coordinator_config.save(base, selected)
+    return Remote(config, peer)
 
 
 def discover():

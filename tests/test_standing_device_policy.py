@@ -1,11 +1,16 @@
 """Installed device trust selects existing workspace authority without person credentials."""
 
 import pytest
+import base64
+from types import SimpleNamespace
 from workspace_kit import Kit
 
 from ml_stack import home
 from ml_stack.fleet import daemon, tls
 from ml_stack.fleet.onboard import cli as onboard
+from ml_stack.fleet.onboard.requests import Device, Devices
+from ml_stack.hub.peerbook import PeerBook
+from ml_stack.fleet.remote import Peer
 from ml_stack.workspace import coordinator_client, coordinator_config, coordinator_routes, device_agent, tokens
 from ml_stack.workspace.identity import AGENT, Denied
 
@@ -92,3 +97,39 @@ def test_production_daemon_reuses_pairing_certificate_and_isolated_roots_stay_se
     assert serving.beacon == paired.beacon
     isolated = tmp_path / 'isolated-daemon'
     assert daemon.identity_directory(isolated) == isolated / 'tls'
+
+
+@pytest.mark.parametrize('mismatch', ['', 'workspace', 'endpoint', 'name', 'revoked', 'certificate', 'offline'])
+def test_saved_daemon_certificate_recovers_only_same_active_paired_authority(tmp_path, monkeypatch, mismatch):
+    monkeypatch.setenv('ML_STACK_HOME', str(tmp_path / 'installation'))
+    base = tmp_path / 'workspace'
+    base.mkdir()
+    paired = onboard._identity(home.state('onboard'))
+    old = tls.identity(tmp_path / 'old-daemon', 'daemon')
+    device = Device('d' * 64, 'coordinator', 'host', '127.0.0.1', 1,
+                    mine=True, secret=base64.urlsafe_b64encode(b'd' * 32).decode(),
+                    status='revoked' if mismatch == 'revoked' else 'active')
+    Devices(home.state('onboard', 'devices.json'))._write([device])
+    PeerBook(home.state('onboard', 'peers.json')).add({
+        'name': 'coordinator', 'url': 'https://127.0.0.1:8786', 'source': 'pairing',
+        'fingerprint': device.fingerprint, 'certificate': paired.beacon,
+        'device_secret': device.secret})
+    config = coordinator_config.save(base, {'mode': 'remote', 'workspace': 'workspace:existing',
+                                            'name': 'coordinator', 'endpoint': 'https://127.0.0.1:8786',
+                                            'cert': old.beacon})
+    beacon = SimpleNamespace(name='other' if mismatch == 'name' else 'coordinator',
+                             cert=old.beacon if mismatch == 'certificate' else paired.beacon)
+    advertised = Peer('https://127.0.0.1:8787' if mismatch == 'endpoint' else config['endpoint'],
+                      'cluster-proof', beacon=beacon)
+    found = [(advertised, {
+        'workspace': 'workspace:other' if mismatch == 'workspace' else config['workspace']})]
+    monkeypatch.setattr(coordinator_client, 'discover', lambda: [] if mismatch == 'offline' else found)
+    if mismatch:
+        with pytest.raises(Denied):
+            coordinator_client.client(base)
+        assert coordinator_config.load(base) == config
+    else:
+        remote = coordinator_client.client(base)
+        assert remote.config['cert'] == paired.beacon
+        assert remote.config['workspace'] == config['workspace']
+        assert remote.config['endpoint'] == config['endpoint']
