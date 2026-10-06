@@ -338,7 +338,9 @@ git worktree prune
 Agents may fetch and fast-forward the development branch from its upstream, and may push the
 development branch after review, scoped gates, and integration pass. Keep local and upstream
 development branches synchronized as part of completing the task; report the resulting commit
-and upstream state. Never push with force, delete a remote ref, push tags, or push `main`.
+and upstream state. Fetch before each integration and publication, and keep reviewed batches
+synchronized promptly while other devices are landing work. Reconcile upstream divergence in
+an isolated integration worktree. Equivalent recovered patches do not require repeated tests. Never push with force, delete a remote ref, push tags, or push `main`.
 Promotion to `main`, tags, and releases remain the owner's actions. Whoever merges, prunes: a
 subagent that lands its own branch removes its own worktree and branch, and when the main session
 merges it does so in the same step. A merge is not finished until `git worktree list` shows only
