@@ -204,12 +204,17 @@ def started_file(root: Path | str) -> Path:
     return Path(root).expanduser() / STARTED_FILE
 
 
-def start_daemon(port: int, root: Path | str, name: str = "") -> int:
+def start_daemon(port: int, root: Path | str, name: str = "", *,
+                 cluster_key_path: Path | str | None = None, mode: str | None = None) -> int:
     """Start ``ml-stack-traind`` owned by no terminal, its log under ``root``; the pid,
     which is also written to `started_file` for ``leave``."""
     root = Path(root).expanduser()
     root.mkdir(parents=True, exist_ok=True)
     argv = ["--port", str(port), "--root", str(root)] + (["--name", name] if name else [])
+    if cluster_key_path is not None:
+        argv.extend(["--cluster-key", str(home.expand(cluster_key_path).resolve())])
+    if mode is not None:
+        argv.extend(["--mode", cluster_modes.validate(mode)])
     ran = detach("ml_stack.cli.daemon", argv, log=root / "traind.log")
     write_json(started_file(root), versioned(
         {"pid": ran.pid, "argv": list(ran.command), "log": str(ran.log),
@@ -440,7 +445,7 @@ def join_machine(*, name: str = "", passphrase: str = "", group: str = "",
                  cluster_key_path: Path | str | None = None,
                  timeout_s: float = 2.0, wait_s: float = 20.0,
                  say: Callable[[str], None] = say,
-                 start: Callable[[int, Path, str], int] = start_daemon,
+                 start: Callable[[int, Path, str], int] | None = None,
                  enrol: Callable[[str, str], None] | None = None,
                  ensure: Callable[[Path], Path] | None = None,
                  persist_with: Callable[..., Any] | None = None,
@@ -490,7 +495,7 @@ def join_machine(*, name: str = "", passphrase: str = "", group: str = "",
                 if wait_for_health(port, seconds=wait_s) is not None:
                     running = already_running(port)
         if running is None:
-            joined.daemon_pid = start(port, root, name)
+            joined.daemon_pid = _start_selected(start, joined, cluster_key_path)
             joined.started = True
             say(f"started the daemon (pid {joined.daemon_pid}); waiting for it to answer")
             if wait_for_health(port, seconds=wait_s) is None:
@@ -507,6 +512,15 @@ def join_machine(*, name: str = "", passphrase: str = "", group: str = "",
                          port=discovery_port, self_machine=joined.machine, finder=finder)
     say(table(joined.peers))
     return joined
+
+
+def _start_selected(start: Callable[[int, Path, str], int] | None, joined: Joined,
+                    cluster_key_path: Path | str | None) -> int:
+    """Start the selected profile or call the injected launcher."""
+    if start is not None:
+        return start(joined.port, joined.root, joined.name)
+    return start_daemon(joined.port, joined.root, joined.name,
+                        cluster_key_path=cluster_key_path, mode=joined.mode)
 
 
 def _running_notice(joined: Joined, running: dict, say: Callable[[str], None]) -> None:

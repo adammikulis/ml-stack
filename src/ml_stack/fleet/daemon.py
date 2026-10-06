@@ -26,7 +26,7 @@ from ml_stack.files import write_text
 from ml_stack.fleet.onboard.requests import Devices
 from ml_stack.hub import default_roots
 from ml_stack.log import say, warn
-from ml_stack.platform import on_quit
+from ml_stack.platform import on_quit, private_file
 from ml_stack.serve import canaries, guarded
 from ml_stack.serve.leases import lease_file
 from ml_stack.speech import service as speech
@@ -83,20 +83,30 @@ def bind_address(host: str | None, *, lan: bool, joined: bool) -> str:
     return ALL_INTERFACES if lan or joined else LOOPBACK
 
 
-def load_or_create_token(root: Path, cluster_key: bytes | None = None) -> str:
+def load_or_create_token(root: Path, cluster_key: bytes | None = None, *,
+                         profile: Path | str | None = None) -> str:
     """The secret requests are signed with: derived from the cluster key, or random and local.
 
-    Kept in ``token`` beside the daemon's files, mode 0600."""
+    Kept in an owner-only machine token file for the selected profile."""
     p = root / "token"
+    if profile is not None:
+        identity = str(home.expand(profile).resolve()).encode()
+        p = root / "machine-tokens" / hashlib.sha256(identity).hexdigest()
+        p.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if p.parent.is_symlink() or p.is_symlink():
+            raise ValueError("machine token profile paths cannot be symbolic links")
+        p.parent.chmod(0o700)
     if cluster_key is not None:
         tok = derive_token(cluster_key)
     elif p.exists() and p.read_text().strip().startswith(macauth.PREFIX):
+        private_file(p)
         return p.read_text().strip()
     else:
         tok = macauth.PREFIX + secrets.token_urlsafe(32)
     root.mkdir(parents=True, exist_ok=True)
     if not p.exists() or p.read_text().strip() != tok:
         write_text(p, tok)
+    private_file(p)
     return tok
 
 
@@ -154,7 +164,7 @@ def serve_forever(root: Path | str | None = None,
         effective_mode = selected_member.mode
     say(cluster_modes.notice(effective_mode))
     key = load_cluster_key(cluster_key_path)
-    token = load_or_create_token(root, key)
+    token = load_or_create_token(root, key, profile=cluster_key_path or os.environ.get("ML_STACK_CLUSTER_KEY"))
     live_token[0] = token
     settings_path = root / "settings.json"
     settings = Settings.load(settings_path)
@@ -369,7 +379,8 @@ def serve_forever(root: Path | str | None = None,
             if first is not None:
                 key = first.key
                 fetcher.key = first.key
-                live_token[0] = load_or_create_token(root, first.key)
+                live_token[0] = load_or_create_token(
+                    root, first.key, profile=cluster_key_path or os.environ.get("ML_STACK_CLUSTER_KEY"))
                 advertiser = advertisers.get(first.group)
 
     def rename(called: str) -> str:
