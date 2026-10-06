@@ -1,12 +1,11 @@
 """Metadata-only project registration and canonical authority checks."""
 
-import sys
 from types import SimpleNamespace
 
 import pytest
 
 from ml_stack.files import write_json
-from ml_stack.fleet import project_source as source
+from ml_stack.fleet import projects, project_source as source
 from ml_stack.fleet.projects import ProjectRegistry, answer, identity
 from ml_stack.net import git
 
@@ -91,7 +90,7 @@ def test_catalogue_uses_authenticated_visibility_predicate(repository, tmp_path,
         checked.append((conn, opening, path))
         return visible
 
-    monkeypatch.setitem(sys.modules, "ml_stack.fleet.project_enrollment", SimpleNamespace(visible=predicate))
+    monkeypatch.setattr(projects.project_enrollment, "visible", predicate)
     handler = SimpleNamespace(connection=connection, _sealing=lambda: sealing,
                               _send=lambda code, payload: responses.append((code, payload)))
     assert answer(handler, registry, SimpleNamespace(path="/workspace/v1/projects"),

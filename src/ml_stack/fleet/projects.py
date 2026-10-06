@@ -16,7 +16,7 @@ from ml_stack.home import DEFAULT_NAME
 from ml_stack.net import git
 from ml_stack.redact import secrets
 
-from . import project_source as source, tls
+from . import project_enrollment, project_source as source, tls
 from .discovery import primary_ip
 from .wsl_network import ENV as BRIDGE_ENV
 
@@ -246,8 +246,7 @@ def answer(handler, registry: ProjectRegistry | None, parsed, *, cluster_key_pat
         if parsed.path == prefix:
             show_boards = False
             if cluster_key_path is not None:
-                from .project_enrollment import visible
-                show_boards = visible(handler.connection, handler._sealing(), cluster_key_path)
+                show_boards = project_enrollment.visible(handler.connection, handler._sealing(), cluster_key_path)
             handler._send(200, registry.catalogue(include_boards=show_boards))
         elif pieces == ["bootstrap"]:
             handler._send(200, {}, raw=bootstrap(), content_type="text/x-python")
