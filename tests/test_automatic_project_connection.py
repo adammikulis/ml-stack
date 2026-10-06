@@ -6,8 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from ml_stack import home, sealing
-from ml_stack.fleet import project_client
-from ml_stack.fleet import remote as fleet_remote
+from ml_stack.fleet import project_client, remote as fleet_remote
 from ml_stack.http import Sealed
 from ml_stack.workspace import automatic_connection as automatic
 from ml_stack.workspace.identity import Denied
