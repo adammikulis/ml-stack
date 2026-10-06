@@ -7,14 +7,14 @@ import stat
 import sys
 from pathlib import Path
 
-from ml_stack import worktreerules
+from ml_stack import harness_remote, worktreerules
 from ml_stack.guard.destructive import classify
 from ml_stack.guard.shellscan import segments
 from ml_stack.harnesspolicy import CATALOG, SHELL_TOOLS, _shell_line
 from ml_stack.interventions import Call
 from ml_stack.net import git
 from ml_stack.serve.process import started_at
-from ml_stack.workspace import claim_handoff, tokens
+from ml_stack.workspace import claim_handoff, tokens, worktree_lifecycle
 from ml_stack.workspace.claims import normal
 from ml_stack.workspace.identity import Denied
 from ml_stack.workspace.project import describe
@@ -101,6 +101,9 @@ def conflict(name, args, cwd, actor, roots=()):
     required = resources(name, args, cwd)
     if not required:
         return ''
+    canonical = harness_remote.context(actor, cwd, roots or [cwd])
+    if canonical:
+        return harness_remote.conflict(*canonical, required)
     ws = Workspace()
     if not ws.registry.role_of(actor):
         return ''
@@ -126,6 +129,19 @@ def reserve(name, args, cwd, actor, roots):
     for kind, key in required:
         if kind in ('file', 'worktree') and not any(Path(key).is_relative_to(root) for root in approved):
             raise Denied('mutation target is outside the launcher-approved project')
+    try:
+        commit = git.head(Path(cwd))
+    except git.GitFailed:
+        commit = ''
+    canonical = harness_remote.context(actor, cwd, roots)
+    if canonical:
+        harness_remote.inspect_shell(name, args)
+        harness_remote.reserve(*canonical, required, {'note': 'canonical native mutation', 'commit': commit,
+                               'owner_pid': os.getppid(), 'owner_started': started_at(os.getppid()),
+                               'interpreter': str(Path(sys.executable).resolve()),
+                               'environment': str(Path(sys.prefix).resolve())},
+                               branch_only=harness_remote.staging_only(name, args))
+        return
     ws = Workspace()
     who = ws.auth(tokens.load(ws.base, actor))
     if who.id != actor:
@@ -135,13 +151,15 @@ def reserve(name, args, cwd, actor, roots):
     if not grant or any(describe(str(root)).get('key') != grant.get('key') for root in approved):
         raise Denied('mutation ownership requires an existing person-set project grant')
     scope = claim_handoff.acquire(ws, who, approved)
-    try:
-        commit = git.head(Path(cwd))
-    except git.GitFailed:
-        commit = ''
     ws.claims.reserve(who, required, {'note': 'native harness mutation', 'commit': commit,
                                      'owner_pid': os.getppid(), 'owner_started': started_at(os.getppid()),
                                      'interpreter': str(Path(sys.executable).resolve()),
                                      'environment': str(Path(sys.prefix).resolve()),
                                      **({'assignment': scope['id'], 'task': scope['task'],
                                          'project': scope['project']} if scope else {})})
+
+    if scope is None:
+        for kind, key in required:
+            if kind in ('file', 'worktree'):
+                target = Path(key)
+                worktree_lifecycle.remember(ws.base, who.id, '', str(target.parent if target.is_file() else target))

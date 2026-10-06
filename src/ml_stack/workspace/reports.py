@@ -2,6 +2,7 @@
 
 from contextlib import nullcontext
 
+from ml_stack.workspace import worktree_lifecycle
 from ml_stack.workspace.chain import held
 from ml_stack.workspace.identity import HUMAN
 from ml_stack.workspace.screen import injection_markers
@@ -31,6 +32,8 @@ def emit(ws, who, row: dict, *, announce: bool, ttl_s: float):
     with held(ws.base / 'reports.lock') if report else nullcontext():
         authenticated = ws._message_sender(who)
         ws._message_rights(who, row, announce)
+        if authenticated and who.role != HUMAN and row["type"] == "done":
+            worktree_lifecycle.require_clean(ws.base, who.id, row["label"])
         row['model'], row['model_state'] = ('', '') if who.role == HUMAN else ws.registry.model_of(who.id, row['label'])
         if report and authenticated and not injection_markers(row['subject'] + '\n' + row['body']):
             row['report_ttl_s'] = ttl_s

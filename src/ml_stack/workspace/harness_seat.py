@@ -7,7 +7,7 @@ from pathlib import Path
 
 from ml_stack import harness_remote
 from ml_stack.client.health import reported_models
-from ml_stack.workspace import onboard, tokens
+from ml_stack.workspace import onboard, tokens, worktree_lifecycle
 from ml_stack.workspace.identity import AGENT, Denied, Identity
 from ml_stack.workspace.remote import RemoteWorkspace
 from ml_stack.workspace.service import Workspace
@@ -57,6 +57,19 @@ class Seat:
         except (Denied, ValueError, OSError, HTTPException):
             return False
         return True
+
+    def pending_worktrees(self) -> list[dict]:
+        """Return this session identity's unfinished coding scopes."""
+        return worktree_lifecycle.pending(self.base, self.parent or self.name) if self.base else []
+
+    def require_clean(self) -> None:
+        """Refuse a successful session exit with unfinished attributed checkouts."""
+        if self.base:
+            try:
+                worktree_lifecycle.require_clean(self.base, self.parent or self.name,
+                                                self.name if self.parent else '')
+            except Denied as error:
+                raise ValueError(str(error)) from error
 
     def revoke(self) -> bool:
         """Stop the token working and delete its file; False when nothing was minted."""

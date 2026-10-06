@@ -9,7 +9,14 @@ from pathlib import Path
 from typing import Any, TypedDict, Unpack
 
 from ml_stack.sentinel import human
-from ml_stack.workspace import agent_invites, limits as limits_mod, reports, tokens, wake
+from ml_stack.workspace import (
+    agent_invites,
+    limits as limits_mod,
+    reports,
+    tokens,
+    wake,
+    worktree_lifecycle,
+)
 from ml_stack.workspace.boardapi import BoardApi, Follow, Held
 from ml_stack.workspace.boards import ANNOUNCE, ANNOUNCE_KINDS
 from ml_stack.workspace.bus import BROADCAST, TYPES, Bus
@@ -80,6 +87,7 @@ class ClaimOptions(TypedDict, total=False):
     ttl_s: float
     pid: int
     note: str
+    label: str
 
 
 def _only(given: dict[str, Any], allowed: type) -> dict[str, Any]:
@@ -699,6 +707,8 @@ class Workspace:
         except Conflict:
             self.audit("claim.conflict", who.id, kind=kind, key=key)
             raise
+        if kind == "worktree":
+            worktree_lifecycle.remember(self.base, who.id, str(given.get("label", "")), made["key"])
         self.audit("claim", who.id, kind=kind, key=made["key"])
         return made
 

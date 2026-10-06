@@ -1,34 +1,4 @@
-"""Claude Code on a model this machine serves: one command, the settings it scored best with, nothing else.
-
-Adam: "make a very clean/easy way for me to launch claude code with llama-server."
-llama-server speaks the Messages API at ``/v1/messages`` -- streaming, tool use (with
-``--jinja``, which every lease here carries), thinking, ``count_tokens`` -- so Claude Code
-needs no bridge, only an environment that points every request at the served model and
-keeps every other call off the network. ``ml-stack-claude MODEL [-- claude args]`` leases
-the model in the settings it scored best with (a `Config` from its profile, the way the bench, the page and
-the ingest lease), builds that environment, runs ``claude`` inside the lease, and lets the
-server go when Claude Code exits.
-
-What the environment does (from Claude Code's own gateway and environment references):
-
-- ``ANTHROPIC_BASE_URL`` and ``ANTHROPIC_AUTH_TOKEN`` send every model call to the server as a
-  bearer request; ``ANTHROPIC_API_KEY`` is left unset so nothing reaches for a real key.
-- ``ANTHROPIC_MODEL``, ``ANTHROPIC_DEFAULT_MODEL``, the four ``ANTHROPIC_DEFAULT_*_MODEL``
-  tiers and ``CLAUDE_CODE_SUBAGENT_MODEL`` all name the served alias, so a subagent or a
-  "fast" side task goes to the same server rather than to a model that is not there.
-- ``CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC``, ``CLAUDE_CODE_DISABLE_1M_CONTEXT``,
-  ``CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING``, ``CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS``,
-  ``CLAUDE_CODE_SKIP_FAST_MODE_ORG_CHECK`` and ``DISABLE_TELEMETRY`` keep feature flags,
-  telemetry, the fast-mode check and betas a local server does not have off the wire; the
-  ``--settings`` handed to ``claude`` turns the web-fetch preflight (a call to the real API)
-  and always-on thinking off.
-
-Hooks and settings for the session: the ``--settings`` file is written to a directory under the
-state root (outside the working tree, read-only), carrying a PreToolUse hook that sends every tool
-call through ``ml_stack.harnesshook`` (classifier, role, Requests inbox) and a PostToolUse hook that
-passes on the workspace nudge. The model is served at 262,144 tokens on one slot with a q8_0 KV
-cache, and ``CLAUDE_CODE_MAX_CONTEXT_TOKENS`` and ``CLAUDE_CODE_AUTO_COMPACT_WINDOW`` say so.
-"""
+"""Launch Claude Code against a broker-managed local model with authenticated harness hooks."""
 
 from __future__ import annotations
 
@@ -43,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack import harnessing, serverkeys
+from ml_stack.client import reported_models
 from ml_stack.log import say
 from ml_stack.serve import provenance
 
@@ -83,7 +54,7 @@ def environment(base_url: str, alias: str, *, offline: bool = True, context: int
     return env
 
 
-def settings(pre: str = "", post: str = "", wait: float = 0.0) -> str:
+def settings(pre: str = "", post: str = "", wait: float = 0.0, stop: str = "") -> str:
     """The ``--settings`` JSON: no web-fetch preflight (a call to the real API), no always-on
     thinking, and the PreToolUse and PostToolUse command hooks when given."""
     out: dict[str, object] = {"skipWebFetchPreflight": True, "alwaysThinkingEnabled": False}
@@ -92,20 +63,17 @@ def settings(pre: str = "", post: str = "", wait: float = 0.0) -> str:
             "PreToolUse": [{"matcher": "*", "hooks": [
                 {"type": "command", "command": pre, "timeout": int(wait) + 30}]}],
             "PostToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": post, "timeout": 10}]}]}
+    if stop:
+        completion = [{"hooks": [{"type": "command", "command": stop, "timeout": 30}]}]
+        out.setdefault("hooks", {}).update(Stop=completion, SubagentStop=completion)
     return json.dumps(out, sort_keys=True)
 
 
 def alias_of(base_url: str, model: str) -> str:
     """The name the server serves the model under -- what every model variable must say."""
-    try:
-        from ml_stack.client import reported_models
-
-        names = reported_models(base_url)
-    except Exception:  # noqa: BLE001 - the file stem is a fine name when the server will not say
-        names = []
+    names = reported_models(base_url)
     for name in names:
         said = str(name)
-        # a server that answers with the file it loaded gives a path; a name is wanted
         if said and "/" not in said and not said.endswith(".gguf"):
             return said
     stem = Path(str(names[0]) if names else str(model)).name
@@ -171,7 +139,7 @@ def _run(args: argparse.Namespace, command: Sequence[str], served: tuple[str, st
     binary, *extra = command
     try:
         with harnessing.opened(args, "claude-code", served, say) as run:
-            path = run.files.write("settings.json", settings(run.pre, run.post, harnessing.WAIT_S))
+            path = run.files.write("settings.json", settings(run.pre, run.post, harnessing.WAIT_S, run.stop))
             brief = run.files.write("brief.md", run.brief)
             run.files.lock()
             env = environment(base_url, alias, offline=not args.online, context=window)
