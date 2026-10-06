@@ -159,7 +159,10 @@ cluster-view, chat-view, models-view, settings-view, fit-view, data-view, traini
 
   /** True when the route refused for want of a session, and the screen has been changed. */
   M.refused = function (r) {
-    if (r && r.status === 401) { M.signIn(); return true; }
+    if (r && r.status === 401) {
+      if (M.route !== "first-run") M.signIn();
+      return true;
+    }
     return false;
   };
 

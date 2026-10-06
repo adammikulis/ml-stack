@@ -123,3 +123,30 @@ def test_updater_waits_for_downloads_and_background_installations():
     assert runtime.background_busy() is True
     runtime.interface.setup_jobs.active = lambda: False
     assert runtime.background_busy() is False
+
+
+def test_completed_prod_cannot_open_initial_session_anonymously(device):
+    mint_cluster("private", device.keyfile, mode="prod")
+    device.ui.setup_finished()
+    status, body, _ = initial(device, "prod")
+    assert status == 400
+    assert "sign in" in body["error"]
+    assert len(device.ui.sessions) == 0
+
+
+def test_fresh_automatic_dev_can_choose_prod_explicitly(device):
+    automatic_clusters.ensure(device.keyfile, mode="dev")
+    assert initial(device, "prod")[0] == 200
+    assert not memberships(device.keyfile)
+    assert Settings.load(device.ui.settings_path).cluster_mode == "prod"
+
+
+def test_initial_never_drops_manual_dev_membership(device):
+    from dataclasses import replace
+
+    from ml_stack.fleet.discovery import adopt
+
+    member = mint_cluster("private", device.keyfile, mode="dev")
+    adopt(replace(member, selection="manual"), device.keyfile)
+    assert initial(device, "prod")[0] == 400
+    assert memberships(device.keyfile)[0].group == "private"

@@ -216,6 +216,23 @@ class TestFirstRun:
         assert memberships(daemon.keyfile)[0].selection == "automatic"
         assert not errors
 
+    def test_fresh_automatically_joined_device_can_choose_prod(self, daemon, open_page, monkeypatch):
+        from ml_stack.fleet import automatic_clusters
+        from ml_stack.fleet.discovery import memberships
+
+        monkeypatch.setattr(automatic_clusters, "offers", lambda port=None: [])
+        automatic_clusters.ensure(daemon.keyfile, mode="dev")
+        page, errors = open_page(daemon)
+        page.wait_for_selector("#device-mode")
+        page.select_option("#device-mode", "prod")
+        page.click("#first-run button:has-text('Continue')")
+        page.wait_for_selector("#first-run h1:has-text('Clusters')")
+        assert memberships(daemon.keyfile) == []
+        assert daemon.ui.settings.cluster_mode == "prod"
+        assert page.locator("#setup-cluster-passphrase").is_visible()
+        assert page.locator("#first-run button:has-text('Connect automatically')").count() == 0
+        assert not errors
+
     def test_dev_can_return_to_auto_after_leaving_all_clusters(self, daemon, open_page, monkeypatch):
         from ml_stack.fleet import automatic_clusters
         from ml_stack.fleet.discovery import memberships

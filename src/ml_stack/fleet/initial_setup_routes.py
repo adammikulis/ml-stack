@@ -57,12 +57,20 @@ class InitialSetupRoutes:
             raise ValueError("automatic must be a boolean")
         name = require_name(body.get("name", ""))
         mode = cluster_modes.validate(body.get("cluster_mode"))
-        selected = memberships(self.ui.cluster_key_path)
-        if selected and selected[0].mode != mode:
-            raise DiscoveryError("leave the current cluster before changing modes")
         if self.ui.settings is None or self.ui.settings_path is None:
             raise DiscoveryError("device settings are unavailable")
+        selected = memberships(self.ui.cluster_key_path)
+        if (selected and selected[0].mode == "prod" and self.ui.settings.setup_done
+                and not invite_routes.person_session(self)):
+            raise DiscoveryError("sign in before changing Production setup")
+        fresh_auto = (len(selected) == 1 and selected[0].mode == "dev"
+                      and selected[0].selection == "automatic" and not self.ui.settings.setup_done
+                      and not self.ui.settings.cluster_mode)
+        if selected and selected[0].mode != mode and not (fresh_auto and mode == "prod"):
+            raise DiscoveryError("leave the current cluster before changing modes")
         with self.ui.join_guard():
+            if selected and selected[0].mode != mode:
+                self.ui.leave(selected[0].group)
             if mode == "dev":
                 if body.get("automatic") is True:
                     automatic_clusters.select_automatic(self.ui.cluster_key_path, port=self.ui.discovery_port)
