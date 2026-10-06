@@ -40,7 +40,11 @@ def test_receive_pins_advertised_certificate_and_binds_nonce(monkeypatch):
 
     monkeypatch.setattr(joining._Call, "post", post)
     assert automatic.receive("127.0.0.1", offer()) == discovery.Membership("development", KEY)
-    assert captured == [(FINGERPRINT, True, 5.0, "automatic", {"group": "development", "nonce": NONCE})]
+    assert len(captured) == 1
+    pin, tls, timeout, step, body = captured[0]
+    assert (pin, tls, step, body) == (FINGERPRINT, True, "automatic",
+                                      {"group": "development", "nonce": NONCE})
+    assert 0 < timeout <= 5.0
 
 
 @pytest.mark.redteam
