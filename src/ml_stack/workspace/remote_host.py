@@ -112,7 +112,7 @@ class WorkspaceHost:
             if action != "board":
                 return 404, {"error": "no such workspace operation"}
             token = str(body.get("agent_token") or "")
-            device_sessions.check(ws, token, device)
+            device_sessions.check(ws, token, device, self.projects)
             who = self._identity(ws, project_id, token)
             ws.audit("remote.seen", who.id, project_id=project_id)
             operation = str(body.get("operation") or "")

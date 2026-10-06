@@ -54,7 +54,7 @@ def answer(ws, call, *, device=None, projects=None):
                                 claim=(document['model'], document['harness']))
             return 200, {'workspace': identity, 'agent': name, 'token': tokens.load(ws.base, name)}
         token = headers.get('X-ML-Stack-Workspace-Token', '')
-        device_sessions.check(ws, token, device)
+        device_sessions.check(ws, token, device, projects)
         handlers = {name: handler for name, _help, _options, handler in cli.TABLE}
         result = coordinator_calls.execute(ws, token, document, cli.COMMANDS.parser(), handlers)
         if len(json.dumps(result, ensure_ascii=True).encode()) > coordinator_calls.MAX_OUTCOME:

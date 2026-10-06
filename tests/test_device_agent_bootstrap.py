@@ -61,7 +61,7 @@ def test_revoked_device_and_identity_cannot_recover(enrolled):
     with pytest.raises(Denied):
         device_sessions.ensure(kit.ws, device, projects, document, token)
     with pytest.raises(Denied):
-        device_sessions.check(kit.ws, token, device)
+        device_sessions.check(kit.ws, token, device, projects)
     device.status = 'active'
     kit.ws.revoke(kit.owner, name)
     with pytest.raises(Denied):
@@ -90,7 +90,7 @@ def test_two_devices_cannot_recover_each_others_identity(enrolled):
     with pytest.raises(Denied):
         device_sessions.ensure(kit.ws, second_device, projects, document, first)
     with pytest.raises(Denied):
-        device_sessions.check(kit.ws, second, device)
+        device_sessions.check(kit.ws, second, device, projects)
 
 
 def test_bootstrap_route_requires_device_proof_and_existing_project(enrolled):
@@ -225,3 +225,60 @@ def test_enrolled_device_never_creates_local_authority_without_unique_coordinato
         coordinator_client.client(base)
     assert not (base / 'agents.json').exists()
     assert not coordinator_config.load(base)
+
+
+@pytest.mark.parametrize('surface', ['coordinator', 'canonical'])
+@pytest.mark.parametrize('change', ['unshared', 'other-authority'])
+def test_existing_session_loses_access_when_hosted_project_authorization_ends(enrolled, surface, change):
+    kit, device, projects, document = enrolled
+    name, token = device_sessions.ensure(kit.ws, device, projects, document)
+    identity = workspace_id(kit.ws)
+    coordinator_config.save(kit.base, {'mode': 'host', 'workspace': identity})
+    projects.workspace_base = lambda project_id: kit.base
+    host = WorkspaceHost(projects)
+
+    def invoke():
+        if surface == 'canonical':
+            return host.answer(document['project']['key'], 'board', {
+                'agent_token': token, 'operation': 'whoami', 'args': [], 'kwargs': {}}, device=device)
+        body = json.dumps({'workspace': identity, 'request_id': 'c' * 32, 'argv': ['whoami']}).encode()
+        call = Call('POST', '/workspace/v1/call', {'X-ML-Stack-Workspace-Token': token},
+                    '127.0.0.1', True, lambda most: body)
+        return coordinator.answer(kit.ws, call, device=device, projects=projects)
+
+    assert invoke()[0] == 200
+    initial = projects.list()
+    projects.list = lambda: [] if change == 'unshared' else [{**initial[0], 'authority_machine': 'elsewhere'}]
+    assert kit.ws.auth(token).id == name
+    assert invoke()[0] == 403
+
+
+def test_delegated_session_inherits_root_device_and_live_project_boundary(enrolled):
+    kit, device, projects, document = enrolled
+    _name, parent = device_sessions.ensure(kit.ws, device, projects, document)
+    child = kit.ws.delegate(parent, 'helper')
+    token = tokens.load(kit.base, child['id'])
+    device_sessions.check(kit.ws, token, device, projects)
+    with pytest.raises(Denied, match='active paired device'):
+        device_sessions.check(kit.ws, token, None, projects)
+    projects.list = lambda: []
+    with pytest.raises(Denied, match='not uniquely hosted'):
+        device_sessions.check(kit.ws, token, device, projects)
+
+
+@pytest.mark.parametrize('change', ['revoked', 'expired', 'child-project'])
+def test_delegated_session_cannot_outlive_or_widen_root_authorization(enrolled, change):
+    kit, device, projects, document = enrolled
+    name, parent = device_sessions.ensure(kit.ws, device, projects, document)
+    child = kit.ws.delegate(parent, 'helper')
+    token = tokens.load(kit.base, child['id'])
+    agents = kit.ws.registry._load()
+    if change == 'revoked':
+        agents[name]['revoked'] = True
+    elif change == 'expired':
+        agents[name]['expires'] = kit.ws.clock() - 1
+    else:
+        agents[child['id']]['project'] = {'key': 'f' * 32, 'name': 'foreign'}
+    kit.ws.registry._save(agents)
+    with pytest.raises(Denied):
+        device_sessions.check(kit.ws, token, device, projects)

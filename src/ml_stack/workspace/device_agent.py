@@ -110,18 +110,19 @@ def bind_owned_worker(ws, token, name):
         old = account_in(graph, identity)
         if old and old['base_id'] != base:
             raise Denied('the worker already belongs to another enrolled device')
-        if not account:
-            if registered:
-                raise Denied('the device account identity belongs to another registration')
-            account = {'base_id': base, 'device_id': device, 'enrolled_by': parent.id,
-                       'source': 'owned-local-launcher'}
-            graph.upsert_node({'id': key, 'kind': 'device-account', 'label': base, 'attrs': account})
+        if not account and registered:
+            raise Denied('the device account identity belongs to another registration')
         if not registered:
-            if account.get('source') != 'owned-local-launcher':
+            if account and account.get('source') != 'owned-local-launcher':
                 raise Denied('the installed device account registration is unavailable')
             with held(ws.registry.path.with_name('agents.lock')):
                 if base in ws.registry.ids():
                     raise Denied('the device account identity belongs to another registration')
+                ws.registry.within('local-account', ws.limits.mints_per_identity, ws.limits.agents_live)
+                if not account:
+                    account = {'base_id': base, 'device_id': device, 'enrolled_by': parent.id,
+                               'source': 'owned-local-launcher'}
+                    graph.upsert_node({'id': key, 'kind': 'device-account', 'label': base, 'attrs': account})
                 credential = ws.registry._add('local-account', base, AGENT, 0)
             tokens.store(ws.base, base, credential)
         for member in (base, parent.id, identity):

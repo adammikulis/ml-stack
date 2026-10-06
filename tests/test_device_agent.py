@@ -188,3 +188,29 @@ def test_interrupted_owned_device_account_creation_recovers_same_identity(tmp_pa
     account = device_agent.bind_owned_worker(kit.ws, parent, 'worker')
     assert account['base_id'] == 'local-device-1234567890abcdef'
     assert kit.ws.registry.info(account['base_id'])['role'] == AGENT
+
+
+@pytest.mark.parametrize('limit,value', [('mints_per_identity', 1), ('agents_live', 2)])
+def test_owned_device_account_mint_limits_precede_membership_writes(tmp_path, monkeypatch, limit, value):
+    kit = Kit(tmp_path / 'ws')
+    monkeypatch.setattr(device_agent, 'device_id', lambda: '1234567890abcdef')
+    parent = owned_launcher(kit)
+    identity = delegated_worker(kit, parent)
+    kit.limits(**{limit: value})
+    before = kit.ws.registry.ids()
+    with pytest.raises(Denied, match='the limits are'):
+        device_agent.bind_owned_worker(kit.ws, parent, 'worker')
+    assert kit.ws.registry.ids() == before
+    assert account_for(kit.ws, identity) is None
+    with device_agent._graph(kit.ws) as graph:
+        assert graph.nodes('device-account') == []
+
+
+def test_existing_owned_account_membership_does_not_mint_at_capacity(tmp_path, monkeypatch):
+    kit = Kit(tmp_path / 'ws')
+    monkeypatch.setattr(device_agent, 'device_id', lambda: '1234567890abcdef')
+    parent = owned_launcher(kit)
+    delegated_worker(kit, parent)
+    account = device_agent.bind_owned_worker(kit.ws, parent, 'worker')
+    kit.limits(mints_per_identity=2, agents_live=3)
+    assert device_agent.bind_owned_worker(kit.ws, parent, 'worker') == account

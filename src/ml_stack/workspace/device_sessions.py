@@ -98,9 +98,17 @@ def ensure(ws, device, projects, document, token=''):
         return agent, credential
 
 
-def check(ws, token, device):
+def check(ws, token, device, projects):
     actor = ws.auth(token)
-    entry = ws.registry._load().get(actor.id, {})
-    if entry.get('session_device') and (device is None or device.status != 'active'
-                                       or entry['session_device'] != device.fingerprint):
-        raise Denied('the agent session requires its active paired device')
+    agents = ws.registry._load()
+    root = agents.get(ws.registry._root(agents, actor.id), {})
+    entry = agents.get(actor.id, {})
+    fingerprint = root.get('session_device') or entry.get('session_device')
+    if fingerprint:
+        if device is None or device.status != 'active' or fingerprint != device.fingerprint:
+            raise Denied('the agent session requires its active paired device')
+        scope = root.get('project', {})
+        if _project(projects, scope) != scope:
+            raise Denied('the agent project authorization changed')
+        if entry.get('project') and entry['project'] != scope:
+            raise Denied('the delegated agent project differs from its root authorization')
