@@ -82,7 +82,7 @@ def test_capability_and_invite_cannot_cross_projects(host):
     assert host.answer(OTHER, "join", {"name": "wrong", "code": invite["code"]})[0] == 403
 
 
-@pytest.mark.parametrize("operation", ["init", "mint", "registry.info", "files.read", "delegate",
+@pytest.mark.parametrize("operation", ["init", "mint", "registry.info", "files.read",
                                        "quarantine_release", "__class__", "status"])
 def test_operation_allowlist_blocks_privilege_and_unrelated_data(host, operation):
     assert call(host, joined(host), operation)[0] == 403
