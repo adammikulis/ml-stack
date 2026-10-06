@@ -116,3 +116,19 @@ def test_unapproved_proxy_environment_never_runs_install(monkeypatch, tmp_path, 
     with pytest.raises(Refused):
         packages.run("python", ["install", "tensor"], timeout=5, env={name: "https://evil.example"})
     assert len(calls) == 1
+
+
+@pytest.mark.parametrize("name", ["requirement", "constraint", "build-constraint", "editable", "target", "prefix", "root", "user"])
+def test_configured_source_files_and_install_targets_are_refused(monkeypatch, tmp_path, name):
+    calls = capture(monkeypatch, tmp_path, f":env:.{name}='1'\n")
+    with pytest.raises(Refused):
+        packages.run("python", ["install", "--no-index", "tensor"], timeout=5, env={})
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("option", ["-echeckout", "--editable", "--build-constraint", "--target", "--prefix", "--root", "--user", "--isolated"])
+def test_source_and_target_options_cannot_escape_allocated_interpreter(monkeypatch, tmp_path, option):
+    calls = capture(monkeypatch, tmp_path)
+    with pytest.raises(Refused):
+        packages.run("python", ["install", "--no-index", option, "unchecked"], timeout=5, env={})
+    assert len(calls) == 1

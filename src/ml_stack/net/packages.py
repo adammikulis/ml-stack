@@ -44,7 +44,7 @@ def _options(args, configured):
     remaining = []
     iterator = iter(args)
     for argument in iterator:
-        if argument.startswith(("-r", "-c")) and not argument.startswith("--"):
+        if argument.startswith(("-r", "-c", "-e")) and not argument.startswith("--"):
             raise Refused("unchecked package requirement files are not supported")
         if argument.startswith(("-i", "-f")) and not argument.startswith("--") and len(argument) > 2:
             option, separator, supplied = argument[:2], "=", argument[2:]
@@ -61,7 +61,8 @@ def _options(args, configured):
                 values[name].append(value)
         elif option == "--no-index":
             offline = True
-        elif option in {"--trusted-host", "--proxy", "--isolated", "-r", "--requirement", "-c", "--constraint"}:
+        elif option in {"--trusted-host", "--proxy", "--isolated", "--editable", "--build-constraint",
+                         "--target", "--prefix", "--root", "--user", "-r", "--requirement", "-c", "--constraint"}:
             raise Refused(f"unsupported package network option: {option}")
         else:
             remaining.append(argument)
@@ -101,6 +102,11 @@ def run(python, args, *, timeout, env=None):
         return subprocess.run([str(python), "-m", "pip", *args], capture_output=True,
                               text=True, timeout=timeout, env=environment)
     configured = _config(python, args[0], environment, timeout)
+    for name in ("requirement", "constraint", "build-constraint", "editable", "target", "prefix", "root"):
+        if configured.get(name):
+            raise Refused(f"unsupported package source or target configuration: {name}")
+    if configured.get("user", "").lower() in {"1", "true", "yes", "on"}:
+        raise Refused("package installs use the allocated interpreter environment")
     remaining, values, offline = _options(args, configured)
     for name in ("trusted-host", "proxy"):
         if not offline and configured.get(name):
