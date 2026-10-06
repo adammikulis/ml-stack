@@ -32,7 +32,7 @@ from ml_stack.jobs import detach
 from ml_stack.log import say, warn
 from ml_stack.units import human_bytes
 
-from . import recovery
+from . import automatic_clusters, cluster_modes, recovery
 from .applying import apply_plan, serving_table
 from .discovery import (
     Beacon,
@@ -126,6 +126,7 @@ class Joined:
     port: int
     root: Path
     group: str
+    mode: str = ""
     checks: list[Check] = field(default_factory=list)
     started: bool = False
     daemon_pid: int | None = None
@@ -138,7 +139,7 @@ class Joined:
     def public(self) -> dict[str, Any]:
         return {"name": self.name, "machine": self.machine, "port": self.port,
                 "root": str(self.root),
-                "group": self.group, "checks": [c.public() for c in self.checks],
+                "group": self.group, "mode": self.mode, "checks": [c.public() for c in self.checks],
                 "started": self.started, "daemon_pid": self.daemon_pid,
                 "persisted": self.persisted, "persist_note": self.persist_note,
                 "tracking": self.tracking, "peers": self.peers}
@@ -252,7 +253,7 @@ def _started_pid(root: Path | str) -> int | None:
         return None
 
 
-def _enrol_via_daemon(port: int, passphrase: str, group: str) -> None:
+def _enrol_via_daemon(port: int, passphrase: str, group: str, mode: str) -> None:
     """Add a cluster through the daemon already on ``port``, so it advertises at once.
 
     Writing the key file underneath a running daemon leaves it announcing on the clusters
@@ -279,7 +280,7 @@ def _enrol_via_daemon(port: int, passphrase: str, group: str) -> None:
     status, body, set_cookie = call("/ui/session", {"passphrase": passphrase, "group": group})
     if status == 200 and set_cookie:
         cookie = set_cookie.split(";")[0]
-    status, body, _ = call("/ui/clusters", {"passphrase": passphrase, "group": group}, cookie)
+    status, body, _ = call("/ui/clusters", {"passphrase": passphrase, "group": group, "mode": mode}, cookie)
     if status != 200:
         raise JoinError(f"the daemon on port {port} refused the cluster: "
                         f"{body.get('error', status)}")
@@ -433,6 +434,7 @@ def table(rows: Sequence[dict[str, Any]]) -> str:
 
 # -- the join ---------------------------------------------------------------------------
 def join_machine(*, name: str = "", passphrase: str = "", group: str = "",
+                 mode: str | None = None,
                  persist: bool = False, track: str = "", port: int = HTTP_PORT,
                  root: Path | str | None = None,
                  cluster_key_path: Path | str | None = None,
@@ -444,15 +446,9 @@ def join_machine(*, name: str = "", passphrase: str = "", group: str = "",
                  persist_with: Callable[..., Any] | None = None,
                  finder: Callable[..., list[Beacon]] = discover,
                  discovery_port: int | None = None) -> Joined:
-    """Make this machine a peer, and return what the fleet now sees.
-
-    In order: the checks; the cluster (``passphrase`` joins ``group``; a machine already in
-    one keeps it); the daemon (reused if one answers on ``port``, else started detached --
-    ``enrol`` adds the cluster through a daemon that is already up); ``--persist`` installs
-    it at logon; then discovery on the beacon port. ``start``, ``enrol``, ``ensure``,
-    ``persist_with`` and ``finder`` are the four things a test replaces with a fake on
-    loopback; everything else is what the command does.
-    """
+    """Join a cluster, start the daemon and return the visible fleet."""
+    if mode is not None:
+        cluster_modes.validate(mode)
     root = home.expand(root) if root else default_root()
     root.mkdir(parents=True, exist_ok=True)
     group = require_name(group) if passphrase else group.strip()
@@ -472,18 +468,22 @@ def join_machine(*, name: str = "", passphrase: str = "", group: str = "",
     running = already_running(port)
     if passphrase:
         if running is not None:
-            (enrol or (lambda words, g: _enrol_via_daemon(port, words, g)))(passphrase, group)
+            (enrol or (lambda words, g: _enrol_via_daemon(
+                port, words, g, mode or cluster_modes.PRODUCTION)))(passphrase, group)
         else:
-            join_by_passphrase(passphrase, group, cluster_key_path)
+            join_by_passphrase(passphrase, group, cluster_key_path,
+                               mode=mode or cluster_modes.PRODUCTION)
+        enrolled = next((m for m in memberships(cluster_key_path) if m.group == group), None)
+        joined.mode = enrolled.mode if enrolled else mode or cluster_modes.PRODUCTION
         say(f"joined cluster '{group}'")
         recovery.remember(passphrase, group, cluster_key_path, say=say)
-    elif not in_cluster(cluster_key_path):
-        raise JoinError("this machine is in no cluster and no passphrase was given -- "
-                        "pass --passphrase WORDS (the same words on every machine)")
     else:
-        current = memberships(cluster_key_path)[0].group
-        joined.group = current
-        say(f"already in cluster '{current}'")
+        member = automatic_clusters.ensure(cluster_key_path, mode=mode,
+                                           port=discovery_port or port + 1)
+        joined.group = member.group
+        joined.mode = member.mode
+        say(f"joined cluster '{member.group}'")
+    say(cluster_modes.notice(joined.mode))
 
     if running is not None:
         joined.name = str(running.get("name") or name)
@@ -600,17 +600,15 @@ def sweep_argv(models: Sequence[str], *, peers: Sequence[str] = (), sample: int 
 
 # -- the command -----------------------------------------------------------------------
 def _cluster_and_words(args: argparse.Namespace, key: Path | str | None) -> tuple[str, str]:
-    """The cluster name and the words, from flags, the environment, a terminal, or standard input.
-
-    ``ML_STACK_PASSPHRASE`` and ``ML_STACK_CLUSTER`` let a script set a machine up without a
-    terminal. A terminal is asked for the cluster name, from the clusters found, before the words.
-    """
+    """Read explicit cluster credentials or select automatic admission."""
     group = args.group or os.environ.get("ML_STACK_CLUSTER", "").strip()
     told = args.passphrase or os.environ.get("ML_STACK_PASSPHRASE", "").strip()
     if told:
         return require_name(group), told
     if in_cluster(key):
         return group, ""
+    if not group and getattr(args, "mode", None) != cluster_modes.PRODUCTION:
+        return "", ""
     if sys.stdin.isatty() and not os.environ.get("ML_STACK_NONINTERACTIVE"):
         from .peers import _prompt_passphrase
 
@@ -631,7 +629,7 @@ def cmd_join(args: argparse.Namespace) -> int:
     # An install script sets these rather than answering prompts it has no terminal for.
     name = args.name or os.environ.get("ML_STACK_NAME", "").strip()
     joined = join_machine(name=name, passphrase=words, group=group,
-                          persist=args.persist, track=args.track, port=args.port,
+                          mode=args.mode, persist=args.persist, track=args.track, port=args.port,
                           root=args.root,
                           cluster_key_path=args.cluster_key, timeout_s=args.timeout)
     if args.json:
@@ -765,9 +763,11 @@ def main(argv: list[str] | None = None) -> int:
     join_p.add_argument("--persist", action="store_true",
                         help="start the daemon at logon as well, so it comes back after "
                              "a restart")
+    join_p.add_argument("--mode", choices=cluster_modes.MODES, default=None,
+                        help="cluster admission: dev automatically joins nearby devices; "
+                             "prod requires explicit admission (default: existing mode or dev)")
     join_p.add_argument("--passphrase", default="",
-                        help="the words every machine shares; prompted for in a terminal "
-                             "when the machine is in no cluster yet")
+                        help="join a named cluster with shared words (default mode: prod)")
     join_p.add_argument("--group", default="",
                         help="required cluster name when joining with a passphrase")
     join_p.add_argument("--track", default="",
