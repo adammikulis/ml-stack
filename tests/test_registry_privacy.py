@@ -53,7 +53,7 @@ def test_registry_junction_is_refused_before_target_changes(tmp_path, nested):
     path.write_text('unchanged')
     _winapi.CreateJunction(str(target), str(link))
     try:
-        with pytest.raises(Denied, match='redirected|ownership could not be verified'):
+        with pytest.raises(Denied, match=r'redirected|ownership could not be verified'):
             Registry(link / 'new-workspace' if nested else link)._save({})
         assert path.read_text() == 'unchanged'
         assert not (target / 'new-workspace').exists()
