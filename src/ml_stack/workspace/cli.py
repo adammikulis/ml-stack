@@ -36,6 +36,7 @@ from ml_stack.workspace import (
     task_integration,
     task_outcomes,
     tokens,
+    worktree_lifecycle,
 )
 from ml_stack.workspace.boardapi import Follow
 from ml_stack.workspace.boards import ANNOUNCE_KINDS, MODES, STYPES
@@ -267,8 +268,7 @@ def _claim(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
 
 
 def _worktrees(args, ws, token):
-    from ml_stack.workspace.worktree_lifecycle import pending
-    return pending(ws.base, ws.auth(token).id, _label(args))
+    return worktree_lifecycle.pending(ws.base, ws.auth(token).id, _label(args))
 
 
 def _released(args: argparse.Namespace, ws: Workspace, token: str) -> Any:

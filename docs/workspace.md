@@ -596,6 +596,20 @@ Left out: see "The agent workspace" in `HANDOFF.md`.
 
 ### Mutation ownership
 
+Coding checkout ownership survives claim expiry and release in a durable lifecycle graph.
+`ml-stack-workspace worktrees --agent NAME --label HELPER` lists unfinished scopes without
+removing files. A labeled `announce done` checks that helper's scopes and the identity's
+unlabeled native scopes; a lead's unlabeled `done` checks all its own scopes. Completion
+requires the checkout, Git registration and recorded branches to be absent, and recorded
+source commits to be landed on development. Unique, dirty and ignored files remain intact.
+
+The maintained Claude launcher installs authenticated Stop and SubagentStop checks. Both
+maintained Claude and Codex launchers display pending checkout scopes at startup and refuse
+successful exit with unfinished scopes even when no `done` announcement was sent. Canonical
+inbox workers return proposals to their parent; task integration verifies their landing and
+cleanup. A harness started outside these launchers needs its own completion hook; workspace
+completion announcements still enforce the shared guard.
+
 Native coding harness hooks check the launcher's registered identity before permitted
 mutations. Known file tools, patches and inspectable shell targets reserve file or worktree
 claims atomically. Explicit serving ports and Python install environments are reserved as

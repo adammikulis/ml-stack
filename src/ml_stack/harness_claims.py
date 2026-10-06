@@ -14,7 +14,7 @@ from ml_stack.harnesspolicy import CATALOG, SHELL_TOOLS, _shell_line
 from ml_stack.interventions import Call
 from ml_stack.net import git
 from ml_stack.serve.process import started_at
-from ml_stack.workspace import claim_handoff, tokens
+from ml_stack.workspace import claim_handoff, tokens, worktree_lifecycle
 from ml_stack.workspace.claims import normal
 from ml_stack.workspace.identity import Denied
 from ml_stack.workspace.project import describe
@@ -147,5 +147,4 @@ def reserve(name, args, cwd, actor, roots):
                                          'project': scope['project']} if scope else {})})
 
     if scope is None:
-        from ml_stack.workspace.worktree_lifecycle import remember
-        remember(ws.base, who.id, '', cwd)
+        worktree_lifecycle.remember(ws.base, who.id, '', cwd)

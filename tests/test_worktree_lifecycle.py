@@ -122,3 +122,81 @@ def test_native_mutation_records_its_unmanaged_checkout(setup):
     assert lifecycle.pending(kit.base, 'worker')[0]['branch'] == 'worker/change'
     with pytest.raises(Denied, match='verified cleanup'):
         kit.ws.announce(kit.sender, 'done', 'Complete')
+
+
+@pytest.mark.redteam
+def test_deleted_unique_branch_does_not_prove_recorded_work_landed(setup):
+    kit = setup
+    (kit.checkout / 'source.py').write_text('value = 2\n')
+    repo.git(kit.checkout, 'add', 'source.py')
+    repo.git(kit.checkout, 'commit', '-m', 'feat: unique work')
+    claim(kit)
+    unique = repo.git(kit.checkout, 'rev-parse', 'HEAD')
+    repo.git(kit.primary, 'worktree', 'remove', str(kit.checkout))
+    repo.git(kit.primary, 'branch', '-D', 'worker/change')
+    with pytest.raises(Denied, match='recorded commits are not landed'):
+        kit.ws.announce(kit.sender, 'done', 'Complete', label='helper')
+    repo.git(kit.primary, 'merge', '--ff-only', unique)
+    assert kit.ws.announce(kit.sender, 'done', 'Complete', label='helper')
+
+
+@pytest.mark.redteam
+def test_label_cannot_hide_unlabeled_native_scope(setup):
+    kit = setup
+    claim(kit, '')
+    with pytest.raises(Denied, match='verified cleanup'):
+        kit.ws.announce(kit.sender, 'done', 'Complete', label='helper')
+
+
+@pytest.mark.redteam
+def test_harness_stop_uses_authenticated_owner_and_refuses_lingering_scope(setup):
+    from ml_stack import harnesshook
+    from ml_stack.workspace import tokens
+    kit = setup
+    tokens.store(kit.base, 'worker', kit.sender)
+    claim(kit)
+    rail = harnesshook.Rail('plan-and-go', 'worker', roots=[str(kit.checkout)])
+    result = harnesshook.stop(rail)
+    assert result['decision'] == 'block' and str(kit.checkout) in result['reason']
+    repo.git(kit.primary, 'worktree', 'remove', str(kit.checkout))
+    repo.git(kit.primary, 'branch', '-d', 'worker/change')
+    assert harnesshook.stop(rail) == {}
+
+
+def test_claude_settings_wire_stop_and_subagent_stop():
+    import json
+
+    from ml_stack import claude
+    hooks = json.loads(claude.settings('PRE', 'POST', 300, 'STOP'))['hooks']
+    assert hooks['Stop'][0]['hooks'][0]['command'] == 'STOP'
+    assert hooks['SubagentStop'][0]['hooks'][0]['command'] == 'STOP'
+
+
+@pytest.mark.redteam
+def test_launcher_refuses_success_without_done_announcement(setup, monkeypatch):
+    import argparse
+
+    from ml_stack import harnessid, harnessing
+    kit = setup
+    claim(kit)
+    seat = harnessid.Seat('worker', base=kit.base)
+    args = argparse.Namespace(project=str(kit.checkout), parent='', name='worker',
+                              role='plan-and-go', orders_from='owner',
+                              seat_factory=lambda *args: seat)
+    messages = []
+    with pytest.raises(ValueError, match='verified cleanup'), \
+            harnessing.opened(args, 'codex', ('http://127.0.0.1:9', 'fixture', 0), messages.append):
+        pass
+    assert any('unfinished checkout:' in line for line in messages)
+    assert kit.checkout.exists()
+
+
+def test_precreation_claim_catches_checkout_without_another_mutation(setup):
+    kit = setup
+    target = kit.checkout.parent / 'reserved-checkout'
+    kit.ws.claim(kit.sender, 'worktree', str(target), label='helper')
+    assert lifecycle.pending(kit.base, 'worker', 'helper') == []
+    repo.git(kit.primary, 'worktree', 'add', '-b', 'worker/reserved', str(target))
+    with pytest.raises(Denied, match=r'reserved-checkout.*worker/reserved'):
+        kit.ws.announce(kit.sender, 'done', 'Complete', label='helper')
+    assert target.exists()

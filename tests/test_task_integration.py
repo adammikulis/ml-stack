@@ -232,7 +232,7 @@ def test_same_worker_claim_for_another_assignment_cannot_be_returned(board, proj
     claim = board.ws.who_owns('worktree', str(project['source']))
     assert claim['assignment'] == project['worktree']['id']
     wrong = {**project['worktree'], 'id': 'task-worktree:' + '0' * 32}
-    with pytest.raises(Denied, match='different ownership claim'):
+    with pytest.raises(Denied, match='does not match this exact task delegation'):
         board.ws.claims.return_worktree(board.ws.auth(board.parent), wrong)
     current = board.ws.who_owns('worktree', str(project['source']))
     assert {key: value for key, value in current.items() if key != 'expires_in_s'} == \
