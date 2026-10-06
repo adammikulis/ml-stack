@@ -98,10 +98,13 @@ login.
 ## Testing
 
 ```
-python -m pytest tests/ -q
+python scripts/test all tests/<affected-file>.py -n 1
 ```
 
-Run tests through `scripts/test`, which queues for workers in the machine-wide budget:
+Agents test their own changes through `scripts/test`, which defaults to one worker and uses
+shared broker admission. Explicit `-n 0` requests an automatic pool; explicit worker ceilings
+remain effective. The main agent runs shared structural/security gates once per consolidated
+integration batch before publication, handles full end-to-end checks, and schedules full suites.
 
 | tier | what it runs | about |
 |---|---|---|

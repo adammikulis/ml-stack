@@ -7,8 +7,9 @@ CLAUDE.md applies; this note only says where things stand.
 
 ## How work lands
 * Work in your own worktree and branch from `integration/dev` (the lead's staging branch); the
-  lead merges, runs `scripts/test gate` (about a minute) plus the files the branch touched, then
-  fast-forwards `0.2dev`. The full tier runs in the background afterwards, never in front of a merge.
+  workers test their own affected behavior. The lead reviews the consolidated integration batch,
+  runs shared structural/security gates once before publication, and handles full end-to-end
+  verification. The lead schedules the full tier in the background after the batch.
 * Generated files are regenerated, never hand-merged: `python3 scripts/redteam_coverage.py --write`,
   `python3 scripts/reference --write`; roles codemod `docs/notes/rename-roles-codemod.py` after a merge.
 * Announce on the workspace: `ml-stack-workspace announce joined|milestone|done|blocked TEXT`; the

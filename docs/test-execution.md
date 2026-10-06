@@ -4,8 +4,13 @@ Run tests with `python scripts/test fast`, `full`, `slow`, `all`, or `quick`.
 Explicit test paths are checked before broker admission using pytest’s argument parser.
 A missing file or directory, or a node selector that collects no tests, returns
 exit status 4, including in `quick`; an empty affected-test selection remains valid.
-`-n N` limits the worker pool; its default, `0`, creates a pool up to the
-machine's CPU capacity. Every checkout shares the same admission broker.
+`-n N` limits the worker pool; scoped runs default to one worker. Explicit `-n 0` requests
+an automatic pool up to broker capacity. Explicit worker ceilings remain effective.
+Every checkout shares the same admission broker.
+
+Agents run affected tests for their own changes. The main agent coordinates shared structural
+and security gates once per consolidated integration batch before publication, handles full
+end-to-end checks, and schedules background full suites. Workers do not repeat those checks.
 
 CPU capacity defaults to the logical CPU count minus one, with a minimum of
 one. `DEV_TEST_RESERVED_CORES` changes that reservation. This reserves capacity;
@@ -54,4 +59,5 @@ is private to that run and its admission endpoint closes when the run ends.
 host locks, so container workers request host permits through this endpoint.
 Native supervisors bind to loopback. The Linux runner installs dependencies
 under one setup permit, releases it, then starts supervised pytest. Serial
-execution requests one worker and uses `-n 0`.
+execution through `scripts/test` uses `-n 1`. A directly supervised pytest command can use `-n 0`
+to run without xdist workers.

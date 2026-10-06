@@ -10,8 +10,8 @@ subagent. Read it first. This summary adds no restrictions or exceptions.
 - Create worktrees beside the primary checkout, never inside it. Completion includes checking
   for unique work, removing the worktree and merged branch, pruning and verifying cleanup
   before the final report or `announce done` (see `CLAUDE.md`, "Worktrees").
-- Gate each merge with affected tests and required structural/security checks. Run full suites
-  in the background per batch/schedule, not before every merge. **Linux testing is paused by
+- Agents test their own changes with affected tests. The main agent runs shared structural/security
+  gates once per consolidated integration batch and handles full end-to-end and background suites. **Linux testing is paused by
   the owner until explicitly resumed.** Report platform gaps and known failures honestly.
 - Delegate by demonstrated capability, difficulty, benchmarks and available resources; no
   hardcoded vendor/model hierarchy. Keep independent review and name exact runtime provenance.
