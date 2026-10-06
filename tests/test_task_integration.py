@@ -15,6 +15,7 @@ from ml_stack.graph.store import GraphStore
 from ml_stack.workspace import (
     claim_handoff,
     integration_git as repo,
+    integration_staging,
     localagent,
     resource_allocations,
     task_integration,
@@ -431,3 +432,119 @@ def test_completed_task_refuses_recreated_branch_without_deleting_it(board, proj
     with pytest.raises(Denied, match='branch reappeared'):
         task_integration.integrate(board.ws, board.parent, board.task['id'])
     assert repo.git(project['primary'], 'rev-parse', project['worktree']['branch']) == result['commit']
+
+
+@pytest.mark.redteam
+@pytest.mark.parametrize('staged', [False, True])
+def test_lead_preserves_exact_reviewed_primary_bytes_before_fast_forward(board, project, staged, monkeypatch):
+    board.board.review(board.parent, board.task['id'], accepted())
+    primary = project['primary']
+    content = repo.git(project['source'], 'show', 'HEAD:sim.py', binary=True)
+    (primary / 'sim.py').write_bytes(content)
+    if staged:
+        repo.git(primary, 'add', '--', 'sim.py')
+    git = repo.git
+
+    def read_only_primary(root, *arguments, **kwargs):
+        assert root != primary or arguments[0] not in ('add', 'commit', 'restore', 'reset', 'checkout')
+        return git(root, *arguments, **kwargs)
+
+    monkeypatch.setattr(repo, 'git', read_only_primary)
+    if not staged:
+        index = primary / git(primary, 'rev-parse', '--git-path', 'index')
+        before = index.read_bytes()
+        with pytest.raises(Denied, match='already staged'):
+            task_integration.integrate(board.ws, board.parent, board.task['id'])
+        assert index.read_bytes() == before and (primary / 'sim.py').read_bytes() == content
+        assert not project['log'].exists()
+        return
+    result = task_integration.integrate(board.ws, board.parent, board.task['id'])
+    assert result['state'] == 'completed'
+    assert (primary / 'sim.py').read_bytes() == content
+    assert repo.git(primary, 'status', '--porcelain') == ''
+    assert board.ws.who_owns('file', str(primary / 'sim.py')) is None
+
+
+@pytest.mark.redteam
+@pytest.mark.parametrize('change', ['working', 'staged', 'untracked', 'child'])
+def test_unreviewed_primary_bytes_and_child_staging_are_refused(board, project, change):
+    board.board.review(board.parent, board.task['id'], accepted())
+    primary = project['primary']
+    (primary / 'sim.py').write_text('speed = 2\n')
+    token = board.parent
+    if change == 'working':
+        (primary / 'sim.py').write_text('speed = 99\n')
+    elif change == 'staged':
+        (primary / 'sim.py').write_text('speed = 99\n')
+        repo.git(primary, 'add', '--', 'sim.py')
+        (primary / 'sim.py').write_text('speed = 2\n')
+    elif change == 'untracked':
+        (primary / 'unknown.py').write_text('unknown = True\n')
+    else:
+        token = board.child
+    before = repo.git(primary, 'diff', '--cached', binary=True)
+    with pytest.raises(Denied):
+        task_integration.integrate(board.ws, token, board.task['id'])
+    assert repo.git(primary, 'diff', '--cached', binary=True) == before
+    assert repo.git(primary, 'rev-parse', 'HEAD') == project['baseline']
+    assert not project['log'].exists()
+
+
+@pytest.mark.redteam
+def test_primary_preservation_verification_keeps_index_bytes(board, project):
+    primary = project['primary']
+    content = repo.git(project['source'], 'show', 'HEAD:sim.py', binary=True)
+    (primary / 'sim.py').write_bytes(content)
+    repo.git(primary, 'add', '--', 'sim.py')
+    index = primary / repo.git(primary, 'rev-parse', '--git-path', 'index')
+    before = index.read_bytes()
+    names = integration_staging.files(primary, project['proposal']['provenance']['commit'])
+    integration_staging.verify(primary, project['proposal']['provenance']['commit'], names)
+    assert index.read_bytes() == before
+
+
+@pytest.mark.redteam
+def test_primary_preservation_refuses_symlink_bytes(board, project, monkeypatch):
+    primary = project['primary']
+    target = primary / 'sim.py'
+    target.write_bytes(repo.git(project['source'], 'show', 'HEAD:sim.py', binary=True))
+    repo.git(primary, 'add', '--', 'sim.py')
+    is_symlink = Path.is_symlink
+    monkeypatch.setattr(Path, 'is_symlink', lambda path: path == target or is_symlink(path))
+    with pytest.raises(Denied, match='symlinks'):
+        integration_staging.files(primary, project['proposal']['provenance']['commit'])
+
+
+@pytest.mark.redteam
+@pytest.mark.parametrize('contained', [False, True])
+def test_unfinished_merge_metadata_requires_reviewed_commit_containment(board, project, contained):
+    primary = project['primary']
+    commit = project['proposal']['provenance']['commit']
+    marker = primary / repo.git(primary, 'rev-parse', '--git-path', 'MERGE_HEAD')
+    marker.write_text((commit if contained else '0' * 40) + '\n')
+    (primary / 'sim.py').write_bytes(repo.git(project['source'], 'show', 'HEAD:sim.py', binary=True))
+    repo.git(primary, 'add', '--', 'sim.py')
+    if not contained:
+        with pytest.raises((Denied, RuntimeError)):
+            integration_staging.files(primary, commit)
+        assert marker.exists()
+        return
+    names = integration_staging.files(primary, commit)
+    index = primary / repo.git(primary, 'rev-parse', '--git-path', 'index')
+    before = index.read_bytes()
+    integration_staging.verify(primary, commit, names)
+    assert marker.exists() and index.read_bytes() == before
+    board.board.review(board.parent, board.task['id'], accepted())
+    result = task_integration.integrate(board.ws, board.parent, board.task['id'])
+    assert result['state'] == 'completed' and not marker.exists()
+
+
+@pytest.mark.redteam
+def test_cleanup_refuses_a_foreign_worktree_lock(board, project):
+    source = project['source']
+    locked = source / repo.git(source, 'rev-parse', '--git-path', 'locked')
+    repo.git(project['primary'], 'worktree', 'lock', '--reason', 'foreign live operation', str(source))
+    board.board.review(board.parent, board.task['id'], accepted())
+    result = task_integration.integrate(board.ws, board.parent, board.task['id'])
+    assert result['state'] == 'blocked' and 'lock owned by another operation' in result['reason']
+    assert source.exists() and locked.read_text().strip() == 'foreign live operation'

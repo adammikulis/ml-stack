@@ -23,19 +23,20 @@ class GateFailed(Denied):
 def git(root: Path, *arguments: str, binary: bool = False):
     result = subprocess.run(['git', '-C', str(root), *arguments], capture_output=True,
                             text=not binary, check=False, timeout=120,
-                            env={**os.environ, **({'CLAUDECODE': '1'} if arguments[0] == 'push' else {})})
+                            env={**os.environ, **({'CLAUDECODE': '1'} if arguments[0] == 'push' else {}),
+                                 **({'GIT_OPTIONAL_LOCKS': '0'} if arguments[0] in ('status', 'diff') else {})})
     if result.returncode:
         detail = result.stderr.decode(errors='replace') if binary else result.stderr
         raise RuntimeError(f'Git {arguments[0]} failed (exit {result.returncode}): {redact(detail)[-2000:]}')
     return result.stdout if binary else result.stdout.strip()
 
 
-def clean(root: Path) -> None:
+def clean(root: Path, *, allow_changes: bool = False) -> None:
     for marker in ('MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD', 'rebase-merge', 'rebase-apply'):
         path = root / git(root, 'rev-parse', '--git-path', marker)
         if path.exists():
             raise Denied(f'{root} has an unfinished {marker} operation')
-    if git(root, 'status', '--porcelain'):
+    if not allow_changes and git(root, 'status', '--porcelain'):
         raise Denied(f'{root} has uncommitted changes; commit or preserve them before integration')
 
 
@@ -75,7 +76,7 @@ def native_patch(root: Path, commit: str, baseline: str, artifacts: dict[str, st
         raise Denied('the committed native patch does not describe the exact reviewed source changes')
 
 
-def repository(source: Path) -> tuple[Path, str, str]:
+def repository(source: Path, *, require_clean: bool = True) -> tuple[Path, str, str]:
     checkout = worktreerules.checkouts(source)
     if not checkout or checkout[0] != source.resolve() or checkout[0] == checkout[1]:
         raise Denied('reviewed work must belong to a prepared isolated Git worktree')
@@ -84,7 +85,8 @@ def repository(source: Path) -> tuple[Path, str, str]:
     if not branch or branch == 'main':
         raise Denied('integration only targets the checked-out development branch, never main')
     git(primary, 'check-ref-format', '--branch', branch)
-    clean(primary)
+    if require_clean:
+        clean(primary)
     return primary, branch, git(primary, 'rev-parse', 'HEAD')
 
 
@@ -117,7 +119,7 @@ def remote_baseline(root: Path, branch: str, baseline: str) -> None:
         raise Denied('development moved remotely; reconcile the latest remote before integration')
 
 
-def remove_merged(primary: Path, path: Path, branch: str, landed: str) -> None:
+def remove_merged(primary: Path, path: Path, branch: str, landed: str, *, lock_reason: str = '') -> None:
     """Remove a clean merged checkout and branch, preserving unique files and commits."""
     entries = git(primary, 'worktree', 'list', '--porcelain').splitlines()
     listed = any(line.startswith('worktree ') and Path(line[9:]).resolve() == path.resolve()
@@ -135,6 +137,8 @@ def remove_merged(primary: Path, path: Path, branch: str, landed: str) -> None:
             raise Denied(f'{path} contains ignored files requiring preservation: {unknown[:5]}')
         locked = path / git(path, 'rev-parse', '--git-path', 'locked')
         if locked.exists():
+            if not lock_reason or locked.read_text().strip() != lock_reason:
+                raise Denied(f'{path} has a worktree lock owned by another operation')
             git(primary, 'worktree', 'unlock', str(path))
         git(primary, 'worktree', 'remove', str(path))
     elif path.exists():
