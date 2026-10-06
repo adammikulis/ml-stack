@@ -35,7 +35,7 @@ from . import commands, invite_routes, projects as project_routes
 from .availability import Availability, parse_window
 from .deciding import MAX_REQUEST, Deciding
 from .device import device_report
-from .discovery import load_cluster_key
+from .discovery import load_cluster_key, memberships
 from .files import (
     DIGEST_HEADER,
     FILE_CHUNK,
@@ -410,7 +410,6 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
                 sched = schedule.public() if schedule is not None else None
                 if sched is not None and not sched["available"]:
                     status = {**status, "free": 0}
-                from .discovery import memberships
                 joined = memberships(cluster_key_path)
                 self._send(200, {"ok": True, "name": self._name(),
                                  "cluster_mode": daemon.cluster_mode or (joined[0].mode if joined else "dev"), **status, **report(),

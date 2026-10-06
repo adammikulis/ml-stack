@@ -30,7 +30,15 @@ from ml_stack.serve import canaries, guarded
 from ml_stack.serve.leases import lease_file
 from ml_stack.speech import service as speech
 
-from . import autostart, invite_client, invite_routes, tls, updates as updating
+from . import (
+    automatic_clusters,
+    autostart,
+    cluster_modes,
+    invite_client,
+    invite_routes,
+    tls,
+    updates as updating,
+)
 from .api import Daemon, make_handler
 from .availability import Availability, parse_window
 from .conversations import Conversations
@@ -129,7 +137,6 @@ def serve_forever(root: Path | str | None = None,
     live_token: list[str] = [""]
     files_root = root / "files"
     files_root.mkdir(exist_ok=True)
-    from . import automatic_clusters, cluster_modes
     selected = memberships(cluster_key_path)
     effective_mode = cluster_modes.validate(cluster_mode or (selected[0].mode if selected else "dev"))
     if selected and selected[0].mode != effective_mode:
