@@ -197,3 +197,75 @@ def test_a_release_by_dialog_needs_no_terminal_but_an_agent_marker_refuses_it():
     with pytest.raises(human.HumanRequired):
         human.mint_clicked("release", "q-1", answer="Release", label="Release",
                            env={"CLAUDECODE": "1"})
+
+
+def test_unchanged_deep_scan_preserves_manifest_and_state_lock_mtimes():
+    node = sentinel.default()
+    (path,) = pinned(node, 1)
+    node.manifest.pin(path, "model")
+    node.store.quarantine(("peer", "fixture-peer"), "fixture finding", {})
+    names = ("manifest.json", "manifest.json.prev", "state.lock")
+    before = {name: (node.root / name).stat().st_mtime_ns for name in names}
+    node.scan(deep=True)
+    assert {name: (node.root / name).stat().st_mtime_ns for name in names} == before
+
+
+def test_deep_scan_records_changed_verified_metadata():
+    node = sentinel.default()
+    (path,) = pinned(node, 1)
+    old = node.manifest.pins()[str(path)]
+    info = path.stat()
+    os.utime(path, ns=(info.st_atime_ns, info.st_mtime_ns + 1))
+    assert node.scan(deep=True) == []
+    refreshed = node.manifest.pins()[str(path)]
+    assert refreshed.mtime_ns == old.mtime_ns + 1
+    assert refreshed.sha256 == old.sha256
+
+
+@pytest.mark.parametrize("operation", ["repin", "unpin"])
+def test_metadata_refresh_preserves_concurrent_pin_change(operation, monkeypatch):
+    from contextlib import contextmanager
+
+    from ml_stack.sentinel import integrity
+
+    node = sentinel.default()
+    (path,) = pinned(node, 1)
+    old = node.manifest.pins()[str(path)]
+    info = path.stat()
+    os.utime(path, ns=(info.st_atime_ns, info.st_mtime_ns + 1))
+    take_lock, changed = integrity.only_one, []
+
+    @contextmanager
+    def concurrent_pin(*args, **kwargs):
+        with monkeypatch.context() as patch:
+            patch.setattr(integrity, "only_one", take_lock)
+            if operation == "repin":
+                changed.append(node.manifest.pin(path, "model", source="concurrent"))
+            else:
+                assert node.manifest.unpin(path)
+        with take_lock(*args, **kwargs) as held:
+            yield held
+
+    monkeypatch.setattr(integrity, "only_one", concurrent_pin)
+    node.manifest.refresh_stat(old)
+    assert node.manifest.pins() == ({str(path): changed[0]} if operation == "repin" else {})
+
+
+def test_settlement_rechecks_file_absence_after_lock(monkeypatch):
+    from contextlib import contextmanager
+
+    node = sentinel.default()
+    (path,) = pinned(node, 1)
+    path.unlink()
+    record = node.store.quarantine(("model", str(path)), "integrity.missing: fixture", {})
+    take_lock = node.store._locked
+
+    @contextmanager
+    def restored_before_lock():
+        path.write_bytes(b"restored")
+        with take_lock() as held:
+            yield held
+
+    monkeypatch.setattr(node.store, "_locked", restored_before_lock)
+    assert node.store.settle_missing(record.id) is False
+    assert node.store.get(record.id).state == State.QUARANTINED

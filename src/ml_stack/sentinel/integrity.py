@@ -5,11 +5,12 @@ from __future__ import annotations
 import os
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
 from ml_stack.files import sha256_file
+from ml_stack.lock import only_one
 from ml_stack.sentinel.events import Severity
 from ml_stack.sentinel.findings import HIGH, Finding, finding
 from ml_stack.sentinel.sealed import SealedFile
@@ -61,6 +62,13 @@ class Manifest:
     def _save(self, pins: dict[str, Pin]) -> None:
         self._file.save({"pins": {p: v.to_json() for p, v in sorted(pins.items())}})
 
+    def _record(self, made: Pin) -> Pin:
+        with only_one(self._file.path.with_suffix(".lock")):
+            pins = self.pins()
+            pins[made.path] = made
+            self._save(pins)
+        return made
+
     def pin(self, path: Path | str, kind: str, source: str = "") -> Pin:
         """Record the digest of ``path`` as it is now."""
         if kind not in FILE_KINDS:
@@ -69,10 +77,7 @@ class Manifest:
         size, mtime, inode, link = _state(where)
         made = Pin(str(where), kind, sha256_file(where), size, mtime, inode, link, source,
                    self.clock())
-        pins = self.pins()
-        pins[str(where)] = made
-        self._save(pins)
-        return made
+        return self._record(made)
 
     def pin_verified(self, path: Path | str, kind: str, sha256: str, source: str,
                      **notes: str) -> Pin:
@@ -85,25 +90,31 @@ class Manifest:
         size, mtime, inode, link = _state(where)
         made = Pin(str(where), kind, sha256.lower(), size, mtime, inode, link, source,
                    self.clock(), **notes)
-        pins = self.pins()
-        pins[str(where)] = made
-        self._save(pins)
-        return made
+        return self._record(made)
 
     def unpin(self, path: Path | str) -> bool:
-        pins = self.pins()
-        gone = pins.pop(str(Path(path).expanduser()), None)
-        if gone is not None:
-            self._save(pins)
+        key = str(Path(path).expanduser())
+        if key not in self.pins():
+            return False
+        with only_one(self._file.path.with_suffix(".lock")):
+            pins = self.pins()
+            gone = pins.pop(key, None)
+            if gone is not None:
+                self._save(pins)
         return gone is not None
 
     def refresh_stat(self, pin: Pin) -> None:
-        """Record a new mtime and inode for a file whose digest still matches."""
+        """Record changed file metadata while preserving a concurrent pin update or removal."""
         size, mtime, inode, link = _state(Path(pin.path))
-        pins = self.pins()
-        pins[pin.path] = Pin(pin.path, pin.kind, pin.sha256, size, mtime, inode, link,
-                             pin.source, pin.pinned_at, pin.origin, pin.digest_from)
-        self._save(pins)
+        refreshed = replace(pin, bytes=size, mtime_ns=mtime, inode=inode, link=link)
+        if refreshed == pin or self.pins().get(pin.path) != pin:
+            return
+        with only_one(self._file.path.with_suffix(".lock")):
+            pins = self.pins()
+            if pins.get(pin.path) != pin:
+                return
+            pins[pin.path] = refreshed
+            self._save(pins)
 
 
 def _changed(pin: Pin, what: str, now: dict[str, Any]) -> Finding:
