@@ -78,11 +78,11 @@ def key_path(path: Path | str | None = None) -> Path:
     return home.expand(env) if env else home.state("cluster.key")
 
 
-def mint_cluster(group: str, path: Path | str | None = None, *, join: str = "") -> Membership:
+def mint_cluster(group: str, path: Path | str | None = None, *, join: str = "", mode: str = "dev") -> Membership:
     """Make a cluster of a fresh random 256-bit key, replacing one of the same name."""
     group = require_name(group)
     key = base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=")
-    return adopt(Membership(group=group, key=key, join=join), path)
+    return adopt(Membership(group=group, key=key, join=join, mode=mode), path)
 
 
 def create_cluster_key(path: Path | str | None = None, *,
@@ -157,8 +157,20 @@ class Membership:
     """What the join handshake takes as the passphrase (`onboard.joining.join_secret`); empty
     on a machine that does not know the passphrase."""
 
+    mode: str = "dev"
+
+    def __post_init__(self) -> None:
+        from .cluster_modes import validate
+        require_name(self.group)
+        validate(self.mode)
+        if not isinstance(self.key, bytes) or len(self.key) != 43 or len(base64.b64decode(
+                self.key + b"=" * (-len(self.key) % 4), altchars=b"-_", validate=True)) != 32:
+            raise ValueError("cluster key must contain 256 bits")
+        if not isinstance(self.join, str):
+            raise ValueError("cluster join secret must be text")
+
     def public(self) -> dict[str, Any]:
-        return {"group": self.group}
+        return {"group": self.group, "mode": self.mode}
 
 
 def clusters_path(path: Path | str | None = None) -> Path:
@@ -180,12 +192,13 @@ def memberships(path: Path | str | None = None) -> list[Membership]:
         return _adopt_single(path)
     for row in raw if isinstance(raw, list) else []:
         try:
-            group, key, join = str(row["group"]), str(row["key"]).encode(), str(row.get("join") or "")
-        except (KeyError, TypeError, AttributeError):
+            group, key, join = row["group"], row["key"].encode("ascii"), row.get("join", "")
+            member = Membership(group=group, key=key, join=join, mode=row.get("mode", "prod"))
+        except (KeyError, TypeError, AttributeError, ValueError, DiscoveryError):
             continue
         if key and group not in seen:
             seen.add(group)
-            out.append(Membership(group=group, key=key, join=join))
+            out.append(member)
     return out
 
 
@@ -201,7 +214,7 @@ def _adopt_single(path: Path | str | None = None) -> list[Membership]:
         group = group_path(path).read_text().strip()
     except OSError:
         group = ""
-    rows = [Membership(group=group or DEFAULT_CLUSTER, key=key.encode())]
+    rows = [Membership(group=group or DEFAULT_CLUSTER, key=key.encode(), mode="prod")]
     with contextlib.suppress(OSError):
         _write_memberships(rows, path)
     return rows
@@ -211,7 +224,7 @@ def _write_memberships(rows: list[Membership],
                        path: Path | str | None = None) -> None:
     """Record the list this machine belongs to."""
     listed = clusters_path(path)
-    write_json(listed, [{"group": m.group, "key": m.key.decode(), "join": m.join} for m in rows])
+    write_json(listed, [{"group": m.group, "key": m.key.decode(), "join": m.join, "mode": m.mode} for m in rows])
     private_file(listed)
 
 
@@ -496,6 +509,7 @@ class Advertiser:
         self._said: set[str] = set()
         self.cluster = cluster
         self.joinable = False
+        self.mode = "dev"
         """The cluster's name; a machine that asks to join it is told where to shake hands."""
 
     # -- lifecycle --
@@ -602,7 +616,9 @@ class Advertiser:
         """Answer a machine asking to join this cluster: the port and scheme to shake hands on."""
         reply = _canonical({"v": PROTOCOL, "kind": "join", "group": self.cluster, "nonce": nonce,
                             "name": self.beacon.name, "port": self.beacon.port, "tls": bool(self.beacon.cert),
-                            "method": "passphrase" if self.joinable else "recovery"})
+                            "method": "automatic" if self.mode == "dev" else "passphrase" if self.joinable else "recovery",
+                            "mode": self.mode, "cluster_id": hashlib.sha256(self.key).hexdigest(),
+                            "fingerprint": hashlib.sha256(base64.b64decode(self.beacon.cert)).hexdigest() if self.beacon.cert else ""})
         with contextlib.suppress(OSError):
             sock.sendto(reply, addr)
 

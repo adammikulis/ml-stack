@@ -91,7 +91,7 @@ def export_recovery(file: Path | str, group: str = "", path: Path | str | None =
     held = next((m for m in rows if not group or m.group == group), None)
     if held is None:
         raise DiscoveryError("this machine is in no cluster" if not group else f"not in a cluster called '{group}'")
-    body = json.dumps({"group": held.group, "key": held.key.decode()}, indent=1)
+    body = json.dumps({"group": held.group, "key": held.key.decode(), "mode": held.mode}, indent=1)
     target = home.expand(file)
     fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as out:
@@ -111,8 +111,9 @@ def parse_recovery(text: str) -> Membership:
         key = data["key"]
         if len(base64.b64decode(key + "=" * (-len(key) % 4), altchars=b"-_", validate=True)) != 32:
             raise ValueError("invalid recovery key")
-        return Membership(group=require_name(data.get("group")), key=key.encode("ascii"))
-    except (ValueError, TypeError, UnicodeError) as exc:
+        return Membership(group=require_name(data.get("group")), key=key.encode("ascii"),
+                          mode=data.get("mode", "prod"))
+    except (ValueError, TypeError, UnicodeError, DiscoveryError) as exc:
         raise DiscoveryError("not a valid cluster recovery file") from exc
 
 

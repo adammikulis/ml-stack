@@ -95,6 +95,7 @@ class Daemon:
     serving: Serving | None = None
     models: Models | None = None
     cluster_key_path: Path | str | None = None
+    cluster_mode: str | None = None
     tokens: Callable[[], set[str]] | None = None
     bench: BenchHost | None = None
     hosting: Hosting | None = None
@@ -372,7 +373,8 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
             if not isinstance(asked, dict):
                 self._send(400, {"error": "the body is not a JSON object"})
                 return True
-            status, answer = joining.handle(self.path.split("?")[0], asked, self.client_address[0])
+            status, answer = joining.handle(self.path.split("?")[0], asked, self.client_address[0],
+                                            transport_tls=isinstance(self.connection, ssl.SSLSocket))
             self._send(status, answer)
             return True
 
@@ -408,7 +410,10 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
                 sched = schedule.public() if schedule is not None else None
                 if sched is not None and not sched["available"]:
                     status = {**status, "free": 0}
-                self._send(200, {"ok": True, "name": self._name(), **status, **report(),
+                from .discovery import memberships
+                joined = memberships(cluster_key_path)
+                self._send(200, {"ok": True, "name": self._name(),
+                                 "cluster_mode": daemon.cluster_mode or (joined[0].mode if joined else "dev"), **status, **report(),
                                  **({"availability": sched} if sched else {}),
                                  **({"serving": serving.public()} if serving is not None
                                     else {})})
