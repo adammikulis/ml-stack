@@ -177,7 +177,7 @@ def adopt(grant: Grant, directory: Path, *, cluster_path: Path | str | None = No
     joined = False
     if grant.key:
         rows = [m for m in memberships(cluster_path) if m.group != grant.group]
-        rows.insert(0, Membership(group=grant.group, key=grant.key.encode()))
+        rows.insert(0, Membership(group=grant.group, key=grant.key.encode(), selection="manual"))
         write_memberships(rows, cluster_path)
         joined = True
     write_json(directory / "trust.json", {"schema_version": 1, "certificate": grant.certificate,

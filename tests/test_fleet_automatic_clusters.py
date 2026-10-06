@@ -244,3 +244,67 @@ def test_membership_offer_identifies_the_cluster_key():
     assert offered["mode"] == "dev"
     assert offered["nonce"] == NONCE
     assert address == ("127.0.0.1", 8771)
+
+
+def test_manual_dev_selection_survives_restart_and_project_settle(tmp_path, monkeypatch):
+    from ml_stack.workspace.automatic_connection import settle
+
+    path = tmp_path / "device.key"
+    member = discovery.mint_cluster("chosen-dev", path, selection="manual")
+    monkeypatch.setattr(automatic, "offers", lambda port: pytest.fail("manual selection discovered another cluster"))
+    assert discovery.memberships(path)[0].selection == "manual"
+    assert automatic.ensure(path, mode="dev") == member
+    assert settle(discovery.memberships(path)[0], path) == member
+
+
+def test_auto_action_releases_manual_selection_and_converges(tmp_path, monkeypatch):
+    path = tmp_path / "device.key"
+    discovery.adopt(discovery.Membership("chosen-dev", KEY, selection="manual"), path)
+    target = discovery.Membership("automatic-dev", b"b" * 43)
+    candidates = sorted((KEY, target.key), key=lambda key: hashlib.sha256(key).hexdigest())
+    discovery.adopt(discovery.Membership("chosen-dev", candidates[1], selection="manual"), path)
+    target = discovery.Membership("automatic-dev", candidates[0])
+    monkeypatch.setattr(automatic, "offers", lambda port: [("127.0.0.1", offer(target.key))])
+    monkeypatch.setattr(automatic, "receive", lambda host, offered: target)
+    assert automatic.select_automatic(path) == target
+    assert discovery.memberships(path)[0] == target
+
+
+def test_passphrase_creation_marks_dev_manual(tmp_path, monkeypatch):
+    path = tmp_path / "device.key"
+    monkeypatch.setattr(joining, "find_joiners", lambda *args, **kwargs: [])
+    member = joining.create_by_passphrase("trusted words", "chosen-dev", path, mode="dev")
+    assert member.selection == "manual"
+    assert discovery.memberships(path) == [member]
+
+
+@pytest.mark.redteam
+def test_automatic_action_refuses_production_and_invalid_selection(tmp_path):
+    path = tmp_path / "device.key"
+    member = discovery.mint_cluster("production", path, mode="prod")
+    with pytest.raises(discovery.DiscoveryError, match="Development"):
+        automatic.select_automatic(path)
+    assert discovery.memberships(path) == [member]
+    with pytest.raises(ValueError, match="selection"):
+        discovery.Membership("dev", KEY, selection="invalid")
+
+
+def test_manual_join_marks_received_dev_membership(tmp_path, monkeypatch):
+    path = tmp_path / "device.key"
+    received = discovery.Membership("chosen-dev", KEY)
+    monkeypatch.setattr(joining, "_shake", lambda *args: received)
+    member = joining._accept([joining.Joiner("127.0.0.1", 8770, True)],
+                             received.group, "shared secret", path, mode="dev")
+    assert member.key == received.key
+    assert member.selection == "manual"
+    assert discovery.memberships(path) == [member]
+
+
+def test_project_settle_respects_manual_choice_made_during_discovery(tmp_path, monkeypatch):
+    from ml_stack.workspace.automatic_connection import settle
+
+    original = discovery.Membership("development", KEY)
+    chosen = discovery.Membership("chosen-dev", b"b" * 43, selection="manual")
+    monkeypatch.setattr(automatic, "ensure", lambda *args, **kwargs: chosen)
+    monkeypatch.setattr(automatic, "offers", lambda port: pytest.fail("manual selection discovered another cluster"))
+    assert settle(original, tmp_path / "device.key") == chosen
