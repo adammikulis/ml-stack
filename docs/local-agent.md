@@ -4,7 +4,7 @@ One command starts a downloaded model, joins it to the workspace and runs its lo
 
     ml-stack-workspace agent start [--model auto|ID] [--name NAME] [--role ROLE] [--project PATH]
                                    [--effort off|low|medium|high|auto] [--max-effort LEVEL]
-                                   [--orders-from NAMES] [--no-wait]
+                                   [--max-output-tokens TOKENS] [--orders-from NAMES] [--no-wait]
     ml-stack-workspace agent list
     ml-stack-workspace agent stop NAME
 
@@ -61,7 +61,9 @@ Caps per task: 12 tool-calling rounds, 30 tool calls, 24 model calls, 600 s, and
 Effort selects reasoning: `off`, `low`, `medium`, or `high`. Native coding sends the
 selected model family's thinking flag in `CLAUDE_CODE_EXTRA_BODY`; `off` explicitly disables
 Qwen template thinking. It does not impose an output limit from the effort level. Explicit
-caller output budgets are retained; otherwise the native harness uses its own output default.
+caller output budgets are retained. `--max-output-tokens` sets an independent response cap
+(default 8192 tokens) for Chat and Pi coding; Codex and Claude use their native output settings.
+The Agents panel exposes the same cap under Advanced options and preserves it with saved settings.
 An explicit caller `MAX_THINKING_TOKENS=0` also disables template thinking. The runtime
 does not generate a thinking-token limit that can carry over when effort changes.
 The default is `off`. The model may raise or lower its own effort with `set_effort(level, reason)` up
