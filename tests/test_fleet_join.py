@@ -70,10 +70,10 @@ class FakeDaemon:
     `join` started would do, without the daemon."""
 
     def __init__(self, port: int, key: bytes, udp: int, name: str = "larch",
-                 device: dict | None = None, machine: str = "") -> None:
+                 machine: str = "") -> None:
         self.name = name
         machine = machine or f"id-{name}"
-        device = dict(DEVICE if device is None else device)
+        device = dict(DEVICE)
 
         class H(BaseHTTPRequestHandler):
             def do_GET(self_) -> None:
@@ -896,9 +896,9 @@ class TestStatusSaysWhoIsPaused:
         env = {**os.environ, "ML_STACK_CLUSTER_KEY": str(key),
                "ML_STACK_DISCOVERY_PORT": str(udp),
                "PYTHONPATH": str(Path(joining.__file__).parents[2])}
-        code = ("from ml_stack.fleet.daemon import serve_forever;"
-                f"serve_forever(root={str(root)!r}, host='127.0.0.1',"
-                f" port={_free_tcp()}, name='windermere', web=False, announce=False)")
+        code = ("from ml_stack.fleet.daemon import serve, DaemonOptions;"
+                f"serve(DaemonOptions(root={str(root)!r}, host='127.0.0.1',"
+                f" port={_free_tcp()}, name='windermere', web=False, announce=False))")
         proc = subprocess.Popen([sys.executable, "-c", code], env=env,
                                 stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
         saved = root / "availability.json"

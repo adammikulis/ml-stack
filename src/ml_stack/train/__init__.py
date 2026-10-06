@@ -6,6 +6,7 @@ from ml_stack.fleet import (
     Advertiser,
     Beacon,
     DaemonError,
+    DaemonOptions,
     DiscoveryError,
     Job,
     JobRunner,
@@ -16,7 +17,7 @@ from ml_stack.fleet import (
     discover,
     load_cluster_key,
     safe_relpath,
-    serve_forever,
+    serve,
 )
 from ml_stack.train.checkpoint import (
     CheckpointError,
@@ -67,6 +68,7 @@ __all__ = [
     "CheckpointError",
     "CheckpointState",
     "DaemonError",
+    "DaemonOptions",
     "DiscoveryError",
     "Fertility",
     "Job",
@@ -113,7 +115,7 @@ __all__ = [
     "rotate",
     "safe_relpath",
     "save",
-    "serve_forever",
+    "serve",
     "spread_order",
     "step_for",
     "stratified",
