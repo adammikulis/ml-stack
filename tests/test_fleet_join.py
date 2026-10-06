@@ -43,6 +43,7 @@ from ml_stack.fleet.join import (
     table,
 )
 from ml_stack.http import Server
+from ml_stack.platform import process_group_kwargs
 from tests.cluster_support import join as join_cluster
 
 WORDS = "quince larch marlow"
@@ -467,7 +468,8 @@ class TestLeave:
 
         join_cluster(WORDS, group="home", path=key)
         # A process standing in for the daemon `join` started, stopped by pid, never by name.
-        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"],
+                                 **process_group_kwargs())
         root = tmp_path / "root"
         root.mkdir()
         joining.started_file(root).write_text(json.dumps({"pid": child.pid}))
