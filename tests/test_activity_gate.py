@@ -120,7 +120,15 @@ def test_runner_writes_local_evidence_without_user_activity(repo, monkeypatch, c
         assert payload["run"]["runner_interpreter"] == sys.executable
         assert payload["run"]["root"] == str(repo.resolve())
         assert payload["run"]["tree_after"] == payload["refs"]["tree"]
-        assert artifact.stat().st_mode & 0o777 == 0o600
+        if os.name == "nt":
+            from ml_stack.workspace.windows_tokens import _user
+            import win32security
+
+            descriptor = win32security.GetNamedSecurityInfo(
+                str(artifact), win32security.SE_FILE_OBJECT, win32security.OWNER_SECURITY_INFORMATION)
+            assert descriptor.GetSecurityDescriptorOwner() == _user()
+        else:
+            assert artifact.stat().st_mode & 0o777 == 0o600
         assert payload["process"] == {"pid": os.getpid(), "started": psutil.Process().create_time()}
         assert not artifact.with_name(artifact.name.removesuffix(".result.json") + ".xml").exists()
     finally:
