@@ -24,7 +24,7 @@ import sys
 import time
 from collections.abc import AsyncIterator, Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -162,34 +162,17 @@ def session(model: str, *, want: harnessing.Want | None = None, offline: bool = 
     (cwd, allowed_tools, permission_mode, max_turns, system_prompt, mcp_servers, hooks...) and
     ``guard`` is the list of interventions (`ml_stack.guard`) every tool call passes (the built-in
     rails if absent)."""
-    from ml_stack.serve import chat_template, leases, profile as records
+    from ml_stack.serve import chat_template, leases
     from ml_stack.serve.recent import note
-    from ml_stack.serve.serving import Config, Serving, drafted, served
+    from ml_stack.serve.serving import served
 
     want = want or harnessing.Want()
-    context = want.ctx
-    if isinstance(context, bool) or not isinstance(context, int) or context < 0:
-        raise ValueError("context must be 0 (automatic) or a positive token count")
     found = str(hub.located(model, loose=True) or model)
     note(found, by="agent")
-    if not context:
-        fit = harnessing.suggest.suggest(found, goal="long-context", max_verdict="yellow")
-        context = fit.context
-        if context <= 0:
-            raise ValueError(f"{Path(found).name} has no context that fits this device's memory")
-        say(f"automatically selected {context:,} context tokens for this device and model")
-    # a server already holding these weights is joined, so nothing below is what it serves
     leasing = say if leases.already_up(found, want.port) is None else (lambda _line: None)
-    measured = records.profile_for(found) if not want.no_profile else None
-    if measured is not None:
-        config = measured.config(port=want.port, slots=want.slots, model=found)
-        leasing(f"serving in the settings it scored best with: {records.said(measured)}")
-        config = drafted(config, "none", say=leasing)
-    else:
-        config = Config(serving=Serving(model=found, port=want.port, slots=want.slots))
-        config = drafted(config, want.draft, say=leasing)
-    if context:
-        config = replace(config, serving=replace(config.serving, slot_context=context))
+    config = harnessing.config_for(found, want, leasing)
+    if not harnessing.admitted(found, config.serving.context, say, kv=config.serving.cache_type):
+        raise ValueError("the model configuration exceeds this device's wired-memory limit")
     patched = chat_template.written_beside(found)
     if patched is not None:
         leasing("this model's template refuses a system message after the first; serving "
