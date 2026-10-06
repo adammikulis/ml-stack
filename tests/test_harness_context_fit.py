@@ -74,3 +74,8 @@ def test_measured_memory_settings_are_replaced_by_the_fit(monkeypatch, configure
     selected = configured().serving
     assert (selected.cache_type, selected.flash_attn, selected.extra_args) == (
         "q4_0", True, ("-ub", "1024"))
+
+
+def test_automatic_fit_requires_the_estimated_single_slot(monkeypatch, configured):
+    with pytest.raises(ValueError, match="supports one slot"):
+        harnessing.config_for("fixture.gguf", harnessing.Want(ctx=0, slots=2), lambda _: None)
