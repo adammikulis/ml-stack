@@ -142,7 +142,8 @@ def test_start_mints_a_private_token_records_the_pid_and_a_second_start_changes_
         spawned.append(sleeper(*a, **k))
         return spawned[-1]
 
-    got = ls.start(kit.ws, ls.Ask(), pick=PICK, spawn=spawn)
+    got = ls.start(kit.ws, ls.Ask(max_output_tokens=23456), pick=PICK, spawn=spawn)
+    assert la.load(kit.ws, got.name).max_output_tokens == 23456
     try:
         assert got.name == "local-agent" and not got.already
         tok = tokens.directory(kit.base) / got.name
@@ -174,7 +175,7 @@ def test_stop_releases_the_lease_the_loop_recorded(kit):
 
 def test_hostile_names_projects_and_roles_are_refused_before_anything_is_written(kit, tmp_path):
     before = sorted(p.name for p in kit.base.rglob("*"))
-    for ask in (ls.Ask(name="../evil"), ls.Ask(name="human"), ls.Ask(name="ml-stack-x"),
+    for ask in (ls.Ask(max_output_tokens=0), ls.Ask(max_output_tokens=True), ls.Ask(name="../evil"), ls.Ask(name="human"), ls.Ask(name="ml-stack-x"),
                 ls.Ask(name="a" * 60), ls.Ask(project="/nonexistent/x"), ls.Ask(project=str(kit.base)),
                 ls.Ask(project="/tmp\x00x"), ls.Ask(role="root"), ls.Ask(orders_from=("a/b/c",))):
         with pytest.raises(ValueError):

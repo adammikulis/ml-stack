@@ -59,6 +59,7 @@ class Ask:
     project: str = ""
     orders_from: tuple[str, ...] = la.DEFAULT_ORDERS_FROM
     harness: str = lh.PI
+    max_output_tokens: int = 8192
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,6 +124,8 @@ def _start(ws: Workspace, ask: Ask, *, pick: localmodel.Pick | None = None,
     """Join a local model to the workspace and run its loop detached; the same name again reports
     the agent already running. Raises `Unavailable` when no suitable model is downloaded or it
     would not fit, ValueError for a bad name, role or project."""
+    if isinstance(ask.max_output_tokens, bool) or not isinstance(ask.max_output_tokens, int) or ask.max_output_tokens < 1:
+        raise ValueError("maximum output tokens must be a positive integer")
     role = roles.get(ask.role).name
     ceiling = le.valid(ask.max_effort)
     effort = le.clamp(le.valid(ask.effort, allow_auto=True), ceiling) if ask.effort != le.AUTO else le.AUTO
@@ -157,7 +160,7 @@ def _start(ws: Workspace, ask: Ask, *, pick: localmodel.Pick | None = None,
         _record_model(ws, identity, chosen)
         la.stop_file(ws, name).unlink(missing_ok=True)
         agent = la.Agent(name=name, identity=identity, model=chosen.ref, model_name=chosen.name,
-                         size_bytes=chosen.size_bytes, role=role, profile=prof.name, ctx=ctx, effort=effort, max_effort=ceiling,
+                         size_bytes=chosen.size_bytes, role=role, profile=prof.name, ctx=ctx, effort=effort, max_effort=ceiling, max_output_tokens=ask.max_output_tokens,
                          project=folder_, orders_from=orders, started=time.time(), extra=dict(have.extra) if have else {})
         la.save(ws, agent)
         job = (spawn or jobs.detach)(LOOP, [name], log=la.log_file(ws, name), kind=name,
@@ -184,7 +187,7 @@ def _coding(ws: Workspace, ask: Ask, chosen: localmodel.Pick, ctx: int, project:
             return _running(have, chosen)
         agent = la.Agent(name=name, model=chosen.ref, model_name=chosen.name,
                          size_bytes=chosen.size_bytes, role=role, profile="coding", harness=ask.harness,
-                         ctx=ctx, project=project, effort=le.clamp(le.valid(ask.effort), le.valid(ask.max_effort)), max_effort=ask.max_effort,
+                         ctx=ctx, project=project, effort=(le.AUTO if ask.effort == le.AUTO else le.clamp(le.valid(ask.effort), le.valid(ask.max_effort))), max_effort=ask.max_effort, max_output_tokens=ask.max_output_tokens,
                          extra=dict(have.extra) if have else {}, orders_from=la.check_orders(list(ask.orders_from)),
                          started=time.time())
         identity = _worker_identity(ws, have, name, project)

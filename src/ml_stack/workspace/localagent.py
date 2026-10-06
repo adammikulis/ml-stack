@@ -101,6 +101,7 @@ class Agent:
     process_started: float = 0.0
     log: str = ""
     extra: dict[str, Any] = field(default_factory=dict)
+    max_output_tokens: int = 8192
 
     def as_dict(self) -> dict[str, Any]:
         out = asdict(self)

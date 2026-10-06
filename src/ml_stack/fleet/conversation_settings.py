@@ -5,7 +5,7 @@ import math
 from typing import Any
 
 DEFAULTS: dict[str, Any] = {"mode": "chat", "temperature": None, "project": "", "role": "",
-                            "effort": "off", "max_effort": "medium", "harness": "pi", "context": 0, "draft": "auto"}
+                            "effort": "off", "max_effort": "medium", "harness": "pi", "context": 0, "draft": "auto", "max_output_tokens": 8192}
 LEVELS = ("off", "low", "medium", "high")
 
 
@@ -25,6 +25,9 @@ def checked(settings: dict | None = None) -> dict[str, Any]:
     if (isinstance(result["context"], bool) or not isinstance(result["context"], int)
             or (result["context"] != 0 and not 1024 <= result["context"] <= 1048576)):
         raise ValueError("context length must be 0 (automatic) or an integer between 1024 and 1048576")
+    if (isinstance(result["max_output_tokens"], bool) or not isinstance(result["max_output_tokens"], int)
+            or result["max_output_tokens"] < 1):
+        raise ValueError("maximum output tokens must be a positive integer")
     if len(result["harness"]) > 64:
         raise ValueError("harness identifier is too long")
     if len(result["role"]) > 128:

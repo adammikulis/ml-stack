@@ -21,7 +21,7 @@ from ml_stack.fleet import conversation_graph as graph
 from ml_stack.fleet.conversation_types import safe
 from ml_stack.fleet.conversations import Conversations
 from ml_stack.serve.process import kill_process_tree
-from ml_stack.workspace import coding_events, localstart, project
+from ml_stack.workspace import coding_events, localeffort, localstart, project
 from ml_stack.workspace.harness_seat import Seat
 from ml_stack.workspace.service import Workspace
 
@@ -188,6 +188,9 @@ class Manager:
             launch_options = {}
             if harness == "pi":
                 launch_options["max_turns"] = self._max_turns()
+                launch_options["max_output_tokens"] = settings["max_output_tokens"]
+                launch_options["effort"] = (localeffort.pick_for(prompt, settings["max_effort"])
+                    if settings["effort"] == "auto" else localeffort.clamp(settings["effort"], settings["max_effort"]))
             result = coding.launch_coding_agent(conversation.model, settings["role"] or roles.DEFAULT,
                 settings["project"], harness=harness, context=settings["context"], draft=settings.get("draft", "auto"), name=f"chat-{conversation.id}",
                 harness_args=args, seat_factory=self._seat, say=lambda text: turn.emit({"status": text}),
