@@ -654,7 +654,7 @@ def test_the_guarded_client_trims_a_long_task_before_a_call(kit):
         msgs += [{"role": "assistant", "content": "", "tool_calls": [{"id": str(n), "function": {"name": "t"}}]},
                  {"role": "tool", "tool_call_id": str(n), "content": big}]
     model = Script([done("x")])
-    guarded = localtools.Guarded(model, effort="off", limits=(60.0, 5), stop=lambda: False, ctx=32768)
+    guarded = localtools.Guarded(model, effort="off", limits=localtools.Limits(60.0, 5, context=32768), stop=lambda: False)
     guarded.chat(msgs, tools=[])
     assert len(model.seen[0][0]) < 61 and any(m.get("content") == "[earlier turns of this task were dropped to stay inside the context]" for m in model.seen[0][0])
 
@@ -840,7 +840,7 @@ def test_exact_downloaded_model_path_resolves_cache_symlinks_without_basename_fa
 @pytest.mark.parametrize('effort',['off','low','medium','high'])
 def test_reasoning_effort_never_overrides_explicit_response_budget(effort):
     model=Script([done('answer')])
-    guarded=localtools.Guarded(model,effort=effort,limits=(60,5),stop=lambda:False)
+    guarded=localtools.Guarded(model,effort=effort,limits=localtools.Limits(60,5),stop=lambda:False)
     guarded.chat([{'role':'user','content':'answer'}],n_predict=32000)
     assert model.kw[-1]['n_predict'] == 32000
     guarded.chat([{'role':'user','content':'answer'}])

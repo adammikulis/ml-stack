@@ -12,8 +12,8 @@ from collections.abc import Callable, Sequence
 from typing import Any
 
 from ml_stack import harnessing
-from ml_stack.client import families
 from ml_stack.claude import DEFAULT_PORT, DEFAULT_SLOTS, alias_of
+from ml_stack.client import families
 from ml_stack.log import say
 from ml_stack.serve import provenance
 

@@ -140,14 +140,13 @@ def test_native_pi_options_keep_output_effort_and_turns_separate(monkeypatch):
 
 
 def test_chat_agent_output_default_keeps_caller_caps():
-    from ml_stack.workspace.localtools import Guarded
+    from ml_stack.workspace.localtools import Guarded, Limits
 
     class Client:
         def chat(self, messages, **kwargs):
             return kwargs
     for effort in ("off", "low", "medium", "high"):
-        guarded = Guarded(Client(), effort=effort, limits=(60, 5), stop=lambda: False,
-                          max_output_tokens=8192)
+        guarded = Guarded(Client(), effort=effort, limits=Limits(60, 5, max_output_tokens=8192), stop=lambda: False)
         assert guarded.chat([])["n_predict"] == 8192
         assert guarded.chat([], n_predict=32000)["n_predict"] == 32000
         assert guarded.chat([], n_predict=0)["n_predict"] == 0
@@ -157,7 +156,7 @@ def test_chat_agent_output_default_keeps_caller_caps():
 
 def test_guarded_output_cap_reaches_real_client_body():
     from ml_stack.client import Client, Request
-    from ml_stack.workspace.localtools import Guarded
+    from ml_stack.workspace.localtools import Guarded, Limits
 
     class BodyClient(Client):
         def chat(self, messages, **kwargs):
@@ -166,8 +165,7 @@ def test_guarded_output_cap_reaches_real_client_body():
         from ml_stack.client import Transport
         client = BodyClient("http://127.0.0.1:1", model="qwen", request=Request(n_predict=2048),
                             transport=Transport(api=api))
-        guarded = Guarded(client, effort="off", limits=(60, 5), stop=lambda: False,
-                          max_output_tokens=8192)
+        guarded = Guarded(client, effort="off", limits=Limits(60, 5, max_output_tokens=8192), stop=lambda: False)
         key = "max_tokens" if api == "openai" else "n_predict"
         assert guarded.chat([], max_tokens=17000)[key] == 17000
         assert guarded.chat([], max_completion_tokens=19000)[key] == 19000
