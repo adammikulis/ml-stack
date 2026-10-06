@@ -23,6 +23,7 @@ from ml_stack import net
 from ml_stack.files import promote
 from ml_stack.http import ServerError, ServerUnreachable
 from ml_stack.httpguard import Refused
+from ml_stack.lock import Busy
 from ml_stack.net import git as netgit, provenance
 from ml_stack.safenames import Unsafe, safe_filename, unpack
 
@@ -524,6 +525,7 @@ class UpdateRuntime:
     git: Git | None = None
     pip: Callable[[Path], tuple[int, str]] = pip_install
     restart: Callable[[], Any] | None = None
+    admission: Callable[[], contextlib.AbstractContextManager[Any]] = contextlib.nullcontext
 
 
 @dataclass(frozen=True, slots=True)
@@ -655,12 +657,15 @@ def track(source: TrackedBranch, *, idle: Callable[[], bool] = lambda: True,
         while not schedule.rounds or seen < schedule.rounds:
             seen += 1
             try:
-                if idle():
-                    got = track_once(source, runtime=runtime)
-                    note(checked_at=time.time(), error=got.error,
-                         commit=got.now or LAST.get("commit", ""))
-                    if got.restarted:
-                        return
+                with runtime.admission():
+                    if idle():
+                        got = track_once(source, runtime=runtime)
+                        note(checked_at=time.time(), error=got.error,
+                             commit=got.now or LAST.get("commit", ""))
+                        if got.restarted:
+                            return
+            except Busy:
+                pass
             except Exception as exc:                  # noqa: BLE001 - a loop that dies stops following
                 note(checked_at=time.time(), error=str(exc))
             time.sleep(schedule.interval)
@@ -710,7 +715,8 @@ def apply_if_newer() -> dict[str, Any]:
 
 def watch(*, wanted: Callable[[], bool], idle: Callable[[], bool],
           restart: Callable[[], Any] | None = None,
-          schedule: UpdateSchedule = _RELEASE_SCHEDULE) -> threading.Thread:
+          schedule: UpdateSchedule = _RELEASE_SCHEDULE,
+          admission: Callable[[], contextlib.AbstractContextManager[Any]] = contextlib.nullcontext) -> threading.Thread:
     """Check releases on a schedule and install them when the machine is idle."""
     bring_back = restart if restart is not None else restart_after_update
     # Recorded here rather than from inside the thread: which mode this machine is in is
@@ -724,11 +730,14 @@ def watch(*, wanted: Callable[[], bool], idle: Callable[[], bool],
         while not schedule.rounds or seen < schedule.rounds:
             seen += 1
             try:
-                if wanted() and idle():
-                    got = apply_if_newer()
-                    note(checked_at=time.time(), error=str(got.get("error") or ""))
-                    if got.get("installed") and bring_back():
-                        return
+                with admission():
+                    if wanted() and idle():
+                        got = apply_if_newer()
+                        note(checked_at=time.time(), error=str(got.get("error") or ""))
+                        if got.get("installed") and bring_back():
+                            return
+            except Busy:
+                pass
             except Exception as exc:                  # noqa: BLE001
                 _LOG.exception("Release update check failed")
                 note(checked_at=time.time(), error=str(exc))

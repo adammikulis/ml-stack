@@ -20,6 +20,7 @@ from ml_stack import home, macauth, sentinel
 from ml_stack.files import write_text
 from ml_stack.fleet.onboard.requests import Devices
 from ml_stack.hub import default_roots
+from ml_stack.lock import only_one
 from ml_stack.log import say, warn
 from ml_stack.platform import on_quit, private_file
 from ml_stack.serve import canaries, guarded
@@ -78,7 +79,8 @@ def bind_address(host: str | None, *, lan: bool, joined: bool) -> str:
 
 
 def load_or_create_token(
-    root: Path, cluster_key: bytes | None = None, *, profile: Path | str | None = None
+    root: Path, cluster_key: bytes | None = None, *, profile: Path | str | None = None,
+    rotate: bool = False
 ) -> str:
     """Return the owner-only machine token for the selected cluster profile."""
     p = root / "token"
@@ -91,7 +93,7 @@ def load_or_create_token(
         p.parent.chmod(0o700)
     if cluster_key is not None:
         tok = derive_token(cluster_key)
-    elif p.exists() and p.read_text().strip().startswith(macauth.PREFIX):
+    elif not rotate and p.exists() and p.read_text().strip().startswith(macauth.PREFIX):
         private_file(p)
         return p.read_text().strip()
     else:
@@ -343,6 +345,7 @@ class DaemonRuntime:
             updating.track(
                 updating.TrackedBranch(self.tracked_from, self.tracked, self.checkout),
                 idle=self.nothing_running,
+                runtime=updating.UpdateRuntime(admission=self.update_admission),
             )
         else:
             if self.tracked:
@@ -352,6 +355,7 @@ class DaemonRuntime:
             updating.watch(
                 wanted=lambda: bool(getattr(self.settings, "auto_update", False)),
                 idle=self.nothing_running,
+                admission=self.update_admission,
             )
 
     def announcements(self) -> None:
@@ -475,8 +479,11 @@ class DaemonRuntime:
             self.runner.shutdown()
             self.httpd.server_close()
 
+    def update_admission(self):
+        return only_one(self.root / "runtime-install.lock", wait=False)
+
     def background_busy(self) -> bool:
-        return (bool(self.runner.status()["busy"]) or any(row.state == "getting" for row in self.downloads.active())
+        return (bool(self.web and self.initial_setup and not self.settings.setup_done) or bool(self.runner.status()["busy"]) or any(row.state == "getting" for row in self.downloads.active())
                 or bool(self.interface and self.interface.setup_jobs and self.interface.setup_jobs.active()))
 
     def may_start(self) -> tuple[bool, str]:
@@ -547,13 +554,11 @@ class DaemonRuntime:
     def start_announcing(self) -> None:
         """Advertise on every cluster this machine is in, and stop on any it left."""
         with self.announcement_lock:
-            if not self.announce:
-                return
             joined = {m.group: m for m in memberships(self.cluster_key_path)}
             for group in [g for g in self.advertisers if g not in joined]:
                 with contextlib.suppress(Exception):
                     self.advertisers.pop(group).stop()
-            for group, member in joined.items():
+            for group, member in (joined.items() if self.announce else ()):
                 if group in self.advertisers and self.advertisers[group].key != member.key:
                     self.advertisers.pop(group).stop()
                 if group in self.advertisers:
@@ -581,16 +586,26 @@ class DaemonRuntime:
                     self.advertisers[group] = tell.start()
                 except DiscoveryError as exc:
                     say(f"  discovery OFF for {group}: {exc}")
-            first = next(iter(joined.values()), None)
-            if first is not None:
-                self.key = first.key
-                self.fetcher.key = first.key
-                self.token = load_or_create_token(
-                    self.root,
-                    first.key,
-                    profile=self.cluster_key_path or os.environ.get("ML_STACK_CLUSTER_KEY"),
-                )
-                self.advertiser = self.advertisers.get(first.group)
+            self.reconcile_cluster(next(iter(joined.values()), None))
+
+    def reconcile_cluster(self, first) -> None:
+        if first is not None:
+            self.key = first.key
+            self.fetcher.key = first.key
+            self.token = load_or_create_token(
+                self.root,
+                first.key,
+                profile=self.cluster_key_path or os.environ.get("ML_STACK_CLUSTER_KEY"),
+            )
+            self.advertiser = self.advertisers.get(first.group)
+        else:
+            self.token = load_or_create_token(
+                self.root, profile=self.cluster_key_path or os.environ.get("ML_STACK_CLUSTER_KEY"),
+                rotate=self.key is not None,
+            )
+            self.key = None
+            self.fetcher.key = None
+            self.advertiser = None
 
     def rename(self, called: str) -> str:
         """Give this machine a new name now, on the page and on the network."""
@@ -610,9 +625,9 @@ class DaemonRuntime:
         selected = memberships(self.cluster_key_path)
         self.effective_mode = selected[0].mode if selected else self.settings.cluster_mode or "dev"
         self.daemon.cluster_mode = self.effective_mode
+        self.start_announcing()
         if not selected:
             return
-        self.start_announcing()
         for member in selected:
             say(f"  joined cluster {member.group!r}")
         if not self.host and self.listening == LOOPBACK:
