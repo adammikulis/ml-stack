@@ -62,6 +62,29 @@ class BoardGraph:
                 validate(graph, stream)
             yield graph
 
+    @contextmanager
+    def reading(self):
+        if self.path.exists():
+            with held(self.guard, shared=True), GraphStore(
+                    self.path, read_only=True, buffer_pool_size=memory()) as graph:
+                bus = graph.get_doc("legacy:bus")
+                if graph.get_doc("legacy:boards") is not None and bus and bus.get("erased"):
+                    self._check_legacy(graph)
+                    for stream in ("boards", "bus"):
+                        validate(graph, stream)
+                    yield graph
+                    return
+        with self.opened() as graph:
+            yield graph
+
+    def _check_legacy(self, graph):
+        if (self.base / "bus.jsonl").exists():
+            raise ChainBroken("legacy bus was reintroduced after graph migration")
+        path = self.base / "boards.jsonl"
+        raw = path.read_bytes() if path.exists() else b""
+        if hashlib.sha256(raw).hexdigest() != graph.get_doc("legacy:boards")["digest"]:
+            raise ChainBroken("legacy boards changed after graph migration")
+
     def _migrate(self, graph):
         scope = graph.get_doc("board-scope")
         for stream in ("boards", "bus"):
@@ -311,10 +334,10 @@ class BoardGraph:
         return value
 
     def cursor(self, who, key, seq=None):
-        with self.opened() as graph:
-            if seq is not None:
-                with graph.transaction():
-                    return self._cursor(graph, who, key, seq)
+        if seq is not None:
+            with self.opened() as graph, graph.transaction():
+                return self._cursor(graph, who, key, seq)
+        with self.reading() as graph:
             return next(
                 (
                     n["seq"]
@@ -325,7 +348,7 @@ class BoardGraph:
             )
 
     def marks(self, who):
-        with self.opened() as graph:
+        with self.reading() as graph:
             return {
                 n["key"]: n["seq"]
                 for n in graph.nodes("board-cursor")
@@ -333,7 +356,7 @@ class BoardGraph:
             }
 
     def state(self):
-        with self.opened() as graph:
+        with self.reading() as graph:
             identities = {n["id"]: n["name"] for n in graph.nodes("board-identity")}
             membership = graph.edges("MEMBER_OF")
             boards = {

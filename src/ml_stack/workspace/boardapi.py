@@ -94,7 +94,9 @@ class BoardApi:
 
     def can_read(self, who: Identity, name: str, boards: dict[str, Any] | None = None) -> bool:
         """Whether ``who`` may read board ``name``: a member, or a person or lead (read-only)."""
-        found = (boards or self.store.state()[0]).get(name)
+        if not plain.name_ok(name):
+            return False
+        found = (self.store.state()[0] if boards is None else boards).get(name)
         if found is None:
             return False
         return who.role != AGENT or name in (GENERAL, ANNOUNCE) or self._root(who) in found["members"]
@@ -107,11 +109,15 @@ class BoardApi:
 
     def can_post(self, who: Identity, name: str) -> bool:
         """Whether ``who`` is a member of ``name`` and so may post to it."""
+        if not plain.name_ok(name):
+            return False
         found = self.store.state()[0].get(name)
         return found is not None and (name == GENERAL or self._root(who) in found["members"])
 
     def require_post(self, who: Identity, name: str) -> None:
         """`Denied` unless ``who`` is a member of ``name``."""
+        if not plain.name_ok(name):
+            raise ValueError("invalid board name")
         boards = self.store.state()[0]
         found = boards.get(name)
         if found is None or not (name == GENERAL or self._root(who) in found["members"]):
@@ -223,6 +229,8 @@ class BoardApi:
         """Join an open board; a person may join any."""
         who = self._who(token)
         self._top(who, "join boards")
+        if not plain.name_ok(name):
+            raise ValueError("invalid board name")
         with self.store.locked():
             boards = self.store.state()[0]
             found = boards.get(name)
@@ -254,6 +262,8 @@ class BoardApi:
         """Put ``member`` on a board; the person, a lead or the board's maker may."""
         who = self._who(token)
         self._top(who, "add members")
+        if not plain.name_ok(name):
+            raise ValueError("invalid board name")
         with self.store.locked():
             boards = self.store.state()[0]
             found = boards.get(name)

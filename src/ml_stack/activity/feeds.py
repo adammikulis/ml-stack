@@ -89,10 +89,9 @@ def workspace_sync(base: Path | None = None) -> int:
             fresh = [r for r in _rows(base / "audit.jsonl") if r["seq"] > seen]
             if not fresh:
                 return 0
-            bus = {r["seq"]: r for r in _rows(base / "bus.jsonl")}
             done = 0
             for row in fresh:
-                if not _one(row, bus):
+                if not _one(row):
                     break
                 seen, done = row["seq"], done + 1
             write_json(cursor_file, {**read_json(cursor_file, {}), str(base): seen})
@@ -106,16 +105,15 @@ def _workspace_root() -> Path:
     return Path(named).expanduser() if named else home.state("workspace")
 
 
-def _one(row: dict[str, Any], bus: dict[int, dict[str, Any]]) -> bool:
+def _one(row: dict[str, Any]) -> bool:
     event, who = str(row.get("event", "")), str(row.get("who", ""))
     skip = {"v", "seq", "prev", "hash", "ts", "event", "who"}
     detail = {k: v for k, v in row.items() if k not in skip}
     if event == "message":
-        sent = bus.get(int(row.get("msg", 0)), {})
         return writer.record(
             "workspace.message", actor=who, subject=f"msg:{row.get('msg')}", outcome="held" if row.get("held") else "sent",
-            refs={"from": who, "to": row.get("to", ""), "thread": sent.get("thread", "")},
-            meta={"type": row.get("type", ""), "size": len(str(sent.get("body", ""))),
+            refs={"from": who, "to": row.get("to", ""), "thread": row.get("thread", "")},
+            meta={"type": row.get("type", ""), **({"size": row["size"]} if "size" in row else {"payload": "metadata-unavailable"}),
                   "model": row.get("model", ""), "model_verified": bool(row.get("verified", False))},
             ts=row.get("ts"))
     if event in _CLAIMS:

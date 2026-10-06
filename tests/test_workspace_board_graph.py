@@ -1,5 +1,6 @@
 """Relational Board migration, same-authority replica exchange and access isolation."""
 
+import sys
 from copy import deepcopy
 
 import pytest
@@ -324,3 +325,47 @@ def test_valid_rehashed_origin_fork_rolls_back_every_imported_node(replicas):
     assert [row["body"] for row in right.ws.bus.log.rows()] == ["one", "two"]
     with right.ws.bus.log.graph.opened() as graph:
         assert not graph.has(event["id"])
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows graph reads hold exclusive file locks")
+def test_graph_readers_share_committed_snapshot_without_write_transactions(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+    graph_store = BoardGraph(tmp_path)
+    graph_store.state()
+    ready = Barrier(2)
+    def read():
+        with graph_store.reading() as graph:
+            assert graph.read_only
+            ready.wait(timeout=5)
+            return graph.get_doc("board-scope")["workspace"]
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(read) for _ in range(2)]
+        assert futures[0].result(timeout=10) == futures[1].result(timeout=10)
+
+
+def test_exclusive_graph_writer_waits_until_shared_reader_releases(monkeypatch, tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event, current_thread
+
+    from ml_stack import lock
+    from ml_stack.workspace.graphlog import GraphLog
+    graph_store = BoardGraph(tmp_path)
+    graph_store.state()
+    blocked = Event()
+    original = lock.take
+    def taking(handle, *, shared=False):
+        taken = original(handle, shared=shared)
+        if not taken and not shared and current_thread().name.startswith("board-writer"):
+            blocked.set()
+        return taken
+    monkeypatch.setattr(lock, "take", taking)
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="board-writer") as pool:
+        with graph_store.reading() as graph:
+            pending = pool.submit(GraphLog(tmp_path, "bus").append,
+                                  {"kind": "msg", "from": "sender", "to": "reader", "body": "committed"})
+            assert blocked.wait(timeout=5)
+            assert not pending.done()
+            assert graph.get_doc("board-scope")
+        assert pending.result(timeout=10)["body"] == "committed"
+    assert GraphLog(tmp_path, "bus").rows()[0]["body"] == "committed"

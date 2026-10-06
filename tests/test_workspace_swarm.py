@@ -291,7 +291,7 @@ def test_the_indexes_follow_a_prune_and_a_replaced_log(tmp_path):
     assert bus.prune(45) == 6
     assert [m["body"] for m in bus.outbox("a", 100)] == [f"m{i}" for i in range(6, 10)]
     assert bus.thread(8)[0]["seq"] == 8 and bus.thread(2) == []
-    (tmp_path / "bus.jsonl").rename(tmp_path / "bus.old")
+    (tmp_path / "board.db").rename(tmp_path / "board.old")
     bus.append(msg("a", "fresh", "b"))
     assert bus.outbox("a", 100) == [] and [m["body"] for m in bus.outbox("b", 100)] == ["fresh"]
 

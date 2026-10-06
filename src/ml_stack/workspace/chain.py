@@ -39,12 +39,12 @@ class Verdict:
 
 
 @contextmanager
-def held(path: Path) -> Iterator[None]:
+def held(path: Path, *, shared: bool = False) -> Iterator[None]:
     """Hold ``path`` exclusively for the block, polling every few milliseconds."""
     path.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
     try:
-        while not lock.take(fd):
+        while not (lock.take(fd, shared=True) if shared else lock.take(fd)):
             time.sleep(0.005)
         try:
             yield

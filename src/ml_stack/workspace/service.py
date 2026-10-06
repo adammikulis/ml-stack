@@ -404,6 +404,7 @@ class Workspace:
         made = self.bus.append(row)
         wake.signal(self.base / 'wake', self.board.wake_names(made))
         self.audit('message', who.id, msg=made['seq'], to=to, type=row['type'], held=qid,
+                   size=len(made['body']), thread=made.get('thread', 0),
                    label=row['label'], model=row['model'], verified=row['model_state'] == VERIFIED)
         return self.deliver(made, raw=True)
 

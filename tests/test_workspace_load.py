@@ -80,8 +80,10 @@ def test_a_broken_chain_fails_the_run(kit, tmp_path):
     kit.agent("peer")
     kit.ws.send(kit.owner, "peer", "note", "first")
     kit.ws.send(kit.owner, "peer", "note", "pay the invoice")
-    path = kit.base / "bus.jsonl"
-    path.write_text(path.read_text().replace("pay the invoice", "pay the other invoice"))
+    with kit.ws.bus.log.graph.opened() as graph:
+        event = kit.ws.bus.log.graph._events(graph, "bus")[-1]
+        event["row"]["body"] = "pay the other invoice"
+        graph.upsert_node(event)
     shape = {"agents": 1, "messages": 1, "wall": 1.0, "default_limits": False}
     out = load.report([synthetic()], kit.ws, tmp_path / "ring.json", shape)
     assert "chain" in out["missed"] and out["pass"] is False

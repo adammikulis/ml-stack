@@ -34,7 +34,7 @@ class GraphLog:
         ]
 
     def rows(self):
-        with self.graph.opened() as graph:
+        with self.graph.reading() as graph:
             events = self.graph._events(graph, self.stream)
             verdict = verified(events, bases=checkpoints(graph, self.stream))
             if not verdict.ok:
@@ -46,7 +46,7 @@ class GraphLog:
 
     def verify(self, anchor=""):
         try:
-            with self.graph.opened() as graph:
+            with self.graph.reading() as graph:
                 events = self.graph._events(graph, self.stream)
                 verdict = verified(events, anchor, checkpoints(graph, self.stream))
                 return Verdict(

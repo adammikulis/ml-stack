@@ -100,24 +100,24 @@ def timed_locks(waits: list[float], holds: list[float]) -> None:
     """Wrap the workspace's file lock so the bus log's wait and hold times are recorded."""
     from contextlib import contextmanager
 
-    from ml_stack.workspace import chain, claims, rates
+    from ml_stack.workspace import board_graph, chain, claims, rates
 
     original = chain.held
 
     @contextmanager
-    def held(path: Path):
+    def held(path: Path, **options):
         start = time.perf_counter()
-        with original(path) as got:
+        with original(path, **options) as got:
             taken = time.perf_counter()
-            if path.name == "bus.jsonl.lock":
+            if path.name == "board-graph.lock":
                 waits.append(taken - start)
             try:
                 yield got
             finally:
-                if path.name == "bus.jsonl.lock":
+                if path.name == "board-graph.lock":
                     holds.append(time.perf_counter() - taken)
 
-    chain.held = claims.held = rates.held = held
+    board_graph.held = chain.held = claims.held = rates.held = held
 
 
 class Agent:
@@ -295,7 +295,7 @@ def report(outs: list[dict[str, Any]], ws: Any, ring: Path, shape: dict[str, Any
         "claim_s": summary(merged("claim")), "thread_read_s": summary(merged("thread")),
         "bus_lock_wait_s": summary(merged("lock_wait")), "bus_lock_hold_s": summary(merged("lock_hold")),
         "failures": failures,
-        "log": {"bus_rows": verdict.rows, "bus_bytes": (base / "bus.jsonl").stat().st_size,
+        "log": {"bus_rows": verdict.rows, "graph_bytes": ws.bus.log.graph.path.stat().st_size,
                 "audit_bytes": (base / "audit.jsonl").stat().st_size, "chain_ok": verdict.ok},
         "keystore_backend_calls": {k: calls.count(k) for k in ("get", "set", "delete")},
         "cpu_s_total": round(cpu, 2),

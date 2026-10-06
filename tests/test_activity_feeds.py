@@ -192,3 +192,15 @@ def test_a_kept_bench_run_records_command_label_and_where_it_is_kept(person, tmp
     assert (e.subject, e.outcome, e.refs["key"], e.meta["rows"], e.meta["model"]) == (
         "trial", "kept", key, 1, "qwen-q4.gguf")
     assert BODY not in repr(e) and CANARY.encode() not in on_disk(writer.directory())
+
+
+def test_workspace_sync_keeps_audited_size_after_payload_expires(person, monkeypatch, tmp_path):
+    kit = Kit(clean_env(monkeypatch, tmp_path))
+    alpha = kit.agent("alpha")
+    kit.agent("beta")
+    kit.ws.send(alpha, "beta", "handoff", BODY)
+    assert kit.ws.bus.log.prune_prefix(lambda row: True) == 1
+    feeds.workspace_sync(kit.base)
+    msg = next(entry for entry in entries() if entry.kind == "workspace.message")
+    assert msg.meta["size"] == len(BODY)
+    assert BODY not in " ".join(repr(entry) for entry in entries())
