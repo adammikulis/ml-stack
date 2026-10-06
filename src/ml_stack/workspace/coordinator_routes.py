@@ -15,6 +15,7 @@ from ml_stack.workspace import (
 from ml_stack.workspace.boardroute import Request
 from ml_stack.workspace.chain import held
 from ml_stack.workspace.coordination import workspace_id
+from ml_stack.workspace.coordinator_bootstrap import ensure_host as ensure_host
 from ml_stack.workspace.identity import HUMAN, Denied
 from ml_stack.workspace.service import Workspace
 
@@ -55,24 +56,6 @@ def _change(ws, token, document):
             raise Denied('an existing workspace authority cannot be replaced by agent selection')
         return coordinator_client._connect(ws.base, document['name'], replace=not local_agent)
     raise ValueError('choose host or an advertised coordinator name')
-
-
-def ensure_host(ws, token):
-    """Host an existing protected local workspace under its own agent session."""
-    with held(ws.base / 'coordinator-selection.lock'):
-        return _ensure_host(ws, token)
-
-
-def _ensure_host(ws, token):
-    device_agent.owned_local(ws, token)
-    config = coordinator_config.load(ws.base)
-    if config.get('mode') == 'remote':
-        raise Denied('this device follows an existing coordinator authority')
-    if config:
-        return config
-    if coordinator_client._client(ws.base) is not None:
-        raise Denied('this device has an existing shared coordinator authority')
-    return _change(ws, token, {'action': 'host'})
 
 
 def route(request):

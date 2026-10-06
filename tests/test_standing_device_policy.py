@@ -15,6 +15,7 @@ from ml_stack.fleet.onboard.requests import Device, Devices
 from ml_stack.fleet.remote import Peer
 from ml_stack.hub.peerbook import PeerBook
 from ml_stack.workspace import (
+    coordinator_bootstrap,
     coordinator_client,
     coordinator_config,
     coordinator_routes,
@@ -44,9 +45,9 @@ def test_own_local_session_hosts_without_reading_person_token(tmp_path, monkeypa
         assert path.name != tokens.OWNER_FILE
         return read(path)
     monkeypatch.setattr(tokens, 'read_file', agent_only)
-    result = coordinator_routes.ensure_host(kit.ws, token)
+    result = coordinator_bootstrap.ensure_host(kit.ws, token)
     assert result['mode'] == 'host'
-    assert coordinator_routes.ensure_host(kit.ws, token) == result
+    assert coordinator_bootstrap.ensure_host(kit.ws, token) == result
 
 
 @pytest.mark.redteam
@@ -78,14 +79,14 @@ def test_remote_and_unavailable_shared_authority_never_becomes_local_host(tmp_pa
     config = coordinator_config.save(kit.base, {'mode': 'remote', 'workspace': 'workspace:foreign',
                                                'endpoint': 'https://example.invalid:8784'})
     with pytest.raises(Denied):
-        coordinator_routes.ensure_host(kit.ws, token)
+        coordinator_bootstrap.ensure_host(kit.ws, token)
     assert coordinator_config.load(kit.base) == config
     (kit.base / 'coordinator.json').unlink()
     def unavailable(base):
         raise Denied('the enrolled workspace coordinator is unavailable')
     monkeypatch.setattr(coordinator_client, '_client', unavailable)
     with pytest.raises(Denied, match='unavailable'):
-        coordinator_routes.ensure_host(kit.ws, token)
+        coordinator_bootstrap.ensure_host(kit.ws, token)
     assert coordinator_config.load(kit.base) == {}
 
 
