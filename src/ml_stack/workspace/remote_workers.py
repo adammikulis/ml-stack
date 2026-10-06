@@ -139,7 +139,8 @@ def start(projects, project_id, body, *, admission, cluster_key=None):
                     raise Denied('the running worker belongs to another canonical project or caller')
                 if body.get('model', localmodel.AUTO) not in (localmodel.AUTO, agent.model):
                     raise ValueError('stop the running worker before changing its model')
-                credential(remote, prior['identity'], agent.model_name, project.authority_machine)
+                credential(remote, prior['identity'], localmodel.model_identity(agent.model_name),
+                           project.authority_machine)
                 write_json(connection, {**prior, 'cluster_id': cluster_id, 'cluster': cluster})
                 connection.chmod(0o600)
                 return 200, {'name': name, 'identity': prior['identity'], 'model': agent.model_name,
@@ -149,7 +150,8 @@ def start(projects, project_id, body, *, admission, cluster_key=None):
             if not chosen.ok:
                 raise localstart.Unavailable(chosen.problem, chosen.hint)
             canonical_name = 'lan-' + projects.machine[:12] + '-' + name[:20]
-            canonical_token = credential(remote, canonical_name, chosen.name, project.authority_machine)
+            canonical_token = credential(remote, canonical_name, localmodel.model_identity(chosen.name),
+                                         project.authority_machine)
             canonical_identity = remote.call('whoami', canonical_token)['id']
             record = {'host': remote.host, 'project_id': project_id, 'cluster': cluster,
                       'cluster_key': str(cluster_key) if cluster_key else '',

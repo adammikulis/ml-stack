@@ -34,7 +34,6 @@ from ml_stack.workspace import (
 )
 from ml_stack.workspace.chain import held
 from ml_stack.workspace.identity import AGENT, LEAD, Denied
-from ml_stack.workspace.modelid import clean_model
 from ml_stack.workspace.service import Workspace
 
 __all__ = ["Ask", "Authority", "Runtime", "Started", "Stopped", "Unavailable", "launch_parent",
@@ -322,11 +321,7 @@ def stop(ws: Workspace, name: str, *, release: Callable[[str], Any] | None = Non
 
 def _record_model(ws: Workspace, name: str, chosen: localmodel.Pick, harness: str = lh.OWN) -> None:
     """Record the authenticated worker's configured model and harness claim."""
-    try:
-        model = clean_model(chosen.name)
-    except ValueError:
-        model = localmodel.short_name(chosen.name)
-    ws.claim_model(tokens.load(ws.base, name), model, harness)
+    ws.claim_model(tokens.load(ws.base, name), localmodel.model_identity(chosen.name), harness)
 
 
 def _output_tokens(value: int) -> int:

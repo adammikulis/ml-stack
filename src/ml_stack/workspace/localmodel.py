@@ -11,9 +11,10 @@ from ml_stack import hub
 from ml_stack.hub import remote
 from ml_stack.serve import suggest
 from ml_stack.workspace.identity import valid_name
+from ml_stack.workspace.modelid import clean_model
 
 __all__ = ["AUTO", "FETCH_QUERY", "Pick", "Selection", "agent_name", "choose", "fetch_hint",
-           "short_name"]
+           "model_identity", "short_name"]
 
 AUTO = "auto"
 FETCH_QUERY = "Qwen3.8"
@@ -57,6 +58,14 @@ def short_name(name: str) -> str:
     stem = _QUANT.sub("", Path(name).name.removesuffix(".gguf"))
     cleaned = re.sub(r"[^a-z0-9.]+", "-", stem.lower()).strip("-.")
     return cleaned[:28].strip("-.") or "model"
+
+
+def model_identity(name: str) -> str:
+    """Return the configured model's bounded workspace claim identity."""
+    try:
+        return clean_model(name)
+    except ValueError:
+        return short_name(name)
 
 
 def agent_name(pick_name: str) -> str:

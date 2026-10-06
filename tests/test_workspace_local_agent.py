@@ -896,3 +896,17 @@ def test_reasoning_effort_never_overrides_explicit_response_budget(effort):
     assert model.kw[-1]['n_predict'] == 32000
     guarded.chat([{'role':'user','content':'answer'}])
     assert 'n_predict' not in model.kw[-1]
+
+
+@pytest.mark.parametrize('name,expected', [
+    ('Qwen3.8-27B', 'Qwen3.8-27B'),
+    ('Qwen3.8-27B (Q4_K_XL)', 'qwen3.8-27b'),
+    ('hf:downloaded-model-namespace/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_XL.gguf',
+     'hf:downloaded-model-namespace/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_XL.gguf'),
+    ('hf:' + 'downloaded-model-namespace-' * 4 + '/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_XL.gguf',
+     'qwen3.8-27b-ud'),
+])
+def test_model_identity_keeps_valid_claims_and_bounds_display_names(name, expected):
+    from ml_stack.workspace.modelid import clean_model
+    assert localmodel.model_identity(name) == expected
+    assert clean_model(localmodel.model_identity(name)) == expected

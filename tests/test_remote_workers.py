@@ -487,3 +487,25 @@ def test_exact_endpoint_requires_a_signed_device_origin(devices, binding):
         host += '/unrelated'
     observed = SimpleNamespace(base_url=host, beacon=beacon)
     assert not device_address(observed, host)
+
+
+@pytest.mark.parametrize('label', [
+    'Qwen3.8-27B (Q4_K_XL)',
+    'hf:' + 'downloaded-model-namespace-' * 4 + '/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_XL.gguf',
+])
+def test_tls_worker_normalizes_model_claim_and_preserves_full_runtime_reference(devices, monkeypatch, label):
+    state = devices
+    ref = 'hf:' + 'downloaded-model-namespace-' * 4 + '/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_XL.gguf'
+    pick = localmodel.Pick(ref=ref, name=label, size_bytes=1)
+    monkeypatch.setattr(localmodel, 'choose', lambda *args, **kwargs: pick)
+    result = state.target._request('worker', {**state.body, 'model': ref})
+    worker = localagent.load(state.local, 'local-qwen')
+    assert worker.model == ref and worker.model_name == label
+    info = state.authority.workspace(PROJECT).registry.info(result['identity'])
+    assert info['model'] == localmodel.model_identity(label)
+    local_info = state.local.registry.info(worker.identity)
+    assert local_info['model'] == info['model']
+    monkeypatch.setattr(localagent, 'alive', lambda agent: True)
+    again = state.target._request('worker', {**state.body, 'model': ref})
+    assert again['already'] and again['identity'] == result['identity']
+    assert len(state.spawned) == 1
