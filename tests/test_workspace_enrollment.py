@@ -195,3 +195,21 @@ def test_typed_task_commands_bind_full_project_scope_and_idempotency(enrollment)
     assert command("task-claim", {"id": ident, "allocation_id": "untrusted"}, "f" * 32)[0] == 403
     for action in ("task-integrate", "resource-assign", "task-recover", "mint"):
         assert command(action, {})[0] == 400
+
+
+def test_native_heartbeat_does_not_renew_physical_or_foreign_area_claims(enrollment, repository):  # noqa: F811
+    host, project, body = enrollment
+    project.root = str(repository / "project")
+    _, agent = host.enroll(PROJECT, body, cluster="dev", cluster_id="c" * 64)
+    ws = host.workspace(PROJECT)
+    actor = ws.auth(agent["token"])
+    ws.claims.reserve(actor, [("branch", "source"), ("area", str(repository / "outside")),
+                              ("port", "9000"), ("worktree", str(repository / "physical"))])
+    before = {(row["kind"], row["key"]): row["expires"] for row in ws.claims.listing()}
+    code, reply = host.answer(PROJECT, "board", {"agent_token": agent["token"], "operation": "native.heartbeat",
+                             "kwargs": {"ttl_s": 1800}}, admission=("dev", "c" * 64, True))
+    assert code == 200, reply
+    assert [row["kind"] for row in reply["result"]] == ["branch"]
+    after = {(row["kind"], row["key"]): row["expires"] for row in ws.claims.listing()}
+    assert after[("branch", "source")] > before[("branch", "source")]
+    assert all(after[key] == expiry for key, expiry in before.items() if key[0] != "branch")

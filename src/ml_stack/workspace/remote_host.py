@@ -260,7 +260,8 @@ class WorkspaceHost:
             ttl = kwargs.get("ttl_s", 0.0)
             if type(ttl) not in (int, float) or not math.isfinite(ttl) or not 0 <= ttl <= 3600:
                 raise ValueError("native heartbeat lifetime is between zero and 3600 seconds")
-            made = ws.claims.renew(who, ttl_s=ttl)
+            made = ws.claims.renew(who, ttl_s=ttl,
+                                   predicate=lambda row: self._public_claim(project_id, row) is not None)
             return [public for row in made if (public := self._public_claim(project_id, row)) is not None]
         if operation == "native.release":
             if len(args) != 2 or kwargs:
