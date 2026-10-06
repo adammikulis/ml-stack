@@ -28,7 +28,7 @@ def test_first_run_lists_the_clusters_the_network_offers(serving, tmp_path, monk
     with Advertiser(Beacon(name="larch", port=9), key, port=udp, cluster="lab", interval_s=5.0):
         status, body, _ = serving.call("/ui/setup/clusters")
     assert status == 200
-    assert body["found"] == [{"name": "lab", "machines": ["larch"], "mine": False}]
+    assert body["found"] == [{"name": "lab", "machines": ["larch"], "mine": False, "method": "passphrase"}]
 
 
 def test_a_machine_in_a_cluster_asks_for_the_list_behind_its_sign_in(serving):

@@ -100,6 +100,7 @@ def test_invite_join_refuses_expired_then_clears_success_without_leaking_to_stor
 
 def test_first_run_has_join_invite_before_cluster_membership(daemon, open_page):
     page, errors = open_page(daemon)
+    page.locator("#device-mode").select_option("prod")
     page.locator("#first-run").get_by_role("button", name="Continue", exact=True).click()
     panel = page.locator("#first-run fleet-invites")
     expect(panel.get_by_label("Invitation", exact=True)).to_be_visible()
