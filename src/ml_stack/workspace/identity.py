@@ -419,6 +419,8 @@ class Registry:
             agents = self._load()
             if self._live(agents, agents.get(child)):
                 raise ValueError(f"{child} is registered already")
+            if sum(self._live(agents, entry) for entry in agents.values()) >= 64:
+                raise Denied("the workspace holds 64 live identities")
             if len(self.children(by.id)) >= most:
                 raise Denied(f"{by.id} has {most} live delegates already")
             now = self.clock()

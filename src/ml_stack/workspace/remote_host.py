@@ -94,7 +94,8 @@ class WorkspaceHost:
             if len(json.dumps(body).encode()) > 32 * 1024:
                 return 413, {"error": "workspace operation exceeds the size limit"}
             project = self.projects.get(project_id)
-            if not cluster or not cluster_id or body.get("cluster") != cluster:
+            if (not cluster or not cluster_id or body.get("cluster") != cluster
+                    or body.get("cluster_id") != cluster_id):
                 raise Denied("agent enrollment requires its authenticated Dev cluster")
             if body.get("authority_machine") != self.projects.machine:
                 raise Denied("agent enrollment requires the selected local project authority")
@@ -151,7 +152,27 @@ class WorkspaceHost:
                 raise ValueError("invalid operation arguments")
             if operation in {"whoami", "agents", "claims", "who", "history"} and "read" not in who.can:
                 raise Denied("agent capability has no read permission")
-            if operation == "whoami":
+            if operation == "delegate":
+                if len(args) != 1 or kwargs:
+                    raise ValueError("delegation takes one child name")
+                name = args[0]
+                if not isinstance(name, str):
+                    raise ValueError("delegation takes a child name")
+                made = ws.registry.delegate(who, name, min(ws.limits.child_ttl_s, 28_800),
+                                            who.can, min(ws.limits.max_children, 8))
+                child = f"{who.id}/{name}"
+                scope = ws.registry.info(ws.registry.root_of(who.id))["project"]
+                ws.board.place(child, scope)
+                ws.audit("remote.delegate", who.id, child=child, project_id=project_id)
+                result = {"id": child, "token": made, "project_id": project_id,
+                          "expires": ws.registry.info(child)["expires"]}
+            elif operation == "revoke_self":
+                if args or kwargs:
+                    raise ValueError("self revocation takes no target")
+                ws.registry.revoke(who, who.id)
+                ws.audit("remote.revoke_self", who.id, project_id=project_id)
+                result = {"id": who.id, "revoked": True}
+            elif operation == "whoami":
                 result = {"id": who.id, **ws.registry.info(who.id)}
             elif operation == "history":
                 result = read_json(ws.base / "adopted-history.json", {}).get("messages", [])

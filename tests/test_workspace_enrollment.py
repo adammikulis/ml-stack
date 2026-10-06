@@ -18,7 +18,7 @@ def enrollment(tmp_path):
                                workspace_base=lambda identifier: tmp_path / identifier)
     host = WorkspaceHost(projects)
     body = {"name": "worker", "model": "gpt-6", "harness": "codex",
-            "cluster": "dev", "authority_machine": "local"}
+            "cluster": "dev", "cluster_id": "c" * 64, "authority_machine": "local"}
     return host, project, body
 
 
@@ -84,3 +84,39 @@ def test_registry_enrollment_refuses_unbounded_lifetimes(tmp_path, ttl):
     with pytest.raises(ValueError, match="lifetime"):
         registry.enroll_project("worker", SCOPE, ttl)
     assert registry.ids() == []
+
+
+def test_native_child_delegation_inherits_scope_and_self_revocation(enrollment):
+    host, _, body = enrollment
+    _, parent = host.enroll(PROJECT, body, cluster="dev", cluster_id="c" * 64)
+    request = {"agent_token": parent["token"], "operation": "delegate", "args": ["native"]}
+    code, reply = host.answer(PROJECT, "board", request, cluster="dev", cluster_id="c" * 64)
+    assert code == 200, reply
+    child = reply["result"]
+    ws = host.workspace(PROJECT)
+    identity = ws.auth(child["token"])
+    assert identity.id == parent["id"] + "/native" and identity.role == AGENT
+    assert identity.can == ws.auth(parent["token"]).can
+    assert ws.registry.info(identity.id)["expires"] <= ws.registry.info(parent["id"])["expires"]
+    request = {"agent_token": child["token"], "operation": "board.list"}
+    code, reply = host.answer(PROJECT, "board", request, cluster="dev", cluster_id="c" * 64)
+    assert code == 200 and any(row["project"] == PROJECT for row in reply["result"])
+    request["operation"], request["args"] = "delegate", ["another"]
+    assert host.answer(PROJECT, "board", request, cluster="dev", cluster_id="c" * 64)[0] == 403
+    request["operation"], request["args"] = "revoke_self", [parent["id"]]
+    assert host.answer(PROJECT, "board", request, cluster="dev", cluster_id="c" * 64)[0] == 400
+    request["args"] = []
+    assert host.answer(PROJECT, "board", request, cluster="dev", cluster_id="c" * 64)[0] == 200
+    with pytest.raises(Denied, match="revoked"):
+        ws.auth(child["token"])
+    assert ws.auth(parent["token"]).id == parent["id"]
+
+
+def test_native_parent_delegation_is_bounded(enrollment):
+    host, _, body = enrollment
+    _, parent = host.enroll(PROJECT, body, cluster="dev", cluster_id="c" * 64)
+    for index in range(8):
+        request = {"agent_token": parent["token"], "operation": "delegate", "args": [f"native-{index}"]}
+        assert host.answer(PROJECT, "board", request, cluster="dev", cluster_id="c" * 64)[0] == 200
+    request["args"] = ["overflow"]
+    assert host.answer(PROJECT, "board", request, cluster="dev", cluster_id="c" * 64)[0] == 403

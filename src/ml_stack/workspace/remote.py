@@ -107,6 +107,23 @@ class RemoteWorkspace:
         return self._request("board", {"agent_token": token, "operation": operation,
                                        "args": list(args), "kwargs": kwargs, "cluster": self.cluster})["result"]
 
+    def delegate(self, parent: str, name: str) -> dict:
+        """Store a private bounded child capability delegated by the selected parent."""
+        result = self.call("delegate", self.token(agent=parent), name)
+        child = f"{parent}/{name}"
+        if result.get("id") != child or result.get("project_id") != self.project_id:
+            raise Denied("delegation returned another project or identity")
+        path = tokens.store(self.base, child, str(result["token"]))
+        return {"id": child, "token_file": str(path), "expires": result["expires"]}
+
+    def self_revoke(self, name: str) -> dict:
+        """Revoke the selected agent's own capability and remove its private token file."""
+        result = self.call("revoke_self", self.token(agent=name))
+        if result.get("id") != name or result.get("revoked") is not True:
+            raise Denied("self revocation returned another identity")
+        (tokens.directory(self.base) / name.replace("/", "~")).unlink()
+        return result
+
     def token(self, *, agent: str = "", token_file: str = "") -> str:
         if token_file:
             path = Path(token_file).expanduser().resolve()
