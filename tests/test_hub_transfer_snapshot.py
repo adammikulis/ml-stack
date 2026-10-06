@@ -66,3 +66,19 @@ def test_download_rejects_paths_outside_destination(name, tmp_path, monkeypatch)
         transfer._bring(transfer.remote.Ref("maker/model", "", "", "main"),
                         [RemoteFile(name, 1)], folder, transfer._Run())
     assert list(outside.iterdir()) == []
+
+
+@pytest.mark.parametrize("error", [transfer.GatedRepo, transfer.remote.RemoteError])
+def test_snapshot_pull_preserves_endpoint_errors(error, monkeypatch, tmp_path):
+    def refuse(*args):
+        raise error("endpoint refused")
+    monkeypatch.setattr(transfer.remote, "listing", refuse)
+    with pytest.raises(error, match="endpoint refused"):
+        transfer.pull("hf:maker/model/model.safetensors", tmp_path)
+
+
+def test_gguf_pull_returns_named_file(listed, tmp_path):
+    files, calls = listed
+    files[:] = [RemoteFile("model-Q4_K_M.gguf", 1), RemoteFile("config.json", 1)]
+    assert transfer.pull("hf:maker/model/model-Q4_K_M.gguf", tmp_path) == tmp_path / files[0].path
+    assert calls[0][1] == files[:1]
