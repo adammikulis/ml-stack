@@ -149,4 +149,6 @@ def test_native_reservations_are_atomic_project_scoped_and_return_relative_keys(
     for path in ("../outside", "/absolute", "src/../item", "src\\item", "src//item"):
         assert request(first, "native.reserve", [["area", path]])[0] == 400
     assert request(first, "native.reserve", [["port", "8000"]])[0] == 400
+    for branch in ("feature/", "feature.lock", "feature//child"):
+        assert request(first, "native.reserve", [["branch", branch]])[0] == 400
     assert request(first, "native.reserve", [["branch", "valid"]], pid=9999)[0] == 400

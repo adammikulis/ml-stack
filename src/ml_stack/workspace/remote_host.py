@@ -12,6 +12,7 @@ from ml_stack.workspace import onboard, tokens
 from ml_stack.workspace.boards import ANNOUNCE
 from ml_stack.workspace.claims import Conflict, normal
 from ml_stack.workspace.identity import AGENT, Denied
+from ml_stack.workspace.integration_git import git
 from ml_stack.workspace.project_history import adopt
 from ml_stack.workspace.rates import RateLimited, Rates
 from ml_stack.workspace.screen import Refused
@@ -269,7 +270,12 @@ class WorkspaceHost:
         if kind not in {"area", "branch"} or not isinstance(key, str):
             raise ValueError("native reservations use project areas and branches")
         if kind == "branch":
-            return normal(kind, key)
+            key = normal(kind, key)
+            try:
+                git(self.workspace(project_id).base, "check-ref-format", "--branch", key)
+            except RuntimeError as exc:
+                raise ValueError("native reservation requires a valid Git branch") from exc
+            return key
         if (not key or len(key) > 4096 or "\\" in key or key.startswith("/")
                 or any(part in {"", ".", ".."} for part in key.split("/"))
                 or any(ord(char) < 32 for char in key)):
