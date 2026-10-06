@@ -167,3 +167,32 @@ def test_production_advertiser_answers_manual_join_discovery(monkeypatch):
     monkeypatch.setattr(advertiser, "_tell_join", lambda sock, nonce, address: answered.append(nonce))
     advertiser._serve()
     assert answered == [NONCE]
+
+
+@pytest.mark.redteam
+@pytest.mark.parametrize("changed", [{"tls": False}, {"mode": "prod"}, {"method": "passphrase"},
+                                     {"fingerprint": "short"}, {"cluster_id": "short"}])
+def test_offers_ignore_nonautomatic_or_unpinned_advertisements(monkeypatch, changed):
+    rejected = offer()
+    rejected.update(changed)
+    monkeypatch.setattr(joining, "_ask_join", lambda *args, **kwargs:
+                        [("127.0.0.1", rejected), ("127.0.0.2", offer())])
+    assert automatic.offers() == [("127.0.0.2", offer())]
+
+
+def test_failed_candidate_does_not_block_next_cluster(tmp_path, monkeypatch):
+    rows = [("127.0.0.1", offer(b"a" * 43)), ("127.0.0.2", offer(b"b" * 43))]
+    rows.sort(key=lambda item: item[1]["cluster_id"])
+    member = discovery.Membership("development", (b"a" if rows[1][0] == "127.0.0.1" else b"b") * 43)
+    calls = []
+    monkeypatch.setattr(automatic, "offers", lambda port: list(reversed(rows)))
+
+    def receive(host, row):
+        calls.append(host)
+        if host == rows[0][0]:
+            raise discovery.DiscoveryError("unreachable")
+        return member
+
+    monkeypatch.setattr(automatic, "receive", receive)
+    assert automatic.ensure(tmp_path / "device.key") == member
+    assert calls == [row[0] for row in rows]
