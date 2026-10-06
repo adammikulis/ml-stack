@@ -26,6 +26,8 @@ from ml_stack.http import ServerError
 from ml_stack.httpguard import Refused
 from ml_stack.lock import only_one
 
+from .runtime_wheel import cache_wheel, current_wheel, wheel_commit
+
 __all__ = ["CATALOG", "Environment", "Library", "catalog_for"]
 
 METADRIVE_SOURCE = ("metadrive-simulator @ git+https://github.com/metadriverse/"
@@ -272,7 +274,6 @@ class Environment:
         if getattr(sys, "frozen", False):
             bundled = Path(getattr(sys, "_MEIPASS", "")) / "wheels"
             return bundled if bundled.is_dir() else None
-        from .runtime_wheel import current_wheel
         cached = current_wheel()
         if cached is not None:
             return cached.parent
@@ -310,7 +311,6 @@ class Environment:
                                        capture_output=True, text=True, timeout=timeout, env=environment)
             if refreshed.returncode:
                 return refreshed
-            from .runtime_wheel import cache_wheel, wheel_commit
             commit = wheel_commit(wheel)
             if commit:
                 cache_wheel(wheel, commit, prefix=self.path)

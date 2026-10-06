@@ -76,8 +76,7 @@ class InitialSetupRoutes:
                     automatic_clusters.select_automatic(self.ui.cluster_key_path, port=self.ui.discovery_port)
                 else:
                     automatic_clusters.ensure(self.ui.cluster_key_path, mode="dev", port=self.ui.discovery_port)
-            self.ui.settings.name = name
+            self.ui.set_name(name)
             self.ui.settings.cluster_mode = mode
             self.ui.settings.save(self.ui.settings_path)
-            self.ui.name = self.ui.rename(name) if self.ui.rename else name
             self.ui.rejoined()

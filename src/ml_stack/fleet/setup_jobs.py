@@ -4,11 +4,15 @@ import os
 import threading
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from ml_stack.graph.store import GraphStore
 from ml_stack.lock import Busy, only_one
 from ml_stack.serve.process import pid_exists, started_at
+
+from . import llama
+from .session import parse_cookie
 
 ACTIVE = {"queued", "installing"}
 LIMIT = 32
@@ -78,24 +82,31 @@ class Jobs:
             self._save(graph, row)
 
     def _run(self):
-        while True:
-            with self._mutex:
-                if not self._pending:
-                    self._worker = None
-                    return
-                row, operation = self._pending.pop(0)
-            try:
-                with only_one(self.root / "setup-install.lock"):
-                    self._update(row, state="installing", note="Preparing installation")
-                    result = operation(lambda note, current=row: self._update(current, note=str(note)[:1000]))
-                    errors = [str(value.get("error") or "Installation failed") for value in result.get("changed", {}).values() if not value.get("ok")]
-                    if errors:
-                        self._update(row, state="failed", error="; ".join(errors)[:2000], note="Installation failed", result=result)
-                    else:
-                        self._update(row, state="done", note="Installation complete", result=result)
-            except Exception as exc:
-                logging.getLogger(__name__).exception("Setup installation failed")
-                self._update(row, state="failed", error=str(exc)[:2000], note="Installation failed")
+        with ThreadPoolExecutor(max_workers=1, thread_name_prefix="setup-operation") as executor:
+            while True:
+                with self._mutex:
+                    if not self._pending:
+                        self._worker = None
+                        return
+                    row, operation = self._pending.pop(0)
+                outcome = executor.submit(self._install, row, operation)
+                failure = outcome.exception()
+                if failure is None:
+                    continue
+                if not isinstance(failure, Exception):
+                    raise failure
+                logging.getLogger(__name__).error("Setup installation failed", exc_info=(type(failure), failure, failure.__traceback__))
+                self._update(row, state="failed", error=str(failure)[:2000], note="Installation failed")
+
+    def _install(self, row, operation):
+        with only_one(self.root / "setup-install.lock"):
+            self._update(row, state="installing", note="Preparing installation")
+            result = operation(lambda note, current=row: self._update(current, note=str(note)[:1000]))
+            errors = [str(value.get("error") or "Installation failed") for value in result.get("changed", {}).values() if not value.get("ok")]
+            if errors:
+                self._update(row, state="failed", error="; ".join(errors)[:2000], note="Installation failed", result=result)
+            else:
+                self._update(row, state="done", note="Installation complete", result=result)
 
 
 def jobs(ui):
@@ -119,13 +130,11 @@ def libraries(ui, vendor, add, drop, progress):
 
 
 def server(ui, progress):
-    from .llama import ensure_server
-    got = ensure_server(ui.root, on_progress=progress, sources=ui.settings.download_sources if ui.settings else "both")
+    got = llama.ensure_server(ui.root, on_progress=progress, sources=ui.settings.download_sources if ui.settings else "both")
     return {"ok": True, "server": str(got)}
 
 
 def provenance(route):
-    from .session import parse_cookie
     sessions = getattr(route.ui, "sessions", None)
     session = sessions.get(parse_cookie(getattr(route, "cookie", ""))) if sessions else None
     return {"channel": "local-ui", "authentication": session.who if session else "loopback-setup", "client": getattr(route, "client_ip", "")}

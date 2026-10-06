@@ -25,10 +25,12 @@ from ml_stack.http import ServerError, ServerUnreachable
 from ml_stack.httpguard import Refused
 from ml_stack.lock import Busy
 from ml_stack.net import git as netgit, provenance
+from ml_stack.paths import repo_root
 from ml_stack.safenames import Unsafe, safe_filename, unpack
 
 from . import signing
 from .measuring import installed_commit
+from .runtime_wheel import install_checkout, source_checkout
 
 __all__ = [
     "GIT_URL",
@@ -471,10 +473,6 @@ class Pulled:
 
 def checkout_here() -> Path | None:
     """The git working tree this package is imported from, or None for a plain install."""
-    from ml_stack.paths import repo_root
-
-    from .runtime_wheel import source_checkout
-
     return repo_root(Path(__file__).resolve().parent) or source_checkout()
 
 
@@ -508,7 +506,6 @@ def _remote_in(words: list[str]) -> str:
 
 def pip_install(checkout: Path | str) -> tuple[int, str]:
     """Build and install an immutable wheel with the running interpreter."""
-    from .runtime_wheel import install_checkout
 
     return install_checkout(Path(checkout).expanduser(), timeout=PIP_TIMEOUT)
 

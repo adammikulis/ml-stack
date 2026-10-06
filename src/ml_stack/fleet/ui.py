@@ -261,6 +261,13 @@ class UI:
                 self.on_join()
         return self.state(), self.sessions.open("setup").sid
 
+    def set_name(self, name: str) -> str:
+        """Set the device name through the active advertiser."""
+        self.name = self.rename(name) if callable(self.rename) else name
+        if self.settings is not None:
+            self.settings.name = self.name
+        return self.name
+
     def apply_prefs(self, req: dict[str, Any]) -> dict[str, Any]:
         """Apply the wizard's preference step. Everything takes effect now."""
         from . import autostart as auto
@@ -277,8 +284,7 @@ class UI:
             out["applied"].append("one job at a time")
         if "name" in req and str(req["name"]).strip():
             called = str(req["name"]).strip()[:64]
-            settings.name = self.rename(called) if callable(self.rename) else called
-            self.name = settings.name
+            self.set_name(called)
             out["applied"].append(f"this machine is called {settings.name}")
         if "labels" in req:
             settings.labels = [str(s) for s in req["labels"] if str(s).strip()]

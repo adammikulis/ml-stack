@@ -20,6 +20,7 @@ from ml_stack.workspace.project_history import adopt
 from ml_stack.workspace.rates import RateLimited, Rates
 from ml_stack.workspace.screen import Refused
 from ml_stack.workspace.service import Workspace
+from ml_stack.workspace.work_reputation import standings
 
 MAX_REPLY = 512 * 1024
 METHODS = frozenset({"send", "inbox", "outbox", "ack", "thread", "announce", "claim_model", "nudge", "wait",
@@ -30,7 +31,6 @@ METHODS = frozenset({"send", "inbox", "outbox", "ack", "thread", "announce", "cl
 
 
 def _reputation(ws, token, args, kwargs):
-    from ml_stack.workspace.work_reputation import standings
     if args or set(kwargs) - {"agent", "offset"}:
         raise ValueError("reputation takes an agent and evidence offset")
     return standings(ws, token, **kwargs)

@@ -14,6 +14,7 @@ from ml_stack.files import read_json, write_json
 from ml_stack.fleet.discovery import memberships
 from ml_stack.fleet.remote import Peer
 from ml_stack.graph.store import GraphStore
+from ml_stack.log import say
 from ml_stack.workspace import (
     automatic_connection,
     localagent as la,
@@ -307,7 +308,6 @@ def run(args):
 
 
 def main_cli(args):
-    from ml_stack.log import say
     reply = run(args)
     say(json.dumps(reply, indent=1) if args.json else
         f"{reply['identity']} is {reply['state']} on {args.device or 'the discovered remote device'} with {reply['model']}")

@@ -40,6 +40,7 @@ from .pausing import minutes_of
 from .project_board_routes import ProjectBoardRoutes
 from .room_routes import RoomRoutes
 from .session import parse_cookie
+from .setup_jobs import jobs, libraries, provenance, server
 from .setup_recovery_routes import SetupRecoveryRoutes
 from .startup_models import choices
 from .workspace_routes import WorkspaceRoutes
@@ -365,7 +366,6 @@ class SettingsRoutes:
 
     def route(self) -> bool:
         if self.path == "/ui/setup/jobs" and self.method == "GET":
-            from .setup_jobs import jobs
             self.send(200, {"jobs": jobs(self.ui).all() if self.ui.root else []})
             return True
         if self.path == "/ui/settings":
@@ -406,7 +406,6 @@ class SettingsRoutes:
         report = ui.report() if callable(ui.report) else {}
         vendor = str(report.get("vendor") or "cpu")
         if self.method == "GET":
-            from .setup_jobs import jobs
             self.send(200, {**ui.environment.state(vendor), "jobs": jobs(ui).all() if ui.root else []})
             return True
         if self.method == "POST":
@@ -424,7 +423,6 @@ class SettingsRoutes:
         if self.ui.root is None:
             self.send(501, {"error": "this daemon does not know where to keep setup jobs"})
             return True
-        from .setup_jobs import jobs, libraries, provenance
         try:
             job = jobs(self.ui).start("libraries", {"install": add, "remove": drop},
                                       lambda progress: libraries(self.ui, vendor, add, drop, progress), provenance=provenance(self))
@@ -471,7 +469,6 @@ class ModelRoutes:
             return self._models()
         if self.path == "/ui/serving/install":
             if self.method == "GET":
-                from .setup_jobs import jobs
                 rows = [row for row in jobs(self.ui).all() if row["kind"] == "server"] if self.ui.root else []
                 self.send(200, rows[-1] if rows else {"state": "idle", "note": ""})
                 return True
@@ -605,7 +602,6 @@ class ModelRoutes:
             self.send(501, {"error": "this install cannot run a model itself; a machine "
                                      "on your network can serve one instead"})
             return True
-        from .setup_jobs import jobs, provenance, server
         try:
             job = jobs(ui).start("server", {}, lambda progress: server(ui, progress), provenance=provenance(self))
         except ValueError as exc:
