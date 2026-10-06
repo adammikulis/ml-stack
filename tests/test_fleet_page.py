@@ -196,6 +196,75 @@ class TestFirstRun:
             "label[for=labels-train] .why").inner_text()
         assert not errors
 
+    def test_dev_can_pair_manually_and_return_to_automatic(self, daemon, open_page, monkeypatch):
+        from ml_stack.fleet import automatic_clusters
+        from ml_stack.fleet.discovery import memberships
+
+        monkeypatch.setattr(automatic_clusters, "offers", lambda port=None: [])
+        page, errors = open_page(daemon)
+        page.wait_for_selector("#device-mode")
+        page.click("#first-run button:has-text('Continue')")
+        page.click("#first-run button:has-text('Pair manually')")
+        page.select_option("#setup-cluster-action", "create")
+        page.fill("#setup-cluster-name", "private-lab")
+        page.fill("#setup-cluster-passphrase", WORDS)
+        page.click("#first-run button:has-text('Create new cluster')")
+        page.wait_for_selector("#first-run .ok:has-text('Created')")
+        assert memberships(daemon.keyfile)[0].selection == "manual"
+        page.click("#first-run button:has-text('Connect automatically')")
+        page.wait_for_function("document.querySelector('first-run').setup.selection === 'automatic'")
+        assert memberships(daemon.keyfile)[0].selection == "automatic"
+        assert not errors
+
+    def test_background_setup_can_finish_while_server_is_downloading(
+            self, daemon, open_page, monkeypatch):
+        import threading
+
+        from ml_stack.fleet import automatic_clusters, llama
+        from ml_stack.fleet.environment import Environment
+
+        entered, release = threading.Event(), threading.Event()
+        def install(root, **options):
+            options["on_progress"]("Downloading model server")
+            entered.set()
+            assert release.wait(20)
+            return root / "managed-server"
+        monkeypatch.setattr(llama, "ensure_server", install)
+        monkeypatch.setattr(automatic_clusters, "offers", lambda port=None: [])
+        daemon.ui.environment = Environment(daemon.ui.root)
+        page, errors = open_page(daemon)
+        try:
+            page.wait_for_selector("#device-mode")
+            page.click("#first-run button:has-text('Continue')")
+            page.wait_for_selector("#first-run h1:has-text('Clusters')")
+            page.click("#first-run button:has-text('Continue')")
+            page.wait_for_selector("#labels-prep")
+            page.click("#first-run button:has-text('Continue')")
+            page.wait_for_selector("#autostart-manual")
+            page.check("#autostart-manual")
+            page.click("#first-run button:has-text('Continue')")
+            page.wait_for_selector("#source-internet")
+            page.check("#source-internet")
+            page.click("#first-run button:has-text('Save and continue')")
+            page.wait_for_selector("#setup-chat")
+            for checkbox in page.locator("input[id^=lib_]").all():
+                checkbox.uncheck()
+            page.click("#first-run button:has-text('Install and continue')")
+            page.wait_for_selector("#first-run h1:has-text('When you are not using it')")
+            assert entered.wait(5)
+            assert daemon.ui.setup_jobs.all()[0]["state"] == "installing"
+            page.click("#first-run button:has-text('Continue')")
+            page.wait_for_selector("#first-run h1:has-text('Give models more memory?'), #first-run h1:has-text('Joined')")
+            if page.locator("#first-run button:has-text('Skip')").count():
+                page.click("#first-run button:has-text('Skip')")
+            page.wait_for_selector("#first-run h1:has-text('Joined')")
+            assert daemon.ui.settings.setup_done is True
+            assert daemon.ui.setup_jobs.all()[0]["state"] == "installing"
+            assert not errors
+        finally:
+            release.set()
+
+
 
 # -- signing in --------------------------------------------------------------------------
 class TestSigningIn:

@@ -322,7 +322,7 @@
           "Ticked from what this machine is. Anything here can be changed later in "
           + "Settings."),
         el("div", { class: "cap" }, el("span", {}, "CHATTING")),
-        this.optBox("chat", kept.chat, "Run models and chat with them",
+        this.optBox("setup-chat", kept.chat, "Run models and chat with them",
           "installs the model server and the GPU runtime needed on this machine",
           (on) => { kept.chat = on; }),
         this.modelInstall.panel,

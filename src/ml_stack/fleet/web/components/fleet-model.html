@@ -82,6 +82,8 @@ cluster-view, chat-view, models-view, settings-view, fit-view, data-view, traini
   const CTX_STEPS = M.CTX_STEPS = [2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576];
   const KV_MB_PER_TOKEN = 17 * 4 * 256 * 2 * (34 / 32) / (1024 * 1024);
 
+  M.ctxWords = (tokens) => `${Number(tokens).toLocaleString()} tokens`;
+
   M.contextPicker = function (start, onPick) {
     const slider = M.ui("ml-slider", {
       label: "Context length", stops: CTX_STEPS,

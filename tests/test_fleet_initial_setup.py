@@ -96,3 +96,30 @@ def test_saved_prod_daemon_stays_unpaired_on_restart(tmp_path):
     runtime.configure()
     assert runtime.effective_mode == "prod"
     assert not memberships(runtime.cluster_key_path)
+
+
+def test_token_browser_session_cannot_mint_owner_session(device):
+    token_session = device.ui.sessions.open("token")
+    cookie = device.ui.sessions.cookie_header(token_session).split(";")[0]
+    status, _, _ = device.call("/ui/setup/initial", method="POST", headers=browser_headers(device),
+                               cookie=cookie, body={"name": "quillhaven", "cluster_mode": "dev"})
+    assert status == 403
+    assert not memberships(device.keyfile)
+
+
+def test_updater_waits_for_downloads_and_background_installations():
+    from types import SimpleNamespace
+
+    runtime = DaemonRuntime(DaemonOptions())
+    runtime.runner = SimpleNamespace(status=lambda: {"busy": False})
+    runtime.downloads = SimpleNamespace(active=lambda: [])
+    runtime.interface = None
+    assert runtime.background_busy() is False
+    runtime.downloads.active = lambda: [SimpleNamespace(state="getting")]
+    assert runtime.background_busy() is True
+    runtime.downloads.active = lambda: [SimpleNamespace(state="done")]
+    assert runtime.background_busy() is False
+    runtime.interface = SimpleNamespace(setup_jobs=SimpleNamespace(active=lambda: True))
+    assert runtime.background_busy() is True
+    runtime.interface.setup_jobs.active = lambda: False
+    assert runtime.background_busy() is False

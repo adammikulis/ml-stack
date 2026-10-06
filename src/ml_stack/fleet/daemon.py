@@ -331,7 +331,7 @@ class DaemonRuntime:
 
     def updates(self) -> None:
         self.nothing_running = updating.quiet(
-            jobs=lambda: bool(self.runner.status()["busy"]),
+            jobs=self.background_busy,
             measuring=lambda: bool(self.bench_host.measuring()),
             leases=lambda: bool(self.serving.live()),
         )
@@ -474,6 +474,10 @@ class DaemonRuntime:
                 self.advertiser.stop()
             self.runner.shutdown()
             self.httpd.server_close()
+
+    def background_busy(self) -> bool:
+        return (bool(self.runner.status()["busy"]) or any(row.state == "getting" for row in self.downloads.active())
+                or bool(self.interface and self.interface.setup_jobs and self.interface.setup_jobs.active()))
 
     def may_start(self) -> tuple[bool, str]:
         """A measurement holds the GPU and blocks new work."""
