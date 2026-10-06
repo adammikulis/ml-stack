@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import hashlib
 import hmac
 import json
 import os
@@ -24,6 +25,7 @@ from ml_stack.log import warn
 from ml_stack.platform import private_file
 
 from . import tls, wsl_network
+from .cluster_modes import validate
 
 #: Link-local scope in the administratively-scoped block. TTL 1 keeps it there.
 DEFAULT_GROUP = "239.255.77.70"
@@ -160,7 +162,6 @@ class Membership:
     mode: str = "dev"
 
     def __post_init__(self) -> None:
-        from .cluster_modes import validate
         require_name(self.group)
         validate(self.mode)
         if not isinstance(self.key, bytes) or len(self.key) != 43 or len(base64.b64decode(
