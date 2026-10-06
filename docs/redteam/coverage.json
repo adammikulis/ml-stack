@@ -7703,21 +7703,6 @@
    "note": "Real daemon project requests reject missing, revoked and cluster-only device proof, unsealed bodies and malformed JSON before host dispatch; canonical project operations require both paired-device and agent authority"
   },
   {
-   "id": "route:fleet/api.py:/workspace/v1/local-project",
-   "kind": "route",
-   "source": "fleet/api.py:make_handler.Handler._project_register",
-   "trust": "peer holding the cluster key; /health open to anyone",
-   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
-   "status": "covered",
-   "tests": [
-    "tests/test_project_enrollment_admission.py::test_local_project_route_refuses_unauthorized_registration",
-    "tests/test_project_enrollment_admission.py::test_native_registration_requires_local_active_dev_proof",
-    "tests/test_project_board_metadata.py::test_native_registration_refuses_identity_mismatch_before_mutation",
-    "tests/test_project_board_metadata.py::test_native_registration_refuses_unbounded_or_relative_path"
-   ],
-   "note": "native registration requires loopback sealed active Dev admission and an exact bounded local Git identity; rejected requests do not register or expose a path"
-  },
-  {
    "id": "route:fleet/chat_routes.py:/ui/chat",
    "kind": "route",
    "source": "fleet/chat_routes.py:ChatRoutes.route",
@@ -8173,6 +8158,21 @@
     "tests/test_remote_transport_attacks.py"
    ],
    "note": "source publication and checkout require a browser session; hostile candidate paths, peer schema, redirects and source archives are rejected before checkout"
+  },
+  {
+   "id": "route:fleet/projects.py:/workspace/v1/local-project",
+   "kind": "route",
+   "source": "fleet/projects.py:register",
+   "trust": "network peer or local browser",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "covered",
+   "tests": [
+    "tests/test_project_enrollment_admission.py::test_local_project_route_refuses_unauthorized_registration",
+    "tests/test_project_enrollment_admission.py::test_native_registration_requires_local_active_dev_proof",
+    "tests/test_project_board_metadata.py::test_native_registration_refuses_identity_mismatch_before_mutation",
+    "tests/test_project_board_metadata.py::test_native_registration_refuses_unbounded_or_relative_path"
+   ],
+   "note": "native registration requires loopback sealed active Dev admission and an exact bounded local Git identity; rejected requests do not register or expose a path"
   },
   {
    "id": "route:fleet/room_routes.py:/ui/room",

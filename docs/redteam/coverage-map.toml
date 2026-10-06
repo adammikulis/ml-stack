@@ -31,7 +31,7 @@ tests = ["tests/test_automatic_project_connection.py::test_local_registration_re
 note = "bounded loopback registration rejects foreign redirects, oversized replies, absent or tampered seals, malformed JSON and another project identity"
 
 [[group]]
-match = ["route:fleet/api.py:/workspace/v1/local-project"]
+match = ["route:fleet/projects.py:/workspace/v1/local-project"]
 status = "covered"
 count = 1
 tests = ["tests/test_project_enrollment_admission.py::test_local_project_route_refuses_unauthorized_registration",
