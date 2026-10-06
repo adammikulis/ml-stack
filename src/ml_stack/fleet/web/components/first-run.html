@@ -39,7 +39,7 @@
       const at = this.state.step;
       this.stepper.current = at;
       this.stepper.replaceChildren(el("div", { slot: `step-${at}` },
-        ...nodes, this.modelInstall?.status));
+        ...nodes, this.installStatus, this.modelInstall?.status));
     }
 
     go(n) { this.state.step = n; this.paint(); }
@@ -65,6 +65,11 @@
       const st = this.state;
       st.name = st.name || this.setup.name || "";
       const name = el("input", { type: "text", value: st.name, id: "n" });
+      const mode = el("select", { id: "device-mode" },
+        el("option", { value: "dev" }, "Dev — automatically connect trusted devices on this network"),
+        el("option", { value: "prod" }, "Prod — connect only to clusters you explicitly join"));
+      mode.value = st.mode || this.setup.cluster_mode || "dev";
+      const note = el("div", { role: "status" });
       this.show(
         this.steps(0),
         el("h1", {}, "Set up this machine"),
@@ -73,10 +78,16 @@
         el("label", { for: "n" }, "What should this machine be called?"),
         name,
         el("div", { class: "hint" }, "Other machines will show it under this name."),
-        el("button", { onclick: () => {
+        el("label", { for: "device-mode" }, "Mode"), mode,
+        el("button", { onclick: async () => {
           st.name = name.value.trim() || this.setup.name;
+          st.mode = mode.value;
+          const result = await api("/ui/setup/initial", { method: "POST",
+            body: JSON.stringify({ name: st.name, cluster_mode: st.mode }) });
+          if (result.error || !result.ok) { note.textContent = result.error || "Could not save setup."; return; }
+          this.setup = result;
           this.go(1);
-        } }, "Continue"));
+        } }, "Continue"), note);
     }
 
     async clustersStep() {
@@ -95,16 +106,27 @@
               draw(left.clusters || []);
             } }, "Leave"))));
       };
-      this.show(
-        this.steps(1, () => this.go(0)),
-        el("h1", {}, "Clusters"),
-        el("p", { class: "sub" },
-          "On your other machine, open Fleet and choose Create invite. Paste that invite below to join. "
-          + "Only invite computers you own: a computer invite grants permission to run cluster commands."),
+      const manual = el("div");
+      const manualForm = () => manual.replaceChildren(M.clusterForm({ endpoint: "/ui/setup/join",
+        clusterMode: st.mode, group: current[0]?.group || "default",
+        onComplete: async () => { this.setup = await api("/ui/setup");
+          draw((await api("/ui/clusters")).clusters || []); } }));
+      const automatic = st.mode === "dev";
+      if (!automatic || this.setup.selection === "manual") manualForm();
+      this.show(this.steps(1, () => this.go(0)), el("h1", {}, "Clusters"),
+        el("p", { class: "sub" }, automatic
+          ? "Automatic connection is the default for trusted devices on this network. You can also pair with a cluster manually."
+          : "Join an explicitly admitted cluster with an invitation or its name and passphrase."),
         rows,
-        M.clusterForm({ endpoint: "/ui/setup/join", group: current[0]?.group || "default", onComplete: async () =>
-          draw((await api("/ui/clusters")).clusters || []) }),
-        el("button", { onclick: () => this.go(2) }, "Continue"));
+        automatic ? el("button", { class: "ghost", onclick: async () => {
+          const result = await api("/ui/setup/initial", { method: "POST", body: JSON.stringify({
+            name: st.name, cluster_mode: "dev", automatic: true }) });
+          if (result.error) { manual.textContent = result.error; return; }
+          this.setup = result; manual.replaceChildren();
+          draw((await api("/ui/clusters")).clusters || []);
+        } }, "Connect automatically") : null,
+        automatic ? el("button", { class: "ghost", onclick: manualForm }, "Pair manually") : null,
+        manual, el("button", { onclick: () => this.go(2) }, "Continue"));
       draw(current);
     }
 
@@ -271,37 +293,24 @@
       };
 
       go.onclick = async () => {
-        go.disabled = true; later.disabled = true;
-        const doing = (what) => note.replaceChildren(
-          el("div", { class: "hint" }, el("span", { class: "spin" }), " " + what));
-        const stop = (why) => {
-          note.replaceChildren(el("div", { class: "err" }, why));
-          go.disabled = false; later.disabled = false;
+        const watch = (result, label) => {
+          if (result.error) throw new Error(result.error);
+          if (!result.job) return;
+          if (!this.installStatus) this.installStatus = el("div", { role: "status", "aria-live": "polite" });
+          const row = el("div", { class: "hint" }, `${label}: queued`);
+          this.installStatus.append(row);
+          M.followSetupJob(result.job, (job) => {
+            row.textContent = `${label}: ${job.note || job.state}`;
+          }).catch((error) => { row.className = "err"; row.textContent = `${label}: ${error.message}. Retry in Settings.`; });
         };
         try {
-          if (kept.chat) {
-            doing("Getting the model server…");
-            const timer = setInterval(async () => {
-              const status = await api("/ui/serving/install");
-              if (status.note) doing(status.note);
-            }, 1000);
-            let got;
-            try { got = await api("/ui/serving/install", { method: "POST" }); }
-            finally { clearInterval(timer); }
-            if (got.error) return stop(got.error);
-          }
+          if (kept.chat) watch(await api("/ui/serving/install", { method: "POST" }), "Model server");
           const add = [...want];
-          if (add.length) {
-            doing(`Installing ${add.join(", ")}… this can take a few minutes.`);
-            const r = await api("/ui/libraries", { method: "POST",
-              body: JSON.stringify({ install: add }) });
-            if (r.error) return stop(r.error);
-          }
-          await this.modelInstall.start();
-        } catch (e) {
-          return stop(String(e));
-        }
-        this.go(6);
+          if (add.length) watch(await api("/ui/libraries", { method: "POST",
+            body: JSON.stringify({ install: add }) }), "Libraries");
+          this.modelInstall.start().catch((error) => { note.textContent = String(error); });
+          this.go(6);
+        } catch (error) { note.textContent = String(error); }
       };
 
       paint();
@@ -384,9 +393,11 @@
         el("button", { class: "ghost", onclick: () => this.go(8) }, "Skip"), next);
     }
 
-    doneStep() {
+    async doneStep() {
       const st = this.state;
-      api("/ui/setup/done", { method: "POST" });
+      const saved = await api("/ui/setup/done", { method: "POST" });
+      if (saved.error) return this.show(el("div", { class: "err" }, saved.error),
+        el("button", { onclick: () => this.doneStep() }, "Retry"));
       const joined = st.clusters[0];
       const open = el("button", { onclick: () => location.reload() },
         joined ? "Open the cluster" : "Open ml-stack");
@@ -436,9 +447,10 @@
         el("ol", { class: "howto" },
           step(1, "Install ml-stack", "The same installer you used here."),
           step(2, "Open it", "It asks the same questions there."),
-          step(3, "Type the same passphrase",
-            `The words you chose${joined.group !== "ml-stack"
-              ? `, and the cluster name “${joined.group}”` : ""}.`)),
+          step(3, st.mode === "dev" && this.setup.selection !== "manual"
+            ? "Choose Dev" : "Join the same cluster", st.mode === "dev" && this.setup.selection !== "manual"
+            ? "Trusted devices on the same network connect automatically."
+            : "Use its invitation or the same cluster name and passphrase.")),
         el("p", { class: "hint" },
           "They find each other on their own. Nothing else to configure."),
         looking, found, ssh, open);

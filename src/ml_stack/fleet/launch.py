@@ -129,6 +129,8 @@ def main(argv: list[str] | None = None, *,
     threading.Thread(target=_open_when_ready,
                      args=(known.port, not known.no_browser, stopped), daemon=True).start()
     arguments = ["--port", str(known.port), *rest]
+    if not known.no_browser:
+        arguments.append("--initial-setup")
     if sys.platform == "win32":
         try:
             return start(arguments, executable=linux_executable)

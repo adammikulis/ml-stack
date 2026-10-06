@@ -21,7 +21,6 @@ from .discovery import (
     cluster_group,
     derive_token,
     discover,
-    in_cluster,
     leave,
     load_cluster_key,
     memberships,
@@ -147,12 +146,15 @@ class UI:
 
     # -- state -----------------------------------------------------------
     def state(self) -> dict[str, Any]:
-        joined = in_cluster(self.cluster_key_path)
+        selected = memberships(self.cluster_key_path)
+        joined = bool(selected)
+        mode = selected[0].mode if selected else getattr(self.settings, "cluster_mode", "") or "dev"
         done = bool(self.settings and self.settings.setup_done)
         return {"in_cluster": joined, "name": self.name,
                 "group": cluster_group(self.cluster_key_path) if joined else None,
-                "needs_password": joined,
-                "needs_setup": not (joined or done)}
+                "needs_password": joined, "cluster_mode": mode,
+                "selection": getattr(selected[0], "selection", "automatic") if selected else "automatic",
+                "needs_setup": not done}
 
     def setup_finished(self) -> dict[str, Any]:
         """Remember that the wizard was finished, so it is not shown again."""

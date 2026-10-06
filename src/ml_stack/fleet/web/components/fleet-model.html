@@ -190,8 +190,25 @@ cluster-view, chat-view, models-view, settings-view, fit-view, data-view, traini
     M.inCluster = !!setup.needs_password;
     if (setup.needs_setup && document.querySelector("first-run")) return M.go("first-run");
     if (!setup.needs_password) return M.go(opened);
+    if (setup.cluster_mode === "dev" && ["127.0.0.1", "localhost", "[::1]"].includes(location.hostname)) {
+      await M.api("/ui/setup/local-session", { method: "POST" });
+    }
     const s = await M.api("/ui/session");
     return s.signed_in ? M.go(opened) : M.signIn();
+  };
+
+  M.followSetupJob = async function (job, onUpdate = () => {}) {
+    let current = job;
+    while (true) {
+      onUpdate(current);
+      if (current.state === "done") return current.result || {};
+      if (current.state === "failed") throw new Error(current.error || current.note || "Installation failed.");
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      const response = await M.api("/ui/setup/jobs");
+      if (response.error || response.status === 401) throw new Error(response.error || "Sign in to check installation status.");
+      current = (response.jobs || []).find((candidate) => candidate.id === job.id);
+      if (!current) throw new Error("Installation status is unavailable. Check Settings to retry.");
+    }
   };
 
   class FleetModel extends HTMLElement {

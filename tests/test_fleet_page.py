@@ -90,6 +90,7 @@ def joined(daemon):
                 body={"passphrase": WORDS, "group": "home"})
     _, _, headers = daemon.call("/ui/session", method="POST", body={"passphrase": WORDS})
     daemon.cookie = headers["Set-Cookie"].split(";")[0]
+    daemon.ui.setup_finished()
     return daemon
 
 
@@ -160,13 +161,15 @@ class TestFirstRun:
         page.fill("#n", "quillhaven")
         page.click("#first-run button:has-text('Continue')")
         page.wait_for_selector("#first-run h1:has-text('Clusters')")
-        assert page.locator("#setup-cluster-passphrase").is_visible()
+        assert page.locator("#first-run button:has-text('Pair manually')").is_visible()
+        assert page.locator("#setup-cluster-passphrase").count() == 0
         assert not errors
 
     def test_a_short_passphrase_cannot_be_joined_with(self, daemon, open_page):
         page, errors = open_page(daemon)
         page.wait_for_selector("#first-run:not([hidden])")
         page.click("#first-run button:has-text('Continue')")
+        page.click("#first-run button:has-text('Pair manually')")
         page.wait_for_selector("#setup-cluster-passphrase")
         page.fill("#setup-cluster-name", "default")
         page.fill("#setup-cluster-passphrase", "abc")

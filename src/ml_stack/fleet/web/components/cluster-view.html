@@ -166,7 +166,7 @@
           ? el("div", { class: "empty" },
               el("div", { class: "big" }, "Just this machine so far"),
               el("div", {}, "Install ml-stack on another machine and open it."),
-              el("div", {}, "Choose Create invite below, then use Join with invite on the other machine."))
+              el("div", {}, "Dev connects trusted devices automatically. You can also pair manually below."))
           : null));
 
       const nav = document.querySelector("fleet-nav");
@@ -236,7 +236,7 @@
     }
 
     drawClusters(rows) {
-      const signature = JSON.stringify(rows.map(c => c.group));
+      const signature = JSON.stringify(rows.map(c => [c.group, c.mode, c.selection]));
       if (signature === this.clusterSignature) return;
       this.clusterSignature = signature;
       const joined = this.querySelector("#cluster-joined");
@@ -247,6 +247,13 @@
       joined.replaceChildren(
         el("h2", {}, "Clusters"),
         el("div", { class: "hint" }, "This machine shares work with each cluster listed here."),
+        ...M.kids(rows[0]?.mode === "dev" ? el("button", { class: "ghost small", onclick: async () => {
+          const state = await api("/ui/setup");
+          const result = await api("/ui/setup/initial", { method: "POST", body: JSON.stringify({
+            name: state.name, cluster_mode: "dev", automatic: true }) });
+          if (result.error) { joined.append(el("div", { class: "err" }, result.error)); return; }
+          await refresh();
+        } }, rows[0].selection === "manual" ? "Connect automatically" : "Automatic connection enabled") : null),
         ...(rows.length ? rows.map((c, i) =>
           el("div", { class: "row" },
             el("span", {}, el("b", {}, c.group),

@@ -25,6 +25,7 @@ class Settings:
     """``stop`` gets the machine back now, at the cost of restarting the current job"""
     autostart: str = "manual"
     setup_done: bool = False
+    cluster_mode: str = ""
     gym_python: str = ""
     """The default interpreter for installed simulator libraries."""
     gym_pythons: dict[str, str] = field(default_factory=dict)

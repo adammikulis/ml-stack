@@ -3,7 +3,7 @@
   const M = window.fleetModel;
   const el = M.el;
   class ClusterActions extends HTMLElement {
-    setup({ endpoint, onComplete, group = "default", groups = [] }) {
+    setup({ endpoint, onComplete, group = "default", groups = [], clusterMode }) {
     const scope = endpoint.includes("/setup/") ? "setup-cluster" : "fleet-cluster";
     const mode = el("select", { id: `${scope}-action` },
       el("option", { value: "join" }, "Join existing cluster"),
@@ -30,7 +30,7 @@
       const group = named.value.trim();
       const action = mode.value;
       const got = await M.api(endpoint, { method: "POST",
-        body: JSON.stringify({ group, passphrase: words.value, mode: action }) });
+        body: JSON.stringify({ group, passphrase: words.value, mode: action, cluster_mode: clusterMode }) });
       if (got.error || got.ok === false) {
         note.replaceChildren(el("div", { class: "err" }, got.error || "The cluster action failed."));
         check();

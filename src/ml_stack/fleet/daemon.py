@@ -137,6 +137,7 @@ class DaemonOptions:
     fetch_slots: int = 2
     web: bool = True
     setup_from_lan: bool = False
+    initial_setup: bool = False
     busy_hours: Iterable[str] = ()
     free_hours: Iterable[str] = ()
     on_paused: str = "stop"
@@ -162,6 +163,7 @@ class DaemonRuntime:
         self.fetch_slots = options.fetch_slots
         self.web = options.web
         self.setup_from_lan = options.setup_from_lan
+        self.initial_setup = options.initial_setup
         self.busy_hours = options.busy_hours
         self.free_hours = options.free_hours
         self.on_paused = options.on_paused
@@ -175,15 +177,20 @@ class DaemonRuntime:
         self.root.mkdir(parents=True, exist_ok=True)
         self.files_root = self.root / "files"
         self.files_root.mkdir(exist_ok=True)
+        self.settings_path = self.root / "settings.json"
+        self.settings = Settings.load(self.settings_path)
         self.selected = memberships(self.cluster_key_path)
         self.effective_mode = cluster_modes.validate(
-            self.cluster_mode or (self.selected[0].mode if self.selected else "dev")
+            self.cluster_mode or (self.selected[0].mode if self.selected else self.settings.cluster_mode or "dev")
         )
         if self.selected and self.selected[0].mode != self.effective_mode:
             raise DiscoveryError(
                 "select a cluster with the requested mode before starting this daemon"
             )
-        if self.announce:
+        pending = (self.web and self.initial_setup and not self.selected
+                   and not self.settings.cluster_mode and not self.cluster_mode)
+        saved_prod = not self.selected and self.settings.cluster_mode == "prod" and not self.cluster_mode
+        if self.announce and not pending and not saved_prod:
             self.selected_member = automatic_clusters.ensure(
                 self.cluster_key_path, mode=self.effective_mode
             )
@@ -195,8 +202,6 @@ class DaemonRuntime:
             self.key,
             profile=self.cluster_key_path or os.environ.get("ML_STACK_CLUSTER_KEY"),
         )
-        self.settings_path = self.root / "settings.json"
-        self.settings = Settings.load(self.settings_path)
         self.name = (
             self.name
             or os.environ.get("ML_STACK_PEER_NAME")
@@ -283,8 +288,7 @@ class DaemonRuntime:
             lan_host(self.port),
         )
         self.workspaces = workspace_host(self.projects, self.workspace_factory)
-        self.handler = make_handler(
-            Daemon(
+        self.daemon = Daemon(
                 self.runner,
                 self.files_root,
                 lambda: self.token,
@@ -309,7 +313,7 @@ class DaemonRuntime:
                 ui_from_lan=self.ui_from_lan or self.setup_from_lan,
                 joining=Joining(lambda: memberships(self.cluster_key_path), self.fingerprint),
             )
-        )
+        self.handler = make_handler(self.daemon)
         self.listening = bind_address(
             self.host, lan=self.lan or self.setup_from_lan, joined=self.key is not None
         )
@@ -599,8 +603,13 @@ class DaemonRuntime:
 
     def joined_a_cluster(self) -> None:
         """Announce, and listen on the network now that peers are meant to reach this."""
+        selected = memberships(self.cluster_key_path)
+        self.effective_mode = selected[0].mode if selected else self.settings.cluster_mode or "dev"
+        self.daemon.cluster_mode = self.effective_mode
+        if not selected:
+            return
         self.start_announcing()
-        for member in memberships(self.cluster_key_path):
+        for member in selected:
             say(f"  joined cluster {member.group!r}")
         if not self.host and self.listening == LOOPBACK:
             self.widen.set()
@@ -797,6 +806,7 @@ def run(
         "Windows -- and start it now. 'ml-stack-traind --persist' twice "
         "replaces the first install.",
     )
+    ap.add_argument("--initial-setup", action="store_true", help=argparse.SUPPRESS)
     a = ap.parse_args(argv)
     if a.persist:
         return persist(
@@ -836,6 +846,7 @@ def run(
             fetch_slots=a.fetch_slots,
             web=not a.no_web,
             setup_from_lan=a.setup_from_lan,
+            initial_setup=a.initial_setup,
             busy_hours=a.busy,
             free_hours=a.free,
             on_paused=a.on_paused,
