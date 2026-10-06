@@ -27,7 +27,7 @@ LONGEST = 48
 SENDER_WAIT_S = 15
 BRIEF = """\
 You are {name}, a coding agent running on a local model ({alias}) through the {harness} harness, on
-this machine's ml-stack workspace. Run every workspace command with `--agent {name}`, for example
+this project's ml-stack workspace. Run every workspace command with `--agent {name}`, for example
 `ml-stack-workspace inbox --agent {name}`. You need `inbox`, `send TO KIND TEXT`, `thread SEQ`,
 `claim KIND KEY`, `who KIND KEY` and `board post #BOARD TEXT`.
 You were announced as joined when this session started; read your inbox before anything else.
@@ -59,10 +59,10 @@ def invite(name: str, project_dir: Path, parent: str, say: Callable[[str], None]
     if not valid_name(name):
         say(f"error: {name!r} is not a usable agent id (a-z, 0-9, . _ -; up to {LONGEST})")
         raise ValueError("the coding agent needs a usable workspace identity")
+    canonical = automatic_connection.startup(project_dir, name, parent)
+    if canonical is not None:
+        return canonical
     try:
-        canonical = automatic_connection.startup(project_dir, name, parent)
-        if canonical is not None:
-            return canonical
         ws = Workspace()
         try:
             onboard.setup(ws, [name], [name] if ws.registry.role_of(name) else [], onboard.TOKEN_S)
