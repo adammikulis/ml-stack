@@ -528,6 +528,26 @@ tests = ["tests/test_fleet_credentials.py::test_ui_saves_multiple_named_credenti
 note = "credential values are saved without being returned; joined credential management requires a signed-in session"
 
 [[group]]
+match = ["route:fleet/initial_setup_routes.py:/ui/setup/initial",
+         "route:fleet/initial_setup_routes.py:/ui/setup/local-session"]
+status = "covered"
+tests = [
+  "tests/test_fleet_initial_setup.py::test_owner_admission_routes_refuse_foreign_and_agent_requests",
+  "tests/test_fleet_initial_setup.py::test_owner_admission_routes_refuse_lan_and_missing_ui_header",
+  "tests/test_fleet_initial_setup.py::test_initial_rejects_hostile_body_without_identity_or_membership_changes",
+  "tests/test_fleet_initial_setup.py::test_local_session_cannot_upgrade_agent_cookie_or_prod_membership",
+  "tests/test_fleet_initial_setup.py::test_completed_prod_cannot_open_initial_session_anonymously",
+  "tests/test_fleet_initial_setup.py::test_initial_never_drops_manual_dev_membership",
+]
+note = "Real sockets refuse foreign origins, DNS rebinding, LAN ownership, missing UI headers and agent credentials; malformed or oversized setup bodies cannot mutate names or memberships, token sessions cannot mint person sessions, and completed Production setup requires sign-in"
+
+[[group]]
+match = ["route:fleet/routes.py:/ui/setup/jobs"]
+status = "covered"
+tests = ["tests/test_fleet_initial_setup.py::test_setup_jobs_refuses_untrusted_readers_and_ignores_external_paths"]
+note = "Joined job history refuses anonymous and forged cookies, missing UI headers and rebound hosts; authenticated hostile path queries cannot read an external job store"
+
+[[group]]
 match = ["route:fleet/routes.py:*", "route:fleet/chat_routes.py:*", "handler:fleet/ui.py:*"]
 status = "partial"
 tests = [

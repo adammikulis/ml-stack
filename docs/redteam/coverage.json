@@ -1,10 +1,10 @@
 {
- "surfaces": 768,
+ "surfaces": 772,
  "by_status": {
-  "covered": 448,
+  "covered": 451,
   "partial": 199,
   "uncovered": 53,
-  "n/a": 68,
+  "n/a": 69,
   "unmapped": 0
  },
  "by_kind": {
@@ -68,7 +68,7 @@
    "covered": 3,
    "partial": 5,
    "uncovered": 0,
-   "n/a": 14,
+   "n/a": 15,
    "unmapped": 0
   },
   "mcp-tool": {
@@ -86,7 +86,7 @@
    "unmapped": 0
   },
   "route": {
-   "covered": 86,
+   "covered": 89,
    "partial": 58,
    "uncovered": 0,
    "n/a": 0,
@@ -4656,9 +4656,9 @@
    "note": "binds only to probe whether a port is free, to serve a local fit page on loopback, or to run the sandbox self-test; no request is read from a client"
   },
   {
-   "id": "listener:fleet/daemon.py:run",
+   "id": "listener:fleet/daemon.py:DaemonRuntime.initialize_listener",
    "kind": "listener",
-   "source": "fleet/daemon.py:run",
+   "source": "fleet/daemon.py:DaemonRuntime.initialize_listener",
    "trust": "anything that can connect to the address",
    "attacker": "an unauthenticated or cross-origin client reaches the port",
    "status": "partial",
@@ -4669,9 +4669,9 @@
    "note": "the daemon handler is attacked; forged UDP beacons are attacked in tests/test_fleet_discovery.py only for the signature"
   },
   {
-   "id": "listener:fleet/daemon.py:serve_forever",
+   "id": "listener:fleet/daemon.py:DaemonRuntime.run",
    "kind": "listener",
-   "source": "fleet/daemon.py:serve_forever",
+   "source": "fleet/daemon.py:DaemonRuntime.run",
    "trust": "anything that can connect to the address",
    "attacker": "an unauthenticated or cross-origin client reaches the port",
    "status": "partial",
@@ -4851,9 +4851,19 @@
    "note": "binds only to probe whether a port is free, to serve a local fit page on loopback, or to run the sandbox self-test; no request is read from a client"
   },
   {
-   "id": "listener:workspace/automatic_connection.py:connect",
+   "id": "listener:workspace/automatic_connection.py:attach",
    "kind": "listener",
-   "source": "workspace/automatic_connection.py:connect",
+   "source": "workspace/automatic_connection.py:attach",
+   "trust": "anything that can connect to the address",
+   "attacker": "an unauthenticated or cross-origin client reaches the port",
+   "status": "n/a",
+   "tests": [],
+   "note": "binds only to probe whether a port is free, to serve a local fit page on loopback, or to run the sandbox self-test; no request is read from a client"
+  },
+  {
+   "id": "listener:workspace/automatic_connection.py:refresh",
+   "kind": "listener",
+   "source": "workspace/automatic_connection.py:refresh",
    "trust": "anything that can connect to the address",
    "attacker": "an unauthenticated or cross-origin client reaches the port",
    "status": "n/a",
@@ -7890,6 +7900,40 @@
    "note": "actual daemon sockets reject malformed bodies before dispatch, unauthenticated controls, coerced fields, command injection, private-path traversal, symlinked reviews and camera files"
   },
   {
+   "id": "route:fleet/initial_setup_routes.py:/ui/setup/initial",
+   "kind": "route",
+   "source": "fleet/initial_setup_routes.py:InitialSetupRoutes.public_route",
+   "trust": "network peer or local browser",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "covered",
+   "tests": [
+    "tests/test_fleet_initial_setup.py::test_owner_admission_routes_refuse_foreign_and_agent_requests",
+    "tests/test_fleet_initial_setup.py::test_owner_admission_routes_refuse_lan_and_missing_ui_header",
+    "tests/test_fleet_initial_setup.py::test_initial_rejects_hostile_body_without_identity_or_membership_changes",
+    "tests/test_fleet_initial_setup.py::test_local_session_cannot_upgrade_agent_cookie_or_prod_membership",
+    "tests/test_fleet_initial_setup.py::test_completed_prod_cannot_open_initial_session_anonymously",
+    "tests/test_fleet_initial_setup.py::test_initial_never_drops_manual_dev_membership"
+   ],
+   "note": "Real sockets refuse foreign origins, DNS rebinding, LAN ownership, missing UI headers and agent credentials; malformed or oversized setup bodies cannot mutate names or memberships, token sessions cannot mint person sessions, and completed Production setup requires sign-in"
+  },
+  {
+   "id": "route:fleet/initial_setup_routes.py:/ui/setup/local-session",
+   "kind": "route",
+   "source": "fleet/initial_setup_routes.py:InitialSetupRoutes.public_route",
+   "trust": "network peer or local browser",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "covered",
+   "tests": [
+    "tests/test_fleet_initial_setup.py::test_owner_admission_routes_refuse_foreign_and_agent_requests",
+    "tests/test_fleet_initial_setup.py::test_owner_admission_routes_refuse_lan_and_missing_ui_header",
+    "tests/test_fleet_initial_setup.py::test_initial_rejects_hostile_body_without_identity_or_membership_changes",
+    "tests/test_fleet_initial_setup.py::test_local_session_cannot_upgrade_agent_cookie_or_prod_membership",
+    "tests/test_fleet_initial_setup.py::test_completed_prod_cannot_open_initial_session_anonymously",
+    "tests/test_fleet_initial_setup.py::test_initial_never_drops_manual_dev_membership"
+   ],
+   "note": "Real sockets refuse foreign origins, DNS rebinding, LAN ownership, missing UI headers and agent credentials; malformed or oversized setup bodies cannot mutate names or memberships, token sessions cannot mint person sessions, and completed Production setup requires sign-in"
+  },
+  {
    "id": "route:fleet/invite_routes.py:/join/invite/challenge",
    "kind": "route",
    "source": "fleet/invite_routes.py:public",
@@ -8694,6 +8738,18 @@
     "tests/test_fleet_ui.py::TestSignIn::test_the_cluster_cannot_be_browsed_without_signing_in"
    ],
    "note": "session, header and host checks are attacked; the query and body of each /ui screen route are not"
+  },
+  {
+   "id": "route:fleet/routes.py:/ui/setup/jobs",
+   "kind": "route",
+   "source": "fleet/routes.py:SettingsRoutes.route",
+   "trust": "browser session on this machine behind the UI header",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "covered",
+   "tests": [
+    "tests/test_fleet_initial_setup.py::test_setup_jobs_refuses_untrusted_readers_and_ignores_external_paths"
+   ],
+   "note": "Joined job history refuses anonymous and forged cookies, missing UI headers and rebound hosts; authenticated hostile path queries cannot read an external job store"
   },
   {
    "id": "route:fleet/routes.py:/ui/setup/join",
@@ -10101,6 +10157,18 @@
    "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
   },
   {
+   "id": "spawn:fleet/runtime_wheel.py:_run",
+   "kind": "spawn",
+   "source": "fleet/runtime_wheel.py:_run",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "partial",
+   "tests": [
+    "tests/test_redteam_spawn.py::test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line"
+   ],
+   "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
+  },
+  {
    "id": "spawn:fleet/settings.py:_has_battery",
    "kind": "spawn",
    "source": "fleet/settings.py:_has_battery",
@@ -10164,18 +10232,6 @@
    "id": "spawn:fleet/updates.py:git_in.run",
    "kind": "spawn",
    "source": "fleet/updates.py:git_in.run",
-   "trust": "arguments built from model output, peer messages or file names",
-   "attacker": "attacker text becomes a command line, environment or working directory",
-   "status": "partial",
-   "tests": [
-    "tests/test_redteam_spawn.py::test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line"
-   ],
-   "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
-  },
-  {
-   "id": "spawn:fleet/updates.py:pip_install",
-   "kind": "spawn",
-   "source": "fleet/updates.py:pip_install",
    "trust": "arguments built from model output, peer messages or file names",
    "attacker": "attacker text becomes a command line, environment or working directory",
    "status": "partial",

@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack.files import read_json
-from ml_stack.workspace import device_sessions, onboard, remote_tasks, tokens
+from ml_stack.workspace import device_sessions, onboard, remote_tasks, remote_workers, tokens
 from ml_stack.workspace.boards import ANNOUNCE
 from ml_stack.workspace.chain import held
 from ml_stack.workspace.claims import Conflict, normal
@@ -18,16 +18,12 @@ from ml_stack.workspace.integration_git import git
 from ml_stack.workspace.modelid import CLAIMED, clean_harness, clean_model
 from ml_stack.workspace.project_history import adopt
 from ml_stack.workspace.rates import RateLimited, Rates
+from ml_stack.workspace.remote_protocol import METHODS
 from ml_stack.workspace.screen import Refused
 from ml_stack.workspace.service import Workspace
 from ml_stack.workspace.work_reputation import standings
 
 MAX_REPLY = 512 * 1024
-METHODS = frozenset({"send", "inbox", "outbox", "ack", "thread", "announce", "claim_model", "nudge", "wait",
-                     "heartbeat", "board.list", "board.read",
-                     "board.threads", "board.join", "board.leave", "board.dm",
-                     "board.subscribe", "board.unsubscribe", "board.subs", "board.digest",
-                     "board.rollup", "board.summary", "board.mentions"})
 
 
 def _reputation(ws, token, args, kwargs):
@@ -38,6 +34,10 @@ def _reputation(ws, token, args, kwargs):
 
 class WorkspaceHost:
     """Serve isolated registered project boards to authenticated agents."""
+
+    def start_worker(self, project, request, *, admission, cluster_key):
+        """Start a worker within the registered project and admitted cluster."""
+        return remote_workers.start(self.projects, project, request, admission=admission, cluster_key=cluster_key)
 
     def __init__(self, projects: Any) -> None:
         self.projects = projects

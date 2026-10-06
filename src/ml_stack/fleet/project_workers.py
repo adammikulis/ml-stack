@@ -3,8 +3,6 @@
 import re
 from urllib.parse import urlparse
 
-from ml_stack.workspace import remote_workers
-
 from . import project_enrollment
 
 
@@ -26,7 +24,7 @@ def answer(handler, host, body, cluster_key_path):
                 handler._send(403, {"error": "automatic project operations require the active Dev cluster over TLS"})
                 return True
             if match[2] == "worker":
-                code, reply = remote_workers.start(host.projects, match[1], request, admission=(cluster, cluster_id),
+                code, reply = host.start_worker(match[1], request, admission=(cluster, cluster_id),
                                                    cluster_key=cluster_key_path)
             else:
                 operation = host.enroll if match[2] == "enroll" else host.renew

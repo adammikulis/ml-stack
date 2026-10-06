@@ -11,7 +11,7 @@ from ml_stack.net import git
 from ml_stack.workspace.chain import held
 from ml_stack.workspace.identity import AGENT, Denied, Identity
 from ml_stack.workspace.remote import RemoteWorkspace
-from ml_stack.workspace.remote_host import METHODS
+from ml_stack.workspace.remote_protocol import METHODS
 
 
 def _saved() -> dict:
