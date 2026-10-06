@@ -169,7 +169,7 @@ def _project_checkouts(repository, tmp_path):
     return repository, clone
 
 
-def _dev_device(state, number, checkout, udp):
+def _dev_device(state, number, checkout, udp, *, default_profile=False):
     from ml_stack.fleet import discovery, tls
     from ml_stack.fleet.api import Daemon, make_handler
     from ml_stack.fleet.framing import LimitedServer
@@ -184,7 +184,8 @@ def _dev_device(state, number, checkout, udp):
     files = state / "files"
     files.mkdir(parents=True)
     runner = JobRunner(state / "jobs", files)
-    daemon = Daemon(runner, files, discovery.derive_token(member.key), cluster_key_path=keyfile)
+    daemon = Daemon(runner, files, discovery.derive_token(member.key),
+                    **({} if default_profile else {"cluster_key_path": keyfile}))
     daemon.tokens = lambda: {discovery.derive_token(row.key) for row in discovery.memberships(keyfile)}
     registry = ProjectRegistry(state / "fleet", f"node-{number}")
     daemon.projects, daemon.workspaces = registry, WorkspaceHost(registry)
@@ -286,3 +287,68 @@ def test_two_device_states_share_board_over_real_udp_and_tls_without_codes(dev_p
     ws = authority.workspace(project_id)
     assert all(ws.registry.info(actor)["model"] == "" for actor in (first_id, other_id))
     assert all(ws.registry.info(actor)["harness"] == "" for actor in (first_id, other_id))
+
+
+@pytest.mark.parametrize("mode", ["dev", "prod"])
+def test_default_profile_catalogue_and_automatic_board_use_real_udp_and_tls(repository, tmp_path, monkeypatch, mode):
+    from ml_stack import http
+    from ml_stack.fleet import automatic_clusters, discovery
+    from ml_stack.fleet.projects import identity
+    from ml_stack.fleet.remote import Peer
+    state = tmp_path / "default-device"
+    monkeypatch.setenv("ML_STACK_HOME", str(state))
+    monkeypatch.delenv("ML_STACK_CLUSTER_KEY", raising=False)
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        udp = probe.getsockname()[1]
+    original_discover = Peer.discover
+    original_offers = automatic_clusters.offers
+    monkeypatch.setattr(Peer, "discover", lambda **kw: original_discover(
+        **{**kw, "port": udp, "timeout_s": 0.3}))
+    monkeypatch.setattr(automatic_clusters, "offers", lambda port=None: original_offers(udp))
+    device = _dev_device(state, 0, repository, udp, default_profile=True)
+    if mode == "prod":
+        device.advertiser.key = discovery.mint_cluster("development", mode="prod").key
+    http._PINNED.clear()
+    try:
+        assert device.daemon.cluster_key_path is None
+        assert discovery.key_path() == device.keyfile
+        monkeypatch.setattr(automatic_connection, "HTTP_PORT", device.local_port)
+        project_id = identity(repository)
+        if mode == "prod":
+            device.daemon.projects.register(repository, project_id)
+        found = automatic_connection.discover(repository)
+        if mode == "prod":
+            assert found is None
+            member = discovery.memberships()[0]
+            peers = Peer.discover(key=member.key, group=member.group)
+            assert peers
+            assert all(automatic_connection.catalogue(node)["boards"] == [] for node in peers)
+            return
+        assert found is not None
+        assert found["project_id"] == project_id
+        assert found["cluster_key"] == ""
+        assert device.daemon.projects.get(project_id).root == str(repository)
+        _exchange_default_board(repository, project_id)
+    finally:
+        device.advertiser.stop()
+        for server in device.servers:
+            server.shutdown()
+            server.server_close()
+        device.runner.shutdown()
+        http._PINNED.clear()
+
+
+def _exchange_default_board(repository, project_id):
+    from ml_stack.workspace.remote import RemoteWorkspace
+
+    first = automatic_connection.connect(repository, "first")
+    second = automatic_connection.connect(repository, "second")
+    remote = RemoteWorkspace(first["host"], project_id)
+    first_token = remote.token(agent=first["agent"])
+    second_token = remote.token(agent=second["agent"])
+    sent = remote.call("send", first_token, second["agent"], "note", "default profile connects without a code")
+    received = next(row for row in remote.call("inbox", second_token) if row["seq"] == sent["seq"])
+    assert received["from"] == first["agent"]
+    assert received["to"] == second["agent"]
+    assert "default profile connects without a code" in received["text"]

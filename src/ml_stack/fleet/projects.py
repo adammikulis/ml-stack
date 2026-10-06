@@ -287,9 +287,7 @@ def answer(handler, registry: ProjectRegistry | None, parsed, *, cluster_key_pat
     pieces = parsed.path.removeprefix(prefix).strip("/").split("/")
     try:
         if parsed.path == prefix:
-            show_boards = False
-            if cluster_key_path is not None:
-                show_boards = project_enrollment.visible(handler.connection, handler._sealing(), cluster_key_path)
+            show_boards = project_enrollment.visible(handler.connection, handler._sealing(), cluster_key_path)
             handler._send(200, registry.catalogue(include_boards=show_boards))
         elif pieces == ["bootstrap"]:
             handler._send(200, {}, raw=bootstrap(), content_type="text/x-python")
