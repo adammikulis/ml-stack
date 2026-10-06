@@ -14,6 +14,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from ml_stack import harness_remote
 from ml_stack.command import Group, flag, option
 from ml_stack.http import ServerError
 from ml_stack.log import say, warn
@@ -33,6 +34,7 @@ from ml_stack.workspace import (
     project,
     project_connection,
     remote_cli,
+    remote_task_client,
     task_integration,
     task_outcomes,
     tokens,
@@ -682,7 +684,17 @@ def _runner(handler: Handler) -> Callable[[argparse.Namespace], int]:
             ws, token = _context(args)
             if isinstance(ws, Workspace) and handler is not _init:
                 ws.registry._record_device(ws.auth(token).id, onboard.device_metadata.current())
-            result = handler(args, ws, token)
+            if isinstance(ws, project_connection.CanonicalWorkspace) and args.cmd.startswith('task'):
+                result = remote_task_client.command(ws.remote, token, args)
+            elif isinstance(ws, project_connection.CanonicalWorkspace) and (
+                    args.cmd in ('claim', 'release', 'heartbeat', 'who', 'worktrees')
+                    or (args.cmd == 'announce' and args.kind == 'done')
+                    or (args.cmd == 'send' and args.type == 'done')):
+                result = harness_remote.cli_command(ws.remote, token, args)
+                if args.cmd in ('announce', 'send'):
+                    result = handler(args, ws, token)
+            else:
+                result = handler(args, ws, token)
         _show(args, result)
         _held_note(result)
         return 0

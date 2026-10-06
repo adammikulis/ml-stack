@@ -268,8 +268,10 @@ def opened(args: argparse.Namespace, harness: str, served: tuple[str, str, int],
     files = session_files(cwd)
     seat = None
     try:
-        invite = getattr(args, "seat_factory", None) or harnessid.invite
-        seat = invite(harnessid.agent_name(alias, harness, args.name), cwd, args.parent, say)
+        invite = getattr(args, "seat_factory", None)
+        identity = harnessid.agent_name(alias, harness, args.name)
+        seat = invite(identity, cwd, args.parent, say) if invite else harnessid.invite(
+            identity, cwd, args.parent, say, claim=(alias, harness))
         if not seat.record_model(alias, harness, base_url):
             say(f"the model of {seat.name} ({alias}, {harness}) is not recorded: the serving endpoint and session identity must verify")
         pre = hook_command("pre", role=args.role, label=seat.name, root=cwd, protect=protected_paths(files))

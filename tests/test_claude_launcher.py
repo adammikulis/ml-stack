@@ -12,7 +12,7 @@ from ml_stack import claude, harnessid
 
 @pytest.fixture(autouse=True)
 def _no_workspace(monkeypatch):
-    monkeypatch.setattr(harnessid, "invite", lambda name, project, parent, say: harnessid.Seat(name, parent))
+    monkeypatch.setattr(harnessid, "invite", lambda name, project, parent, say, **kwargs: harnessid.Seat(name, parent))
     monkeypatch.setattr(harnessid, "announce", lambda *a, **k: True)
 
 

@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, Any
 
-from ml_stack import harness_claims, requests
+from ml_stack import harness_claims, harness_remote, requests
 from ml_stack.harnesspolicy import (
     Decision,
     _shell_line,
@@ -134,6 +134,10 @@ def post(label: str) -> dict[str, Any]:
 def stop(rail: Rail) -> dict[str, Any]:
     """Block an authenticated harness completion until its recorded checkouts are cleaned."""
     try:
+        canonical = harness_remote.context(rail.label, rail.roots[0], rail.roots, require_claim=False)
+        if canonical:
+            harness_remote.require_clean(*canonical)
+            return {}
         ws = Workspace()
         who = ws.auth(tokens.load(ws.base, rail.label))
         if who.id != rail.label:
