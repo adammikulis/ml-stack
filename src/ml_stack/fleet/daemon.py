@@ -121,9 +121,10 @@ def serve_forever(root: Path | str | None = None,
     from . import automatic_clusters, cluster_modes
     selected = memberships(cluster_key_path)
     effective_mode = cluster_modes.validate(cluster_mode or (selected[0].mode if selected else "dev"))
-    say(cluster_modes.notice(effective_mode))
     if announce:
-        automatic_clusters.ensure(cluster_key_path, mode=effective_mode)
+        selected_member = automatic_clusters.ensure(cluster_key_path, mode=effective_mode)
+        effective_mode = selected_member.mode
+    say(cluster_modes.notice(effective_mode))
     key = load_cluster_key(cluster_key_path)
     token = load_or_create_token(root, key)
     live_token[0] = token
@@ -225,7 +226,7 @@ def serve_forever(root: Path | str | None = None,
         name=lambda: live_name[0], report=report, fetcher=fetcher,
         ui=interface, projects=projects, workspaces=workspaces, schedule=schedule, on_paused=on_paused,
         schedule_path=schedule_path, serving=serving, models=models,
-        cluster_key_path=cluster_key_path, tokens=every_token,
+        cluster_key_path=cluster_key_path, cluster_mode=effective_mode, tokens=every_token,
         bench=bench_host[0], hosting=hosting,
         decide=Deciding(serving), ui_from_lan=ui_from_lan or setup_from_lan,
         joining=Joining(lambda: memberships(cluster_key_path), fingerprint)))
@@ -439,6 +440,14 @@ def serve_forever(root: Path | str | None = None,
     if idle_s:
         say(f"  reclaiming a server unused for {idle_s:.0f}s")
         reclaiming.enter_context(watching(older_than=idle_s, say=print))
+    convergence_stop = threading.Event()
+    convergence = None
+    if announce and effective_mode == "dev":
+        convergence = threading.Thread(
+            target=automatic_clusters.converge,
+            args=(convergence_stop, start_announcing, cluster_key_path),
+            name="development-cluster-convergence", daemon=True)
+        convergence.start()
     try:
         while True:
             httpd.serve_forever()
@@ -455,6 +464,9 @@ def serve_forever(root: Path | str | None = None,
     except KeyboardInterrupt:
         pass
     finally:
+        convergence_stop.set()
+        if convergence is not None:
+            convergence.join(timeout=12.0)
         reclaiming.close()
         scanner.stop()
         _stop_advertisers(advertisers)
