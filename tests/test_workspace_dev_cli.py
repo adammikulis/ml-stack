@@ -81,7 +81,7 @@ def test_local_project_discovery_uses_checkout_root(monkeypatch, tmp_path):
 
 
 def test_board_registration_waits_until_visible_singletons_converge(monkeypatch, tmp_path):
-    member = SimpleNamespace(key=b"winner", group="development", mode="dev")
+    member = SimpleNamespace(key=b"winner", group="development", mode="dev", selection="automatic")
     identity = hashlib.sha256(member.key).hexdigest()
     monkeypatch.setattr(automatic_connection, "memberships", lambda path: [member])
     monkeypatch.setattr(automatic_connection, "identity", lambda root: "a" * 32)
@@ -100,7 +100,7 @@ def test_board_registration_waits_until_visible_singletons_converge(monkeypatch,
 
 
 def test_unsettled_devices_never_register_or_claim_board(monkeypatch, tmp_path):
-    member = SimpleNamespace(key=b"winner", group="development", mode="dev")
+    member = SimpleNamespace(key=b"winner", group="development", mode="dev", selection="automatic")
     monkeypatch.setattr(automatic_connection, "memberships", lambda path: [member])
     monkeypatch.setattr(automatic_connection, "identity", lambda root: "a" * 32)
     monkeypatch.setattr(automatic_connection.automatic_clusters, "ensure", lambda *a, **kw: member)
@@ -180,7 +180,7 @@ def _dev_device(state, number, checkout, udp):
     from ml_stack.workspace.remote_host import WorkspaceHost
 
     keyfile = state / "cluster.key"
-    member = discovery.mint_cluster("development", keyfile)
+    member = discovery.mint_cluster("development", keyfile, selection="automatic")
     files = state / "files"
     files.mkdir(parents=True)
     runner = JobRunner(state / "jobs", files)

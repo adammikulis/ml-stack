@@ -112,7 +112,7 @@ def parse_recovery(text: str) -> Membership:
         if len(base64.b64decode(key + "=" * (-len(key) % 4), altchars=b"-_", validate=True)) != 32:
             raise ValueError("invalid recovery key")
         return Membership(group=require_name(data.get("group")), key=key.encode("ascii"),
-                          mode=data["mode"])
+                          mode=data["mode"], selection="manual")
     except (KeyError, ValueError, TypeError, UnicodeError, DiscoveryError) as exc:
         raise DiscoveryError("not a valid cluster recovery file") from exc
 
