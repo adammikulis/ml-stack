@@ -16,6 +16,33 @@ partial = 199
 
 
 [[group]]
+match = ["egress:workspace/automatic_connection.py:_register"]
+status = "covered"
+count = 1
+tests = ["tests/test_automatic_project_connection.py::test_local_registration_refuses_hostile_response"]
+note = "bounded loopback registration rejects foreign redirects, oversized replies, absent or tampered seals, malformed JSON and another project identity"
+
+[[group]]
+match = ["route:fleet/api.py:/workspace/v1/local-project"]
+status = "covered"
+count = 1
+tests = ["tests/test_project_enrollment_admission.py::test_local_project_route_refuses_unauthorized_registration",
+         "tests/test_project_enrollment_admission.py::test_native_registration_requires_local_active_dev_proof",
+         "tests/test_project_board_metadata.py::test_native_registration_refuses_identity_mismatch_before_mutation",
+         "tests/test_project_board_metadata.py::test_native_registration_refuses_unbounded_or_relative_path"]
+note = "native registration requires loopback sealed active Dev admission and an exact bounded local Git identity; rejected requests do not register or expose a path"
+
+[[group]]
+match = ["route:fleet/api.py:/jobs/*"]
+status = "covered"
+count = 1
+tests = ["tests/test_fleet_daemon.py::test_job_reads_refuse_unknown_or_traversing_identifiers",
+         "tests/test_fleet_daemon.py::test_job_runs_and_reports_success",
+         "tests/test_fleet_daemon.py::test_unknown_job_is_404"]
+note = "job reads require authentication and select existing job identifiers; unknown, traversing and malformed paths cannot return outside-file contents"
+
+
+[[group]]
 match = ["route:fleet/invite_routes.py:/join/invite/challenge", "route:fleet/invite_routes.py:/join/invite/redeem"]
 status = "covered"
 count = 2
