@@ -19,7 +19,7 @@
   --warn:#9b5a00; --busy:#bc7200; --bad:var(--ml-red); --good:var(--ml-green);
   --nvidia:#527f00; --amd:#c02635; --apple:#555c70; --cpu:#3068b0;
   --radius:14px; --gap:calc(20px * var(--ui-density)); --mono:var(--ml-mono); --sans:var(--ml-font); --shadow:var(--ml-shadow);
-  --ui-font-size:14px; --ui-density:1; --rail-width:76px; --header-height:88px;
+  --ui-font-size:14px; --ui-density:1; --rail-width:76px; --header-height:48px;
 }
 * { box-sizing:border-box; }
 [hidden] { display:none !important; }
