@@ -97,3 +97,12 @@ def test_unsafe_descriptor_is_refused(descriptor, monkeypatch, mode, uid):
     monkeypatch.setattr(os, 'geteuid', lambda: 123, raising=False)
     with pytest.raises(OSError, match='private and owned'):
         registration._private(SimpleNamespace(st_mode=mode, st_uid=uid))
+
+
+def test_oversized_explicit_configuration_cannot_be_registered(descriptor, monkeypatch):
+    path, _, config = descriptor
+    config['unused'] = '界' * (registration.LIMIT // 2)
+    monkeypatch.setenv(registration.ENV, json.dumps(config, ensure_ascii=False))
+    with pytest.raises(OSError, match='Invalid'), registration.registered():
+        pytest.fail('oversized bridge was registered')
+    assert not path.exists()

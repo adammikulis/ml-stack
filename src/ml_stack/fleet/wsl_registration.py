@@ -68,7 +68,7 @@ def configuration():
     """Return the explicit bridge or the current same-user daemon's registration."""
     if ENV in os.environ:
         try:
-            if len(os.environ[ENV]) > LIMIT:
+            if len(os.environ[ENV].encode("utf-8")) > LIMIT:
                 raise ValueError('oversized configuration')
             return _validate(json.loads(os.environ[ENV]))
         except ValueError as exc:
@@ -96,7 +96,7 @@ def registered():
     if not explicit:
         yield
         return
-    config = _validate(json.loads(explicit))
+    config = configuration()
     path = _path()
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     _private(path.parent.lstat(), directory=True)
