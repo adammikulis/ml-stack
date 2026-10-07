@@ -170,6 +170,23 @@ status = "n/a"
 note = "The interpreter comes from the fixed library catalog or the running Python; the probe uses a fixed -c program and an argv list, without model, peer or browser text"
 
 [[group]]
+match = ["spawn:fleet/environment.py:Environment.require_current_runtime"]
+status = "covered"
+count = 1
+tests = ["tests/test_fleet_environment.py::test_runtime_revision_probe_rejects_stale_literal_hostile_interpreter",
+         "tests/test_fleet_environment.py::test_frozen_runtime_requires_exact_bundled_commit_before_work"]
+note = "Real interpreter paths containing shell punctuation remain literal argv; unstamped and mismatched revisions cannot start work, and probing has an explicit timeout and no shell"
+
+[[group]]
+match = ["spawn:fleet/managed_compute.py:report"]
+status = "covered"
+count = 1
+tests = ["tests/test_fleet_managed_compute.py::test_managed_probe_uses_literal_hostile_path_and_redacts_real_child_environment",
+         "tests/test_fleet_managed_compute.py::test_managed_compute_does_not_advertise_unverified_capabilities",
+         "tests/test_fleet_managed_compute.py::test_frozen_report_probes_the_job_interpreter_and_keeps_provenance"]
+note = "A real child receives a literal hostile interpreter path and a credential-redacted environment; malformed output, missing provenance, missing executables, timeout and failing exits cannot advertise capabilities"
+
+[[group]]
 match = ["route:fleet/routes.py:/ui/session"]
 status = "covered"
 tests = ["tests/test_fleet_ui.py::TestSignIn::test_the_wrong_passphrase_does_not",

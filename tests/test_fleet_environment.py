@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 
 import pytest
@@ -329,3 +330,21 @@ def test_frozen_runtime_requires_exact_bundled_commit_before_work(tmp_path, monk
             managed.require_current_runtime()
     assert calls[0][:3] == [str(managed.python), "-I", "-c"]
     assert len(calls) == 1
+
+
+@pytest.mark.skipif(os.name == 'nt', reason='POSIX executable path syntax')
+def test_runtime_revision_probe_rejects_stale_literal_hostile_interpreter(tmp_path, monkeypatch):
+    from ml_stack.fleet import environment
+
+    python = tmp_path / "python;touch injected"
+    python.symlink_to(sys.executable)
+    wheel = tmp_path / "ml_stack-0.2.1-py3-none-any.whl"
+    wheel.touch()
+    managed = Environment(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(environment.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(managed, "wheels", lambda: tmp_path)
+    monkeypatch.setattr(environment, "wheel_commit", lambda path: "f" * 40)
+    with pytest.raises(OSError, match="Refresh Training essentials"):
+        managed.require_current_runtime(python=python)
+    assert not (tmp_path / "injected").exists()
