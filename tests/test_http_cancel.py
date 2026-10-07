@@ -68,3 +68,38 @@ def test_explicit_sdk_opening_timeout_remains_effective():
             assert received.is_set() and await asyncio.to_thread(closed.wait, 1)
             await transport.aclose()
         asyncio.run(run())
+
+
+def test_unlimited_sdk_can_cancel_during_tls_handshake():
+    import socketserver
+
+    received, closed = threading.Event(), threading.Event()
+    class Handler(socketserver.BaseRequestHandler):
+        def handle(self):
+            self.request.settimeout(3)
+            try:
+                assert self.request.recv(4096)
+                received.set()
+                while self.request.recv(4096):
+                    pass
+                closed.set()
+            except OSError:
+                pass
+    with socketserver.ThreadingTCPServer(('127.0.0.1', 0), Handler) as server:
+        worker = threading.Thread(target=server.serve_forever, daemon=True)
+        worker.start()
+        async def run():
+            url = f'https://127.0.0.1:{server.server_address[1]}/v1/chat/completions'
+            transport = FleetTransport(url, '')
+            task = asyncio.create_task(transport.handle_async_request(httpx.Request('POST', url, json={})))
+            assert await asyncio.to_thread(received.wait, 2)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(task, 1)
+            assert await asyncio.to_thread(closed.wait, 1)
+            await transport.aclose()
+        try:
+            asyncio.run(run())
+        finally:
+            server.shutdown()
+            worker.join(1)
