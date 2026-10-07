@@ -6,19 +6,19 @@
     setup({ endpoint, onComplete, group = "default", groups = [], clusterMode }) {
     const scope = endpoint.includes("/setup/") ? "setup-cluster" : "fleet-cluster";
     const mode = el("select", { id: `${scope}-action` },
-      el("option", { value: "join" }, "Join existing cluster"),
-      el("option", { value: "create" }, "Create new cluster"));
+      el("option", { value: "join" }, "Join existing pool"),
+      el("option", { value: "create" }, "Create new pool"));
     const named = el("input", { id: `${scope}-name`, type: "text", required: "1", value: group });
     const words = el("input", { id: `${scope}-passphrase`, type: "password", required: "1" });
-    const submit = el("button", { class: "ghost small" }, "Join existing cluster");
+    const submit = el("button", { class: "ghost small" }, "Join existing pool");
     const note = el("div", { role: "status", "aria-live": "polite" });
     const explain = el("div", { class: "hint" });
     const check = () => { submit.disabled = !named.value.trim() || words.value.trim().length < M.MIN_PASS; };
     const choose = () => {
-      submit.textContent = mode.value === "create" ? "Create new cluster" : "Join existing cluster";
+      submit.textContent = mode.value === "create" ? "Create new pool" : "Join existing pool";
       explain.textContent = mode.value === "create"
-        ? "Start a separate cluster with this name and a new passphrase."
-        : "Use the name and passphrase of a cluster already running on your network.";
+        ? "Start a separate pool with this name and a new passphrase."
+        : "Use the name and passphrase of a pool already running on your network.";
       check();
     };
     named.oninput = words.oninput = check;
@@ -26,20 +26,20 @@
     submit.onclick = async () => {
       submit.disabled = true;
       note.replaceChildren(el("span", { class: "spin" }),
-        mode.value === "create" ? " Creating cluster…" : " Looking for the existing cluster…");
+        mode.value === "create" ? " Creating pool…" : " Looking for the existing pool…");
       const group = named.value.trim();
       const action = mode.value;
       const got = await M.api(endpoint, { method: "POST",
         body: JSON.stringify({ group, passphrase: words.value, mode: action, cluster_mode: clusterMode }) });
       if (got.error || got.ok === false) {
-        note.replaceChildren(el("div", { class: "err" }, got.error || "The cluster action failed."));
+        note.replaceChildren(el("div", { class: "err" }, got.error || "The pool action failed."));
         check();
         return;
       }
       words.value = "";
       check();
       note.replaceChildren(el("div", { class: "ok" },
-        `${action === "create" ? "Created" : "Joined"} cluster '${group}'.`));
+        `${action === "create" ? "Created" : "Joined"} pool '${group}'.`));
       await onComplete(got);
     };
     const nearby = el("div", { role: "status", "aria-live": "polite" });
@@ -56,17 +56,17 @@
               if (c.method === "recovery") recovered.append(window.setupRecovery(c.name, onComplete));
               else words.focus();
             } }, c.method === "recovery" ? "Join with recovery file" : "Join"))));
-        if (!nearby.childNodes.length) nearby.textContent = result.error || "No nearby clusters found.";
-      } catch { nearby.textContent = "Could not discover nearby clusters."; }
+        if (!nearby.childNodes.length) nearby.textContent = result.error || "No nearby pools found.";
+      } catch { nearby.textContent = "Could not discover nearby pools."; }
       finally { refresh.disabled = false; }
-    } }, "Refresh nearby clusters");
+    } }, "Find nearby pools");
     choose();
     this.replaceChildren(M.inviteForm({ groups, onComplete, scope }),
       el("div", { class: "group", id: `${scope}-form` },
-      el("h3", {}, "Nearby clusters"), nearby, refresh, recovered,
+      el("h3", {}, "Nearby pools"), nearby, refresh, recovered,
       el("label", { for: `${scope}-action` }, "What would you like to do?"), mode, explain,
-      el("label", { for: `${scope}-name` }, "Cluster name (required)"), named,
-      el("label", { for: `${scope}-passphrase` }, "Cluster passphrase"), words,
+      el("label", { for: `${scope}-name` }, "Pool name (required)"), named,
+      el("label", { for: `${scope}-passphrase` }, "Pool passphrase"), words,
       submit, note));
     }
   }
@@ -82,28 +82,28 @@
       join.onclick = async () => {
         const generation = this.generation;
         join.disabled = true;
-        note.textContent = "Joining the invited cluster...";
+        note.textContent = "Joining the invited pool...";
         try {
           const got = await M.api("/ui/fleet/join-invite", { method: "POST",
             body: JSON.stringify({ invite: invite.value.trim() }) });
           if (generation !== this.generation || M.refused(got)) return;
           if (got.error || got.ok === false) throw new Error(got.error || "Could not join this invite.");
           invite.value = "";
-          note.textContent = `Joined cluster '${got.group || ""}'.`;
+          note.textContent = `Joined pool '${got.group || ""}'.`;
           await onComplete(got);
         } catch (error) { note.textContent = error.message; }
         finally { check(); }
       };
       check();
-      this.replaceChildren(el("div", { class: "group", "aria-label": "Cluster invitations" },
-        el("h3", {}, "Connect another machine"),
-        el("p", { class: "hint" }, "Create an invite on a machine in your cluster, then paste it here on the machine joining. Both machines must be reachable on your network."),
+      this.replaceChildren(el("div", { class: "group", "aria-label": "Pool invitations" },
+        el("h3", {}, "Connect another device"),
+        el("p", { class: "hint" }, "Create an invite on a machine in your pool, then paste it here on the machine joining. Both machines must be reachable on your network."),
         el("label", { for: `${scope}-invite` }, "Invitation"), invite, join, note));
       if (!groups.length) return;
       const named = el("select", { id: `${scope}-invite-group` },
         ...groups.map(group => el("option", { value: group }, group)));
       const kind = el("select", { id: `${scope}-invite-kind` },
-        el("option", { value: "computer" }, "Owned computer: full cluster access"),
+        el("option", { value: "computer" }, "Owned computer: full pool access"),
         el("option", { value: "android" }, "Owned Android phone: local status and chat for one hour"));
       const issued = el("div");
       const create = el("button", { class: "ghost small" }, "Create invite");
@@ -125,7 +125,7 @@
       this.create = create; this.issued = issued;
       this.firstChild.append(el("label", { for: `${scope}-invite-group` }, "Cluster to invite into"),
         named, el("label", { for: `${scope}-invite-kind` }, "Device and permissions"), kind,
-        el("p", { class: "hint" }, "Only add computers you own. This invite grants full cluster access, including permission to run commands."),
+        el("p", { class: "hint" }, "Only add computers you own. This invite grants full pool access, including permission to run commands."),
         create, creation, issued);
       const devices = el("div");
       const refresh = el("button", { class: "ghost small" }, "Show Android connections");
@@ -158,7 +158,7 @@
             text.focus(); text.select();
             if (!document.execCommand("copy")) throw new Error("Select the invitation and copy it.");
           }
-          note.textContent = "Invite copied. On the other machine, open ml-stack and choose Join with invite.";
+          note.textContent = "Invite copied. On the other machine, open Poolside and choose Join with invite.";
         } catch { text.focus(); text.select(); note.textContent = "Select the invitation and copy it."; }
       };
       const revoke = el("button", { class: "ghost small" }, "Revoke invite");

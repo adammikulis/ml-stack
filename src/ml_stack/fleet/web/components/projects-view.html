@@ -22,7 +22,7 @@
         <pre id="project-command"></pre><button id="project-copy">Copy access details</button>
       </div>
       <h3>Connected agents</h3><div id="project-agents"></div>
-      <h3>Shared messageboard</h3><div id="project-messages"></div>
+      <h3>Project conversation</h3><div id="project-messages"></div>
     </section>
   </main>
 </template>
@@ -62,7 +62,7 @@
       this.loading = true;
       try {
         const result = await M.api('/ui/projects');
-        if (!result.ok) { this.note.textContent = result.error || 'Project sharing is unavailable on this device. Update ml-stack to enable it.'; return; }
+        if (!result.ok) { this.note.textContent = result.error || 'Project sharing is unavailable on this device. Update Poolside to enable it.'; return; }
         this.projects = result.projects || [];
         const signature = JSON.stringify([this.projects, result.candidates, result.devices]);
         if (signature !== this.signature) {
@@ -72,11 +72,11 @@
           if ([...this.candidate.options].some(p => p.value === selected)) this.candidate.value = selected;
           this.share.disabled = !this.candidate.value;
           this.rows.replaceChildren(...this.projects.map(p => el('div', {class: 'model-row'},
-            el('div', {}, el('b', {}, p.name), el('p', {class: 'hint'}, `${p.is_self ? 'This device' : p.peer || p.host || 'Cluster device'} · ${p.state || 'Shared'}`)),
+            el('div', {}, el('b', {}, p.name), el('p', {class: 'hint'}, `${p.is_self ? 'This device' : p.peer || p.host || 'Pool device'} · ${p.state || 'Shared'}`)),
             el('button', {onclick: () => this.select(p)}, 'Open project'))));
           if (!this.projects.length) this.rows.append(el('p', {class: 'hint'}, 'No shared projects found yet.'));
           for (const d of result.devices || []) if (d.state === 'upgrade_required' || d.error) {
-            this.rows.append(el('p', {class: 'hint'}, `${d.name || d.peer}: ${d.error || 'Update ml-stack on this device to share projects.'}`));
+            this.rows.append(el('p', {class: 'hint'}, `${d.name || d.peer}: ${d.error || 'Update Poolside on this device to share projects.'}`));
           }
         }
         if (this.selected) await this.loadBoard();
@@ -89,7 +89,7 @@
       this.board.hidden = false;
       this.querySelector('#project-title').textContent = project.name;
       this.querySelector('#project-authority').textContent = `Board authority: ${project.authority_machine || 'unconfigured'}`;
-      this.querySelector('#project-source').textContent = `Source available on ${project.is_self ? 'this device' : project.source_host || project.host || project.peer || 'a cluster device'}`;
+      this.querySelector('#project-source').textContent = `Source available on ${project.is_self ? 'this device' : project.source_host || project.host || project.peer || 'a pool device'}`;
       this.querySelector('#project-host-board').checked = false;
       this.querySelector('#project-access').hidden = true;
       this.querySelector('#project-command').textContent = '';
@@ -162,7 +162,7 @@
         this.querySelector('#project-access').hidden = false;
         this.querySelector('#project-access-hint').textContent = result.command
           ? /\b(NAME|MODEL|HARNESS|HOST_URL|CLUSTER)\b/.test(result.command)
-            ? 'Replace the uppercase placeholders with the agent name, model, harness and cluster, and the authority address if needed. Run it on the agent\'s device within ten minutes.'
+            ? 'Replace the uppercase placeholders with the agent name, model, harness and pool, and the authority address if needed. Run it on the agent\'s device within ten minutes.'
             : 'Run this on the agent\'s device. The code expires after ten minutes.'
           : 'Project-scoped access code. Use it with workspace remote join on the agent\'s device. It expires after ten minutes.';
         this.querySelector('#project-command').textContent = result.command || result.code || '';

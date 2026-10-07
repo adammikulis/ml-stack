@@ -41,7 +41,7 @@ from ml_stack.workspace import (
     remote_workers,
     task_integration,
     task_outcomes,
-    task_worktree_recovery,
+    task_source_recovery,
     tokens,
     worktree_lifecycle,
 )
@@ -391,7 +391,7 @@ def _join(args: argparse.Namespace, ws: Workspace) -> int:
     expected = getattr(args, "workspace", "")
     if expected and (not remote or remote.config["workspace"] != expected):
         raise Denied("this invitation belongs to another coordinator workspace; "
-                     "enroll in its Fleet cluster and use the complete invitation command")
+                     "enroll in its cluster and use the complete invitation command")
     name = remote.join(limits.root(), args.code, args.name, args.model, args.harness) if remote else onboard.join(
         ws, args.code, args.name, claim=(args.model, args.harness))
     if not remote:
@@ -550,7 +550,7 @@ BARE: tuple[tuple[str, str, list[Any], Callable[[argparse.Namespace, Workspace],
       *LIVE], _connect),
     ("join", "an agent redeems an invite code and saves its private token", [
         flag("code"), flag("--name", default="", help="a short id for yourself, e.g. codex"),
-        flag("--coordinator", default="", help="select this enrolled Fleet coordinator before redeeming the invite"),
+        flag("--coordinator", default="", help="select this enrolled cluster coordinator before redeeming the invite"),
         flag("--workspace", default="", help="expected coordinator workspace ID; refuses local redemption"),
         flag("--model", default="", help="the exact model id you run as; recorded as claimed"),
         flag("--harness", default="", help="your harness, e.g. claude-code or codex")],
@@ -636,8 +636,7 @@ TABLE: tuple[tuple[str, str, list[Any], Handler], ...] = (
      lambda a, w, t: task_outcomes.credit(w, t, a.id)),
     ("task-integrate", "gate, land and clean an independently accepted committed native task", [flag("id")],
      lambda a, w, t: task_integration.integrate(w, t, a.id)),
-    ("task-dematerialize", "remove an unchanged inactive task checkout, preserving its pending history", [flag("id"), flag("reason")],
-     lambda a, w, t: task_worktree_recovery.dematerialize(w, t, a.id, a.reason)),
+    *task_source_recovery.TABLE,
     ("inbox", "unread messages, fenced as data", [
         *READ,
         flag("--children", action="store_true", help="only messages from your delegates")],
@@ -758,7 +757,7 @@ def _runner(handler: Handler) -> Callable[[argparse.Namespace], int]:
     def run(args: argparse.Namespace) -> int:
         connection = _project_connection()
         remote = None if connection else coordinator_client.client(limits.root())
-        if args.cmd == 'task-dematerialize' and (remote or connection):
+        if args.cmd in ('task-dematerialize', 'task-rebind-source') and (remote or connection):
             raise Denied('native task checkout recovery runs only on its local coordinator')
         if remote:
             options = next(options for name, _help, options, _fn in TABLE if name == args.cmd)
@@ -872,7 +871,7 @@ def _coordinator(args):
 
 
 COMMANDS.add("coordinator", _guarded(_coordinator),
-             help="inspect, host or select one authenticated Fleet workspace coordinator",
+             help="inspect, host or select one authenticated shared workspace coordinator",
              options=[*COMMON, flag("action", choices=('status', 'list', 'host', 'connect')),
                       flag("name", nargs='?', default='')])
 COMMANDS.add("nudge", _guarded(_nudging),
