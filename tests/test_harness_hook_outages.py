@@ -37,7 +37,9 @@ def test_pre_outage_is_a_structured_denial_with_a_reason(monkeypatch):
     assert 'connection refused' in answer['permissionDecisionReason']
 
 
-@pytest.mark.parametrize('secret', ['sk-' + 'a' * 30, 'https://owner:private-password@example.invalid',
+@pytest.mark.parametrize('secret', ['mlws1.worker.' + 'a' * 43, 'mlws1.worker.one/child.two.' + 'b' * 43,
+                                   'mlsk1.' + 'c' * 43, 'sk-' + 'a' * 30,
+                                   'https://owner:private-password@example.invalid',
                                    '-----BEGIN PRIVATE KEY-----hidden-----END PRIVATE KEY-----'])
 def test_diagnostic_redacts_credentials(secret, monkeypatch):
     monkeypatch.setenv('ML_STACK_TEST_TOKEN', 'opaque-local-credential')
