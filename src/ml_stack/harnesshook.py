@@ -29,7 +29,7 @@ from ml_stack.harnesspolicy import (
     workspace_authority,
 )
 from ml_stack.keystore import ENV_NONINTERACTIVE
-from ml_stack.workspace import harness_remote, tokens, worktree_lifecycle
+from ml_stack.workspace import harness_remote, notification_reader, tokens, worktree_lifecycle
 from ml_stack.workspace.identity import Denied
 from ml_stack.workspace.service import Workspace
 
@@ -80,6 +80,7 @@ class Rail:
     roots: Sequence[str] = ()
     protected: Sequence[str] = ()
     wait_s: float = WAIT_S
+    session_id: str = ""
 
 
 def pre(payload: dict[str, Any], rail: Rail, inbox: requests.Inbox | None = None) -> dict[str, Any]:
@@ -118,11 +119,13 @@ def _owned_answer(payload, rail, event, reason):
     return _answer(event, 'allow', reason)
 
 
-def nudge(label: str) -> str:
+def nudge(label: str, rail: Rail | None = None) -> str:
     """What ``ml-stack-workspace nudge --agent LABEL`` prints, or "" when it prints nothing or
     cannot run."""
     try:
-        done = subprocess.run(["ml-stack-workspace", "nudge", "--agent", label], capture_output=True,
+        done = subprocess.run([sys.executable, "-m", notification_reader.__name__, label,
+                               str(rail.roots[0] if rail and rail.roots else Path.cwd()),
+                               rail.session_id if rail else ""], capture_output=True,
                               text=True, timeout=NUDGE_S, check=False, stdin=subprocess.DEVNULL)
     except (OSError, subprocess.SubprocessError) as error:
         sys.stderr.write(f"workspace nudge unavailable: {_diagnostic(error)}\n")
@@ -152,7 +155,7 @@ def post(label: str, rail: Rail | None = None) -> dict[str, Any]:
     except FAILURES as error:
         warning = f"workspace checkpoint unavailable: {_diagnostic(error)}"
         sys.stderr.write(warning + "\n")
-    text = "\n".join(part for part in (warning, nudge(label)) if part)
+    text = "\n".join(part for part in (warning, nudge(label, rail)) if part)
     if not text:
         return {}
     return {"hookSpecificOutput": {"hookEventName": HOOK_EVENTS["post"],
@@ -200,7 +203,8 @@ def run(argv: Sequence[str] | None = None, stdin: IO[str] | None = None,
         payload = payload if isinstance(payload, dict) else {}
         label = opts.get("label", ["harness"])[-1]
         rail = Rail(opts.get("role", ["read-only"])[-1], label, opts.get("root") or [str(payload.get("cwd", ""))],
-                    opts.get("protect", []), float(opts.get("wait", [WAIT_S])[-1]))
+                    opts.get("protect", []), float(opts.get("wait", [WAIT_S])[-1]),
+                    str(payload.get("session_id", "")) if event == "post" else "")
         out = pre(payload, rail) if event == "pre" else stop(rail) if event == "stop" else post(label, rail)
     except FAILURES as exc:
         outcome = "notification unavailable" if notification else "call blocked"

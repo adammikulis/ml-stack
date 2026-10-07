@@ -14,7 +14,7 @@ def unavailable(*args, **kwargs):
 
 def test_post_outage_does_not_reverse_a_completed_tool(monkeypatch, capsys):
     monkeypatch.setattr(harnesshook.harness_remote, 'context', unavailable)
-    monkeypatch.setattr(harnesshook, 'nudge', lambda label: '')
+    monkeypatch.setattr(harnesshook, 'nudge', lambda label, rail=None: '')
     out = io.StringIO()
     assert harnesshook.run(['post', '--label', 'worker', '--root', '/project'], io.StringIO('{}'), out) == 0
     context = json.loads(out.getvalue())['hookSpecificOutput']['additionalContext']
@@ -96,7 +96,7 @@ def test_post_checkpoint_outage_preserves_pending_message_alert(monkeypatch):
     monkeypatch.setattr(harnesshook.harness_remote, 'context', unavailable)
     seen = []
 
-    def pending(label):
+    def pending(label, rail=None):
         seen.append(label)
         return '1 waiting for you; run inbox'
 
@@ -118,7 +118,7 @@ def test_post_lifecycle_failure_preserves_stop_message_alert(monkeypatch):
     worker = type('Worker', (), {'id': 'worker'})()
     monkeypatch.setattr(harnesshook.harness_remote, 'context', lambda *args, **kwargs: (remote, worker))
     monkeypatch.setattr(harnesshook.worktree_lifecycle, 'checkpoint', broken)
-    monkeypatch.setattr(harnesshook, 'nudge', lambda _label: 'urgent message waiting; run inbox')
+    monkeypatch.setattr(harnesshook, 'nudge', lambda _label, rail=None: 'urgent message waiting; run inbox')
     result = harnesshook.post('worker', harnesshook.Rail('plan-and-go', 'worker', ['/project']))
     context = result['hookSpecificOutput']['additionalContext']
     assert 'checkpoint missing shadow' in context
