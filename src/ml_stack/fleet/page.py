@@ -13,7 +13,7 @@ COMPONENTS_DIR = WEB / "components"
 COMPONENTS = ("fleet-model", "fleet-nav", "sign-in", "startup-models", "cluster-actions", "first-run", "fleet-benchmark", "cluster-view",
               "chat-stream", "chat-view", "coordinator-control", "board-view", "projects-view", "wired-memory", "models-library", "model-browser", "models-view", "settings-view", "fit-model", "fit-view",
               "fit-charts", "rates-view", "telemetry-view",
-              "workspace-jobs", "history-view", "tasks-view", "data-view",
+              "workspace-jobs", "history-view", "tasks-view", "data-view", "knowledge-view",
               "training-view", "tools-view", "benchmarks-view", "gym-scene-controls",
               "gym-drone-camera", "gym-scene", "gym-recordings",
               "gym-world-options", "gym-model-options", "gym-view", "close-sheet")
@@ -23,7 +23,7 @@ MODULES = {"task-publishing": frozenset({"tasks-view"}),
            "setup-recovery": frozenset({"first-run", "cluster-actions"}),
            "chat-model-picker": frozenset({"chat-view"}),
            "chat-coding": frozenset({"chat-view"}), "workspace-model": frozenset({
-    "workspace-jobs", "history-view", "tasks-view", "data-view", "training-view", "tools-view", "benchmarks-view",
+    "workspace-jobs", "history-view", "tasks-view", "data-view", "knowledge-view", "training-view", "tools-view", "benchmarks-view",
     "gym-world-options", "gym-recordings", "gym-model-options", "gym-view",
 })}
 #: the fit screen on its own, for a machine running no daemon
