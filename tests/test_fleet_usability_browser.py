@@ -108,14 +108,15 @@ def test_four_workspaces_context_pages_and_theme_navigation(usability_page):
     from playwright.sync_api import expect
     served, page, errors = usability_page
     page.goto(f'http://127.0.0.1:{served.port}/ui/')
-    expect(page.locator('#nav-title')).to_have_text('Model chats')
+    expect(page.locator('#nav-section')).to_have_text('Conversations')
+    expect(page.locator('#nav-title')).to_be_hidden()
+    assert page.locator('#nav-group').count() == 0
     primary = page.get_by_role('navigation', name='Main navigation')
     expect(primary.locator('a')).to_have_count(4)
     assert page.get_by_role('searchbox', name='Find a page').count() == 0
     for group, titles in [('Studio', ['Models', 'Fine-tune', 'Worlds', 'Evaluate', 'Data']),
                           ('Work', ['Tasks', 'Projects', 'Tools', 'Graph', 'History']),
-                          ('Pool', ['Devices', 'Capacity']),
-                          ('Conversations', ['Model chats', 'Team channels'])]:
+                          ('Pool', ['Devices', 'Capacity'])]:
         primary.get_by_role('link', name=group, exact=True).click()
         context = page.get_by_role('navigation', name='Workspace pages')
         assert context.locator('a').all_text_contents() == titles
@@ -126,6 +127,10 @@ def test_four_workspaces_context_pages_and_theme_navigation(usability_page):
     page.get_by_role('link', name='Settings', exact=True).click()
     expect(page.locator('#nav-section')).to_have_text('Settings')
     primary.get_by_role('link', name='Conversations', exact=True).click()
+    expect(page.get_by_role('navigation', name='Workspace pages', include_hidden=True)).to_be_hidden()
+    page.evaluate("location.hash = 'board'")
+    expect(page.locator('#nav-section')).to_have_text('Conversations')
+    expect(page.locator('#nav-title')).to_be_hidden()
     for theme in ('light', 'dark'):
         page.evaluate('(theme)=>window.fleetModel.setPreferences({...window.fleetModel.preferences,resolved_theme:{base:theme}})', theme)
         expect(page.locator('html')).to_have_attribute('data-theme', theme)

@@ -181,7 +181,8 @@ chat-view #chat-activity-output { max-height:240px; overflow:auto; white-space:p
         ...projects.map(row => M.el('option', {value:row.id}, row.name)),
         M.el('option', {value:'local'}, 'Device-local Board'));
       const valid = projects.find(row => row.id === saved) || projects.find(row => row.is_self) || projects[0];
-      if (valid) { this.project.value = valid.id; this.selectProject(); }
+      if (saved === 'local') { this.project.value = 'local'; this.selectProject(); }
+      else if (valid) { this.project.value = valid.id; this.selectProject(); }
       else this.channels.replaceChildren(M.el('p', {class:'hint'}, result.error || 'Choose a workspace to open its channels. Device-local messages are not shared with your pool.'));
     }
     selectProject() {
@@ -201,7 +202,7 @@ chat-view #chat-activity-output { max-height:240px; overflow:auto; white-space:p
     }
     navigation(data) {
       this.navigationData = data;
-      const button = (label, current, view) => M.el('button', {
+      const button = (label, current, view, identity = '') => M.el('button', {title:identity,
         type:'button', 'aria-current':String(this.active && current), onclick:() => {
           M.go('board'); this.board.open(view);
         }}, label);
@@ -221,7 +222,7 @@ chat-view #chat-activity-output { max-height:240px; overflow:auto; white-space:p
       }
       const newMessage = data.me ? M.el('details', {}, M.el('summary', {}, '+ New direct message'), this.board.newDm()) : null;
       this.direct.replaceChildren(newMessage, ...[...peers.values()].map(row => button(row.label,
-        data.view.kind === 'dm' && [data.view.a,data.view.b].includes(row.id), row.view)));
+        data.view.kind === 'dm' && [data.view.a,data.view.b].includes(row.id), row.view, row.id)));
       if (!peers.size) this.direct.append(M.el('p', {class:'hint'}, 'Agents and direct messages appear here.'));
     }
     models(rows) {

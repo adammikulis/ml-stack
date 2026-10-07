@@ -1,7 +1,11 @@
 <template>
   <aside class="workspace-rail" aria-label="Workspace navigation">
     <a class="poolside-mark" href="#chat" aria-label="Poolside home" title="Poolside home">
-      <svg viewBox="0 0 40 40" aria-hidden="true"><path d="M8 24V13a7 7 0 0 1 14 0v11" fill="none" stroke="var(--poolside-pink)" stroke-width="6" stroke-linecap="round"/><path d="M18 27V16a7 7 0 0 1 14 0v11" fill="none" stroke="var(--poolside-orange)" stroke-width="6" stroke-linecap="round"/><path d="M7 31c6 5 20 5 26 0" fill="none" stroke="var(--poolside-cyan)" stroke-width="4" stroke-linecap="round"/></svg>
+      <svg viewBox="0 0 40 40" aria-hidden="true">
+        <path d="M8 31V9a4 4 0 0 1 4-4h11a11 11 0 0 1 0 22h-8v4a3.5 3.5 0 0 1-7 0Zm7-19v8h8a4 4 0 0 0 0-8Z" fill="var(--poolside-pink)" fill-rule="evenodd"/>
+        <path d="M23 5a11 11 0 0 1 0 22v-7a4 4 0 0 0 0-8Z" fill="var(--poolside-orange)"/>
+        <path d="M21 33h12" fill="none" stroke="var(--poolside-cyan)" stroke-width="4" stroke-linecap="round"/>
+      </svg>
     </a>
     <nav class="primary-navigation" id="nav-tabs" aria-label="Main navigation"></nav>
     <div class="rail-utilities">
@@ -11,7 +15,7 @@
     </div>
   </aside>
   <header class="workspace-header">
-    <div class="workspace-heading"><div class="workspace-breadcrumb"><span class="wordmark">Poolside</span><span aria-hidden="true">/</span><span id="nav-group"></span></div>
+    <div class="workspace-heading"><span class="wordmark">Poolside</span>
       <div class="workspace-title"><strong id="nav-section"></strong><span id="nav-title"></span></div>
     </div>
     <div class="header-actions">
@@ -69,7 +73,7 @@
       if (this.wired) return;
       this.wired=true; this.remembered={};
       this.tabs=this.querySelector("#nav-tabs"); this.context=this.querySelector("#nav-context");
-      this.group=this.querySelector("#nav-group"); this.heading=this.querySelector("#nav-title");
+      this.heading=this.querySelector("#nav-title");
       this.section=this.querySelector("#nav-section"); this.guide=this.querySelector("#nav-demo");
       this.querySelector("#nav-settings").append(icon("settings"),el("span",{},"Settings"));
       this.querySelector("#nav-signout").append(icon("exit"));
@@ -110,13 +114,13 @@
       if(active)this.remembered[active.id]=route;
       const app=document.getElementById("app");
       if(app){app.dataset.workspace=active?.id||"settings";app.dataset.color=active?.color||"pink";}
-      this.group.textContent=M.group||"Local workspace";
       const connection=this.querySelector(".connection-dot");
       const status=M.inCluster ? `Joined pool: ${M.group || "your pool"}` : "Working locally";
       connection.dataset.state=M.inCluster ? "pool" : "local";
       connection.title=status; connection.setAttribute("aria-label",status);
       this.section.textContent=active?.title||"Settings";
-      this.heading.textContent=active?.pages.find(([,key])=>key===route)?.[0]||"Preferences";
+      this.heading.hidden=active?.id === "conversations";
+      this.heading.textContent=active?.id === "conversations" ? "" : active?.pages.find(([,key])=>key===route)?.[0]||"Preferences";
       this.tabs.replaceChildren(...groups.map(g=>{
         const key=this.remembered[g.id]||g.pages.find(here)[1];
         return el("a",{class:`rail-link${active===g?" on":""}`,href:`#${key}`,"data-workspace":g.id,
@@ -129,7 +133,7 @@
       this.context.replaceChildren(...(active?.pages.filter(here)||[]).map(([name,key])=>
         el("a",{class:`context-link${key===route?" on":""}`,href:`#${key}`,"aria-current":key===route?"page":null,
           onclick:e=>{e.preventDefault();M.go(key);}},name)));
-      this.context.hidden=!active;
+      this.context.hidden=!active || active.id === "conversations";
     }
   }
   customElements.define("fleet-nav",FleetNav);
