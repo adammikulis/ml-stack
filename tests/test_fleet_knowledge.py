@@ -200,3 +200,17 @@ def test_large_fields_and_directory_discovery_are_bounded(daemon):
     assert daemon.call('/ui/knowledge/nodes?store=knowledge.db&offset=abc')[0] == 400
     assert daemon.call('/ui/knowledge/stores?path=../private')[0] == 400
     assert daemon.call('/ui/knowledge/stores', method='POST', body={}, ui_header=False)[0] == 403
+
+
+def test_kind_identity_bounds_refuse_oversized_values(daemon):
+    assert daemon.call('/ui/knowledge/nodes?' + urlencode({
+        'store': 'knowledge.db', 'kind': 'k' * 201}))[0] == 400
+    with GraphStore(daemon.files / 'knowledge.db') as graph:
+        graph.upsert_node({'id': 'long-kind', 'kind': 'k' * 40_000, 'label': 'Oversized kind'})
+    for route in ('/ui/knowledge/nodes?store=knowledge.db',
+                  '/ui/knowledge/node?store=knowledge.db&id=long-kind'):
+        code, data, _ = daemon.call(route)
+        assert code == 400, data
+        assert data == {'error': 'Stored node kinds longer than 200 characters cannot be inspected.'}
+    code, data, _ = daemon.call('/ui/knowledge/nodes?store=knowledge.db&kind=model')
+    assert code == 400, data

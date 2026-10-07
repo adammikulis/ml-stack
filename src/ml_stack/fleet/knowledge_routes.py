@@ -15,7 +15,7 @@ from .room_routes import _origin_ok
 PAGE_SIZE = 60
 FIELD_CHARS = 32_768
 NODE_FIELDS = (
-    "substring(n.id, 1, 2049) AS id, substring(n.kind, 1, 200) AS kind, substring(n.label, 1, 2000) AS label, "
+    "substring(n.id, 1, 2049) AS id, substring(n.kind, 1, 201) AS kind, substring(n.label, 1, 2000) AS label, "
     "n.mentions AS mentions, substring(n.attrs, 1, 32769) AS attrs, "
     "substring(n.data, 1, 32769) AS data"
 )
@@ -30,6 +30,8 @@ def preview(raw, label):
 def decoded(row):
     if len(row["id"]) > 2048:
         raise ValueError("Node IDs longer than 2048 characters cannot be inspected.")
+    if len(row["kind"]) > 200:
+        raise ValueError("Stored node kinds longer than 200 characters cannot be inspected.")
     return {**{key: value for key, value in row.items() if key not in {"data", "attrs"}},
             "attrs": preview(row["attrs"], "node attributes"),
             "details": preview(row["data"], "node details")}
@@ -124,13 +126,18 @@ class KnowledgeRoutes:
         offset = int(self.asked("offset", "0"))
         if offset < 0 or offset > 1_000_000:
             raise ValueError("Node offset must be between 0 and 1000000.")
-        text, kind = self.asked("q")[:200], self.asked("kind")[:200]
+        text, kind = self.asked("q")[:200], self.asked("kind")
+        if len(kind) > 200:
+            raise ValueError("Node kind filters must be at most 200 characters.")
+        oversized = graph.query("MATCH (n:Node) WHERE size(n.kind) > 200 RETURN count(n) AS count")
+        if oversized[0]["count"]:
+            raise ValueError("Stored node kinds longer than 200 characters cannot be inspected.")
         params = {"q": text.lower(), "kind": kind}
         where = ("WHERE ($q = '' OR lower(n.label) CONTAINS $q OR lower(n.id) CONTAINS $q) "
                  "AND ($kind = '' OR n.kind = $kind) ")
         rows = graph.query("MATCH (n:Node) " + where + "RETURN " + NODE_FIELDS
                            + f" ORDER BY label, id SKIP {offset} LIMIT {PAGE_SIZE + 1}", params)
-        kinds = graph.query("MATCH (n:Node) RETURN n.kind AS kind, count(n) AS count ORDER BY kind LIMIT 200")
+        kinds = graph.query("MATCH (n:Node) RETURN substring(n.kind, 1, 200) AS kind, count(n) AS count ORDER BY kind LIMIT 200")
         self.send(200, {"nodes": [decoded(row) for row in rows[:PAGE_SIZE]],
                         "more": len(rows) > PAGE_SIZE, "offset": offset,
                         "kinds": kinds, "counts": graph.counts()})
