@@ -17,7 +17,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from ml_stack import activity
 from ml_stack.fleet.onboard.web import Call, Listener, Reply as WebReply
-from ml_stack.graph.guard import host_ok, refusal
+from ml_stack.graph.guard import refusal
 from ml_stack.ui import assets
 from ml_stack.workspace import coordinator_config, plain, tokens
 from ml_stack.workspace.identity import HUMAN, Denied
