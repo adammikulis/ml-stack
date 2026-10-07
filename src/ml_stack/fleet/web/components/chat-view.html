@@ -2,7 +2,7 @@
   <main class="chatmain" id="chat" hidden>
     <button class="conversation-mobile-nav ghost" id="conversation-mobile-nav" aria-expanded="false" aria-controls="conversation-sidebar">Channels and model chats ▾</button>
     <aside class="chats" id="conversation-sidebar" aria-label="Conversations">
-      <div class="conversation-space"><span class="conversation-space-mark" aria-hidden="true">✦</span><div><strong>Poolside</strong><small>Your shared workspace</small></div></div>
+      <div class="conversation-space"><span class="conversation-space-mark" aria-hidden="true">✦</span><div><strong>Poolside</strong></div></div>
       <label class="conversation-project-label" for="conversation-project">Workspace</label><select id="conversation-project"><option value="">Loading projects…</option></select>
       <button id="chat-new" class="conversation-new">＋ New conversation</button>
       <label class="conversation-search" for="chat-search"><input type="search" id="chat-search" placeholder="Search model chats…" aria-label="Search conversations"></label>
@@ -155,8 +155,8 @@
 
     welcome() {
       this.list.replaceChildren(el("div", { class: "chat-welcome" },
-        el("strong", {}, "A place to think and build together"),
-        el("p", {}, "Talk to a model, plan an experiment, or bring a coding agent into your project. Your team channels and model conversations live together here."),
+        el("strong", {}, "Start a conversation"),
+        el("p", {}, "Choose a model below or a team channel in the sidebar."),
         el("div", { class: "chat-starters" }, ...[
           ["Explain a model", "Help me understand this model’s strengths, limitations, and how to evaluate it."],
           ["Plan an experiment", "Help me design a reproducible training experiment. Ask me about the model, data, and success criteria."],
