@@ -59,7 +59,7 @@ def test_rename_search_reload_and_delete_saved_conversation(chat_browser):
     page.get_by_label("Options for Braking evaluation").click()
     page.get_by_role("button", name="Delete", exact=True).click()
     page.get_by_role("button", name="Delete conversation", exact=True).click()
-    expect(page.locator("chat-view #chat-title")).to_have_text("New chat")
+    expect(page.locator("chat-view #chat-title")).to_have_text("New conversation")
     assert served.ui.conversations.get(conversation.id) is None
     assert served.ui.conversations.get(other.id) is not None
 
@@ -91,7 +91,7 @@ def test_one_composer_enter_sends_and_shift_enter_keeps_the_draft(chat_browser):
     composer.press("Enter")
     expect(page.locator("chat-view #chat-messages")).to_contain_text("Saved answer")
     assert calls[0]["messages"][-1]["content"] == "First line\nSecond line"
-    assert page.locator("chat-view textarea").count() == 1
+    assert page.locator("chat-view textarea:visible").count() == 1
     assert not page.locator("chat-view #chat-options").evaluate("node => node.open")
     page.reload()
     expect(page.locator("chat-view #chat-messages")).to_contain_text("Saved answer")
@@ -104,7 +104,7 @@ def test_saved_temperature_restores_when_switching_and_reloading(chat_browser):
     served.ui.conversations.start(model="model-a", title="Default temperature")
     _open(served, page)
     page.get_by_role("link", name="Low temperature", exact=True).click()
-    page.locator("chat-view #chat-options summary").click()
+    page.locator("chat-view #conversation-details").click()
     expect(page.get_by_label("Temperature", exact=True)).to_have_value("0.2")
     page.get_by_label("Temperature", exact=True).fill("0.6")
     page.get_by_label("Temperature", exact=True).press("Tab")
@@ -113,7 +113,7 @@ def test_saved_temperature_restores_when_switching_and_reloading(chat_browser):
     page.get_by_role("link", name="Low temperature", exact=True).click()
     expect(page.get_by_label("Temperature", exact=True)).to_have_value("0.6")
     page.reload()
-    page.locator("chat-view #chat-options summary").click()
+    page.locator("chat-view #conversation-details").click()
     expect(page.get_by_label("Temperature", exact=True)).to_have_value("0.6")
 
 
@@ -137,10 +137,11 @@ def test_model_picker_groups_and_searches_loaded_and_installed_models(chat_brows
     expect(page.locator("chat-view #model")).to_have_value("model-a")
     page.locator("chat-view #chat-model-button").click()
     page.locator("chat-view").get_by_label("Search models", exact=True).fill("no matches")
-    expect(page.locator("chat-view #chat-model-list")).to_have_text("No models match your search.")
+    expect(page.locator("chat-view #chat-model-list p")).to_have_text("No models match your search.")
+    expect(page.locator("chat-view #chat-model-list").get_by_role("button", name="Browse model library")).to_be_visible()
     page.locator("chat-view").get_by_label("Search models", exact=True).press("Escape")
     expect(page.locator("chat-view #chat-model-dialog")).not_to_be_visible()
-    assert page.locator("chat-view textarea").count() == 1
+    assert page.locator("chat-view textarea:visible").count() == 1
 
 
 def test_installed_model_picker_remains_visible_with_no_loaded_server(chat_browser):
@@ -166,13 +167,16 @@ def test_learning_prompts_preserve_draft_and_team_channels_are_connected(chat_br
     composer = page.get_by_role("textbox", name="Message", exact=True)
     expect(composer).to_have_value("Help me design a reproducible training experiment. Ask me about the model, data, and success criteria.")
     assert not served.ui.conversations.all()
-    page.locator("chat-view").get_by_role("link", name="Team channels", exact=True).click()
-    expect(page.locator("board-view .board-workspace")).to_be_visible()
-    page.locator("board-view").get_by_role("link", name="Model chats", exact=True).click()
+    page.evaluate("window.fleetModel.go('board')")
+    expect(page.locator("chat-view #conversation-team")).to_be_visible()
+    expect(page.locator("chat-view .chats")).to_be_visible()
+    page.get_by_role("button", name="● model-a", exact=True).click()
     expect(composer).to_have_value("Help me design a reproducible training experiment. Ask me about the model, data, and success criteria.")
     page.screenshot(path="/private/tmp/poolside-conversations-desktop.png", full_page=True)
     page.set_viewport_size({"width": 390, "height": 844})
-    expect(page.locator("chat-view").get_by_role("link", name="Team channels", exact=True)).to_be_visible()
+    expect(page.locator("chat-view .chats")).to_be_hidden()
+    page.get_by_role("button", name="Channels and model chats ▾").click()
+    expect(page.locator("chat-view .chats")).to_be_visible()
     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
     page.screenshot(path="/private/tmp/poolside-conversations-mobile.png", full_page=True)
 
@@ -195,7 +199,7 @@ def test_output_token_control_uses_backend_defaults_and_accepts_no_cap(chat_brow
     page.route("**/ui/conversations/defaults", lambda route: route.fulfill(json={"settings": {
         "mode": "chat", "max_output_tokens": 13579, "context": 0, "draft": "auto"}}))
     _open(served, page)
-    page.locator("chat-view #chat-options summary").click()
+    page.locator("chat-view #conversation-details").click()
     cap = page.get_by_label("Maximum output tokens", exact=True)
     expect(cap).to_have_value("13579")
     cap.fill("")

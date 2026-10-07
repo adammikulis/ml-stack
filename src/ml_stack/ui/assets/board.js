@@ -2,6 +2,7 @@
    Every string from the route is shown as text after control and bidirectional characters are
    removed; nothing is parsed as markup and the only link is a file's download (an attachment, never shown inline). The page holds no token. */
 import { MlElement, define, h } from "./base.js";
+import { INTEGRATED_STYLES } from "./board-styles.js";
 
 const HIDDEN = /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff]/g;
 const BODY_MAX = 4000;
@@ -86,8 +87,8 @@ nav .new input { flex: 1; min-width: 0; font: inherit; color: var(--ml-text);
 `;
 
 class MlBoard extends MlElement {
-  static props = { endpoint: "string", interval: "number", readonly: "bool", channelFeed:"bool" };
-  static styles = STYLES;
+  static props = { endpoint: "string", interval: "number", readonly: "bool", channelFeed:"bool", integrated:"bool" };
+  static styles = STYLES + INTEGRATED_STYLES;
 
   build() {
     this.storageKey = `ml-stack-board:${this.base()}`;
@@ -267,6 +268,8 @@ class MlBoard extends MlElement {
 
   update() {
     if (!this.nav) return;
+    this.emit("board-navigation", {boards:this.boards, dms:this.dms, agents:this.agents,
+      me:this.me, view:this.view, error:this.error || ""});
     const item = (label, count, current, onclick, title = "") => h("button", {title,
       type: "button", "aria-current": current ? "true" : null, onclick },
     h("span", {}, line(label, 160)), count ? h("span", { class: "count" }, String(count)) : null);
@@ -298,7 +301,10 @@ class MlBoard extends MlElement {
       : h("input", {type:"text", maxlength:"97", "aria-label":"Message an agent", placeholder:"agent id"});
     const open = () => {
       const name = line(box.value, 97);
-      if (name) this.open({ kind: "dm", a: this.me, b: name });
+      if (name) {
+        this.emit("ml-board-open", {kind:"dm"});
+        this.open({ kind: "dm", a: this.me, b: name });
+      }
     };
     box.addEventListener("keydown", (e) => { if (e.key === "Enter") open(); });
     return h("div", { class: "new" }, box, h("button", { type: "button", onclick: open }, "Open"));
