@@ -188,6 +188,7 @@ class UI:
                 "slots": slots, "free": int(status.get("free", slots)),
                 "host": "127.0.0.1", "hostname": "",
                 "base_url": f"http://127.0.0.1:{self.peer_port}",
+                "display_url": self.projects.host if self.projects is not None else "",
                 "is_self": True, "clusters": []}
 
     def peers(self, *, force: bool = False) -> list[dict[str, Any]]:
@@ -365,6 +366,7 @@ class UI:
                             machine=str(row.get("machine") or ""))
             rows.append({**describe(beacon, clusters=row.get("clusters") or [],
                                     self_machine=machine_id()),
+                         "display_url": str(row.get("display_url") or ""),
                          "called": str(row.get("called") or row["name"])})
         models = sorted({m for r in rows for m in r["models"]})
         return {"peers": rows, "models": models, "self": self.name,
