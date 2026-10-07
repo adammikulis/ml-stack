@@ -136,7 +136,7 @@ def _settings(body, admission):
 
 
 def _effective_limits(agent):
-    return {"max_output_tokens": agent.max_output_tokens, "task_caps": asdict(localloop.caps_of(agent))}
+    return {"context": agent.ctx, "max_output_tokens": agent.max_output_tokens, "task_caps": asdict(localloop.caps_of(agent))}
 
 
 def start(projects, project_id, body, *, admission, cluster_key=None):
@@ -168,7 +168,9 @@ def start(projects, project_id, body, *, admission, cluster_key=None):
                 _save_connection(connection, {**prior, 'cluster_id': cluster_id, 'cluster': cluster})
                 return 200, {'name': name, 'identity': prior['identity'], 'model': agent.model_name,
                              'pid': agent.pid, 'project_id': project_id, 'state': 'running', 'already': True,
-                             'requested_by': caller['id'], 'effective_limits': _effective_limits(agent)}
+                             'requested_by': caller['id'],
+                             'requested_context': prior.get('requested_context', 'unknown'),
+                             'effective_limits': _effective_limits(agent)}
             chosen = localmodel.choose(body.get('model') or localmodel.AUTO,
                                        selection=localmodel.Selection(context=body.get('ctx', 0)))
             if not chosen.ok:
@@ -180,7 +182,9 @@ def start(projects, project_id, body, *, admission, cluster_key=None):
             record = {'host': remote.host, 'project_id': project_id, 'cluster': cluster,
                       'cluster_key': str(cluster_key) if cluster_key else '',
                       'identity': canonical_identity, 'requested_by': caller['id'],
-                      'name': name, 'cluster_id': cluster_id, 'authority_machine': remote.authority_machine,
+                      'name': name, 'cluster_id': cluster_id,
+                      'requested_context': body.get('ctx', 0) or 'auto',
+                      'authority_machine': remote.authority_machine,
                       'device_cert': remote.device_cert}
             root = str(Path(project.root).resolve(strict=True))
             ask = localstart.Ask(model=chosen.ref, name=name, project=root,
@@ -196,7 +200,7 @@ def start(projects, project_id, body, *, admission, cluster_key=None):
                      canonical_identity=canonical_identity)
             return 200, {'name': got.name, 'identity': canonical_identity, 'pid': got.pid,
                          'model': got.model, 'project_id': project_id, 'state': 'starting', 'already': got.already,
-                         'requested_by': caller['id'],
+                         'requested_by': caller['id'], 'requested_context': record['requested_context'],
                          'effective_limits': _effective_limits(la.load(ws, got.name))}
     except Denied as error:
         return 403, {'error': str(error)}

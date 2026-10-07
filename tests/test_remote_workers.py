@@ -192,8 +192,9 @@ def test_repeated_launch_reuses_owned_running_worker(devices, monkeypatch):
     assert second['identity'] == first['identity']
     assert len(devices.spawned) == 1
     assert first['requested_by'] == second['requested_by'] == 'test-caller'
+    assert first['requested_context'] == second['requested_context'] == 32768
     assert first['effective_limits'] == second['effective_limits'] == {
-        'max_output_tokens': 1234,
+        'context': 32768, 'max_output_tokens': 1234,
         'task_caps': {'rounds': None, 'calls': None, 'steps': None, 'seconds': None}}
     changed = devices.target._request('worker', {**devices.body, 'max_output_tokens': 99,
                                               'task_caps': {'rounds': 2}})
