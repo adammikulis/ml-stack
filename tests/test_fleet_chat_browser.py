@@ -163,6 +163,9 @@ def test_learning_prompts_preserve_draft_and_team_channels_are_connected(chat_br
 
     served, page = chat_browser
     _open(served, page)
+    expect(page.locator("chat-view .chat-welcome strong")).to_have_text("Start a conversation")
+    expect(page.locator("chat-view .conversation-space small")).to_have_count(0)
+    page.screenshot(path="/private/tmp/poolside-conversations-welcome.png", full_page=True)
     page.get_by_role("button", name="Plan an experiment", exact=True).click()
     composer = page.get_by_role("textbox", name="Message", exact=True)
     expect(composer).to_have_value("Help me design a reproducible training experiment. Ask me about the model, data, and success criteria.")
