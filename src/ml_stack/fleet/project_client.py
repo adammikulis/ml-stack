@@ -40,8 +40,8 @@ def register_local(root, key, project_id, port):
             result = json.loads(response.sealed.open(response.status, response.headers, raw))
             if not isinstance(result, dict) or result.get("id") != project_id:
                 raise ProjectError("local project registration returned another project")
-    except ServerUnreachable:
-        return
+    except ServerUnreachable as error:
+        raise ProjectError("Local Fleet is unavailable; start ml-stack and retry project joining") from error
     except ServerError as error:
         raise ProjectError("local Fleet project registration failed") from error
 
