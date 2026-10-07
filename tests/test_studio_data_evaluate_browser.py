@@ -106,3 +106,64 @@ def test_evaluate_selection_review_status_and_recorded_results(tmp_path, monkeyp
             expect(run).to_be_disabled()
     finally:
         served.close()
+
+
+@pytest.mark.parametrize('theme', ['light', 'dark', 'custom'])
+def test_studio_surfaces_follow_theme_and_keep_text_contrast(tmp_path, monkeypatch, theme):
+    served = Serving(tmp_path)
+    served.ui.settings.setup_done = True
+    served.files.joinpath('examples.jsonl').write_text('{"prompt":"Sample"}\n')
+    monkeypatch.setattr(served.ui, 'fleet', lambda: {
+        'models': ['sample-qwen.gguf'],
+        'peers': [{'name': 'studio', 'is_self': True, 'models': ['sample-qwen.gguf']}],
+    })
+    try:
+        with browser(Window(profile=tmp_path / 'browser', headless=True)) as page:
+            page.goto(f'http://127.0.0.1:{served.port}/ui/#data')
+            expect(page.locator('data-view .data-file')).to_have_count(1)
+            page.evaluate('''theme => {
+                const root = document.documentElement;
+                root.dataset.theme = theme === 'custom' ? 'dark' : theme;
+                if (theme === 'custom') {
+                    const values = {'--bg':'#081c17', '--bg-raised':'#102d25',
+                        '--bg-sunken':'#071b14', '--text':'#f5fff8',
+                        '--muted':'#b9dac9', '--line':'#527364'};
+                    for (const [key, value] of Object.entries(values)) root.style.setProperty(key, value);
+                }
+            }''', theme)
+            page.get_by_role('button', name='+ Add dataset').click()
+            metrics = page.evaluate('''() => {
+                const rgb = value => value.match(/[\\d.]+/g).slice(0,3).map(Number);
+                const luminance = value => rgb(value).map(v => {
+                    const channel = v/255;
+                    return channel <= .04045 ? channel/12.92 : ((channel+.055)/1.055)**2.4;
+                }).reduce((sum, v, i) => sum+v*[.2126,.7152,.0722][i],0);
+                const measure = selector => {
+                    const node = document.querySelector(selector), style = getComputedStyle(node);
+                    let surface = node;
+                    while (getComputedStyle(surface).backgroundColor === 'rgba(0, 0, 0, 0)') surface = surface.parentElement;
+                    const a = luminance(style.color), b = luminance(getComputedStyle(surface).backgroundColor);
+                    return (Math.max(a,b)+.05)/(Math.min(a,b)+.05);
+                };
+                const probe = document.createElement('div');
+                probe.style.backgroundColor = 'var(--bg-raised)';
+                document.body.append(probe);
+                const expectedSurface = getComputedStyle(probe).backgroundColor;
+                probe.remove();
+                return {expectedSurface, panel: getComputedStyle(document.querySelector('data-view .data-panel')).backgroundColor,
+                    contrast: ['data-view .data-file strong','data-view .data-file small',
+                        'data-view #add-dataset','data-view .data-tabs button[aria-pressed=true]'].map(measure)};
+            }''')
+            assert metrics['panel'] == metrics['expectedSurface']
+            assert min(metrics['contrast']) >= 4.5, metrics
+            page.evaluate("window.fleetModel.go('benchmarks')")
+            expect(page.locator('benchmarks-view .evaluate-choice')).to_have_count(2)
+            surfaces = page.evaluate('''() => {
+                const probe = document.createElement('div');
+                probe.style.backgroundColor='var(--bg-raised)';document.body.append(probe);
+                const expected=getComputedStyle(probe).backgroundColor;probe.remove();
+                return {expected, card:getComputedStyle(document.querySelector('benchmarks-view .evaluate-card')).backgroundColor};
+            }''')
+            assert surfaces['card'] == surfaces['expected']
+    finally:
+        served.close()
