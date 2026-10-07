@@ -76,6 +76,7 @@ def test_library_chat_action_selects_server_identity(joined, open_page):
 
 def test_decision_tools_handoff_opens_recipe_step(joined, open_page):
     page, errors = open_page(joined, cookie=joined.cookie, path='/ui/#tools')
+    page.wait_for_function("window.fleetModel.route === 'tools'")
     page.evaluate("document.querySelector('training-view').openRun({workflow:'decider',dataset:'datasets/decisions.jsonl'})")
     expect(page.get_by_label('Workflow', exact=True)).to_have_value('decider')
     expect(page.get_by_label('Recipe', exact=True)).to_be_visible()
