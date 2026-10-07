@@ -297,7 +297,7 @@ class Workspace:
         info = self.registry.info(name)
         model, state = self.registry.model_of(name)
         return {"model": model, "model_state": state, "harness": info["harness"],
-                "models": info["models"]}
+                "harness_state": info["harness_state"], "models": info["models"]}
 
     def _record_model(self, name: str, model: str, harness: str, state: str) -> None:
         before, _ = self.registry.record_model(name, model, harness, state)

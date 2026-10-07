@@ -9,7 +9,7 @@ def family(model: str) -> str:
         return "Claude"
     if model.startswith(("gpt-", "chatgpt-", "o1", "o3", "o4")):
         return "ChatGPT"
-    if model.startswith("qwen"):
+    if model == "thinkingcap-qwen3.8-27b" or model.startswith("qwen"):
         return "Qwen"
     return "Model unknown"
 

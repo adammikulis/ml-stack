@@ -151,6 +151,7 @@ def test_cli_main_session_uses_canonical_mutation_rpc(host, monkeypatch, capsys)
     ("gpt-6", "codex", "ChatGPT"),
     ("claude-sonnet-4-6", "claude-code", "Claude"),
     ("Qwen3.8-Flash-Next-GSQ-RCO-Coder", "codex", "Qwen"),
+    ("thinkingcap-qwen3.8-27b", "codex", "Qwen"),
     ("unknown-provider-model", "claude-code", "Model unknown"),
 ])
 def test_readable_family_uses_recorded_model_not_harness_or_auth_id(kit, model, harness, expected):
@@ -219,6 +220,7 @@ def test_verified_model_does_not_promote_reported_harness_on_repeat_registration
         kit.ws.register_session(token, harness='codex')
         info = registry.info('model-only-verified')
         assert info['harness_state'] == 'claimed'
+        assert kit.ws.whoami_model('model-only-verified')['harness_state'] == 'claimed'
         assert (info['model'], info['model_state'], info['models']) == (before['model'], before['model_state'], before['models'])
     kit.ws.register_session(token, harness='claude-code')
     assert registry.info('model-only-verified')['harness_state'] == 'claimed'
