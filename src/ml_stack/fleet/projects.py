@@ -6,6 +6,8 @@ import hashlib
 import ipaddress
 import json
 import os
+import re
+import subprocess
 import threading
 import urllib.parse
 from dataclasses import asdict, dataclass
@@ -16,9 +18,35 @@ from ml_stack.home import DEFAULT_NAME
 from ml_stack.net import git
 from ml_stack.redact import secrets
 
-from . import project_enrollment, project_source as source, tls
+from . import project_enrollment, project_source as source, runtime_wheel, tls, wsl_startup
 from .discovery import primary_ip
 from .wsl_network import ENV as BRIDGE_ENV
+
+
+def local_candidates() -> tuple[Path, ...]:
+    """Return local checkout candidates including installed source provenance."""
+    paths = (Path(__file__).resolve().parents[3], Path.cwd())
+    recorded = runtime_wheel.source_checkout()
+    return (*paths, recorded) if recorded is not None else paths
+
+
+def local_root(value: str) -> Path:
+    """Validate a local path and translate Windows drive paths inside WSL."""
+    if (not isinstance(value, str) or not value or len(value) > 2048
+            or any(ord(c) < 32 for c in value) or value.startswith(("\\\\", "//"))):
+        raise source.ProjectError("Choose an absolute local project path")
+    if re.match(r"^[A-Za-z]:[\\/]", value) and wsl_startup.guest():
+        try:
+            value = subprocess.run(["wslpath", "-a", "-u", value], capture_output=True,
+                                   text=True, timeout=5, check=True).stdout.strip()
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise source.ProjectError("Windows project path could not be resolved in WSL") from exc
+        if len(value) > 2048 or any(ord(c) < 32 for c in value):
+            raise source.ProjectError("Choose an absolute local project path")
+    root = Path(value)
+    if not root.is_absolute():
+        raise source.ProjectError("Choose an absolute local project path")
+    return root
 
 
 def lan_host(port: int) -> str:
@@ -143,8 +171,7 @@ class ProjectRegistry:
     def register(self, root: Path, expected_project: str) -> dict:
         """Register a verified local Git project and return its Board metadata."""
         source.project_id(expected_project)
-        if not root.is_absolute() or len(str(root)) > 2048 or any(ord(c) < 32 for c in str(root)):
-            raise source.ProjectError("Choose an absolute local project path")
+        root = local_root(str(root))
         try:
             canonical = Path(git.run(["rev-parse", "--show-toplevel"], cwd=root).stdout.strip()).resolve()
             identifier = identity(canonical)
@@ -278,7 +305,7 @@ def register(handler, registry: ProjectRegistry | None, cluster_key_path: Path |
     else:
         request = handler._object(body)
         try:
-            handler._send(200, registry.register(Path(request.get("root", "")), request.get("project_id", "")))
+            handler._send(200, registry.register(local_root(request.get("root", "")), request.get("project_id", "")))
         except (TypeError, ValueError, OSError):
             handler._send(400, {"error": "project registration requires a matching local Git checkout"})
     return True

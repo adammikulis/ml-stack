@@ -89,7 +89,7 @@
       el("div", { class: "row" },
         el("div", {},
           el("div", { class: "name" }, p.name),
-          el("div", { class: "url" }, p.base_url || p.host || ""))),
+          el("div", { class: "url" }, p.display_url || p.base_url || p.host || ""))),
       el("div", { class: "row", style: "margin-top:10px;gap:6px;flex-wrap:wrap" },
         el("span", { class: `badge ${v.key}` }, el("span", { class: "chip" }), v.text),
         d.gpu ? el("span", { class: "label" }, d.gpu) : null,

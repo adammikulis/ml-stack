@@ -35,6 +35,7 @@ from ml_stack.workspace import (
     onboard,
     project,
     project_connection,
+    project_session,
     remote_cli,
     remote_task_client,
     remote_workers,
@@ -121,8 +122,6 @@ def _project_connection(cwd: Path | None = None):
     saved = project_connection.selected(cwd)
     if saved:
         return saved
-    if coordinator_config.load(limits.root()).get("mode") == "remote":
-        return project_connection.auto_attach(cwd)
     return automatic_connection.local_project(cwd) or project_connection.auto_attach(cwd)
 
 
@@ -189,13 +188,14 @@ def _text(value: Any) -> str:
                        f"{'  ' + v['harness'] if v['harness'] else ''}" for v in value], "agents")
     if isinstance(value, dict) and {"kind", "key", "owner", "expires_in_s"} <= value.keys():
         soon = ", expiring soon" if value.get("expiring_soon") else ""
-        return f"{value['kind']} {value['key']}  {value['owner']}  expires in {value['expires_in_s']:.0f} s{soon}"
+        return f"{value['kind']} {value['key']}  {project_session.owner(value['owner'])}  expires in {value['expires_in_s']:.0f} s{soon}"
     if isinstance(value, dict) and "text" in value and "kind" in value:
         return (f"note {value['id']} {value['kind']} ({value['trust']}"
                 f"{', stale' if value['stale'] else ''}): {value['status']}\n{value['text']}")
     if isinstance(value, list):
         return "\n".join(_text(v) for v in value) or "(none)"
     if isinstance(value, dict):
+        value = {**value, "owner": project_session.owner(value["owner"])} if "owner" in value else value
         return "\n".join(f"{k}: {v if not isinstance(v, (dict, list)) else json.dumps(v)}"
                          for k, v in value.items())
     return str(value)
@@ -756,8 +756,6 @@ def _guarded(run: Callable[[argparse.Namespace], int | None]) -> Callable[[argpa
 def _runner(handler: Handler) -> Callable[[argparse.Namespace], int]:
     def run(args: argparse.Namespace) -> int:
         connection = _project_connection()
-        if connection and coordinator_config.load(limits.root()).get("mode") == "remote":
-            raise Denied("select one workspace authority before dispatching commands")
         remote = None if connection else coordinator_client.client(limits.root())
         if args.cmd in ('task-dematerialize', 'task-rebind-source') and (remote or connection):
             raise Denied('native task checkout recovery runs only on its local coordinator')

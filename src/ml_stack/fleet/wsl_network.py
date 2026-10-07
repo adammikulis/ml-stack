@@ -8,7 +8,6 @@ import ctypes
 import hmac
 import ipaddress
 import json
-import os
 import secrets
 import select
 import socket
@@ -16,6 +15,7 @@ import threading
 from collections.abc import Callable
 from typing import Any
 
+from . import wsl_registration
 from .onboard.lan import require_local
 
 ENV = "ML_STACK_WSL_NETWORK"
@@ -52,7 +52,9 @@ class DiscoverySocket:
     """A discovery UDP socket on the Windows LAN interface."""
 
     def __init__(self, options: dict) -> None:
-        config = json.loads(os.environ[ENV])
+        config = wsl_registration.configuration()
+        if config is None:
+            raise OSError("No Windows discovery bridge is registered")
         address = tuple(config["address"])
         require_local(*address)
         self.connection = socket.create_connection(address, timeout=5)

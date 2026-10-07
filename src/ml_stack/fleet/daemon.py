@@ -61,7 +61,7 @@ from .measuring import BenchHost, bench_home as bench_home_beside
 from .models import Downloads, Models
 from .onboard.joining import PLAIN, Joining
 from .pausing import ADOPT_S, adopt_pause, peer_pause
-from .projects import ProjectRegistry, lan_host
+from .projects import ProjectRegistry, lan_host, local_candidates
 from .runtime_paths import announce_token, configure as configure_runtime_paths
 from .serving import Hosting, Serving
 from .settings import Settings
@@ -287,7 +287,7 @@ class DaemonRuntime:
         self.projects = ProjectRegistry(
             self.root,
             self.bench_host.machine,
-            (Path(__file__).resolve().parents[3], Path.cwd()),
+            local_candidates(),
             lan_host(self.port),
         )
         self.workspaces = workspace_host(self.projects, self.workspace_factory)

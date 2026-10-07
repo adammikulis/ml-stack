@@ -1,0 +1,4 @@
+interface:
+  display_name: "Worktree cleanup"
+  short_description: "Land useful work and remove extra Git worktrees"
+  default_prompt: "Use $worktree-cleanup to account for every extra worktree, land useful changes, and leave only the primary checkout."
