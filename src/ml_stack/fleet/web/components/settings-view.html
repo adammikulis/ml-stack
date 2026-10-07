@@ -6,15 +6,38 @@ settings-view #settings-note { margin-top:12px; min-height:24px; }
 settings-view #settings-libs .library-kind { display:inline-block; font-size:11px; border:1px solid var(--line); border-radius:20px; padding:2px 8px; margin:4px 0; }
 settings-view #settings-libs { scroll-margin-top:20px; }
 settings-view [aria-busy="true"] { opacity:.8; }
+settings-view #settings { max-width:1120px; margin:0 auto; }
+settings-view #settings .group { padding:22px; border:1px solid var(--line); border-radius:14px; background:var(--panel, var(--bg)); margin-bottom:16px; }
+settings-view #settings h2 { margin-top:0; font-size:17px; }
+settings-view #settings .opt { padding:10px 0; }
+settings-view .settings-sections { display:flex; gap:8px; flex-wrap:wrap; margin:18px 0; }
+settings-view .settings-sections a { border:1px solid var(--line); border-radius:20px; padding:7px 12px; font-size:13px; text-decoration:none; color:var(--text); }
+settings-view #settings-save { max-width:240px; margin-bottom:24px; }
+settings-view #settings-interface { border-left:3px solid var(--accent); }
+settings-view #settings-advanced { padding:18px; border:1px solid var(--line); border-radius:14px; }
+settings-view #settings-advanced > summary { cursor:pointer; font-weight:600; }
+settings-view #settings-advanced[open] > summary { margin-bottom:18px; }
+settings-view #settings-removal { border-color:var(--danger, #cf5a68) !important; }
+settings-view .group { scroll-margin-top:24px; }
+@media (max-width:600px) { settings-view #settings .group { padding:16px; } }
 </style>
 <template>
   <main id="settings" hidden>
     <h1>Settings</h1>
     <p class="sub" id="settings-sub"></p>
+    <p class="hint">Choose how this workspace looks, which models it uses, and how this device contributes.</p>
+    <nav class="settings-sections" aria-label="Settings sections">
+      <a href="#settings" data-section="settings-interface">Interface</a>
+      <a href="#settings" data-section="settings-chatting">Models</a>
+      <a href="#settings" data-section="settings-left">Device</a>
+      <a href="#settings" data-section="settings-credentials">Credentials</a>
+      <a href="#settings" data-section="settings-advanced">Maintenance</a>
+    </nav>
     <div class="settings-toolbar">
       <button class="ghost" id="settings-open-libraries" type="button">Libraries &amp; simulators</button>
       <span class="hint">Install capabilities once and reuse them across launches.</span>
     </div>
+    <div class="group" id="settings-interface"></div>
     <div class="two">
       <div id="settings-left"></div>
       <div id="settings-right">
@@ -25,12 +48,12 @@ settings-view [aria-busy="true"] { opacity:.8; }
     </div>
     <button id="settings-save">Save</button>
     <div class="group" id="settings-credentials"></div>
-    <div class="group" id="settings-wired">
-      <h2>GPU memory</h2>
-      <wired-memory></wired-memory>
-    </div>
     <details class="aside" id="settings-advanced">
       <summary>Advanced options: runtimes and maintenance</summary>
+      <div class="group" id="settings-wired">
+        <h2>GPU memory</h2>
+        <wired-memory></wired-memory>
+      </div>
       <div class="group" id="settings-libs"></div>
       <div class="group" id="settings-again"></div>
       <div class="group" id="settings-removal"></div>
@@ -53,6 +76,12 @@ settings-view [aria-busy="true"] { opacity:.8; }
       this.note = this.querySelector("#settings-note");
       this.save = this.querySelector("#settings-save");
       this.save.onclick = () => this.apply();
+      for (const link of this.querySelectorAll("[data-section]")) link.onclick = event => {
+        event.preventDefault();
+        const section = this.querySelector(`#${link.dataset.section}`);
+        if (section.tagName === "DETAILS") section.open = true;
+        section.scrollIntoView({behavior:"smooth", block:"start"});
+      };
       this.querySelector("#settings-open-libraries").onclick = () => {
         this.querySelector("#settings-advanced").open = true;
         this.querySelector("#settings-libs").scrollIntoView({behavior:"smooth", block:"start"});
@@ -80,7 +109,7 @@ settings-view [aria-busy="true"] { opacity:.8; }
     }
 
     check(key, label, why) {
-      const input = el("input", { type: "checkbox", id: key,
+      const input = el("input", { type: "checkbox", id: key, "aria-label":label,
                                   ...(this.pick[key] ? { checked: "1" } : {}) });
       input.onchange = () => { this.pick[key] = input.checked; };
       return el("label", { class: "opt", for: key }, input, M.row(label, why));
@@ -101,9 +130,17 @@ settings-view [aria-busy="true"] { opacity:.8; }
         on_close: cur.on_close || "",
         auto_update: cur.auto_update !== false,
         autodownload_models: cur.autodownload_models !== false,
-        download_sources: cur.download_sources || "",
+        download_sources: cur.download_sources || "both",
         context: cur.context || 8192,
+        always_show_advanced: cur.always_show_advanced === true,
+        chat_max_output_tokens: cur.chat_max_output_tokens,
       };
+      M.setPreferences(cur);
+      this.querySelector("#settings-interface").replaceChildren(
+        el("h2", {}, "Interface"),
+        this.check("always_show_advanced", "Always show advanced options",
+          "Keep detailed model, training, tool, and maintenance settings expanded across the workspace."),
+        el("p", {class:"hint"}, "Start with the essential controls. Open advanced options as you learn, or keep them visible here. Saved on this device."));
       this.querySelector("#settings-sub").textContent =
         `${s.name}${s.machine?.gpu ? " — " + s.machine.gpu : ""}`;
       const nav = document.querySelector("fleet-nav");
@@ -111,7 +148,7 @@ settings-view [aria-busy="true"] { opacity:.8; }
 
       this.querySelector("#settings-left").replaceChildren(
         el("div", { class: "group" },
-          el("h2", {}, "What this machine does"),
+          el("h2", {}, "What this device does"),
           this.radio("labels", "train", "Train models", ""),
           this.radio("labels", "prep", "Prepare data", ""),
           this.radio("labels", "train,prep", "Both", "")),
@@ -122,13 +159,19 @@ settings-view [aria-busy="true"] { opacity:.8; }
             "your computer will ask for your password"),
           this.radio("autostart", "manual", "Only when I open it", "")));
 
+      const output = el("input", {type:"number", min:"1", step:"1", "aria-label":"Default maximum output tokens"});
+      output.value = cur.chat_max_output_tokens ?? "";
+      output.oninput = () => { this.pick.chat_max_output_tokens = output.value === "" ? null : Number(output.value); };
       this.querySelector("#settings-chatting").replaceChildren(
         el("h2", {}, "Model defaults"),
+        el("label", {}, "Default maximum output tokens", output),
+        el("p", {class:"hint"}, "Used by new conversations. Leave blank for no output cap. Existing conversations keep their selected limits. Reasoning effort is configured separately."),
         el("h3", {}, "Download sources"),
         this.radio("download_sources", "internet", "Internet only", "Skip LAN model transfers."),
         this.radio("download_sources", "lan", "LAN only", "No Internet fallback for models or MTP heads."),
-        this.radio("download_sources", "both", "Both", "Try your cluster first, then the Internet."),
-        M.contextPicker(cur.context || 8192, (n) => { this.pick.context = n; }));
+        this.radio("download_sources", "both", "Both", "Try your Pool first, then the Internet."),
+        M.contextPicker(cur.context || 8192, (n) => { this.pick.context = n; }),
+        el("p", {class:"hint"}, "Serving context controls the model memory window. Coding conversations can select automatic context separately."));
 
       const status = el("div", { class: "hint", style: "margin-top:10px" },
         el("span", { class: "spin" }), " Checking for updates…");
@@ -143,7 +186,7 @@ settings-view [aria-busy="true"] { opacity:.8; }
 
       this.querySelector("#settings-when").replaceChildren(...M.kids(
         el("div", { class: "group" },
-          el("h2", {}, "When you need the machine"),
+          el("h2", {}, "When you need this device"),
           this.radio("on_paused", "stop", "Pausing stops what is running",
             "the run picks up from its last checkpoint"),
           this.radio("on_paused", "finish", "Pausing lets the current job finish", "")),
@@ -151,8 +194,8 @@ settings-view [aria-busy="true"] { opacity:.8; }
           el("h2", {}, "Closing the window"),
           this.radio("on_close", "", "Ask me each time", ""),
           this.radio("on_close", "background", "Keep running in the background",
-            "stays in the cluster"),
-          this.radio("on_close", "quit", "Quit", "leaves the cluster")),
+            "stays in the Pool"),
+          this.radio("on_close", "quit", "Quit", "leaves the Pool")),
         (s.schedule?.windows || []).length
           ? el("div", { class: "group" },
               el("h2", {}, "Not available"),
@@ -161,10 +204,10 @@ settings-view [aria-busy="true"] { opacity:.8; }
           : null));
 
       this.querySelector("#settings-again").replaceChildren(
-        el("h2", {}, "Set this machine up again"),
+        el("h2", {}, "Set this device up again"),
         el("div", { class: "hint" },
           "Walks through naming it and choosing a passphrase, as it did the first time. "
-          + "The clusters it is already in are left alone."),
+          + "The Pools it is already in are left alone."),
         el("button", { class: "ghost small",
           onclick: () => M.go("first-run") }, "Run setup again"));
 
@@ -177,7 +220,7 @@ settings-view [aria-busy="true"] { opacity:.8; }
       });
       this.drawUpdates(status).catch(() => { status.textContent = "Could not check for updates right now."; });
       this.drawRemoval().catch(error => {
-        this.querySelector("#settings-removal").replaceChildren(el("h2", {}, "Remove ml-stack"),
+        this.querySelector("#settings-removal").replaceChildren(el("h2", {}, "Remove Poolside"),
           el("div", {class:"err"}, error.message));
       });
     }
@@ -231,7 +274,8 @@ settings-view [aria-busy="true"] { opacity:.8; }
       try {
         const result = await api("/ui/settings", {method:"POST", body:JSON.stringify({
           ...this.pick, labels:this.pick.labels ? this.pick.labels.split(",") : []})});
-        if (!result.ok) throw Error(result.error || "Could not save preferences.");
+        if (!result.ok || result.error) throw Error(result.error || "Could not save preferences.");
+        M.setPreferences({...M.preferences, ...this.pick});
         this.note.replaceChildren(result.manual
           ? el("div", {}, el("div", {class:"err"}, result.manual_why || "Needs permission."),
               el("pre", {class:"cmd"}, result.manual))
@@ -361,11 +405,11 @@ settings-view [aria-busy="true"] { opacity:.8; }
     async drawRemoval() {
       const removal = this.querySelector("#settings-removal");
       removal.replaceChildren(
-        el("h2", {}, "Remove ml-stack"),
-        el("div", { class: "hint" }, "Loading what is on this machine…"));
+        el("h2", {}, "Remove Poolside"),
+        el("div", { class: "hint" }, "Loading what is on this device…"));
       const u = await api("/ui/uninstall");
       if (u.error) {
-        removal.replaceChildren(el("h2", {}, "Remove ml-stack"),
+        removal.replaceChildren(el("h2", {}, "Remove Poolside"),
           el("div", { class: "err" }, u.error));
         return;
       }
@@ -403,7 +447,7 @@ settings-view [aria-busy="true"] { opacity:.8; }
             : null));
       };
       removal.replaceChildren(
-        el("h2", {}, "Remove ml-stack"),
+        el("h2", {}, "Remove Poolside"),
         el("div", { class: "hint" },
           "Ticked items go. Your models and your own files are left unless you say "
           + "otherwise."),

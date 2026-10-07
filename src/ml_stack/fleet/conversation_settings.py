@@ -45,3 +45,11 @@ def checked(settings: dict | None = None) -> dict[str, Any]:
         if not math.isfinite(temperature) or not 0 <= temperature <= 2:
             raise ValueError("temperature must be between 0 and 2")
     return result
+
+
+def effective(machine_settings=None) -> dict[str, Any]:
+    """Return effective defaults for a new conversation."""
+    from .settings import Settings
+
+    source = machine_settings if machine_settings is not None else Settings()
+    return checked({**DEFAULTS, "max_output_tokens": source.chat_max_output_tokens})

@@ -1,7 +1,7 @@
 """Saved conversation listing, lookup and updates behind the daemon UI guard."""
 from __future__ import annotations
 
-from .conversation_settings import DEFAULTS
+from .conversation_settings import effective
 from .room_routes import _origin_ok
 
 
@@ -33,7 +33,7 @@ class ConversationRoutes:
 
     def _conversations(self) -> bool:
         if self.path == "/ui/conversations/defaults" and self.method == "GET":
-            self.send(200, {"settings": DEFAULTS})
+            self.send(200, {"settings": effective(self.ui.settings)})
             return True
         store = self.ui.conversations
         if store is None:
@@ -51,7 +51,7 @@ class ConversationRoutes:
             if not isinstance(request.get("model", ""), str) or not isinstance(request.get("title", ""), str):
                 raise ValueError("model and title must be text")
             made = store.start(model=request.get("model", ""), title=request.get("title", ""),
-                               settings=request.get("settings"))
+                               settings={**effective(self.ui.settings), **request.get("settings", {})})
             self.send(201, made.public())
             return True
         return super().route()
