@@ -164,7 +164,7 @@ def test_the_serving_uses_the_reference_asked_for_and_the_slots_asked_for():
 def test_a_head_recorded_by_file_name_is_looked_for_where_this_machine_keeps_models(
         monkeypatch):
     monkeypatch.setattr("ml_stack.hub.located", lambda name: Path(f"/models/{name}"))
-    assert measured().serving(resolve=True).draft == f"/models/{HEAD}"
+    assert measured().serving(resolve=True).draft == str(Path(f"/models/{HEAD}"))
 
     monkeypatch.setattr("ml_stack.hub.located", lambda name: None)
     assert measured().serving(resolve=True).draft == "", "a head not on this machine is not served"
@@ -336,7 +336,7 @@ def test_up_with_a_profile_fills_every_flag_that_was_not_given(leases, tmp_path)
     spec = leases[0]
     assert spec.context == 65536 and spec.parallel == 1, \
         "one slot holding the whole cache the record measured across two"
-    assert str(spec.draft) == f"/models/{HEAD}" and spec.spec_type == "draft-mtp"
+    assert str(spec.draft) == str(Path(f"/models/{HEAD}")) and spec.spec_type == "draft-mtp"
     assert spec.spec_draft_max == 4
     assert spec.cache_type_k == spec.cache_type_v == "q8_0"
     assert spec.reasoning_budget == 0

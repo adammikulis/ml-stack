@@ -45,7 +45,7 @@ class Role:
     summary: str
     tools: frozenset[str]
     asks: str
-    max_calls: int
+    max_calls: int | None = None
     max_gpu_seconds: float | None = None
 
     @property
@@ -88,12 +88,12 @@ def _table(*roles: Role) -> Mapping[str, Role]:
 
 ROLES: Mapping[str, Role] = _table(
     Role(READ_ONLY, "reads only: nothing is offered that starts, stops, downloads or writes",
-         frozenset(READ), "never", max_calls=60, max_gpu_seconds=0.0),
+         frozenset(READ), "never", max_calls=None, max_gpu_seconds=0.0),
     Role(APPROVE_FIRST, "reads run; each call that acts asks the person first",
-         frozenset(READ) | frozenset(CONFIRM), "each", max_calls=200),
+         frozenset(READ) | frozenset(CONFIRM), "each", max_calls=None),
     Role(PLAN_AND_GO, "runs the calls an approved plan names without asking again; anything else asks",
-         frozenset(READ) | frozenset(CONFIRM), "outside-plan", max_calls=200,
-         max_gpu_seconds=6 * 3600.0),
+         frozenset(READ) | frozenset(CONFIRM), "outside-plan", max_calls=None,
+         max_gpu_seconds=None),
 )
 DEFAULT = APPROVE_FIRST
 TASK_DEFAULT = PLAN_AND_GO
@@ -115,7 +115,7 @@ def validate(table: Mapping[str, Role] = ROLES) -> None:
             problems.append("a tool on the person-only floor")
         if role.acts == (role.asks == "never"):
             problems.append("asking policy does not fit what the tools do")
-        if role.max_calls < 1 or (role.max_gpu_seconds or 0.0) < 0:
+        if (role.max_calls is not None and role.max_calls < 1) or (role.max_gpu_seconds or 0.0) < 0:
             problems.append("limits must be positive")
         if problems:
             raise ValueError(f"role {key}: " + "; ".join(problems))

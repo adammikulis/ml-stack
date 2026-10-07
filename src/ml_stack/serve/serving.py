@@ -193,8 +193,8 @@ class Talking:
     :meth:`request` nor :meth:`transport`. ``spec_draft_max`` rides on each request.
     """
 
-    n_predict: int = 16384               # a ceiling, not a budget
-    timeout: float = 300.0
+    n_predict: int | None = None
+    timeout: float | None = None
     sampling: Mapping[str, Any] = field(default_factory=dict)
     think: bool | None = None
     spec_draft_max: int | None = None    # tokens guessed ahead
@@ -203,12 +203,12 @@ class Talking:
         """The :class:`~ml_stack.client.Request` a client on ``slot`` sends."""
         sampling = {k: v for k, v in dict(self.sampling).items() if v is not None}
         depth = None if self.spec_draft_max is None else int(self.spec_draft_max)
-        return Request(n_predict=int(self.n_predict), spec_draft_max=depth, slot=slot,
+        return Request(n_predict=self.n_predict, spec_draft_max=depth, slot=slot,
                        **sampling)
 
     def transport(self) -> Transport:
         """The :class:`~ml_stack.client.Transport` a client reaches its server with."""
-        return Transport(timeout=float(self.timeout))
+        return Transport(timeout=self.timeout)
 
 
 @dataclass(frozen=True)

@@ -124,7 +124,7 @@ class Runtime(Model):
         if self.consumed:
             self.messages.extend(incoming)
         self.consumed = len(input)
-        if self.repairs > owner.budget.max_repairs:
+        if owner.budget.max_repairs is not None and self.repairs > owner.budget.max_repairs:
             raise Stopped('repairs_exhausted')
         if owner.budget.max_tokens is not None and self.tokens >= owner.budget.max_tokens:
             raise Stopped('max_tokens', getattr(self, 'last_text', ''))
@@ -152,7 +152,7 @@ class Runtime(Model):
             output.append(ResponseOutputMessage(id=uuid4().hex, role='assistant', status='completed',
                 type='message', content=[ResponseOutputText(type='output_text', text=text, annotations=[])]))
         if pending:
-            if self.calls + len(pending) > owner.budget.max_tool_calls:
+            if owner.budget.max_tool_calls is not None and self.calls + len(pending) > owner.budget.max_tool_calls:
                 raise Stopped('max_tool_calls', text)
             self.calls += len(pending)
             self.run.context.tool_calls = self.calls
@@ -200,7 +200,7 @@ class Runtime(Model):
 
 
 async def execute(owner: Any, task: Any):
-    """Yield application events from a bounded SDK run."""
+    """Yield application events from an SDK run."""
     messages = [{'role': 'user', 'content': task}] if isinstance(task, str) else task
     schemas = from_mcp(listed := await owner.tools.list_tools(), owner.budget.profile)
     rail = start(owner._items(listed), offered=schemas, task=_task_of(messages),

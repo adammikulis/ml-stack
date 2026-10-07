@@ -46,3 +46,22 @@ def test_refused_sdk_model_turn_never_generates_or_counts_a_turn():
 
 async def _collect(agent):
     return [event async for event in agent.run('say hello')]
+
+
+def test_default_budget_continues_past_former_step_cap():
+    from ml_stack.agent import Budget
+    budget = Budget()
+    assert (budget.max_steps, budget.max_tool_calls, budget.max_tokens,
+            budget.max_repairs, budget.max_result_chars) == (None,) * 5
+    turns = [Turn(calls=(('ping', '{}'),)) for _ in range(10)]
+    server = ToolCallingServer([*turns, Turn(text=('finished',))])
+    def ping():
+        return 'pong'
+    agent = Agent(Client(server.base_url), FunctionTools([({'name': 'ping'}, ping)]),
+                  interventions=guard.default())
+    try:
+        result = asyncio.run(_collect(agent))[-1]
+        assert (result.reason, result.steps, result.tool_calls) == ('answer', 11, 10)
+    finally:
+        agent.close()
+        server.close()

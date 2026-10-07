@@ -64,7 +64,7 @@ def _question_row(one: Mapping[str, Any], label: str, conversation: int = 0, tur
 
 def _ask_once(ask: Callable[..., Any], row: Row, *, client: Any,
               graph: Mapping[str, Any] | None = None, turns: Sequence[Mapping[str, str]] = (),
-              per_question: float = PER_QUESTION, trace: bool = False) -> tuple[Row, str]:
+              per_question: float | None = PER_QUESTION, trace: bool = False) -> tuple[Row, str]:
     """Record a question's measured answer and carry its text into the next turn."""
     began = time.time()
     counting = Counting(client, deadline=began + per_question if per_question else None,
@@ -121,7 +121,7 @@ def _ask_once(ask: Callable[..., Any], row: Row, *, client: Any,
 def measure(ask: Callable[[str, Any], Any], questions: Sequence[dict[str, Any]], *,
             label: str, client: Any, log: Callable[[str], None] | None = None,
             graph: Mapping[str, Any] | None = None,
-            per_question: float = PER_QUESTION, trace: bool | None = None,
+            per_question: float | None = PER_QUESTION, trace: bool | None = None,
             baseline: Mapping[str, int] | None = None) -> list[Row]:
     """Ask each question once through ``ask(question, client)`` and record what it cost.
 
@@ -156,7 +156,7 @@ def concurrent(ask: Callable[..., Any], questions: Sequence[Mapping[str, Any]], 
                conversations: int, turns: int, label: str, client: Any,
                graph: Mapping[str, Any] | None = None, base_url: str = "",
                log: Callable[[str], None] | None = None,
-               per_question: float = PER_QUESTION,
+               per_question: float | None = PER_QUESTION,
                trace: bool | None = None) -> tuple[list[Row], dict[str, Any]]:
     """N conversations of T turns each, asked of one server at the same time.
 
