@@ -1,0 +1,34 @@
+#!/usr/bin/env python3
+"""A SessionStart hook: records the session's model with the workspace as a claimed model."""
+
+from __future__ import annotations
+
+import os
+
+import workspace_hook
+
+
+def main() -> int:
+    event = workspace_hook.event("SessionStart")
+    if event is None:
+        return 0
+    environment = workspace_hook.session_environment(event, "SessionStart")
+    if environment is None:
+        return 0
+    workspace_hook.persist_session(environment)
+    model = event.get("model") or os.environ.get("ANTHROPIC_MODEL", "")
+    if isinstance(model, dict):
+        model = model.get("id", "")
+    if not isinstance(model, str) or not model or len(model) > 256 or not model.isprintable():
+        workspace_hook.warning("SessionStart", "model unavailable; no model claim recorded")
+        return 0
+    registered = workspace_hook.run(["ml-stack-workspace", "whoami", "--agent", "claude-code", "--model", model,
+                        "--harness", "claude-code"], "SessionStart", environment=environment)
+    if registered and not event.get("agent_id"):
+        workspace_hook.run(["ml-stack-workspace", "main-session", "--agent", "claude-code"],
+                           "SessionStart", environment=environment)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

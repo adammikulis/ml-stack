@@ -9,27 +9,50 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import rules_loader  # noqa: E402
+import rules_loader
+import workspace_hook
+
+
+def workspace_brief(event: dict) -> str:
+    label = f"{event.get('agent_type') or 'subagent'}-{str(event.get('agent_id') or '')[:6]}".strip("-").lower()
+    environment = workspace_hook.session_environment(event, "SubagentStart")
+    if environment is None:
+        return ""
+    done = workspace_hook.run(["ml-stack-workspace", "brief", label, "--agent", "claude-code"],
+                              "SubagentStart", environment=environment)
+    return done.stdout.strip() if done else ""
 
 
 def main() -> int:
-    event = json.load(sys.stdin)
-    rules = rules_loader.load()
-    found = rules.checkouts(event.get("cwd") or ".") if rules else None
-    if not found:
+    event = workspace_hook.event("SubagentStart")
+    if event is None:
         return 0
-    primary = found[1]
-    dev = subprocess.run(["git", "-C", str(primary), "branch", "--show-current"],
-                         capture_output=True, text=True, check=False).stdout.strip()
-    text = (f"Checkout rule: the primary checkout {primary} is on the development branch {dev}. "
+    rules = rules_loader.load()
+    try:
+        found = rules.checkouts(event.get("cwd") or ".") if rules else None
+    except (OSError, subprocess.TimeoutExpired, ValueError, TypeError) as error:
+        workspace_hook.warning("SubagentStart", error)
+        found = None
+    parts = [workspace_brief(event)]
+    if found:
+        parts.append(checkout_rule(found[1]))
+    text = "\n\n".join(p for p in parts if p)
+    if not text:
+        return 0
+    print(json.dumps({"hookSpecificOutput": {"hookEventName": "SubagentStart",
+                                             "additionalContext": text}}))
+    return 0
+
+
+def checkout_rule(primary: Path) -> str:
+    done = workspace_hook.run(["git", "-C", str(primary), "branch", "--show-current"], "SubagentStart")
+    dev = done.stdout.strip() if done else "unknown"
+    return (f"Checkout rule: the primary checkout {primary} is on the development branch {dev}. "
             "Use it when that is the best way to complete the task; concurrent writers, experiments "
             "and conflicts require separate sibling worktrees and branches. Acquire authenticated "
             "claims before mutation, preserve unrelated work, and stage files by name. "
             "Independent review and affected tests are required. Never use editable installs "
             "or commit or push main without the owner's explicit instruction.")
-    print(json.dumps({"hookSpecificOutput": {"hookEventName": "SubagentStart",
-                                             "additionalContext": text}}))
-    return 0
 
 
 if __name__ == "__main__":
