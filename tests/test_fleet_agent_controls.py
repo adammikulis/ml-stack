@@ -139,7 +139,7 @@ def test_auto_context_stays_automatic_when_work_profile_changes(served, browser)
         page.goto(f"http://127.0.0.1:{server.port}/ui/#board")
         page.locator("#board-agents > summary").click()
         controls = page.locator("ml-agents")
-        controls.locator("input#context").wait_for()
+        controls.locator("input#context").wait_for(state="attached")
         page.wait_for_function("document.querySelector('ml-agents')?.shadowRoot?.querySelector('#name')?.value === 'local-worker'")
         assert controls.locator("input#context").input_value() == ""
         assert controls.locator("input#context").get_attribute("placeholder") == "Auto"
