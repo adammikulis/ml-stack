@@ -11,20 +11,20 @@ gym-view .gym-section-title { display:flex; align-items:center; gap:10px; margin
 gym-view .gym-section-title h2 { font-size:15px; margin:0; }
 gym-view .gym-section-title span { color:var(--muted,#757381); font-size:12px; }
 gym-view #environments { display:grid; grid-template-columns:repeat(auto-fit,minmax(155px,1fr)); gap:12px; }
-gym-view .gym-scenario { padding:16px; border-radius:14px; border:1px solid var(--line,#e5ddd4); background:var(--raised,#fff); min-width:0; position:relative; }
+gym-view .gym-scenario { padding:16px; border-radius:14px; border:1px solid var(--line,#e5ddd4); background:var(--bg-raised,#fff); min-width:0; position:relative; }
 gym-view .gym-scenario[data-selected=true] { border-color:var(--poolside-orange,#ff8a3d); box-shadow:0 0 0 2px color-mix(in srgb,var(--poolside-orange,#ff8a3d) 18%,transparent); }
 gym-view .gym-scenario-icon { display:flex; align-items:center; justify-content:center; width:40px; height:40px; border-radius:12px; background:color-mix(in srgb,var(--scenario-color) 20%,white); color:var(--poolside-navy,#1b1f3a); font-size:22px; margin-bottom:12px; }
 gym-view .gym-scenario h3 { font-size:14px; margin:0 0 6px; }
 gym-view .gym-scenario p { font-size:12px; color:var(--muted,#757381); line-height:1.5; margin:0 0 12px; }
 gym-view .gym-scenario .gym-ready { color:var(--poolside-navy,#1b1f3a); font-size:11px; font-weight:700; }
-gym-view .gym-scenario button { padding:6px 10px; min-height:30px; width:100%; background:var(--sunken,#f6f1ea); border:0; font-size:12px; color:inherit; }
+gym-view .gym-scenario button { padding:6px 10px; min-height:30px; width:100%; background:var(--bg-sunken,#f6f1ea); border:0; font-size:12px; color:inherit; }
 gym-view .gym-scenario[data-selected=true] button { background:var(--poolside-orange,#ff8a3d); color:var(--poolside-navy,#1b1f3a); }
 gym-view .gym-layout { display:grid; grid-template-columns:280px minmax(0,1fr); align-items:start; gap:20px; }
-gym-view .gym-setup,gym-view .gym-live { border:1px solid var(--line,#e5ddd4); background:var(--raised,#fff); border-radius:16px; min-width:0; }
+gym-view .gym-setup,gym-view .gym-live { border:1px solid var(--line,#e5ddd4); background:var(--bg-raised,#fff); border-radius:16px; min-width:0; }
 gym-view .gym-setup { padding:20px; }
 gym-view #config h2 { font-size:16px; margin:0 0 4px; }
 gym-view #config > .intro { font-size:12px; line-height:1.5; margin:0 0 16px; }
-gym-view #config input:not([type=checkbox]),gym-view #config select { width:100%; box-sizing:border-box; min-height:38px; background:var(--sunken,#f6f1ea); border:1px solid var(--line,#e5ddd4); border-radius:8px; color:inherit; padding:8px 10px; }
+gym-view #config input:not([type=checkbox]),gym-view #config select { width:100%; box-sizing:border-box; min-height:38px; background:var(--bg-sunken,#f6f1ea); border:1px solid var(--line,#e5ddd4); border-radius:8px; color:inherit; padding:8px 10px; }
 gym-view #config label { margin-top:14px; font-size:12px; font-weight:600; }
 gym-view #config .intro { font-size:12px; margin:10px 0; }
 gym-view #config details { border-top:1px solid var(--line,#e5ddd4); padding:14px 0 0; margin-top:16px; }
@@ -49,16 +49,16 @@ gym-view .gym-empty-mark i:nth-child(4) { height:55px; background:var(--poolside
 gym-view .gym-stage:fullscreen { margin:0; border-radius:0; height:100vh; }
 gym-view .gym-stage:fullscreen gym-scene,gym-view .gym-stage:fullscreen img { height:100vh; }
 gym-view #controls { padding:0 20px 18px; margin:16px 0 0; gap:8px; }
-gym-view #controls button { background:var(--sunken,#f6f1ea); border:1px solid var(--line,#e5ddd4); color:inherit; border-radius:8px; }
+gym-view #controls button { background:var(--bg-sunken,#f6f1ea); border:1px solid var(--line,#e5ddd4); color:inherit; border-radius:8px; }
 gym-view #controls button:first-child { background:var(--poolside-cyan,#2de2e6); color:var(--poolside-navy,#1b1f3a); border-color:transparent; font-weight:750; }
 gym-view .gym-shortcuts { margin-left:auto; font-size:11px; color:var(--muted,#757381); }
 gym-view .gym-metrics { display:grid; grid-template-columns:repeat(auto-fit,minmax(110px,1fr)); gap:1px; background:var(--line,#e5ddd4); border-top:1px solid var(--line,#e5ddd4); border-bottom:1px solid var(--line,#e5ddd4); }
-gym-view .gym-metrics > div { background:var(--raised,#fff); padding:16px 20px; }
+gym-view .gym-metrics > div { background:var(--bg-raised,#fff); padding:16px 20px; }
 gym-view .gym-metrics span { color:var(--muted,#757381); font-size:11px; }
 gym-view .gym-metrics strong { display:block; font-size:20px; margin-top:6px; font-variant-numeric:tabular-nums; }
 gym-view .gym-inspection { padding:20px; }
 gym-view #decision-flow { grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin-bottom:20px; }
-gym-view #decision-flow .workspace-card { padding:16px; background:var(--sunken,#f6f1ea); border:0; }
+gym-view #decision-flow .workspace-card { padding:16px; background:var(--bg-sunken,#f6f1ea); border:0; }
 gym-view #decision-flow h3 { font-size:12px; margin:0 0 12px; color:var(--muted,#757381); }
 gym-view #decision-flow p { font-size:12px; overflow-wrap:anywhere; }
 gym-view #decision-flow .workspace-card:last-child { border-top:3px solid var(--poolside-yellow,#ffd166); }
