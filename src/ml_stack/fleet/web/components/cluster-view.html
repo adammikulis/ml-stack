@@ -24,6 +24,9 @@ cluster-view #cluster-pause .searchrow { display:flex; flex-wrap:wrap; gap:8px; 
 cluster-view #cluster-pause input,cluster-view #cluster-pause select { width:100%; min-width:0; }
 cluster-view .pool-config { margin-top:22px; padding-top:20px; border-top:1px solid var(--line); }
 cluster-view .pool-config button { width:100%; margin-top:14px; }
+cluster-view .pool-jobs { margin-top:24px; background:var(--bg-raised); border:1px solid var(--line); border-radius:16px; padding:22px; }
+cluster-view .pool-jobs > h2 { margin-top:0; }
+cluster-view .pool-jobs workspace-jobs > h2 { display:none; }
 cluster-view .pool-connections { margin:24px 0; border:1px solid var(--line); border-radius:12px; padding:18px; background:var(--bg-raised); }
 cluster-view .pool-connections summary { cursor:pointer; font-weight:600; }
 cluster-view .url,cluster-view .name,cluster-view .loaded-models { overflow-wrap:anywhere; }
@@ -36,7 +39,7 @@ cluster-view .url,cluster-view .name,cluster-view .loaded-models { overflow-wrap
     <header class="pool-hero"><div><h1>Your spare compute, together</h1><p class="sub" id="cluster-sub"></p></div><span class="pool-emblem" aria-hidden="true">◌◌◌</span></header>
     <div class="stat" id="cluster-stat"></div>
     <div class="pool-layout">
-      <section aria-label="Pool devices"><header class="pool-device-heading"><h2>Devices in your pool</h2><span class="hint">Live resource usage</span></header><div id="cluster-cards"></div></section>
+      <section aria-label="Pool devices"><header class="pool-device-heading"><h2>Devices in your pool</h2><span class="hint">Live resource usage</span></header><div id="cluster-cards"></div><section class="pool-jobs"><h2>Jobs on this device</h2><p class="hint">Training and tool jobs managed by this device. Each device card shows its pool slot usage.</p><workspace-jobs></workspace-jobs></section></section>
       <aside class="pool-control"><div id="cluster-pause"></div><div class="pool-config"><h3>How this device contributes</h3><p class="hint">Configure startup, training capabilities, and availability in device settings.</p><button class="ghost" id="pool-device-settings" type="button">Open device settings</button></div></aside>
     </div>
     <details class="pool-connections" data-advanced><summary>Pool connections &amp; pairing</summary><div id="cluster-joined"></div></details>

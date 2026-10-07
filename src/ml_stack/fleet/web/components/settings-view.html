@@ -33,7 +33,7 @@ settings-view #settings-removal { border-top:1px solid var(--line); padding-top:
   <main id="settings" hidden>
     <header class="settings-heading"><span class="settings-icon" aria-hidden="true">⚙</span><div><h1>Settings</h1><p class="sub" id="settings-sub"></p></div></header>
     <div class="settings-layout">
-      <nav class="settings-sections" aria-label="Settings sections" role="tablist">
+      <nav class="settings-sections" aria-label="Settings sections" role="tablist" aria-orientation="vertical">
         <button type="button" role="tab" data-section="appearance" aria-selected="true">Appearance &amp; advanced</button>
         <button type="button" role="tab" data-section="models" aria-selected="false">Models &amp; providers</button>
         <button type="button" role="tab" data-section="compute" aria-selected="false">Compute &amp; device</button>
@@ -68,8 +68,22 @@ settings-view #settings-removal { border-top:1px solid var(--line); padding-top:
       this.note = this.querySelector("#settings-note");
       this.save = this.querySelector("#settings-save");
       this.save.onclick = () => this.apply();
-      for (const button of this.querySelectorAll("[data-section]")) {
+      const tabs = [...this.querySelectorAll("[data-section]")];
+      for (const [index, button] of tabs.entries()) {
+        const pane = this.querySelector(`[data-pane="${button.dataset.section}"]`);
+        button.id = `settings-tab-${button.dataset.section}`;
+        button.setAttribute("aria-controls", `settings-pane-${button.dataset.section}`);
+        button.tabIndex = index ? -1 : 0;
+        pane.id = `settings-pane-${button.dataset.section}`;
+        pane.setAttribute("aria-labelledby", button.id);
         button.onclick = () => this.selectSection(button.dataset.section);
+        button.onkeydown = event => {
+          if (!["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
+          event.preventDefault();
+          const next = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1
+            : (index + (event.key === "ArrowDown" ? 1 : -1) + tabs.length) % tabs.length;
+          tabs[next].click(); tabs[next].focus();
+        };
       }
       M.onRoute((route) => {
         const on = route === "settings";
@@ -82,6 +96,7 @@ settings-view #settings-removal { border-top:1px solid var(--line); padding-top:
       for (const pane of this.querySelectorAll("[data-pane]")) pane.hidden = pane.dataset.pane !== section;
       for (const button of this.querySelectorAll("[data-section]")) {
         button.setAttribute("aria-selected", String(button.dataset.section === section));
+        button.tabIndex = button.dataset.section === section ? 0 : -1;
       }
       this.save.hidden = !["appearance", "models", "compute", "maintenance"].includes(section);
     }

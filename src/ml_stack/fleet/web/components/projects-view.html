@@ -27,7 +27,7 @@ projects-view #project-command { white-space:pre-wrap; overflow-wrap:anywhere; }
       <p class="hint">Sharing publishes the tracked source snapshot. Agent access is a separate step.</p>
     </section>
     <section class="panel"><h2>Shared projects</h2><div id="project-list"></div></section></aside>
-    <section class="panel" id="project-board" hidden>
+    <div><section class="panel" id="project-empty"><h2>Bring a project into the conversation</h2><p class="hint">Choose a shared project to see its agents, source, and team activity. Share a local project to start working across your pool.</p></section><section class="panel" id="project-board" hidden>
       <h2 id="project-title"></h2><p id="project-authority"></p><p id="project-board-state" role="status"></p>
       <p id="project-source"></p>
       <button id="project-checkout">Get source on this device</button>
@@ -42,7 +42,7 @@ projects-view #project-command { white-space:pre-wrap; overflow-wrap:anywhere; }
       </div>
       </details><h3>Connected agents</h3><div id="project-agents"></div>
       <h3>Project conversation</h3><div id="project-messages"></div>
-    </section></div>
+    </section></div></div>
   </main>
 </template>
 <script>
@@ -106,6 +106,7 @@ projects-view #project-command { white-space:pre-wrap; overflow-wrap:anywhere; }
     select(project) {
       this.selected = project;
       this.board.hidden = false;
+      this.querySelector("#project-empty").hidden = true;
       this.querySelector('#project-title').textContent = project.name;
       this.querySelector('#project-authority').textContent = `Board authority: ${project.authority_machine || 'unconfigured'}`;
       this.querySelector('#project-source').textContent = `Source available on ${project.is_self ? 'this device' : project.source_host || project.host || project.peer || 'a pool device'}`;
