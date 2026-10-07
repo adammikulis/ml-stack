@@ -251,7 +251,10 @@ class WorkspaceHost:
             method = getattr(owner, name)
             bound = inspect.signature(method).bind(token, *args, **kwargs)
             if "limit" in bound.arguments:
-                bound.arguments["limit"] = min(max(int(bound.arguments["limit"]), 1), 100)
+                requested = int(bound.arguments["limit"])
+                default = ws.limits.read_items if requested == 0 else requested
+                bound.arguments["limit"] = (100 if bound.arguments.get("widen")
+                                            else min(max(default, 1), 100))
             if "widen" in bound.arguments:
                 bound.arguments["widen"] = False
             if "timeout_s" in bound.arguments:
