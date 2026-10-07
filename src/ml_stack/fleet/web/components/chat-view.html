@@ -1,8 +1,39 @@
+<style>
+chat-view .chats { padding:20px 16px; background:var(--bg); }
+chat-view .chat-heading { gap:8px; }
+chat-view .chat-heading h1 { font-size:19px; }
+chat-view .chats label { font-size:12px; color:var(--muted); }
+chat-view .chat-search { margin-top:22px; }
+chat-view .chatrow { border-radius:9px; margin:4px 0; }
+chat-view .chatrow a { padding:12px; overflow-wrap:anywhere; }
+chat-view .talk { background:var(--bg-raised); min-width:0; }
+chat-view .chat-toolbar { border-bottom:1px solid var(--line); padding:16px 24px; }
+chat-view .chat-toolbar h1 { font-size:18px; }
+chat-view .pickrow { margin:0; padding:12px 24px; border-bottom:1px solid var(--line); }
+chat-view .messages { padding:24px; }
+chat-view .msg { max-width:920px; margin:0 auto 24px; border-radius:0; border:0; padding:10px 14px; background:transparent; }
+chat-view .msg.user { background:var(--bg); border-radius:12px; }
+chat-view .speaker { font-size:12px; letter-spacing:.02em; }
+chat-view .chat-welcome { max-width:640px; margin:40px auto; display:block; text-align:left; }
+chat-view .chat-welcome strong { font-size:28px; }
+chat-view .chat-welcome p { margin:12px 0 24px; }
+chat-view .chat-starters { display:grid; gap:10px; }
+chat-view .chat-starters button { text-align:left; padding:14px 18px; border:1px solid var(--line); border-radius:12px; }
+chat-view .askrow { margin:0 24px; padding:12px; border:1px solid var(--line); border-radius:14px; background:var(--bg); }
+chat-view .askrow textarea { border:0; background:transparent; resize:vertical; min-height:64px; }
+chat-view .chat-hint { padding:10px 24px 16px; }
+chat-view #chat-options { margin:8px 24px; }
+chat-view #chat-note { padding:0 24px; }
+chat-view .chat-model-action { color:var(--accent); }
+@media(max-width:760px) { chat-view .chats { padding:12px; max-height:none; } chat-view #chat-list { max-height:160px; overflow-y:auto; } chat-view .messages { padding:12px; } chat-view .askrow { margin:0 12px; } chat-view .chat-welcome { margin:16px auto; padding:12px; } chat-view .chat-welcome strong { font-size:22px; } }
+</style>
 <template>
   <main class="chatmain" id="chat" hidden>
     <aside class="chats" aria-label="Conversations">
       <div class="chat-heading"><h1>Conversations</h1><button class="ghost small" id="chat-new">New chat</button></div>
-      <label for="chat-mode">Mode</label><select id="chat-mode"><option value="chat">Chat</option><option value="coding">Coding</option></select>
+      <nav class="conversation-tabs" aria-label="Conversation spaces"><a href="#chat" aria-current="page">Model chats</a><a href="#board">Team channels</a></nav>
+      <p class="hint">Private model chats and project work.</p>
+      <label for="chat-mode">Conversation mode</label><select id="chat-mode"><option value="chat">Chat</option><option value="coding">Coding</option></select>
       <div class="chat-search"><label for="chat-search">Search conversations</label>
         <input type="search" id="chat-search" placeholder="Search messages…"></div>
       <div id="chat-list"></div>
@@ -15,7 +46,7 @@
         <select id="model" aria-label="Selected model" hidden></select>
       </div>
       <div class="hint" id="chat-none" hidden>
-        No model is running yet. <a href="#models">Choose a model to serve</a>, or use one running on your fleet.
+        No model is running yet. <a href="#models">Choose a model to serve</a>, or use one running on your pool.
       </div>
       <div class="chat-coding-fields" data-coding hidden>
         <label for="chat-project">Project directory</label><input id="chat-project" placeholder="/path/to/project">
@@ -23,11 +54,11 @@
           <div><label for="chat-role">Tool permissions</label><select id="chat-role"></select></div></div>
         <p class="hint">The selected agent works in this directory using your model and the permissions above.</p>
       </div>
-      <details class="aside" id="chat-options" hidden>
+      <details class="aside" id="chat-options" data-advanced hidden>
         <summary>Advanced options</summary>
         <label for="chat-output-tokens">Maximum output tokens</label>
-        <input id="chat-output-tokens" type="number" min="1" step="1" value="8192">
-        <p class="hint">Applies to Chat and Pi coding. Independent of reasoning effort. Default: 8192 tokens.</p>
+        <input id="chat-output-tokens" type="number" min="1" step="1" placeholder="No user cap">
+        <p class="hint">Applies to Chat and Pi coding. Independent of reasoning effort. Leave blank for no user cap.</p>
         <div data-chat>
         <label for="chat-temperature">Temperature</label>
         <input id="chat-temperature" type="number" min="0" max="2" step="0.1" placeholder="Model default">
@@ -121,7 +152,7 @@
         this.messages = [];
         this.savedSettings = { ...this.defaultSettings };
         this.temperature.value = "";
-        this.outputTokens.value = this.savedSettings.max_output_tokens ?? 8192;
+        this.outputTokens.value = this.savedSettings.max_output_tokens ?? "";
         this.coding.restore(this.savedSettings);
         this.welcome();
         this.note.replaceChildren();
@@ -140,13 +171,21 @@
         this.box.hidden = !on;
         if (on && !this.request) this.draw();
       });
+      window.addEventListener("fleet-chat-ready", event => { this.pendingModel = event.detail.model; });
       this.welcome();
     }
 
     welcome() {
       this.list.replaceChildren(el("div", { class: "chat-welcome" },
         el("strong", {}, "What would you like to explore?"),
-        "Chat with a model on this machine or anywhere in your fleet."));
+        el("p", {}, "Explore ideas with a model, or switch to Coding to work in a project."),
+        el("div", { class: "chat-starters" }, ...[
+          ["Explain a model", "Help me understand this model’s strengths, limitations, and how to evaluate it."],
+          ["Plan an experiment", "Help me design a reproducible training experiment. Ask me about the model, data, and success criteria."],
+          ["Review an implementation", "Help me review an implementation. Ask me about the project, requirements, and tests."],
+        ].map(([title, prompt]) => el("button", { class: "ghost", type: "button", onclick: () => {
+          this.input.value = prompt; this.input.focus();
+        } }, title)))));
     }
 
     renderBody(node, text) {
@@ -179,6 +218,7 @@
     }
 
     async draw() {
+      this.coding.mode.disabled = true;
       try {
         const defaults = await api("/ui/conversations/defaults");
         if (M.refused(defaults)) return;
@@ -201,17 +241,22 @@
         this.none.hidden = !!available.length;
         this.options.hidden = !available.length;
         await this.modelPicker.catalogue();
-        this.outputTokens.value = this.savedSettings.max_output_tokens ?? 8192;
+        this.outputTokens.value = this.savedSettings.max_output_tokens ?? "";
         await this.coding.restore(this.savedSettings, this.picker.value);
         this.updateReadiness();
         await this.paintList();
         const selectedChat = this.open || localStorage.getItem("ml-stack.chat.selected");
         if (selectedChat) await this.load(selectedChat);
+        if (this.pendingModel && available.some(model => model.model === this.pendingModel)) {
+          this.picker.value = this.pendingModel; this.pendingModel = null;
+          this.modelPicker.render(); this.updateReadiness(); this.saveSettings();
+        }
       } catch (error) { this.showError(error.message); }
+      finally { this.coding.mode.disabled = !!this.request; }
     }
 
     settings() {
-      return { ...this.savedSettings, ...this.coding.settings(), temperature: this.temperature.value === "" ? null : Number(this.temperature.value), max_output_tokens: Number(this.outputTokens.value || 8192) };
+      return { ...this.savedSettings, ...this.coding.settings(), temperature: this.temperature.value === "" ? null : Number(this.temperature.value), max_output_tokens: this.outputTokens.value === "" ? null : Number(this.outputTokens.value) };
     }
 
     saveSettings() {
@@ -229,7 +274,7 @@
     }
 
     updateReadiness() {
-      this.send.disabled = this.runtimeReady === false || !this.picker.value || !!this.picker.selectedOptions[0]?.disabled;
+      this.send.disabled = (!this.coding.active && this.runtimeReady === false) || !this.picker.value || !!this.picker.selectedOptions[0]?.disabled;
       if (this.runtimeReady === false && !this.coding.active) this.showError(this.runtimeError);
       this.coding.readiness();
     }
@@ -328,7 +373,7 @@
         this.messages = one.messages || [];
         this.savedSettings = one.settings || { ...this.defaultSettings };
         this.temperature.value = this.savedSettings.temperature ?? "";
-        this.outputTokens.value = this.savedSettings.max_output_tokens ?? 8192;
+        this.outputTokens.value = this.savedSettings.max_output_tokens ?? "";
         await this.coding.restore(this.savedSettings, one.model);
         this.list.replaceChildren();
         for (const m of this.messages) this.say(m.role, m.content, m.reasoning || "");
@@ -341,6 +386,7 @@
         }
         this.note.replaceChildren();
         this.updateReadiness();
+        this.modelPicker.render();
         this.coding.reattach();
       } catch (error) { this.showError(error.message); }
     }
@@ -349,7 +395,8 @@
       const text = this.input.value.trim();
       if (!this.outputTokens.checkValidity()) { this.showError("Maximum output tokens must be a positive integer."); return; }
       if (!this.temperature.checkValidity()) { this.showError("Temperature must be between 0 and 2."); return; }
-      if (this.runtimeReady === false && !this.coding.active) { this.showError(this.runtimeError); return; }
+      this.updateReadiness();
+      if (this.send.disabled) return;
       if (!text || !this.picker.value || this.picker.selectedOptions[0]?.disabled || this.request) return;
       this.request = new AbortController();
       this.list.setAttribute("aria-busy", "true");
@@ -357,7 +404,7 @@
       this.send.hidden = true;
       this.stop.hidden = false;
       this.newChat.disabled = this.picker.disabled = true;
-      this.temperature.disabled = true;
+      this.temperature.disabled = this.outputTokens.disabled = true;
       this.coding.busy(true);
       this.coding.accepted = false;
       let reply, userBody, accepted = false;
@@ -404,14 +451,14 @@
       } finally {
         if (reply?.dataset.text) {
           this.renderBody(reply, reply.dataset.text);
-          this.messages.push({ role: "assistant", content: reply.dataset.text });
+          this.messages.push({ role: "assistant", content: reply.dataset.text, reasoning: reply.closest(".msg").querySelector(".reasoning-text")?.textContent || "" });
         }
         this.request = null;
         this.list.removeAttribute("aria-busy");
         this.send.hidden = false;
         this.stop.hidden = true;
         this.newChat.disabled = this.picker.disabled = false;
-        this.temperature.disabled = false;
+        this.temperature.disabled = this.outputTokens.disabled = false;
         this.coding.busy(false);
         this.updateReadiness();
         this.paintList();
@@ -439,9 +486,6 @@
         if (!result.content) throw new Error("The model returned no answer. Try again or choose another model.");
       } finally { activity.textContent = ""; }
     }
-
-
-
   }
   customElements.define("chat-view", ChatView);
 })();

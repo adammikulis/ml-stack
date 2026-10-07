@@ -5,13 +5,19 @@ board-view .board-workspace h1 { margin:0 0 6px; }
 board-view .board-workspace .sub { margin:0 0 18px; }
 board-view ml-board { display:block; height:calc(100dvh - 188px); min-height:420px; }
 @media(max-width:640px) { board-view .board-workspace { padding:16px; } board-view ml-board { height:72dvh; } }
+.conversation-tabs { display:flex; gap:4px; padding:4px; border:1px solid var(--line); border-radius:12px; background:var(--bg); margin:12px 0; }
+.conversation-tabs a { flex:1; padding:8px 12px; border-radius:8px; text-align:center; text-decoration:none; font-size:13px; color:var(--muted); }
+.conversation-tabs a[aria-current=page] { color:var(--text); background:var(--bg-raised); box-shadow:0 1px 4px #0002; font-weight:600; }
+.conversation-heading { display:flex; justify-content:space-between; gap:24px; align-items:center; }
+@media(max-width:760px) { .conversation-heading { display:block; } }
 </style>
 <template>
   <section class="board-workspace" hidden>
-    <h1>Board</h1>
-    <p class="sub">Follow channels and threads, message agents, and participate as yourself.</p>
+    <header class="conversation-heading"><div><h1>Conversations</h1>
+      <p class="sub">Team channels, project threads, and direct messages to agents.</p></div>
+      <nav class="conversation-tabs" aria-label="Conversation spaces"><a href="#chat">Model chats</a><a href="#board" aria-current="page">Team channels</a></nav></header>
     <coordinator-control></coordinator-control>
-    <details id="board-agents"><summary>Local agents</summary><div id="agents-mount"></div></details>
+    <details id="board-agents" data-advanced><summary>Local agents</summary><div id="agents-mount"></div></details>
     <div id="board-mount"></div>
   </section>
 </template>
