@@ -147,11 +147,12 @@ def test_frozen_collects_wheel_modules_and_dynamic_entrypoints(frozen_collector,
         "ml_stack/ingest/cli.py", "ml_stack/workspace/remote_host.py",
         "ml_stack/ui/assets/index.html", "ml_stack-1.0.dist-info/METADATA",
         "../bin/ml-stack", "ml_stack/non-module.py",
-    ]], entry_points=entries)
+    ]], entry_points=entries, locate_file=lambda file: ROOT / "src" / str(file))
     monkeypatch.setattr(frozen_collector, "distribution", lambda name: installed)
     datas, modules = frozen_collector.collect_project()
     assert calls == ["ml_stack.ui_routes", "ml_stack.workspace_hosts"]
-    assert datas == [("plugin-metadata", group) for group in calls]
+    assert (str(ROOT / "src/ml_stack/workspace/remote_host.py"), "ml_stack/workspace") in datas
+    assert datas[-2:] == [("plugin-metadata", group) for group in calls]
     assert modules == [
         "ml_stack", "ml_stack.bench.cli", "ml_stack.fleet.daemon", "ml_stack.ingest.cli",
         "ml_stack.workspace.agent_routes", "ml_stack.workspace.remote_host",
