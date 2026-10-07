@@ -138,7 +138,8 @@ class MlBoard extends MlElement {
       const view = JSON.parse(raw);
       if (!view || !["board", "thread", "dm"].includes(view.kind)) return {kind:"none"};
       if (view.kind === "thread" && (!Number.isSafeInteger(view.root) || view.root < 1)) return {kind:"none"};
-      if ([view.name, view.board, view.a, view.b].some(value => value !== undefined && (typeof value !== "string" || value.length > 64))) return {kind:"none"};
+      if ([view.name, view.board].some(value => value !== undefined && (typeof value !== "string" || value.length > 64))) return {kind:"none"};
+      if ([view.a, view.b].some(value => value !== undefined && (typeof value !== "string" || value.length > 97))) return {kind:"none"};
       return view;
     } catch { return {kind:"none"}; }
   }
