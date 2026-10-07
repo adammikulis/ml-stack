@@ -53,6 +53,7 @@ def test_stale_installed_source_provenance_is_not_a_candidate(tmp_path, monkeypa
     assert runtime_wheel.source_checkout() is None
 
 
+@pytest.mark.redteam
 def test_windows_registration_in_wsl_uses_literal_argv_and_verified_git_root(tmp_path, monkeypatch):
     checkout = repository(tmp_path / "source")
     calls = []
