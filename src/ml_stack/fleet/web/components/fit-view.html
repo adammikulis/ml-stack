@@ -4,58 +4,58 @@
 
   fit-view header.fit-top {
     display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap;
-    padding: 22px 26px; border: 1px solid var(--line); border-radius:16px;
+    padding: calc(22px * var(--ui-density,1)) calc(26px * var(--ui-density,1)); border: 1px solid var(--line); border-radius:16px;
     background: var(--bg-raised); margin-bottom:20px;
   }
-  fit-view header.fit-top h1 { font-size: 22px; margin: 0; letter-spacing: -.01em; }
-  fit-view header.fit-top .machine { color: var(--muted); font-family: var(--mono); font-size: 12px; }
+  fit-view header.fit-top h1 { font-size:1.571rem; margin: 0; letter-spacing: -.01em; }
+  fit-view header.fit-top .machine { color: var(--muted); font-family: var(--mono); font-size:0.857rem; }
   fit-view header.fit-top .spacer { flex: 1; }
   fit-view nav.views { display: flex; gap: 2px; }
   fit-view nav.views button {
     background: none; border: 0; border-bottom: 2px solid transparent; cursor: pointer;
-    color: var(--muted); font: inherit; font-size: 13px; padding: 3px 10px 5px;
+    color: var(--muted); font: inherit; font-size:0.929rem; padding: calc(3px * var(--ui-density,1)) calc(10px * var(--ui-density,1)) calc(5px * var(--ui-density,1));
   }
   fit-view nav.views button.on { color: var(--text); border-bottom-color: var(--accent); }
   fit-view { display:contents; }
-  fit-view #fit { padding:28px 32px; width:100%; }
+  fit-view #fit { padding:calc(28px * var(--ui-density,1)) calc(32px * var(--ui-density,1)); width:100%; }
   fit-view .capacity-heading { display:flex; align-items:center; justify-content:space-between; gap:24px; margin-bottom:24px; }
-  fit-view .capacity-heading h1 { font-size:30px; margin:0 0 8px; }
+  fit-view .capacity-heading h1 { font-size:2.143rem; margin:0 0 8px; }
   fit-view .capacity-heading p { margin:0; }
-  fit-view .capacity-heading > span { padding:14px 18px; border-radius:12px; background:var(--poolside-cyan); color:var(--poolside-navy); font-weight:600; }
-  fit-view .wrap { max-width:1500px; margin:0; padding:0 0 40px; width:100%; }
-  fit-view #fit-body { background:var(--bg-raised); border:1px solid var(--line); border-radius:16px; margin-top:20px; padding:24px; overflow:auto; }
-  @media(max-width:700px) { fit-view #fit { padding:20px; } fit-view .capacity-heading > span { display:none; } }
+  fit-view .capacity-heading > span { padding:calc(14px * var(--ui-density,1)) calc(18px * var(--ui-density,1)); border-radius:12px; background:var(--poolside-cyan); color:var(--poolside-cyan-ink,var(--poolside-navy)); font-weight:600; }
+  fit-view .wrap { max-width:1500px; margin:0; padding:0 0 calc(40px * var(--ui-density,1)); width:100%; }
+  fit-view #fit-body { background:var(--bg-raised); border:1px solid var(--line); border-radius:16px; margin-top:20px; padding:calc(24px * var(--ui-density,1)); overflow:auto; }
+  @media(max-width:700px) { fit-view #fit { padding:calc(20px * var(--ui-density,1)); } fit-view .capacity-heading > span { display:none; } }
 
   fit-view svg .point { stroke: var(--bg-raised); stroke-width: 1.2; }
   fit-view svg .front { fill: none; stroke: var(--good); stroke-width: 1.4; stroke-dasharray: 4 3; }
   fit-view table.fit td.mark { color: var(--good); }
 
   fit-view .controls {
-    display: grid; gap: 18px 26px; padding: 16px 0 18px;
+    display: grid; gap: 18px 26px; padding: calc(16px * var(--ui-density,1)) 0 calc(18px * var(--ui-density,1));
     grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
-    border:1px solid var(--line); border-radius:16px; background:var(--bg-raised); padding:24px;
+    border:1px solid var(--line); border-radius:16px; background:var(--bg-raised); padding:calc(24px * var(--ui-density,1));
   }
   fit-view .ctl { min-width: 0; }
   fit-view .ctl > label.cap, fit-view .ctl > div.cap {
     display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
-    font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted);
+    font-size:0.786rem; text-transform: uppercase; letter-spacing: .07em; color: var(--muted);
     margin-bottom: 5px;
   }
-  fit-view .ctl .cap b { font-size: 13px; text-transform: none; letter-spacing: 0;
+  fit-view .ctl .cap b { font-size:0.929rem; text-transform: none; letter-spacing: 0;
                 color: var(--text); font-family: var(--mono); }
   fit-view .ctl input[type=range] { width: 100%; accent-color: var(--accent); }
   fit-view .ctl .pair { display: flex; gap: 6px; align-items: center; }
   fit-view .ctl select, fit-view .ctl input[type=number] {
     background: var(--bg-sunken); color: var(--text); border: 1px solid var(--line-bright);
-    border-radius: 7px; padding: 5px 7px; font: inherit; min-width: 0; flex: 1;
+    border-radius: 7px; padding: calc(5px * var(--ui-density,1)) calc(7px * var(--ui-density,1)); font: inherit; min-width: 0; flex: 1;
   }
-  fit-view .ctl .hint { color: var(--dim); font-size: 11px; margin-top: 4px; }
+  fit-view .ctl .hint { color: var(--dim); font-size:0.786rem; margin-top: 4px; }
   fit-view .wide { grid-column: 1 / -1; }
 
   fit-view .models { display: flex; flex-wrap: wrap; gap: 4px 14px; }
   fit-view .models label {
     display: flex; align-items: center; gap: 6px; cursor: pointer;
-    font-family: var(--mono); font-size: 12px; white-space: nowrap;
+    font-family: var(--mono); font-size:0.857rem; white-space: nowrap;
     margin: 0; color: var(--text);
   }
   fit-view .models label.off { opacity: .4; }
@@ -66,39 +66,39 @@
             border-radius: 7px; overflow: hidden; }
   fit-view .toggle button {
     flex: 1; background: var(--bg-sunken); color: var(--muted); border: 0;
-    padding: 6px 8px; font: inherit; cursor: pointer; white-space: nowrap;
+    padding: calc(6px * var(--ui-density,1)) calc(8px * var(--ui-density,1)); font: inherit; cursor: pointer; white-space: nowrap;
   }
   fit-view .toggle button.on { background: var(--accent-dim); color: var(--text); }
 
-  fit-view table.fit { width: 100%; border-collapse: collapse; margin-top: 22px; font-size: 13px; }
-  fit-view table.fit th, fit-view table.fit td { padding: 7px 10px; text-align: right;
+  fit-view table.fit { width: 100%; border-collapse: collapse; margin-top: 22px; font-size:0.929rem; }
+  fit-view table.fit th, fit-view table.fit td { padding: calc(7px * var(--ui-density,1)) calc(10px * var(--ui-density,1)); text-align: right;
                                border-bottom: 1px solid var(--line); }
-  fit-view table.fit th { color: var(--muted); font-size: 11px; text-transform: uppercase;
+  fit-view table.fit th { color: var(--muted); font-size:0.786rem; text-transform: uppercase;
                  letter-spacing: .06em; font-weight: 600; }
   fit-view table.fit th:first-child, fit-view table.fit td:first-child { text-align: left; }
   fit-view table.fit td { font-family: var(--mono); }
   fit-view table.fit tbody tr.hot { background: color-mix(in srgb, var(--accent) 12%, transparent); }
   fit-view table.fit tbody tr.nofit td { color: var(--dim); }
-  fit-view table.fit td.name { display: flex; align-items: center; gap: 7px; font-size: 12px; }
+  fit-view table.fit td.name { display: flex; align-items: center; gap: 7px; font-size:0.857rem; }
   fit-view table.fit .bad { color: var(--bad); }
   fit-view .stats { display: grid; gap: 12px; margin-top: 18px;
            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
   fit-view .stat { background: var(--bg-raised); border: 1px solid var(--line); border-radius: 9px;
-          padding: 10px 12px; display: block; }
-  fit-view .stat .cap { color: var(--muted); font-size: 11px; text-transform: uppercase;
+          padding: calc(10px * var(--ui-density,1)) calc(12px * var(--ui-density,1)); display: block; }
+  fit-view .stat .cap { color: var(--muted); font-size:0.786rem; text-transform: uppercase;
                letter-spacing: .07em; }
-  fit-view .stat .big { font-family: var(--mono); font-size: 19px; margin-top: 3px; }
-  fit-view .stat .sub { color: var(--dim); font-size: 11px; margin-top: 2px; }
+  fit-view .stat .big { font-family: var(--mono); font-size:1.357rem; margin-top: 3px; }
+  fit-view .stat .sub { color: var(--dim); font-size:0.786rem; margin-top: 2px; }
   fit-view .ctl button.go {
     background: var(--bg-sunken); color: var(--text); border: 1px solid var(--line-bright);
-    border-radius: 7px; padding: 5px 12px; font: inherit; cursor: pointer;
+    border-radius: 7px; padding: calc(5px * var(--ui-density,1)) calc(12px * var(--ui-density,1)); font: inherit; cursor: pointer;
   }
   fit-view .ctl input[type=text] {
     background: var(--bg-sunken); color: var(--text); border: 1px solid var(--line-bright);
-    border-radius: 7px; padding: 5px 7px; font: inherit; width: 100%;
+    border-radius: 7px; padding: calc(5px * var(--ui-density,1)) calc(7px * var(--ui-density,1)); font: inherit; width: 100%;
   }
-  fit-view .note { color: var(--dim); font-size: 12px; margin-top: 14px; max-width: 82ch; }
-  fit-view .empty { color: var(--muted); padding: 40px 0; }
+  fit-view .note { color: var(--dim); font-size:0.857rem; margin-top: 14px; max-width: 82ch; }
+  fit-view .empty { color: var(--muted); padding: calc(40px * var(--ui-density,1)) 0; }
 </style>
 <template>
   <div id="fit" hidden>

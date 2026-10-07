@@ -1,33 +1,33 @@
 <!-- settings-view: what this machine does, what it can train with, and taking it off again -->
 <style>
 settings-view { display:contents; }
-settings-view #settings { padding:28px 32px; max-width:1320px; width:100%; }
+settings-view #settings { padding:calc(28px * var(--ui-density,1)) calc(32px * var(--ui-density,1)); max-width:1320px; width:100%; }
 settings-view .settings-heading { display:flex; align-items:center; gap:16px; margin-bottom:24px; }
 settings-view .settings-heading h1 { margin:0; }
 settings-view .settings-heading p { margin:6px 0 0; }
-settings-view .settings-icon { display:grid; place-items:center; width:52px; height:52px; background:var(--poolside-pink); color:var(--poolside-navy); border-radius:16px; font-size:28px; }
+settings-view .settings-icon { display:grid; place-items:center; width:52px; height:52px; background:var(--poolside-pink); color:var(--poolside-pink-ink,var(--poolside-navy)); border-radius:16px; font-size:2.000rem; }
 settings-view .settings-layout { display:grid; grid-template-columns:220px minmax(0,1fr); gap:32px; }
 settings-view .settings-sections { display:flex; flex-direction:column; gap:5px; align-self:start; }
-settings-view .settings-sections button { margin:0; text-align:left; background:transparent; color:var(--text); border:0; padding:13px 15px; border-radius:10px; font-weight:500; }
-settings-view .settings-sections button[aria-selected="true"] { background:var(--poolside-navy); color:white; }
+settings-view .settings-sections button { margin:0; text-align:left; background:transparent; color:var(--text); border:0; padding:calc(13px * var(--ui-density,1)) calc(15px * var(--ui-density,1)); border-radius:10px; font-weight:500; }
+settings-view .settings-sections button[aria-selected="true"] { background:var(--poolside-navy); color:var(--poolside-navy-ink,#fff); }
 settings-view .settings-content { min-width:0; }
-settings-view .settings-pane { border:1px solid var(--line); background:var(--bg-raised,#fff); border-radius:18px; padding:26px; }
+settings-view .settings-pane { border:1px solid var(--line); background:var(--bg-raised); border-radius:18px; padding:calc(26px * var(--ui-density,1)); }
 settings-view .settings-pane[hidden] { display:none; }
 settings-view .settings-pane > header { border-bottom:1px solid var(--line); padding-bottom:18px; margin-bottom:22px; }
-settings-view .settings-pane > header h2 { font-size:23px; margin:0 0 8px; }
+settings-view .settings-pane > header h2 { font-size:1.643rem; margin:0 0 8px; }
 settings-view .settings-pane .group { border:0; border-radius:0; padding:0; margin:0 0 24px; background:transparent; }
 settings-view .settings-pane .group:last-child { margin-bottom:0; }
-settings-view .settings-pane h3 { font-size:15px; margin:22px 0 12px; }
-settings-view .settings-pane .opt { padding:12px; border:1px solid var(--line); border-radius:10px; margin-bottom:8px; }
+settings-view .settings-pane h3 { font-size:1.071rem; margin:22px 0 12px; }
+settings-view .settings-pane .opt { padding:calc(12px * var(--ui-density,1)); border:1px solid var(--line); border-radius:10px; margin-bottom:8px; }
 settings-view .settings-toolbar { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin:16px 0; }
 settings-view .settings-toolbar button { width:auto; margin:0; }
 settings-view .settings-footer { display:flex; align-items:center; gap:18px; margin-top:20px; }
-settings-view #settings-save { width:auto; min-width:150px; margin:0; background:var(--poolside-pink); color:var(--poolside-navy); }
+settings-view #settings-save { width:auto; min-width:150px; margin:0; background:var(--poolside-pink); color:var(--poolside-pink-ink,var(--poolside-navy)); }
 settings-view #settings-note { min-height:24px; }
-settings-view .library-kind { display:inline-block; font-size:11px; border:1px solid var(--line); border-radius:20px; padding:2px 8px; margin:4px 8px; }
+settings-view .library-kind { display:inline-block; font-size:0.786rem; border:1px solid var(--line); border-radius:20px; padding:calc(2px * var(--ui-density,1)) calc(8px * var(--ui-density,1)); margin:4px 8px; }
 settings-view [aria-busy="true"] { opacity:.8; }
 settings-view #settings-removal { border-top:1px solid var(--line); padding-top:24px; }
-@media(max-width:760px) { settings-view #settings { padding:20px; } settings-view .settings-layout { grid-template-columns:1fr; gap:16px; } settings-view .settings-sections { flex-direction:row; overflow:auto; } settings-view .settings-sections button { white-space:nowrap; } settings-view .settings-pane { padding:20px; } }
+@media(max-width:760px) { settings-view #settings { padding:calc(20px * var(--ui-density,1)); } settings-view .settings-layout { grid-template-columns:1fr; gap:16px; } settings-view .settings-sections { flex-direction:row; overflow:auto; } settings-view .settings-sections button { white-space:nowrap; } settings-view .settings-pane { padding:calc(20px * var(--ui-density,1)); } }
 </style>
 <template>
   <main id="settings" hidden>

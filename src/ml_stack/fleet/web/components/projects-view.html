@@ -1,21 +1,21 @@
 <style>
 projects-view { display:contents; }
-projects-view #projects { padding:28px 32px; max-width:1500px; width:100%; }
+projects-view #projects { padding:calc(28px * var(--ui-density,1)) calc(32px * var(--ui-density,1)); max-width:1500px; width:100%; }
 projects-view .project-heading { display:flex; justify-content:space-between; align-items:center; gap:20px; margin-bottom:24px; }
 projects-view .project-heading h1 { margin:0 0 8px; } projects-view .project-heading p { margin:0; }
-projects-view .project-heading .project-count { background:var(--poolside-yellow); color:var(--poolside-navy); padding:14px 18px; border-radius:12px; font-weight:600; }
+projects-view .project-heading .project-count { background:var(--poolside-yellow); color:var(--poolside-yellow-ink,var(--poolside-navy)); padding:calc(14px * var(--ui-density,1)) calc(18px * var(--ui-density,1)); border-radius:12px; font-weight:600; }
 projects-view .project-layout { display:grid; grid-template-columns:300px minmax(0,1fr); gap:24px; align-items:start; }
-projects-view .panel { background:var(--bg-raised); border:1px solid var(--line); border-radius:16px; padding:22px; margin:0 0 18px; }
-projects-view .panel h2 { margin-top:0; font-size:18px; }
-projects-view #project-list .model-row { display:block; padding:14px 0; border-bottom:1px solid var(--line); }
+projects-view .panel { background:var(--bg-raised); border:1px solid var(--line); border-radius:16px; padding:calc(22px * var(--ui-density,1)); margin:0 0 18px; }
+projects-view .panel h2 { margin-top:0; font-size:1.286rem; }
+projects-view #project-list .model-row { display:block; padding:calc(14px * var(--ui-density,1)) 0; border-bottom:1px solid var(--line); }
 projects-view #project-list button { margin:10px 0 0; width:100%; }
 projects-view #project-board { min-height:400px; }
-projects-view .project-message { padding:14px 0; border-top:1px solid var(--line); }
-projects-view #project-agents p { border:1px solid var(--line); padding:12px; border-radius:10px; }
-projects-view .project-access-settings { margin:24px 0; padding:16px; border:1px solid var(--line); border-radius:12px; }
+projects-view .project-message { padding:calc(14px * var(--ui-density,1)) 0; border-top:1px solid var(--line); }
+projects-view #project-agents p { border:1px solid var(--line); padding:calc(12px * var(--ui-density,1)); border-radius:10px; }
+projects-view .project-access-settings { margin:24px 0; padding:calc(16px * var(--ui-density,1)); border:1px solid var(--line); border-radius:12px; }
 projects-view .project-access-settings summary { cursor:pointer; font-weight:600; }
 projects-view #project-command { white-space:pre-wrap; overflow-wrap:anywhere; }
-@media(max-width:900px) { projects-view .project-layout { grid-template-columns:1fr; } projects-view #projects { padding:20px; } }
+@media(max-width:900px) { projects-view .project-layout { grid-template-columns:1fr; } projects-view #projects { padding:calc(20px * var(--ui-density,1)); } }
 </style>
 <template>
   <main id="projects" class="settingsmain" hidden>

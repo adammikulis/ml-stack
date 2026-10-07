@@ -1,37 +1,37 @@
 <style>
 cluster-view { display:contents; }
-cluster-view #cluster { padding:28px 32px; max-width:1500px; width:100%; }
-cluster-view .pool-hero { display:flex; align-items:center; justify-content:space-between; gap:24px; padding:26px; background:var(--poolside-cyan); color:var(--poolside-navy); border-radius:18px; margin-bottom:24px; }
-cluster-view .pool-hero h1 { margin:0 0 8px; font-size:30px; } cluster-view .pool-hero p { margin:0; color:inherit; }
-cluster-view .pool-hero .pool-emblem { font-size:48px; font-weight:800; letter-spacing:-5px; }
+cluster-view #cluster { padding:calc(28px * var(--ui-density,1)) calc(32px * var(--ui-density,1)); max-width:1500px; width:100%; }
+cluster-view .pool-hero { display:flex; align-items:center; justify-content:space-between; gap:24px; padding:calc(26px * var(--ui-density,1)); background:var(--poolside-cyan); color:var(--poolside-cyan-ink,var(--poolside-navy)); border-radius:18px; margin-bottom:24px; }
+cluster-view .pool-hero h1 { margin:0 0 8px; font-size:2.143rem; } cluster-view .pool-hero p { margin:0; color:inherit; }
+cluster-view .pool-hero .pool-emblem { font-size:3.429rem; font-weight:800; letter-spacing:-5px; }
 cluster-view #cluster-stat { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin-bottom:24px; }
-cluster-view #cluster-stat > div { background:var(--bg-raised); border:1px solid var(--line); padding:18px; border-radius:12px; }
-cluster-view #cluster-stat .n { font-size:26px; } cluster-view #cluster-stat .k { color:var(--muted); font-size:12px; margin-top:5px; }
+cluster-view #cluster-stat > div { background:var(--bg-raised); border:1px solid var(--line); padding:calc(18px * var(--ui-density,1)); border-radius:12px; }
+cluster-view #cluster-stat .n { font-size:1.857rem; } cluster-view #cluster-stat .k { color:var(--muted); font-size:0.857rem; margin-top:5px; }
 cluster-view .pool-layout { display:grid; grid-template-columns:minmax(0,1fr) 320px; align-items:start; gap:24px; }
 cluster-view .pool-device-heading { display:flex; align-items:center; justify-content:space-between; margin-bottom:18px; }
 cluster-view .pool-device-heading h2 { margin:0; }
 cluster-view #cluster-cards .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:16px; }
-cluster-view .peer { border:1px solid var(--line); border-radius:16px; background:var(--bg-raised); padding:22px; min-width:0; }
+cluster-view .peer { border:1px solid var(--line); border-radius:16px; background:var(--bg-raised); padding:calc(22px * var(--ui-density,1)); min-width:0; }
 cluster-view .peer.self { border-top:4px solid var(--poolside-cyan); }
-cluster-view .peer .name { font-size:17px; font-weight:700; }
-cluster-view .peer .url { font-size:11px; color:var(--muted); margin-top:5px; }
-cluster-view .peer .loaded-models { padding:14px 0; margin:14px 0; border-top:1px solid var(--line); border-bottom:1px solid var(--line); }
-cluster-view .peer .loaded-models h3 { font-size:12px; margin:0 0 8px; }
-cluster-view .pool-control { background:var(--bg-raised); border:1px solid var(--line); border-radius:16px; padding:22px; }
+cluster-view .peer .name { font-size:1.214rem; font-weight:700; }
+cluster-view .peer .url { font-size:0.786rem; color:var(--muted); margin-top:5px; }
+cluster-view .peer .loaded-models { padding:calc(14px * var(--ui-density,1)) 0; margin:14px 0; border-top:1px solid var(--line); border-bottom:1px solid var(--line); }
+cluster-view .peer .loaded-models h3 { font-size:0.857rem; margin:0 0 8px; }
+cluster-view .pool-control { background:var(--bg-raised); border:1px solid var(--line); border-radius:16px; padding:calc(22px * var(--ui-density,1)); }
 cluster-view #cluster-pause { margin:0; padding:0; border:0; }
-cluster-view #cluster-pause h2 { margin-top:0; font-size:17px; }
+cluster-view #cluster-pause h2 { margin-top:0; font-size:1.214rem; }
 cluster-view #cluster-pause .searchrow { display:flex; flex-wrap:wrap; gap:8px; margin-top:16px; }
 cluster-view #cluster-pause input,cluster-view #cluster-pause select { width:100%; min-width:0; }
 cluster-view .pool-config { margin-top:22px; padding-top:20px; border-top:1px solid var(--line); }
 cluster-view .pool-config button { width:100%; margin-top:14px; }
-cluster-view .pool-jobs { margin-top:24px; background:var(--bg-raised); border:1px solid var(--line); border-radius:16px; padding:22px; }
+cluster-view .pool-jobs { margin-top:24px; background:var(--bg-raised); border:1px solid var(--line); border-radius:16px; padding:calc(22px * var(--ui-density,1)); }
 cluster-view .pool-jobs > h2 { margin-top:0; }
 cluster-view .pool-jobs workspace-jobs > h2 { display:none; }
-cluster-view .pool-connections { margin:24px 0; border:1px solid var(--line); border-radius:12px; padding:18px; background:var(--bg-raised); }
+cluster-view .pool-connections { margin:24px 0; border:1px solid var(--line); border-radius:12px; padding:calc(18px * var(--ui-density,1)); background:var(--bg-raised); }
 cluster-view .pool-connections summary { cursor:pointer; font-weight:600; }
 cluster-view .url,cluster-view .name,cluster-view .loaded-models { overflow-wrap:anywhere; }
 @media(max-width:1000px) { cluster-view .pool-layout { grid-template-columns:1fr; } }
-@media(max-width:600px) { cluster-view #cluster { padding:20px; } cluster-view #cluster-stat { grid-template-columns:repeat(2,1fr); } cluster-view .pool-hero { padding:20px; } cluster-view .pool-emblem { display:none; } cluster-view .stat { flex-wrap:wrap; } }
+@media(max-width:600px) { cluster-view #cluster { padding:calc(20px * var(--ui-density,1)); } cluster-view #cluster-stat { grid-template-columns:repeat(2,1fr); } cluster-view .pool-hero { padding:calc(20px * var(--ui-density,1)); } cluster-view .pool-emblem { display:none; } cluster-view .stat { flex-wrap:wrap; } }
 </style>
 <!-- cluster-view: the machines on this network, the clusters this one is in, and a sweep across them -->
 <template>
