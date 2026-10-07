@@ -427,8 +427,9 @@ note = "raising the GPU wiring limit is person-only: agent processes, tokens, fo
 
 # -- the Board ------------------------------------------------------------------------------
 [[group]]
-match = ["parser:workspace/fleet_routes.py", "route:workspace/fleet_routes.py:*"]
+match = ["parser:workspace/boardroute.py"]
 status = "covered"
+count = 1
 tests = [
   "tests/test_fleet_board_routes.py::test_local_person_posts_dm_and_thread_without_exposing_credentials",
   "tests/test_fleet_board_routes.py::test_joined_session_is_required_before_owner_identity_is_used",
@@ -437,15 +438,14 @@ tests = [
   "tests/test_fleet_board_routes.py::test_page_cannot_post_announcements_or_use_agent_owner_file",
   "tests/test_fleet_board_routes.py::test_oversized_post_and_unsupported_methods_do_not_mutate",
   "tests/test_fleet_board_routes.py::test_ack_marks_only_an_existing_visible_message_in_its_scope",
-]
-note = "Fleet delegates to maintained person-only Board routes after its existing UI authorization; foreign origins, missing UI header, malformed bodies, impersonation fields, oversized requests and agent owner credentials cannot send"
-
-[[group]]
-match = ["egress:workspace/boardroute.py:*", "listener:workspace/cli.py:_board_serve",
-         "parser:workspace/boardroute.py", "human:workspace/boardapi.py:*",
-         "human:workspace/service.py:Workspace.mint"]
-status = "covered"
-tests = [
+  "tests/test_project_board_ui.py::test_selected_canonical_project_messages_and_person_post",
+  "tests/test_project_board_ui.py::test_canonical_person_board_rejects_foreign_requests",
+  "tests/test_project_board_ui.py::test_missing_remote_or_unconfigured_project_never_falls_back",
+  "tests/test_project_board_ui.py::test_person_identity_is_required_and_never_created",
+  "tests/test_project_board_ui.py::test_canonical_person_board_refuses_unsupported_methods",
+  "tests/test_project_board_ui.py::test_canonical_person_threads_direct_messages_and_ack",
+  "tests/test_project_board_ui.py::test_canonical_person_post_accepts_exact_browser_origin",
+  "tests/test_project_board_ui.py::test_canonical_person_post_rejects_different_browser_origin",
   "tests/test_redteam_board.py::test_the_route_never_writes_and_refuses_other_hosts_sites_and_traversal",
   "tests/test_redteam_board.py::test_an_agent_cannot_read_another_board_or_pair_through_any_command",
   "tests/test_redteam_board.py::test_boards_and_subscriptions_cannot_be_made_without_limit",
@@ -458,7 +458,7 @@ tests = [
   "tests/test_workspace_model.py::test_a_hostile_model_or_harness_is_refused_everywhere",
   "tests/test_redteam_board.py::test_following_and_the_live_route_give_an_agent_nothing_it_could_not_already_read",
 ]
-note = "the loopback route (reads, and one person-only post), live follow and chat, board and conversation privacy, board and subscription caps, quiet defaults, a person's board membership"
+note = "Fleet and exact registered local canonical projects delegate to the maintained person-only Board parser; HTTP and HTTPS exact browser origins, membership, visible acknowledgements, malformed and oversized bodies, missing UI authority, foreign projects and agent owner credentials are exercised without identity creation"
 
 [[group]]
 match = ["route:fleet/api.py:/companion/*", "route:fleet/companion_routes.py:/companion/*",
