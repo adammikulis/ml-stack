@@ -69,6 +69,8 @@ def _prepare_runtime(monkeypatch, tmp_path, *, installed="", returncode=0):
                                "bwrap": "/usr/bin/bwrap", "home": "/home/test"})
         if args[0] == "python3":
             return "1"
+        if args[0] == "printenv":
+            return "/usr/bin:/bin"
         if args[0] == "wslpath":
             return "/tmp/wheel path; $(touch injected) `touch injected`.whl"
         if len(args) > 2 and args[2] == wsl._CACHE_RUNTIME:
@@ -93,10 +95,10 @@ def _prepare_runtime(monkeypatch, tmp_path, *, installed="", returncode=0):
 def test_wsl_installer_uses_cached_wheel_without_source_checkout(monkeypatch, tmp_path):
     _, calls, _ = _prepare_runtime(monkeypatch, tmp_path)
     assert wsl.prepare().endswith("/bin/python")
-    assert len(calls) == 3
+    assert len(calls) == 4
     argv, kwargs = calls[1]
     assert argv[-1].startswith("/tmp/wheel path; $(touch injected) `touch injected`.whl[")
-    assert "agents" in argv[-1].partition("[")[2].rstrip("]").split(",")
+    assert {"agents", "pi"} <= set(argv[-1].partition("[")[2].rstrip("]").split(","))
     assert "--upgrade" in argv
     assert "-e" not in argv
     assert not kwargs.get("shell")
@@ -108,6 +110,12 @@ def test_wsl_installer_uses_cached_wheel_without_source_checkout(monkeypatch, tm
     assert "--no-deps" in calls[2][0]
     assert "--no-index" in calls[2][0]
     assert "/ml-stack-wheels/" in calls[2][0][-1]
+    npm_argv, npm_kwargs = calls[3]
+    assert "PATH=/home/test/.local/share/ml-stack/runtime/bin:/usr/bin:/bin" in npm_argv
+    assert npm_argv[-6:] == ["/home/test/.local/share/ml-stack/runtime/bin/npm", "install", "--global",
+                             "--prefix", "/home/test/.local/share/ml-stack/runtime",
+                             "@earendil-works/pi-coding-agent"]
+    assert npm_kwargs["capture_output"]
 
 
 def test_wsl_runtime_reuses_matching_install_and_refreshes_changed_revision(monkeypatch, tmp_path):
@@ -119,7 +127,7 @@ def test_wsl_runtime_reuses_matching_install_and_refreshes_changed_revision(monk
     assert not calls
     wheel.write_bytes(b"committed runtime two")
     wsl.prepare()
-    assert len(calls) == 3
+    assert len(calls) == 4
     assert reads[-1][-1] != marker
 
 
@@ -167,6 +175,27 @@ def test_wsl_runtime_cache_preserves_revision_and_translates_source(tmp_path, ha
     assert wheel.read_bytes() == original
 
 
+def test_wsl_failed_pi_install_reports_error_without_success_marker(monkeypatch, tmp_path):
+    _, calls, reads = _prepare_runtime(monkeypatch, tmp_path)
+
+    def install(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return subprocess.CompletedProcess(argv, int(len(calls) == 4), "", "npm package error")
+
+    monkeypatch.setattr(wsl.subprocess, "run", install)
+    with pytest.raises(wsl.WSLError, match="Pi coding-agent installation did not complete: npm package error"):
+        wsl.prepare()
+    assert not any("write_text" in arg for args in reads for arg in args)
+
+
+def test_pi_runtime_extra_provides_pinned_node():
+    import tomllib
+
+    project = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    extras = tomllib.loads(project.read_text(encoding="utf-8"))["project"]["optional-dependencies"]
+    assert extras["pi"] == ["nodejs-wheel==24.19.0"]
+
+
 def test_wsl_failed_cache_does_not_record_marker(monkeypatch, tmp_path):
     _, _, reads = _prepare_runtime(monkeypatch, tmp_path)
     read = wsl._read
@@ -210,7 +239,8 @@ def test_wsl_start_preserves_service_setup_and_closes_owned_resources(monkeypatc
     def unexpected_process(*args, **kwargs):
         pytest.fail("WSL launch managed another process")
 
-    monkeypatch.setattr(wsl, "_read", lambda *args: "/mnt/c/runtime/python.exe")
+    monkeypatch.setattr(wsl, "_read", lambda *args: "/usr/bin:/bin" if args[0] == "printenv"
+                        else "/mnt/c/runtime/python.exe")
     monkeypatch.setattr(wsl, "_bridge", lambda *args: bridge)
     monkeypatch.setattr(wsl, "command", lambda *args: ["wsl.exe", "--exec", *args])
     monkeypatch.setattr(wsl, "launch", owned_launch)
@@ -222,6 +252,7 @@ def test_wsl_start_preserves_service_setup_and_closes_owned_resources(monkeypatc
     assert len(launches) == 1
     argv, kwargs = launches[0]
     assert argv[-len(arguments):] == arguments
+    assert "PATH=/home/test/runtime/bin:/usr/bin:/bin" in argv
     assert wsl.wsl_network.ENV + "=bridge-config" in argv
     assert kwargs == {"stdin": subprocess.PIPE}
     assert events == [("wait", {}, False), "pipe-close",

@@ -84,7 +84,7 @@ print(json.dumps(dict(kernel=platform.release(), python=list(sys.version_info[:2
     if ready != "1":
         say("Preparing ml-stack's Linux runtime in Ubuntu.")
         _read("python3", "-m", "venv", runtime)
-    extras = "agents,graph,store,web,hub,memory,plot,fleet-tls,fleet-update,fleet-onboard"
+    extras = "agents,pi,graph,store,web,hub,memory,plot,fleet-tls,fleet-update,fleet-onboard"
     fingerprint = hashlib.sha256((wheel_digest + "\n" + extras + "\n" + linux_source + "\ncache-v1\n").encode()).hexdigest()
     marker = runtime + "/ml-stack-install"
     installed = _read(python, "-c", "import pathlib,sys; p=pathlib.Path(sys.argv[1]); "
@@ -104,6 +104,14 @@ print(json.dumps(dict(kernel=platform.release(), python=list(sys.version_info[:2
                                       "--force-reinstall", "--no-deps", "--no-index", cached))
         if done.returncode:
             raise WSLError("The ml-stack Linux runtime installation did not complete.")
+        linux_path = _read("printenv", "PATH")
+        done = subprocess.run(command("env", "PATH=" + runtime + "/bin:" + linux_path,
+                                      runtime + "/bin/npm", "install", "--global", "--prefix", runtime,
+                                      "@earendil-works/pi-coding-agent"),
+                              capture_output=True, text=True, encoding="utf-8")
+        if done.returncode:
+            detail = ((done.stderr or done.stdout) or "").strip()[-2000:]
+            raise WSLError("The Pi coding-agent installation did not complete: " + detail)
         _read(python, "-c", "import pathlib,sys; pathlib.Path(sys.argv[1]).write_text(sys.argv[2])",
               marker, fingerprint)
     return python
@@ -134,7 +142,9 @@ def start(argv: list[str], *, executable: str | None = None) -> int:
     executable = executable or prepare()
     arguments = list(argv)
     host_python = _read("wslpath", "-a", "-u", sys.executable)
-    environment = ["ML_STACK_SANDBOX_SERVE=1", "ML_STACK_WINDOWS_PYTHON=" + host_python]
+    linux_path = _read("printenv", "PATH")
+    environment = ["PATH=" + executable.rsplit("/", 1)[0] + ":" + linux_path,
+                   "ML_STACK_SANDBOX_SERVE=1", "ML_STACK_WINDOWS_PYTHON=" + host_python]
     for name in ("ML_STACK_HOME", "ML_STACK_CACHE"):
         if value := os.environ.get(name):
             translated = _read("wslpath", "-a", "-u", str(Path(value).resolve()))
