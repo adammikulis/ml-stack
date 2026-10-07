@@ -32,6 +32,7 @@ from .extension_routes import ExtensionRoutes
 from .gym_recording_routes import GymRecordingRoutes
 from .gym_routes import GymRoutes
 from .initial_setup_routes import InitialSetupRoutes
+from .knowledge_routes import KnowledgeRoutes
 from .launch_routes import LaunchRoutes
 from .onboard.clusters import known_clusters
 from .onboard.joining import JoinOptions, cluster_action, join_by_passphrase
@@ -832,7 +833,7 @@ class JobRoutes:
 
 class Router(InitialSetupRoutes, PageRoutes, SetupRecoveryRoutes, SetupRoutes, SessionRoutes, MeasureRoutes, SettingsRoutes,
              ProjectBoardRoutes, RoomRoutes, ModelRoutes, ChatRoutes, UpdateRoutes, ClusterRoutes, JobRoutes,
-             WorkspaceRoutes, GymRecordingRoutes, GymRoutes, LaunchRoutes, ExtensionRoutes, Base):
+             KnowledgeRoutes, WorkspaceRoutes, GymRecordingRoutes, GymRoutes, LaunchRoutes, ExtensionRoutes, Base):
     """Every screen's routes, in the order a request meets them."""
 
     def run(self) -> bool:
