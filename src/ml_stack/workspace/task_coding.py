@@ -56,7 +56,8 @@ class TaskManager(Manager):
             self.calls += sum(isinstance(block, dict) and block.get('type') == 'tool_use'
                               for block in row.get('message', {}).get('content', []))
             caps = localloop.caps_of(self.agent)
-            if self.steps > caps.steps or self.calls > caps.calls:
+            if ((caps.steps is not None and self.steps > caps.steps)
+                    or (caps.calls is not None and self.calls > caps.calls)):
                 raise RuntimeError('Native task model or tool call limit reached')
         super()._event(turn, row, harness)
         if harness == 'claude' and row.get('type') == 'user':
@@ -76,8 +77,9 @@ class TaskManager(Manager):
             return super()._process(turn, command, environment, context)
         caps = localloop.caps_of(self.agent)
         command = [*command, '--system-prompt', BOOTSTRAP,
-                   '--tools', 'Read,Edit,Write,Bash,Glob,Grep,Agent',
-                   '--max-turns', str(caps.rounds)]
+                   '--tools', 'Read,Edit,Write,Bash,Glob,Grep,Agent']
+        if caps.rounds is not None:
+            command += ['--max-turns', str(caps.rounds)]
         counter = context[0] / 'task-tool-calls.json'
         counter.write_text(json.dumps({'version': 1, 'calls': 0, 'limit': caps.calls}), encoding='utf-8')
         setting_index = command.index('--settings') + 1

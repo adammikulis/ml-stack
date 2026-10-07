@@ -12,9 +12,10 @@ def admit(path):
     with held(path.with_suffix('.lock')):
         state = json.loads(path.read_text(encoding='utf-8'))
         if (state.get('version') != 1 or type(state.get('calls')) is not int
-                or type(state.get('limit')) is not int or state['calls'] < 0 or state['limit'] <= 0):
+                or state['calls'] < 0 or (state.get('limit') is not None and
+                    (type(state['limit']) is not int or state['limit'] <= 0))):
             raise ValueError('invalid native tool admission counter')
-        if state['calls'] >= state['limit']:
+        if state['limit'] is not None and state['calls'] >= state['limit']:
             return False
         state['calls'] += 1
         path.write_text(json.dumps(state), encoding='utf-8')

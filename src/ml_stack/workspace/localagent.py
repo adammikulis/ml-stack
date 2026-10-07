@@ -101,7 +101,7 @@ class Agent:
     process_started: float = 0.0
     log: str = ""
     extra: dict[str, Any] = field(default_factory=dict)
-    max_output_tokens: int = 8192
+    max_output_tokens: int | None = None
 
     def as_dict(self) -> dict[str, Any]:
         out = asdict(self)
@@ -143,6 +143,8 @@ def load(ws: Workspace, name: str) -> Agent | None:
         return None
     fields = {k: row[k] for k in Agent.__dataclass_fields__ if k in row}
     fields["orders_from"] = tuple(str(n) for n in fields.get("orders_from", ()))
+    if fields.get("max_output_tokens") == 8192 and not fields.get("extra", {}).get("explicit_output_limit"):
+        fields["max_output_tokens"] = None
     return Agent(**fields)
 
 

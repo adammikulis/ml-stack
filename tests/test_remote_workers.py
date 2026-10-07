@@ -509,3 +509,13 @@ def test_tls_worker_normalizes_model_claim_and_preserves_full_runtime_reference(
     again = state.target._request('worker', {**state.body, 'model': ref})
     assert again['already'] and again['identity'] == result['identity']
     assert len(state.spawned) == 1
+
+
+def test_remote_none_and_large_explicit_task_limits_preserve_shape():
+    from ml_stack.workspace import remote_workers
+    body = {"cluster": "dev", "cluster_id": "id", "max_output_tokens": None,
+            "task_caps": {"seconds": 200000, "rounds": None}}
+    assert remote_workers._settings(body, ("dev", "id")) == "local-qwen"
+    for caps in ({"calls": True}, {"seconds": float("inf")}, {"unknown": None}):
+        with pytest.raises(ValueError):
+            remote_workers._settings({**body, "task_caps": caps}, ("dev", "id"))

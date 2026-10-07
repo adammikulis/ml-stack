@@ -75,7 +75,11 @@ class MlAgents extends MlElement {
       value: "chat" });
     this.profile.options = [{value:"chat",label:"Chat"},{value:"coding",label:"Coding"}];
     this.contextField = h("input", { type:"text", id:"context", value:"32K" });
-    this.outputField = h("input", { type:"number", id:"output-tokens", min:"1", step:"1", required:"", value:"8192" });
+    this.outputField = h("input", { type:"number", id:"output-tokens", min:"1", step:"1", placeholder:"None", value:"" });
+    this.capFields = Object.fromEntries(["rounds", "calls", "steps", "seconds"].map(key => [key,
+      h("input", {type:"number", id:`task-${key}`, min:"1", step:key === "seconds" ? "any" : "1", placeholder:"None"})]));
+    this.limitNote = h("p", {class:"note"});
+    for (const field of [this.outputField, ...Object.values(this.capFields)]) field.addEventListener("input", () => this.update());
     this.harness = h("ml-select", { label:"Harness", value:"ml-stack-agent" });
     this.profile.addEventListener("change", event => { if (event.detail?.value) { this.contextField.value = event.detail.value === "coding" ? "256K" : "32K"; this.update(); } });
     this.ceiling = h("ml-select", { label: "Maximum reasoning effort", hint: "It can raise its own effort up to this",
@@ -95,7 +99,10 @@ class MlAgents extends MlElement {
         h("details", {}, h("summary", {}, "Advanced options"),
           h("div", {class:"grid"}, h("div", {}, h("label", {for:"model"}, "Exact model path or reference (auto selects for the kind of work)"), this.modelField), this.effort, this.ceiling, this.harness,
             h("div", {}, h("label", {for:"context"}, "Context length"), this.contextField),
-            h("div", {}, h("label", {for:"output-tokens"}, "Maximum output tokens (Chat and Pi coding)"), this.outputField))),
+            h("div", {}, h("label", {for:"output-tokens"}, "Maximum output tokens"), this.outputField),
+            ...Object.entries({rounds:"Task turns",calls:"Tool calls per task",steps:"Model calls per task",seconds:"Task wall time (seconds)"}).map(([key,label]) =>
+              h("div", {}, h("label", {for:`task-${key}`}, label), this.capFields[key])))),
+        this.limitNote,
         this.rolesEl, this.preview,
         h("div", { class: "row" }, this.go, this.note)),
       h("section", {}, h("h2", {}, "Running agents"), this.list));
@@ -146,7 +153,7 @@ class MlAgents extends MlElement {
         this.ceiling.options = levels.filter((l) => l.value !== "auto");
         this.effort.value = line(data.default_effort, 12);
         this.ceiling.value = line(data.default_max_effort, 12);
-        this.outputField.value = data.default_max_output_tokens ?? 8192;
+        this.outputField.value = data.default_max_output_tokens ?? "";
       }
       if (!this.settingsLoaded && this.saved.length) { this.applySettings(this.saved[0]); this.settingsLoaded = true; }
       this.failed = false;
@@ -167,14 +174,15 @@ class MlAgents extends MlElement {
 
   async start() {
     if (this.busy) return;
-    if (!this.outputField.checkValidity()) { this.say("Maximum output tokens must be a positive integer.", true); return; }
+    if ([this.outputField, ...Object.values(this.capFields)].some(field => !field.checkValidity())) { this.say("Limits must be positive numbers, or blank for None.", true); return; }
     this.busy = true;
     this.say("Starting. Loading the model can take a minute.", false);
     try {
       const got = await this.call("start", {
         model: this.modelField.value.trim() || "auto", name: this.nameField.value.trim(),
         role: this.roleControl.value, profile: this.profile.value || "chat", effort: this.effort.value || "off", max_effort: this.ceiling.value || "medium", project: this.projectField.value.trim(),
-        harness:this.harness.value, ctx:this.contextField.value.trim(), max_output_tokens:Number(this.outputField.value) });
+        harness:this.harness.value, ctx:this.contextField.value.trim(), max_output_tokens:this.outputField.value === "" ? null : Number(this.outputField.value),
+        task_caps:Object.fromEntries(Object.entries(this.capFields).map(([key, field]) => [key, field.value === "" ? null : Number(field.value)])) });
       this.say(got.already ? `${line(got.name, 48)} is already running.` : `${line(got.name, 48)} started.`, false);
     } catch (e) {
       this.say(`${line(e.message, 300)}${e.hint ? ` Run: ${line(e.hint, 200)}` : ""}`, true);
@@ -184,12 +192,14 @@ class MlAgents extends MlElement {
   }
 
   applySettings(saved) {
+    if (!saved) return;
     this.nameField.value = saved.name; this.modelField.value = saved.model;
     this.projectField.value = saved.project; this.roleControl.value = saved.role;
     this.profile.value = saved.profile; this.effort.value = saved.effort;
     this.ceiling.value = saved.max_effort; this.harness.value = saved.harness;
     this.contextField.value = String(saved.ctx);
-    this.outputField.value = saved.max_output_tokens ?? 8192;
+    this.outputField.value = saved.max_output_tokens ?? "";
+    for (const [key, field] of Object.entries(this.capFields)) field.value = saved.task_caps?.[key] ?? "";
     this.update();
   }
 
@@ -212,6 +222,10 @@ class MlAgents extends MlElement {
 
   update() {
     if (!this.list) return;
+    const effective = [`output tokens: ${this.outputField.value || "None"}`,
+      ...Object.entries(this.capFields).map(([key,field]) => `${({rounds:"turns",calls:"tool calls",steps:"model calls",seconds:"wall seconds"})[key]}: ${field.value || "None"}`)];
+    this.limitNote.textContent = `Effective limits — ${effective.join(", ")}.`
+      + (this.capFields.seconds.value === "" ? " Task wall time is None. Tasks could run indefinitely until you cancel them." : "");
     this.go.toggleAttribute("disabled", this.busy);
     this.rolesEl.replaceChildren(...this.roleList.map((r) =>
       h("li", {}, h("b", {}, line(r.name, 40)), ` ${line(r.summary, 200)}`)));
@@ -243,7 +257,7 @@ class MlAgents extends MlElement {
       h("div", { class: "meta" },
         `${line(a.model, 80)} on ${line(a.harness, 24)}, ${line(a.role, 40)}`
         + `, ${Math.round((Number(a.ctx) || 0) / 1024)}K context, effort ${line(a.effort, 12)} (ceiling ${line(a.max_effort, 12)})`
-        + `, ${Number(a.max_output_tokens) || 8192} maximum output tokens`
+        + `, ${a.max_output_tokens ?? "None"} maximum output tokens`
         + `, ${fmt(a.memory_bytes, "bytes-iec")} held, ${Number(a.tasks) || 0} tasks, ${Number(a.steps) || 0} steps`),
       h("div", { class: "meta" }, a.device?.label ? `${line(a.device.label, 128)} · ${line(a.device.verification, 24)}` : "Device not recorded"),
       a.detail ? h("div", { class: "meta" }, line(a.detail, 200)) : null,

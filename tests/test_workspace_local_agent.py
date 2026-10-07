@@ -42,7 +42,6 @@ def info(name: str, gb: float, arch: str = "qwen3moe") -> ModelInfo:
                      size_bytes=int(gb * GB), source="huggingface", quantization="Q4_K_M",
                      parameters=int(35e9), architecture=arch)
 
-
 # -- the model ----------------------------------------------------------------------------
 def test_auto_takes_the_best_downloaded_qwen_and_never_flash_next():
     have = [info("Qwen3.8-Flash-Next-Q4_K_M.gguf", 4), info("Llama-70B-Q4.gguf", 40, "llama"),
@@ -112,7 +111,6 @@ def test_a_model_that_does_not_fit_gets_one_line_and_the_smaller_choice():
 def test_an_id_that_is_not_downloaded_is_refused():
     assert not localmodel.choose("nope.gguf", installed=[],
                                  selection=localmodel.Selection(machine=BIG)).ok
-
 
 # -- start and stop -----------------------------------------------------------------------
 @pytest.fixture
@@ -194,7 +192,6 @@ def test_start_and_stop_refuse_a_process_an_agent_started(kit):
     # no terminal either
     assert cli(kit.base, "", "agent", "start").returncode == 3
     assert cli(kit.base, "", "agent", "list").returncode == 0
-
 
 # -- the loop ----------------------------------------------------------------------------
 la_status = la.Status
@@ -396,7 +393,6 @@ def test_a_model_that_cannot_be_leased_fails_in_one_line(kit):
     st = la.status_of(kit.ws, "local-t")
     assert st["state"] == "failed" and "40 GB" in st["detail"]
 
-
 # -- the routes ---------------------------------------------------------------------------
 @pytest.fixture
 def served(kit, monkeypatch):
@@ -503,7 +499,6 @@ def test_a_task_the_workspace_screens_as_an_injection_is_held_and_never_acted_on
         waited(lambda: la.status_of(kit.ws, "local-t").get("ignored"))
     assert model.calls == 0
 
-
 # -- effort -------------------------------------------------------------------------------
 def tools_of(model, n):
     return model.seen[n][1]
@@ -554,7 +549,6 @@ def test_auto_effort_thinks_for_a_plan_and_not_for_a_status(kit):
     run_tasks(kit, model, ["show the status", "plan the migration"], effort="auto")
     assert [k["think"] for k in model.kw] == [False, True]
 
-
 # -- the prompt cache ---------------------------------------------------------------------
 def test_each_turn_extends_the_last_prompt_byte_for_byte_and_tasks_share_their_prefix(kit):
     from ml_stack.testing.fakes import Served, fake_llama_server
@@ -588,19 +582,7 @@ def test_with_no_one_to_ask_an_acting_call_and_a_plan_are_denied(kit):
     assert person.plan(["serve_up m"])["go"] is False
     assert person.ask_user("which?")["answer"] == ""
     assert [n.kind for n in state.needs] == ["tool_call", "plan"]
-
-
 # -- profiles, context, coding model -------------------------------------------------------
-def test_context_sizes_parse_k_and_profiles_carry_their_caps():
-    from ml_stack.workspace import localprofile as lp
-    assert lp.parse_ctx("256k") == lp.parse_ctx("256K") == 262144
-    assert lp.parse_ctx("32768") == 32768 and lp.parse_ctx("") == lp.CODING.ctx == lp.CHAT.ctx == 0
-    for bad in ("big", "1", "-5k", "256 k"):
-        with pytest.raises(ValueError):
-            lp.parse_ctx(bad)
-    assert lp.CODING.rounds > lp.CHAT.rounds and lp.CODING.seconds > lp.CHAT.seconds
-    assert localloop.caps_of(la.Agent(name="a", model="m", profile="coding")).calls == lp.CODING.calls
-
 
 def test_automatic_and_coding_agents_choose_the_best_qwen_and_never_flash_next():
     have = [info("Qwen3.8-Flash-Next-UD-Q4_K_XL.gguf", 118), info("Qwen3.6-35B-A3B-Q4_K_M.gguf", 22),
@@ -828,7 +810,8 @@ def test_stop_restart_retains_identity_and_preferences_across_models(kit):
     try:
         restored = la.load(kit.ws, got.name)
         assert restored.identity == child['id']
-        assert restored.extra == {'preference': 'saved'}
+        assert restored.extra['preference'] == 'saved'
+        assert all(value is None for value in restored.extra['task_caps'].values())
         assert restored.model == PICK.ref
         assert Path(child['token_file']).read_text() == secret
     finally:

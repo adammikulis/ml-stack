@@ -11,6 +11,7 @@ import hmac
 import json
 import secrets
 from collections.abc import Mapping
+from dataclasses import asdict
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -22,6 +23,7 @@ from ml_stack.workspace import (
     localagent as la,
     localeffort as le,
     localharness,
+    localloop,
     localmodel,
     localprofile as lp,
     localstart as ls,
@@ -36,7 +38,7 @@ __all__ = ["COOKIE", "PREFIX", "respond", "serve", "session_ok"]
 PREFIX = "/agents/"
 COOKIE = "ml_session"
 BODY_MAX = 4096
-START_KEYS = {"model": str, "name": str, "role": str, "effort": str, "max_effort": str, "profile": str, "ctx": str, "project": str, "repo": str, "harness": str, "max_output_tokens": int}
+START_KEYS = {"model": str, "name": str, "role": str, "effort": str, "max_effort": str, "profile": str, "ctx": str, "project": str, "repo": str, "harness": str, "max_output_tokens": (int, type(None)), "task_caps": dict}
 STOP_WAIT_S = 10.0
 
 
@@ -74,9 +76,10 @@ def _model_view(*, coding: bool = False) -> dict[str, Any]:
 def _read(ws: Workspace, route: str) -> Any:
     if route == "list":
         return {"agents": ls.listing(ws), "roles": la.role_choices(), "default_role": roles.DEFAULT, "efforts": [*le.LEVELS, le.AUTO],
-                "default_effort": le.DEFAULT, "default_max_effort": le.DEFAULT_MAX, "default_max_output_tokens": 8192,
+                "default_effort": le.DEFAULT, "default_max_effort": le.DEFAULT_MAX, "default_max_output_tokens": None, "default_task_caps": {},
                 "orders_from": list(la.DEFAULT_ORDERS_FROM), "harnesses": [localharness.OWN, *coding.HARNESSES],
                 "saved": [{key: (agent.extra.get("backlog", {}).get("repo", "") if key == "repo"
+                                 else asdict(localloop.caps_of(agent)) if key == "task_caps"
                                  else getattr(agent, key)) for key in START_KEYS}
                           for name in la.names(ws) if (agent := la.load(ws, name)) is not None]}
     if route == "model":
@@ -84,7 +87,7 @@ def _read(ws: Workspace, route: str) -> Any:
     raise ValueError("no such route")
 
 
-def _typed(body: bytes, shape: Mapping[str, type]) -> dict[str, Any]:
+def _typed(body: bytes, shape: Mapping[str, Any]) -> dict[str, Any]:
     if len(body) > BODY_MAX:
         raise ValueError("the body is too large")
     data = json.loads(body or b"{}")
@@ -108,7 +111,8 @@ def _write(ws: Workspace, route: str, body: bytes) -> tuple[int, Any]:
                                       data.get("max_effort") or le.DEFAULT_MAX,
                                       profile, context,
                                       data.get("project", ""), harness=data.get("harness") or "pi",
-                                      repo=data.get("repo", ""), max_output_tokens=data.get('max_output_tokens', 8192)),
+                                      repo=data.get("repo", ""), max_output_tokens=data.get('max_output_tokens'),
+                                      task_caps=data.get('task_caps', {})),
                            authority=ls.Authority(parent_token=ls.launch_parent(ws, data.get('project', ''))))
         except ls.Unavailable as err:
             return 409, {"error": plain.line(err.problem, 300), "hint": plain.line(err.hint, 200)}

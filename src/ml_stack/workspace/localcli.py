@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import time
 from typing import Any
 
@@ -31,6 +32,26 @@ __all__ = ["ACTIONS", "OPTIONS", "run"]
 
 ACTIONS = ("start", "stop", "list", "backlog", "schedule", "supersede-issue", "resume-issue")
 READY_WAIT_S = 180.0
+
+
+def _limit(value: str) -> int | None:
+    if value.lower() == "none":
+        return None
+    amount = int(value)
+    if amount <= 0:
+        raise argparse.ArgumentTypeError("a limit must be a positive integer or none")
+    return amount
+
+
+def _seconds(value: str) -> float | None:
+    if value.lower() == "none":
+        return None
+    amount = float(value)
+    if not math.isfinite(amount) or amount <= 0:
+        raise argparse.ArgumentTypeError("task seconds must be positive and finite, or none")
+    return amount
+
+
 OPTIONS = [
     flag("action", choices=ACTIONS, help="start a local model as an agent, stop one, or list them"),
     flag("target", nargs="?", default="", metavar="NAME", help="stop: the agent to stop"),
@@ -49,8 +70,12 @@ OPTIONS = [
          help="how much the model thinks (off is fastest); auto picks per task; default: %(default)s"),
     flag("--max-effort", default=le.DEFAULT_MAX, choices=list(le.LEVELS),
          help="the most effort the model may give itself with set_effort; default: %(default)s"),
-    flag("--max-output-tokens", type=int, default=8192,
-         help="maximum generated tokens per response, independent of reasoning effort"),
+    flag("--max-output-tokens", type=_limit, default=None,
+         help="maximum generated tokens per response; default none"),
+    flag("--max-rounds", type=_limit, default=None, help="task turns; default none"),
+    flag("--max-tool-calls", type=_limit, default=None, help="tool calls per task; default none"),
+    flag("--max-model-calls", type=_limit, default=None, help="model calls per task; default none"),
+    flag("--max-task-seconds", type=_seconds, default=None, help="task wall time in seconds; default none"),
     flag("--orders-from", default=",".join(la.DEFAULT_ORDERS_FROM), metavar="NAMES",
          help="agents it takes tasks from besides the person and any lead (comma list)"),
     flag("--profile", default="coding", choices=["chat", "coding"],
@@ -93,9 +118,11 @@ def _start(args: argparse.Namespace, ws: Workspace) -> int:
         got = task_launch.start(ws, tokens.load(ws.base, args.agent), args.name or args.target, args.task)
         runner = la.load(ws, got.name)
         caps = localloop.caps_of(runner)
+        if caps.seconds is None:
+            warn("Task wall time is None. Tasks could run indefinitely until you cancel them.")
         say(f'{got.name}: {runner.model_name}; {runner.ctx} context; {runner.role}; {runner.harness}; '
             f'effort {runner.effort}, ceiling {runner.max_effort}; '
-            f'{caps.rounds} turns, {caps.calls} tool calls, {caps.steps} model calls, {caps.seconds:g}s wall time')
+            f'{caps.rounds} turns, {caps.calls} tool calls, {caps.steps} model calls, {caps.seconds} seconds wall time')
         return 0 if args.no_wait else _wait(ws, got.name, READY_WAIT_S)
     selected_profile = lp.profile(args.profile)
     selected_context = lp.parse_ctx(args.ctx) or selected_profile.ctx
@@ -108,11 +135,17 @@ def _start(args: argparse.Namespace, ws: Workspace) -> int:
         if pick.hint:
             say(f"fetch it with: {pick.hint}")
         return 1
+    if getattr(args, "max_task_seconds", None) is None:
+        warn("Task wall time is None. Tasks could run indefinitely until you cancel them.")
     say(f"model: {pick.name} ({pick.note})")
     try:
         got = ls.start(ws, ls.Ask(args.model, args.name, selected_role, args.effort, args.max_effort,
                                   args.profile, selected_context, project, la.check_orders(args.orders_from.split(",")), args.harness,
-                                  repo=args.repo, max_output_tokens=args.max_output_tokens), pick=pick,
+                                  repo=args.repo, max_output_tokens=args.max_output_tokens,
+                                  task_caps={"rounds": getattr(args, "max_rounds", None),
+                                             "calls": getattr(args, "max_tool_calls", None),
+                                             "steps": getattr(args, "max_model_calls", None),
+                                             "seconds": getattr(args, "max_task_seconds", None)}), pick=pick,
                        authority=ls.Authority(parent_token=ls.launch_parent(ws, project)))
     except ls.Unavailable as err:
         warn(str(err))

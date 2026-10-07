@@ -99,3 +99,16 @@ def test_native_cancellation_preserves_the_supervisor_cause(tmp_path, monkeypatc
         raise RuntimeError('Native coding turn cancelled or ended without an answer')
     result = task_runtime.execute(board, 'worker', 'task', 'allocation', run)
     assert result['blocked_reason'] == cause
+
+
+def test_canonical_runtime_has_no_implicit_wall_cap(tmp_path, monkeypatch):
+    board = Board(tmp_path)
+    board.task["limits"] = {"max_wall_s": None}
+    monkeypatch.setattr(task_runtime.tokens, "load", lambda *_: "token")
+    tick = iter((0, 1e9, 1e9, 1e9))
+    monkeypatch.setattr(task_runtime.time, "monotonic", lambda: next(tick, 1e9))
+    def run(task, project, stopped, checkpoint):
+        threading.Event().wait(0.1)
+        assert not stopped()
+        return {"artifacts": {"report": "a" * 64}}
+    assert "artifacts" in task_runtime.execute(board, "worker", "task", "allocation", run)

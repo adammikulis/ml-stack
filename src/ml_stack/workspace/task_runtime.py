@@ -16,7 +16,7 @@ from ml_stack.workspace.identity import Denied
 class Settings:
     stopped: Callable[[], bool] = lambda: False
     heartbeat_s: float = 20.0
-    wall_s: float = 3600.0
+    wall_s: float | None = None
 
 
 def execute(board, identity: str, task_id: str, allocation_id: str, run: Callable,
@@ -29,17 +29,18 @@ def execute(board, identity: str, task_id: str, allocation_id: str, run: Callabl
     task = board.get(token(), task_id)
     if task['state'] != 'queued':
         raise ValueError('only a queued canonical task may start')
-    seconds = min(task['limits'].get('max_wall_s', 3600), settings.wall_s)
+    limits = [value for value in (task['limits'].get('max_wall_s'), settings.wall_s) if value is not None]
+    seconds = min(limits) if limits else None
     board.claim(token(), task_id, allocation_id)
     task = board.get(token(), task_id)
     done, cancel = threading.Event(), threading.Event()
-    deadline = time.monotonic() + seconds
+    deadline = time.monotonic() + seconds if seconds is not None else None
     failure = []
 
     def supervise():
         next_heartbeat = time.monotonic()
         while not done.wait(0.05):
-            if settings.stopped() or time.monotonic() >= deadline:
+            if settings.stopped() or (deadline is not None and time.monotonic() >= deadline):
                 failure.append('Worker stopped' if settings.stopped() else 'Task wall time limit reached')
                 cancel.set()
                 return

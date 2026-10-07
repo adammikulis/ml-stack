@@ -22,14 +22,14 @@ class Profile:
 
     name: str
     ctx: int
-    rounds: int
-    calls: int
-    steps: int
-    seconds: float
+    rounds: int | None
+    calls: int | None
+    steps: int | None
+    seconds: float | None
 
 
-CHAT = Profile("chat", 0, 12, 30, 24, 600.0)
-CODING = Profile("coding", 0, 60, 150, 120, 3600.0)
+CHAT = Profile("chat", 0, None, None, None, None)
+CODING = Profile("coding", 0, None, None, None, None)
 PROFILES = {p.name: p for p in (CHAT, CODING)}
 
 

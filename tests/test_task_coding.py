@@ -30,7 +30,7 @@ def test_native_turn_and_output_limits_preserve_authority(monkeypatch, native):
     manager = task_coding.TaskManager(None, SimpleNamespace(base=None), agent)
     command, context = native
     manager._process(None, [*command, '--print'], {'AUTHORITY': 'unchanged'}, context)
-    assert seen['command'][-2:] == ['--max-turns', '60']
+    assert '--max-turns' not in seen['command']
     settings = json.loads(context[0].joinpath('task-settings.json').read_text())
     hooks = settings['hooks']['PreToolUse']
     assert '--protect' in hooks[0]['hooks'][0]['command']
@@ -164,4 +164,18 @@ def test_canonical_pi_launcher_receives_independent_budget_and_clamped_effort(tm
     manager._run(task_coding.Turn(conversation.id), conversation, 'Implement a queue')
     assert seen['max_output_tokens'] == 32000
     assert seen['effort'] == 'low'
-    assert seen['max_turns'] == 60
+    assert seen['max_turns'] is None
+
+
+def test_unlimited_native_tool_counter_preserves_parser_bounds(tmp_path):
+    from ml_stack.workspace import task_caps
+    path = tmp_path / "counter.json"
+    path.write_text(json.dumps({'version': 1, 'calls': 10000, 'limit': None}))
+    assert task_caps.admit(path)
+    assert json.loads(path.read_text())["calls"] == 10001
+    path.write_text(json.dumps({'version': 1, 'calls': 0, 'limit': 2}))
+    assert task_caps.admit(path) and task_caps.admit(path)
+    assert not task_caps.admit(path)
+    path.write_text(json.dumps({'version': 1, 'calls': True, 'limit': None}))
+    with pytest.raises(ValueError):
+        task_caps.admit(path)

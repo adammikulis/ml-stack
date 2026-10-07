@@ -802,7 +802,7 @@ The complete paste binds the advertised Fleet coordinator and its workspace ID. 
 join command: its code alone cannot identify the correct authority. `--remote` refuses to create
 an invitation before hosting is active, and a workspace-bound join never falls back to a local registry.
 
-### Local Qwen on another Dev device
+### Run a Qwen model on another Dev device
 
 From your project checkout, start a worker and give it a task on a discovered device:
 
@@ -847,3 +847,15 @@ An agent report is labelled `agent-reported`; a local observation is `local-obse
 paired transport adapter may record `paired` only after checking the actual device proof.
 Missing metadata stays unknown. These labels are separate from authorization and from source
 security reputation. History shows one family credit balance and its contributing device IDs.
+
+### Task limits
+
+Agent output tokens, turns, tool calls, model calls and wall time default to **None**.
+Tasks with no limits could run indefinitely until you cancel or stop them.
+The Agents panel shows effective limits and provides optional limits under Advanced settings.
+
+For local or remote worker launches, use `--max-output-tokens`, `--max-rounds`,
+`--max-tool-calls`, `--max-model-calls` and `--max-task-seconds` to choose finite limits,
+or pass `none`. Reasoning effort and model context remain separate controls.
+The model's physical context capacity, authentication, parser and message size protections
+remain enforced. A shortened workspace reply carries a message size notice.

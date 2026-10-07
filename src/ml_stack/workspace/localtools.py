@@ -115,10 +115,10 @@ class Unattended(do.Person):
 
 @dataclass(frozen=True, slots=True)
 class Limits:
-    seconds: float
-    steps: int
+    seconds: float | None
+    steps: int | None
     context: int = 0
-    max_output_tokens: int = 0
+    max_output_tokens: int | None = None
 
 
 class Guarded:
@@ -131,14 +131,14 @@ class Guarded:
         self.ctx = limits.context
         self.max_output_tokens = limits.max_output_tokens
         self.client, self.think, self.steps, self.stop = client, le.thinks(effort), steps, stop
-        self.deadline, self.used, self.seconds = time.monotonic() + seconds, 0, seconds
+        self.deadline, self.used, self.seconds = (time.monotonic() + seconds if seconds is not None else None), 0, seconds
 
     def chat(self, messages: list[dict[str, Any]], **kwargs: Any) -> Any:
         if self.stop():
             raise TaskStopped("stopped by the person")
-        if time.monotonic() > self.deadline:
+        if self.deadline is not None and time.monotonic() > self.deadline:
             raise TaskStopped(f"over the {self.seconds:.0f} s limit for one task")
-        if self.used >= self.steps:
+        if self.steps is not None and self.used >= self.steps:
             raise TaskStopped(f"over the {self.steps}-step limit for one task")
         self.used += 1
         if self.ctx:

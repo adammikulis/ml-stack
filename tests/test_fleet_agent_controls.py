@@ -101,11 +101,21 @@ def test_person_board_controls_reuse_saved_settings_and_enroll_through_maintaine
         assert controls.get_by_text('auto uses',exact=False).count() == 0
         assert not controls.locator('details').get_attribute('open')
         assert controls.locator('input#context').input_value() == '262144'
+        assert controls.locator('input#output-tokens').input_value() == ''
+        assert controls.get_by_text('Tasks could run indefinitely', exact=False).count() == 1
+        controls.locator('details > summary').click()
+        controls.locator('input#task-seconds').fill('7200')
+        controls.locator('input#task-rounds').fill('200')
+        controls.locator('input#output-tokens').fill('32000')
+        assert controls.get_by_text('Tasks could run indefinitely', exact=False).count() == 0
         controls.get_by_role('button',name='Start a local agent',exact=True).click()
         page.wait_for_function("document.querySelector('ml-agents')?.shadowRoot?.querySelector('.note[role=status]')?.textContent.includes('started.')")
         assert len(children) == 1
         assert localagent.load(kit.ws,'local-worker').identity == worker
         assert account_for(kit.ws,worker) is not None
+        agent = localagent.load(kit.ws, 'local-worker')
+        assert agent.max_output_tokens == 32000
+        assert agent.extra['task_caps'] == {'rounds':200, 'calls':None, 'steps':None, 'seconds':7200}
     finally:
         page.close()
 

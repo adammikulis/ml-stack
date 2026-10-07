@@ -67,7 +67,8 @@ class Ask:
     harness: str = lh.PI
     authority: tuple[str, str] | None = None
     repo: str = ""
-    max_output_tokens: int = 8192
+    max_output_tokens: int | None = None
+    task_caps: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -171,6 +172,7 @@ def _start(ws: Workspace, ask: Ask, *, pick: localmodel.Pick | None = None,
     the agent already running. Raises `Unavailable` when no suitable model is downloaded or it
     would not fit, ValueError for a bad name, role or project."""
     output_tokens = _output_tokens(ask.max_output_tokens)
+    task_caps = asdict(localloop.checked_caps(ask.task_caps))
     role = roles.get(ask.role).name
     ceiling = le.valid(ask.max_effort)
     effort = le.clamp(le.valid(ask.effort, allow_auto=True), ceiling) if ask.effort != le.AUTO else le.AUTO
@@ -211,7 +213,7 @@ def _start(ws: Workspace, ask: Ask, *, pick: localmodel.Pick | None = None,
         la.stop_file(ws, name).unlink(missing_ok=True)
         agent = la.Agent(name=name, identity=identity, model=chosen.ref, model_name=chosen.name,
                          size_bytes=chosen.size_bytes, role=role, profile=prof.name, ctx=ctx, effort=effort, max_effort=ceiling,
-                         project=folder_, orders_from=orders, started=time.time(), extra=dict(have.extra) if have else {},
+                         project=folder_, orders_from=orders, started=time.time(), extra={**(dict(have.extra) if have else {}), "task_caps": task_caps, "explicit_output_limit": True, "explicit_task_limits": True},
                          max_output_tokens=output_tokens)
         la.save(ws, agent)
         if parent_token:
@@ -228,6 +230,7 @@ def _coding(ws: Workspace, ask: Ask, runtime: Runtime,
             parent_token="") -> Started:
     """Start a coding worker through its configured native harness and maintained broker."""
     output_tokens = _output_tokens(ask.max_output_tokens)
+    task_caps = asdict(localloop.checked_caps(ask.task_caps))
     chosen, ctx, project = runtime.model, runtime.context, runtime.project
     chosen = chosen or localmodel.choose(ask.model, selection=localmodel.Selection(coding=True, context=ctx))
     if not chosen.ok:
@@ -249,7 +252,8 @@ def _coding(ws: Workspace, ask: Ask, runtime: Runtime,
                    ('model', 'name', 'role', 'effort', 'max_effort', 'ctx', 'project', 'orders_from',
                     'harness', 'max_output_tokens')):
                 raise ValueError('saved worker configuration changed before task launch')
-            have = replace(have, extra={**have.extra, 'task_caps': asdict(localloop.caps_of(have))})
+            if task_caps != asdict(localloop.caps_of(have)):
+                raise ValueError('saved worker task limits changed before task launch')
         if have is not None and la.alive(have):
             return _running(have, chosen)
         agent = la.Agent(name=name, model=chosen.ref, model_name=chosen.name,
@@ -257,7 +261,7 @@ def _coding(ws: Workspace, ask: Ask, runtime: Runtime,
                          ctx=ctx, project=project, effort=(le.AUTO if ask.effort == le.AUTO else
                              le.clamp(le.valid(ask.effort), le.valid(ask.max_effort))), max_effort=ask.max_effort,
                          max_output_tokens=output_tokens,
-                         extra=dict(have.extra) if have else {}, orders_from=la.check_orders(list(ask.orders_from)),
+                         extra={**(dict(have.extra) if have else {}), "task_caps": task_caps, "explicit_output_limit": True, "explicit_task_limits": True}, orders_from=la.check_orders(list(ask.orders_from)),
                          started=time.time())
         identity = (have.identity or have.name) if ask.authority else _worker_identity(
             ws, have, name, projects.describe(project) if project else {}, parent_token)
@@ -324,9 +328,9 @@ def _record_model(ws: Workspace, name: str, chosen: localmodel.Pick, harness: st
     ws.claim_model(tokens.load(ws.base, name), localmodel.model_identity(chosen.name), harness)
 
 
-def _output_tokens(value: int) -> int:
+def _output_tokens(value: int | None) -> int | None:
     """Validate the positive generated-token limit."""
-    if type(value) is not int or value < 1:
+    if value is not None and (type(value) is not int or value < 1):
         raise ValueError('maximum output tokens must be a positive integer')
     return value
 

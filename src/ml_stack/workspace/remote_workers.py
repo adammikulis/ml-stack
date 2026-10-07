@@ -15,9 +15,11 @@ from ml_stack.fleet.discovery import memberships
 from ml_stack.fleet.remote import Peer
 from ml_stack.graph.store import GraphStore
 from ml_stack.log import say
+from ml_stack.windows_private import restrict
 from ml_stack.workspace import (
     automatic_connection,
     localagent as la,
+    localcli,
     localeffort,
     localloop,
     localmodel,
@@ -32,7 +34,7 @@ from ml_stack.workspace.remote import RemoteWorkspace
 from ml_stack.workspace.service import Workspace
 
 FIELDS = {'agent_token', 'cluster', 'cluster_id', 'name', 'model', 'effort', 'max_effort',
-          'ctx', 'max_output_tokens'}
+          'ctx', 'max_output_tokens', 'task_caps'}
 OPTIONS = [option('json'), flag('--device', default='', help='discovered target device name'),
            flag('--project', default='.', help='local shared project checkout'),
            flag('--agent', default='', help='your canonical Dev agent identity'),
@@ -41,7 +43,19 @@ OPTIONS = [option('json'), flag('--device', default='', help='discovered target 
            flag('--model', default=localmodel.AUTO, help='downloaded model ID or auto'),
            flag('--effort', default='off'), flag('--max-effort', default='medium'),
            flag('--ctx', default='', help='context tokens, for example 32k'),
-           flag('--max-output-tokens', type=int, default=8192)]
+           flag('--max-output-tokens', type=localcli._limit, default=None),
+           flag('--max-rounds', type=localcli._limit, default=None),
+           flag('--max-tool-calls', type=localcli._limit, default=None),
+           flag('--max-model-calls', type=localcli._limit, default=None),
+           flag('--max-task-seconds', type=localcli._seconds, default=None)]
+
+
+def _save_connection(path, value):
+    write_json(path, value)
+    if os.name == "nt":
+        restrict(path)
+    else:
+        path.chmod(0o600)
 
 
 def credential(remote, name, model, authority, harness="ml-stack-agent"):
@@ -97,10 +111,10 @@ def _settings(body, admission):
     cluster, cluster_id = admission
     if type(body) is not dict or set(body) - FIELDS:
         raise ValueError('worker launch accepts model settings and a project agent capability')
-    for key in FIELDS - {'ctx', 'max_output_tokens'}:
+    for key in FIELDS - {'ctx', 'max_output_tokens', 'task_caps'}:
         if key in body and type(body[key]) is not str:
             raise ValueError(f'{key} must be a string')
-    for key in ('ctx', 'max_output_tokens'):
+    for key in ('ctx',):
         if key in body and type(body[key]) is not int:
             raise ValueError(f'{key} must be an integer')
     if body.get('cluster') != cluster or body.get('cluster_id') != cluster_id:
@@ -108,8 +122,8 @@ def _settings(body, admission):
     context = body.get('ctx', 0)
     if context != 0 and not 2048 <= context <= 4 * 1024 * 1024:
         raise ValueError('context must be zero or between 2048 and 4M tokens')
-    if body.get('max_output_tokens', 8192) < 1:
-        raise ValueError('maximum output tokens must be positive')
+    localstart._output_tokens(body.get('max_output_tokens'))
+    localloop.checked_caps(body.get('task_caps', {}))
     localeffort.valid(body.get('effort', 'off'), allow_auto=True)
     localeffort.valid(body.get('max_effort', 'medium'))
     return la.check_name(body.get('name') or 'local-qwen')
@@ -141,8 +155,7 @@ def start(projects, project_id, body, *, admission, cluster_key=None):
                     raise ValueError('stop the running worker before changing its model')
                 credential(remote, prior['identity'], localmodel.model_identity(agent.model_name),
                            project.authority_machine)
-                write_json(connection, {**prior, 'cluster_id': cluster_id, 'cluster': cluster})
-                connection.chmod(0o600)
+                _save_connection(connection, {**prior, 'cluster_id': cluster_id, 'cluster': cluster})
                 return 200, {'name': name, 'identity': prior['identity'], 'model': agent.model_name,
                              'pid': agent.pid, 'project_id': project_id, 'state': 'running', 'already': True}
             chosen = localmodel.choose(body.get('model') or localmodel.AUTO,
@@ -162,10 +175,9 @@ def start(projects, project_id, body, *, admission, cluster_key=None):
             ask = localstart.Ask(model=chosen.ref, name=name, project=root,
                                  orders_from=(caller['id'],), effort=body.get('effort', 'off'),
                                  max_effort=body.get('max_effort', 'medium'), ctx=body.get('ctx', 0),
-                                 max_output_tokens=body.get('max_output_tokens', 8192))
+                                 max_output_tokens=body.get('max_output_tokens'), task_caps=body.get('task_caps', {}))
             def spawn(module, argv, **kwargs):
-                write_json(connection, record)
-                connection.chmod(0o600)
+                _save_connection(connection, record)
                 return jobs.detach('ml_stack.workspace.remote_workers', [str(ws.base), name], **kwargs)
             got = localstart.start(ws, ask, pick=chosen, spawn=spawn,
                                    authority=localstart.Authority(parent_token=localstart.launch_parent(ws, root)))
@@ -219,8 +231,7 @@ class WorkerRemote:
                     graph.upsert_node({**node, 'attrs': {**attrs, 'cluster_id': current_id, 'cluster': rows[0].group}})
         if self.path is not None:
             fresh._safe_storage(self.path)
-            write_json(self.path, {**self.record, 'cluster_id': current_id, 'cluster': rows[0].group})
-            self.path.chmod(0o600)
+            _save_connection(self.path, {**self.record, 'cluster_id': current_id, 'cluster': rows[0].group})
         self.current = fresh
         self.record.update(cluster_id=current_id, cluster=rows[0].group)
 
@@ -268,6 +279,9 @@ class BoardWorker(CanonicalWorkspace):
 
 def run(args):
     """Discover one Dev target and launch its model on the shared project Board."""
+    if any(getattr(args, key, None) is None for key in (
+            "max_output_tokens", "max_rounds", "max_tool_calls", "max_model_calls", "max_task_seconds")):
+        say("Task limits include None: tasks could run indefinitely until you stop them.")
     root = Path(args.project).resolve()
     connection = selected(root) or automatic_connection.discover(root)
     if not connection:
@@ -302,7 +316,11 @@ def run(args):
                                       'cluster_id': remote.cluster_id, 'name': args.name, 'model': args.model,
                                       'effort': args.effort, 'max_effort': args.max_effort,
                                       'ctx': localprofile.parse_ctx(args.ctx),
-                                      'max_output_tokens': args.max_output_tokens})
+                                      'max_output_tokens': args.max_output_tokens,
+                                      'task_caps': {'rounds': getattr(args, 'max_rounds', None),
+                                                    'calls': getattr(args, 'max_tool_calls', None),
+                                                    'steps': getattr(args, 'max_model_calls', None),
+                                                    'seconds': getattr(args, 'max_task_seconds', None)}})
     if args.task:
         sent = remote.call('send', token, result['identity'], 'task', args.task)
         result['task_seq'] = sent['seq']

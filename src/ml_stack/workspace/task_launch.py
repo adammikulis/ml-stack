@@ -20,7 +20,7 @@ def start(ws, token, worker, task):
     ask = localstart.Ask(model=runner.model, name=runner.name, role=runner.role,
                          effort=runner.effort, max_effort=runner.max_effort, profile='coding',
                          ctx=runner.ctx, project=runner.project, orders_from=runner.orders_from,
-                         harness=runner.harness, max_output_tokens=runner.max_output_tokens, authority=(token, task))
+                         harness=runner.harness, max_output_tokens=runner.max_output_tokens, authority=(token, task), task_caps=caps)
     result = localstart._coding(ws, ask, localstart.Runtime(None, runner.ctx, runner.project))
     ws.audit('local-agent.task-start', ws.auth(token).id, agent=worker, task=task, caps=caps)
     return result
