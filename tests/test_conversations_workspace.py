@@ -62,8 +62,8 @@ def test_canonical_project_selection_never_falls_back_to_local_board(chat_browse
     served, page = chat_browser
     project = '7' * 32
     seen = []
-    page.route('**/ui/projects', lambda route: route.fulfill(json={'projects': [
-        {'id': project, 'name': 'Experiment workspace', 'is_self': True}]}))
+    page.route('**/ui/projects', lambda route: route.fulfill(json={'workspaces': [
+        {'id': project, 'name': 'Experiment workspace', 'is_self': True, 'local_authority': True}]}))
 
     def unavailable(route):
         seen.append(route.request.url)
@@ -166,3 +166,39 @@ def test_conversation_surfaces_consume_resolved_theme_tokens(chat_browser, monke
     assert board.locator('.composer').evaluate('node => getComputedStyle(node).backgroundColor') == expected[0]
     assert board.get_by_label('Message', exact=True).evaluate('node => getComputedStyle(node).color') == expected[1]
     page.screenshot(path=f'/private/tmp/poolside-conversations-theme-{theme}.png', full_page=True)
+
+
+def test_unshared_canonical_workspace_is_selected_and_team_messages_render(chat_browser, monkeypatch, tmp_path):
+    from playwright.sync_api import expect
+
+    from ml_stack.fleet import project_client, project_source
+    from ml_stack.fleet.projects import ProjectRegistry, identity
+    from ml_stack.net import git
+    from ml_stack.workspace.remote_host import WorkspaceHost
+
+    checkout = tmp_path / 'experiment-workspace'
+    checkout.mkdir()
+    git.run(['init'], cwd=checkout)
+    git.run(['remote', 'add', 'origin', 'https://code.example.invalid/team/canonical-demo.git'], cwd=checkout)
+    registry = ProjectRegistry(tmp_path / 'registry', 'fixture-device', (checkout,), 'http://127.0.0.1:8770')
+    project = identity(checkout)
+    host = WorkspaceHost(registry)
+    host.prepare(project)
+    ws = host.workspace(project)
+    owner = tokens.read_file(tokens.directory(ws.base) / tokens.OWNER_FILE)
+    worker = ws.mint(owner, 'canonical-demo-helper')
+    ws.send(worker, '#general', 'note', 'The canonical team experiment is ready.')
+    monkeypatch.setattr(project_client, 'peers', lambda ui: [])
+    monkeypatch.setattr(project_source, 'build', lambda *args: pytest.fail('Board chooser published source'))
+    served, page = chat_browser
+    served.ui.projects, served.ui.workspaces = registry, host
+    assert registry.get(project).shared is False
+    assert registry.list() == []
+    page.goto(f'http://127.0.0.1:{served.port}/ui#board')
+    expect(page.get_by_label('Workspace', exact=True)).to_have_value(project)
+    board = page.locator('chat-view ml-board')
+    assert board.get_attribute('endpoint') == f'/ui/projects/{project}/board'
+    expect(board.locator('.msg pre')).to_contain_text('The canonical team experiment is ready.')
+    assert registry.get(project).shared is False
+    assert registry.list() == []
+    assert not (tmp_path / 'registry' / 'project-bundles').exists()

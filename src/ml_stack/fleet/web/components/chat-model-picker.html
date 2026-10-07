@@ -174,7 +174,8 @@ chat-view #chat-activity-output { max-height:240px; overflow:auto; white-space:p
       try { result = await M.api('/ui/projects'); }
       catch { result = {ok:false, error:'Could not connect to the workspace. Reload to try again.'}; }
       if (M.refused(result)) return;
-      const projects = (result.ok ? result.projects || [] : []).filter(row => /^[a-f0-9]{32}$/.test(row.id));
+      const projects = (result.ok ? result.workspaces || [] : []).filter(row =>
+        /^[a-f0-9]{32}$/.test(row.id) && row.local_authority === true);
       let saved = '';
       try { saved = localStorage.getItem('poolside.conversations.project') || ''; } catch {}
       this.project.replaceChildren(M.el('option', {value:''}, 'Choose a workspace'),

@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from ml_stack.files import write_json
-from ml_stack.fleet import project_source as source, projects
+from ml_stack.fleet import project_client, project_source as source, projects
 from ml_stack.fleet.projects import ProjectRegistry, answer, identity
 from ml_stack.net import git
 
@@ -138,3 +138,31 @@ def test_native_registration_refuses_unbounded_or_relative_path(tmp_path, root):
         registry.register(type(tmp_path)(root), "a" * 32)
     assert registry.boards() == []
     assert not registry.path.exists()
+
+
+@pytest.mark.parametrize('configuration', [
+    ('device', 'https://device:8770', True),
+    ('foreign', 'https://foreign:8770', False),
+    ('', '', False),
+    ('device', '', False),
+])
+def test_person_workspace_catalogue_includes_unshared_local_authority_only(repository, tmp_path, monkeypatch,
+                                                                          configuration):
+    authority, host, visible = configuration
+    registry = ProjectRegistry(tmp_path / 'registry', 'device', (repository,), 'https://device:8770')
+    identifier = identity(repository)
+    registered = registry.get(identifier)
+    registered.authority_machine, registered.board_host = authority, host
+    monkeypatch.setattr(project_client, 'peers', lambda ui: [])
+    monkeypatch.setattr(source, 'build', lambda *args: pytest.fail('workspace catalogue published source'))
+    result = project_client.available(SimpleNamespace(projects=registry))
+    assert registered.shared is False
+    assert result['projects'] == result['local'] == []
+    assert registry.catalogue()['projects'] == []
+    assert registry.catalogue()['boards'] == []
+    assert result['workspaces'] == ([{
+        'id': identifier, 'name': 'project', 'machine': 'device',
+        'authority_machine': authority, 'board_host': host,
+        'is_self': True, 'local_authority': True,
+    }] if visible else [])
+    assert not (tmp_path / 'registry' / 'project-bundles').exists()
