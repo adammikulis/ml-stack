@@ -14,8 +14,10 @@ from pathlib import Path
 
 from ml_stack import macauth, sealing
 from ml_stack.files import writing
+from ml_stack.fleet import updates
 from ml_stack.http import Sealed, open_stream
 from ml_stack.lock import Busy
+from ml_stack.serve.reclaim import busy_now
 from ml_stack.windows_private import restrict, validate
 
 ROUTE = '/launcher/replace'
@@ -205,9 +207,6 @@ def protected(method, control):
 
 def create(runtime):
     """Publish launcher control for a configured daemon runtime."""
-    from ml_stack.fleet import updates
-    from ml_stack.serve.reclaim import busy_now
-
     def models_busy():
         try:
             with runtime.serving.path.open('rb') as stream:
