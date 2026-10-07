@@ -7,6 +7,7 @@ import json
 import os
 import re
 import select
+import shutil
 import stat
 import subprocess
 import sys
@@ -567,8 +568,14 @@ def test_a_message_or_note_cannot_carry_the_token_directory(base, team):
 # -- the flows under a real terminal ---------------------------------------------------------
 class Terminal:
     def __init__(self, argv, base, answers=()):
+        git = shutil.which("git")
+        assert git is not None, "terminal integration requires Git"
+        tools = base / "terminal-tools"
+        tools.mkdir(exist_ok=True)
+        if not (tools / "git").exists():
+            (tools / "git").symlink_to(git)
         env = {**{k: v for k, v in os.environ.items() if k not in STRIPPED},
-               "ML_STACK_WORKSPACE_HOME": str(base), "PYTHONPATH": SRC, "PATH": "/nonexistent"}
+               "ML_STACK_WORKSPACE_HOME": str(base), "PYTHONPATH": SRC, "PATH": str(tools)}
         master, slave = pty.openpty()
         self.master = master
         self.proc = subprocess.Popen([sys.executable, "-m", "ml_stack.workspace.cli", *argv],
