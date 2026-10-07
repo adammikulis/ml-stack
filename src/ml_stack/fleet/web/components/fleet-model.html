@@ -8,6 +8,9 @@ cluster-view, chat-view, models-view, settings-view, fit-view, data-view, traini
   const M = window.fleetModel = {};
   const H = M.headers = { "X-ML-Stack-UI": "1", "Content-Type": "application/json" };
 
+  let releaseBoot;
+  const bootReady = new Promise(resolve => { releaseBoot = resolve; });
+
   M.MIN_PASS = 5;
 
   M.downloadMessage = function (g) {
@@ -21,11 +24,27 @@ cluster-view, chat-view, models-view, settings-view, fit-view, data-view, traini
   };
 
   /** One call to the daemon: `{ok, status, ...body}`. */
-  M.api = async function (path, opts = {}) {
+  async function request(path, opts = {}) {
     const r = await fetch(path, { ...opts, headers: { ...H, ...(opts.headers || {}) } });
     let body = {};
     try { body = await r.json(); } catch { /* an empty body is fine */ }
     return { ok: r.ok, status: r.status, ...body };
+  }
+
+  M.api = async function (path, opts = {}) {
+    const signal = opts.signal;
+    signal?.throwIfAborted();
+    let aborted;
+    try {
+      await (signal ? Promise.race([bootReady, new Promise((_, reject) => {
+        aborted = () => reject(signal.reason);
+        signal.addEventListener("abort", aborted, {once:true});
+      })]) : bootReady);
+    } finally {
+      if (aborted) signal.removeEventListener("abort", aborted);
+    }
+    signal?.throwIfAborted();
+    return request(path, opts);
   };
 
   /** One element, its attributes and its children. */
@@ -174,32 +193,37 @@ cluster-view, chat-view, models-view, settings-view, fit-view, data-view, traini
 
   /** What to show when the page opens: setup, sign in, or a screen. */
   M.boot = async function () {
-    const launchURL = new URL(location.href);
-    const ticket = launchURL.searchParams.get("launch_ticket");
-    if (ticket !== null) {
-      launchURL.searchParams.delete("launch_ticket");
-      history.replaceState(null, "", launchURL.pathname + launchURL.search + launchURL.hash);
-      if (location.hostname === "127.0.0.1" || location.hostname === "localhost" || location.hostname === "[::1]") {
-        try { await M.api("/ui/session", {method:"POST", body:JSON.stringify({ticket})}); }
-        catch (_) { /* The ordinary sign-in view handles expired tickets. */ }
+    try {
+      const launchURL = new URL(location.href);
+      const ticket = launchURL.searchParams.get("launch_ticket");
+      if (ticket !== null) {
+        launchURL.searchParams.delete("launch_ticket");
+        history.replaceState(null, "", launchURL.pathname + launchURL.search + launchURL.hash);
+        if (location.hostname === "127.0.0.1" || location.hostname === "localhost" || location.hostname === "[::1]") {
+          try { await request("/ui/session", {method:"POST", body:JSON.stringify({ticket})}); }
+          catch (_) { /* The ordinary sign-in view handles expired tickets. */ }
+        }
       }
+      const hash = location.hash.slice(1);
+      const asked = available(hash) ? hash
+        : (location.pathname.replace(/\/$/, "") === "/ui/fit" ? "fit" : "cluster");
+      const opened = document.querySelector(`${asked}-view`) ? asked
+        : (IN_APP.find((n) => document.querySelector(`${n}-view`)) || asked);
+      M.requestedRoute = opened;
+      const setup = await request("/ui/setup");
+      M.group = setup.group || "";
+      M.inCluster = !!setup.needs_password;
+      if (setup.needs_setup && document.querySelector("first-run")) { releaseBoot(); return M.go("first-run"); }
+      if (!setup.needs_password) { releaseBoot(); return M.go(opened); }
+      if (setup.cluster_mode === "dev" && ["127.0.0.1", "localhost", "[::1]"].includes(location.hostname)) {
+        await request("/ui/setup/local-session", { method: "POST" });
+      }
+      const s = await request("/ui/session");
+      releaseBoot();
+      return s.signed_in ? M.go(opened) : M.signIn();
+    } finally {
+      releaseBoot();
     }
-    const hash = location.hash.slice(1);
-    const asked = available(hash) ? hash
-      : (location.pathname.replace(/\/$/, "") === "/ui/fit" ? "fit" : "cluster");
-    const opened = document.querySelector(`${asked}-view`) ? asked
-      : (IN_APP.find((n) => document.querySelector(`${n}-view`)) || asked);
-    M.requestedRoute = opened;
-    const setup = await M.api("/ui/setup");
-    M.group = setup.group || "";
-    M.inCluster = !!setup.needs_password;
-    if (setup.needs_setup && document.querySelector("first-run")) return M.go("first-run");
-    if (!setup.needs_password) return M.go(opened);
-    if (setup.cluster_mode === "dev" && ["127.0.0.1", "localhost", "[::1]"].includes(location.hostname)) {
-      await M.api("/ui/setup/local-session", { method: "POST" });
-    }
-    const s = await M.api("/ui/session");
-    return s.signed_in ? M.go(opened) : M.signIn();
   };
 
   M.followSetupJob = async function (job, onUpdate = () => {}) {
@@ -212,7 +236,7 @@ cluster-view, chat-view, models-view, settings-view, fit-view, data-view, traini
       const response = await M.api("/ui/setup/jobs");
       if (response.error || response.status === 401) throw new Error(response.error || "Sign in to check installation status.");
       current = (response.jobs || []).find((candidate) => candidate.id === job.id);
-      if (!current) throw new Error("Installation status is unavailable. Check Settings to retry.");
+      if (!current) throw new Error("Installation status is unavailable. Open settings to retry.");
     }
   };
 
