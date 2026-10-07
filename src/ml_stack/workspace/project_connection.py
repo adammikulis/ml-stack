@@ -64,10 +64,10 @@ def bind(remote: RemoteWorkspace, root: Path, agent: str, cluster: str = "", **o
         made["cluster_id"] = who["project"]["cluster_id"]
     if local_agent:
         made["local_agent"] = local_agent
-    session = (project_session.current() if local_agent == "codex"
-               and agent.startswith(project_session.name("codex") + "-") else "")
-    if local_agent == "codex" and agent == project_session.name("codex"):
-        session = project_session.current()
+    session = project_session.current(local_agent) if local_agent else ""
+    expected = project_session.name(local_agent) if session else ""
+    if session and agent != expected and not agent.startswith(expected + "-"):
+        session = ""
     if session:
         made["session"] = session
     with held(path.with_suffix(".lock")):
@@ -79,7 +79,7 @@ def bind(remote: RemoteWorkspace, root: Path, agent: str, cluster: str = "", **o
             existing = existing or made.copy()
             sessions = existing.setdefault("sessions", {})
             if session in sessions and sessions[session].get("agent") != agent:
-                raise Denied("this Codex session already has another shared project identity")
+                raise Denied("this native session already has another shared project identity")
             sessions[session] = made
             connections[str(root)] = existing
         else:

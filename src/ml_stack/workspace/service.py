@@ -265,12 +265,12 @@ class Workspace:
         clean_model(model)
         self._record_model(name, model, harness, VERIFIED if verified else CLAIMED)
 
-    def register_session(self, token: str, device: dict | None = None) -> dict[str, Any]:
+    def register_session(self, token: str, device: dict | None = None, harness: str = "") -> dict[str, Any]:
         """Register main-session presentation without granting capabilities."""
         self._may(self.auth(token), "claim")
         if device is not None:
             self.registry.record_device_claim(token, device)
-        self.registry.register_session(token)
+        self.registry.register_session(token, harness)
         return agent_display.metadata(self.registry, self.auth(token).id)
 
     def claim_model(self, token: str, model: str, harness: str = "", label: str = "") -> dict[str, Any]:
@@ -297,7 +297,7 @@ class Workspace:
         info = self.registry.info(name)
         model, state = self.registry.model_of(name)
         return {"model": model, "model_state": state, "harness": info["harness"],
-                "models": info["models"]}
+                "harness_state": info["harness_state"], "models": info["models"]}
 
     def _record_model(self, name: str, model: str, harness: str, state: str) -> None:
         before, _ = self.registry.record_model(name, model, harness, state)
@@ -813,6 +813,6 @@ class Workspace:
                             "unread": self.bus.pending(name), "expires": info["expires"],
                             "project": info["project"].get("name", ""),
                             "model": (shown := self.registry.model_of(name))[0],
-                            "model_state": shown[1], "harness": info["harness"], "device": info["device"],
+                            "model_state": shown[1], "harness": info["harness"], "harness_state": info["harness_state"], "device": info["device"],
                             **agent_display.metadata(self.registry, name)})
         return out

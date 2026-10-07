@@ -3,21 +3,32 @@
 
 from __future__ import annotations
 
-import json
 import os
-import subprocess
-import sys
+
+import workspace_hook
 
 
 def main() -> int:
-    event = json.load(sys.stdin)
+    event = workspace_hook.event("SessionStart")
+    if event is None:
+        return 0
+    environment = workspace_hook.session_environment(event, "SessionStart")
+    if environment is None:
+        return 0
+    workspace_hook.persist_session(environment)
     model = event.get("model") or os.environ.get("ANTHROPIC_MODEL", "")
     if isinstance(model, dict):
         model = model.get("id", "")
-    if not model:
-        return 0
-    subprocess.run(["ml-stack-workspace", "whoami", "--agent", "claude-code", "--model", model,
-                    "--harness", "claude-code"], capture_output=True, check=False, timeout=30)
+    command = ["ml-stack-workspace", "whoami", "--agent", "claude-code"]
+    if isinstance(model, str) and model and len(model) <= 256 and model.isprintable():
+        command.extend(["--model", model])
+    else:
+        workspace_hook.warning("SessionStart", "model unavailable; no model claim recorded")
+    command.extend(["--harness", "claude-code"])
+    registered = workspace_hook.run(command, "SessionStart", environment=environment)
+    if registered and not event.get("agent_id"):
+        workspace_hook.run(["ml-stack-workspace", "main-session", "--agent", "claude-code", "--harness", "claude-code"],
+                           "SessionStart", environment=environment)
     return 0
 
 

@@ -41,7 +41,7 @@ def test_authenticated_child_cannot_promote_and_labels_do_not_grant_main_status(
     with pytest.raises(Denied, match='top-level'):
         registry.register_session(child)
     shown = metadata(registry, 'codex-main/task')
-    assert shown['display_name'].startswith('Subagent · task (parent Codex')
+    assert shown['display_name'].startswith('Subagent · task (parent Model unknown')
     assert not shown['coordinator_eligible']
     activity = metadata(registry, 'codex-main', 'integration')
     assert activity['session_kind'] == 'main'
@@ -50,7 +50,7 @@ def test_authenticated_child_cannot_promote_and_labels_do_not_grant_main_status(
     kit.ws.claim_model(token, 'gpt-6', label='helper')
     helper = metadata(registry, 'codex-main', 'helper')
     assert helper['session_kind'] == 'helper'
-    assert helper['display_name'].startswith('Subagent · helper (parent Codex')
+    assert helper['display_name'].startswith('Subagent · helper (parent Model unknown')
 
 
 def test_revoked_main_is_ineligible(kit):
@@ -72,7 +72,7 @@ def test_canonical_registration_preserves_model_and_rights_and_refuses_child(hos
     code, shown = call(host, first, 'register_session', device={'os': 'macOS', 'hostname': 'test'})
     assert code == 200
     shown = shown['result']
-    assert shown['display_name'] == 'Codex · Mac · session 1'
+    assert shown['display_name'] == 'Model unknown · Mac · session 1'
     assert shown['coordinator_eligible']
     after = call(host, first, 'whoami')[1]['result']
     assert (after['model'], after['can'], after['parent']) == (before['model'], before['can'], before['parent'])
@@ -142,6 +142,97 @@ def test_cli_main_session_uses_canonical_mutation_rpc(host, monkeypatch, capsys)
     monkeypatch.setattr(cli, '_project_connection', lambda: {'host': 'canonical'})
     monkeypatch.setattr(cli, '_context', lambda args, connection: (workspace, agent['token']))
     handler = next(entry[3] for entry in cli.TABLE if entry[0] == 'main-session')
-    args = SimpleNamespace(cmd='main-session', json=True, request_id='')
+    args = SimpleNamespace(cmd='main-session', json=True, request_id='', harness='codex')
     assert cli._runner(handler)(args) == 0
     assert '"session_kind": "main"' in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("model,harness,expected", [
+    ("gpt-6", "codex", "ChatGPT"),
+    ("claude-sonnet-4-6", "claude-code", "Claude"),
+    ("Qwen3.8-Flash-Next-GSQ-RCO-Coder", "codex", "Qwen"),
+    ("thinkingcap-qwen3.8-27b", "codex", "Qwen"),
+    ("unknown-provider-model", "claude-code", "Model unknown"),
+])
+def test_readable_family_uses_recorded_model_not_harness_or_auth_id(kit, model, harness, expected):
+    token = kit.agent('codex-opaque-session')
+    kit.ws.claim_model(token, model, harness)
+    shown = metadata(kit.ws.registry, 'codex-opaque-session')
+    assert shown['display_name'].startswith(expected + ' · ')
+    assert 'codex-opaque-session' not in shown['display_name']
+    assert not shown['coordinator_eligible']
+    before = kit.ws.registry.info('codex-opaque-session')
+    kit.ws.register_session(token)
+    assert kit.ws.registry.info('codex-opaque-session')['can'] == before['can']
+    assert kit.ws.registry.info('codex-opaque-session')['model'] == model
+
+
+def test_same_family_native_sessions_get_distinct_stable_ordinals(kit):
+    registry = kit.ws.registry
+    first = kit.agent('claude-code-' + 'a' * 32)
+    second = kit.agent('claude-code-' + 'b' * 32)
+    for token in (first, second):
+        kit.ws.claim_model(token, 'claude-sonnet-4-6', 'claude-code')
+        kit.ws.register_session(token)
+    names = ['claude-code-' + digit * 32 for digit in ('a', 'b')]
+    before = [registry.info(name)['presentation'].copy() for name in names]
+    assert before[0]['ordinal'] != before[1]['ordinal']
+    assert metadata(registry, names[0])['display_name'] != metadata(registry, names[1])['display_name']
+    kit.ws.claim_model(second, 'Qwen3.8-Flash', 'codex')
+    assert [registry.info(name)['presentation'] for name in names] == before
+    assert metadata(registry, names[1])['display_name'].startswith('Qwen · ')
+
+
+def test_registration_records_unknown_model_harness_without_rewriting_model_history(host):
+    from test_workspace_remote import call, joined
+
+    agent = joined(host, name='native-unknown-model')
+    before = call(host, agent, 'whoami')[1]['result']
+    code, result = call(host, agent, 'register_session', harness='claude-code')
+    assert code == 200, result
+    after = call(host, agent, 'whoami')[1]['result']
+    assert (after['model'], after['model_state'], after['models']) == (before['model'], before['model_state'], before['models'])
+    assert (after['can'], after['parent'], after['project']) == (before['can'], before['parent'], before['project'])
+    assert after['harness'] == 'claude-code' and after['harness_state'] == 'claimed'
+    child = call(host, agent, 'delegate', 'helper')[1]['result']
+    assert call(host, child, 'register_session', harness='codex')[0] == 403
+
+
+def test_harness_registration_preserves_launcher_verified_model_and_harness(kit):
+    token = kit.agent('native-verified')
+    registry = kit.ws.registry
+    registry.record_model('native-verified', 'Qwen3.8-Flash', 'codex', 'verified')
+    before = registry.info('native-verified')
+    with pytest.raises(Denied, match='launcher'):
+        kit.ws.register_session(token, harness='claude-code')
+    kit.ws.register_session(token, harness='codex')
+    after = registry.info('native-verified')
+    assert (after['model'], after['models'], after['harness']) == (before['model'], before['models'], before['harness'])
+    assert after['harness_state'] == 'verified'
+
+
+def test_verified_model_does_not_promote_reported_harness_on_repeat_registration(kit):
+    token = kit.agent('model-only-verified')
+    registry = kit.ws.registry
+    registry.record_model('model-only-verified', 'Qwen3.8-Flash', '', 'verified')
+    before = registry.info('model-only-verified')
+    for _ in range(2):
+        kit.ws.register_session(token, harness='codex')
+        info = registry.info('model-only-verified')
+        assert info['harness_state'] == 'claimed'
+        assert kit.ws.whoami_model('model-only-verified')['harness_state'] == 'claimed'
+        assert (info['model'], info['model_state'], info['models']) == (before['model'], before['model_state'], before['models'])
+    kit.ws.register_session(token, harness='claude-code')
+    assert registry.info('model-only-verified')['harness_state'] == 'claimed'
+    assert registry.info('model-only-verified')['harness'] == 'claude-code'
+
+
+def test_launcher_harness_observation_updates_independent_confidence(kit):
+    token = kit.agent('observed-harness')
+    registry = kit.ws.registry
+    kit.ws.register_session(token, harness='claude-code')
+    assert registry.info('observed-harness')['harness_state'] == 'claimed'
+    registry.record_model('observed-harness', 'Qwen3.8-Flash', 'codex', 'verified')
+    assert registry.info('observed-harness')['harness_state'] == 'verified'
+    with pytest.raises(Denied, match='launcher'):
+        kit.ws.register_session(token, harness='claude-code')

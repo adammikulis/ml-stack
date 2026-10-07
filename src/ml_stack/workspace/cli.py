@@ -602,8 +602,8 @@ TABLE: tuple[tuple[str, str, list[Any], Handler], ...] = (
     ("whoami", "who the token says you are; --model records your own model id as claimed", [
         flag("--model", default="", help="the exact model id you run as (a label, never a right)"),
         flag("--harness", default="", help="your harness, e.g. claude-code or codex")], _whoami),
-    ("main-session", "register main-session presentation; grants no rights", [],
-     lambda args, ws, token: ws.register_session(token, onboard.device_metadata.current())),
+    ("main-session", "register main-session presentation; grants no rights", [flag("--harness", default="")],
+     lambda args, ws, token: ws.register_session(token, onboard.device_metadata.current(), args.harness)),
     ("hello-model", "record the model a helper LABEL of yours runs (claimed)", [
         flag("label_name", metavar="LABEL"), flag("model", metavar="MODEL")], _hello_model),
     ("agents", "every live identity with its role, model and whether the model is verified", [],

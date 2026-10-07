@@ -9,20 +9,30 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import rules_loader  # noqa: E402
+import rules_loader
+import workspace_hook
 
 
 def workspace_brief(event: dict) -> str:
-    label = f"{event.get('agent_type') or 'subagent'}-{str(event.get('agent_id') or '')[:6]}".strip("-")
-    done = subprocess.run(["ml-stack-workspace", "brief", label, "--agent", "claude-code"],
-                          capture_output=True, text=True, check=False, timeout=30)
-    return done.stdout.strip() if done.returncode == 0 else ""
+    label = f"{event.get('agent_type') or 'subagent'}-{str(event.get('agent_id') or '')[:6]}".strip("-").lower()
+    environment = workspace_hook.session_environment(event, "SubagentStart")
+    if environment is None:
+        return ""
+    done = workspace_hook.run(["ml-stack-workspace", "brief", label, "--agent", "claude-code"],
+                              "SubagentStart", environment=environment)
+    return done.stdout.strip() if done else ""
 
 
 def main() -> int:
-    event = json.load(sys.stdin)
+    event = workspace_hook.event("SubagentStart")
+    if event is None:
+        return 0
     rules = rules_loader.load()
-    found = rules.checkouts(event.get("cwd") or ".") if rules else None
+    try:
+        found = rules.checkouts(event.get("cwd") or ".") if rules else None
+    except (OSError, subprocess.TimeoutExpired, ValueError, TypeError) as error:
+        workspace_hook.warning("SubagentStart", error)
+        found = None
     parts = [workspace_brief(event)]
     if found:
         parts.append(checkout_rule(found[1]))
@@ -35,8 +45,8 @@ def main() -> int:
 
 
 def checkout_rule(primary: Path) -> str:
-    dev = subprocess.run(["git", "-C", str(primary), "branch", "--show-current"],
-                         capture_output=True, text=True, check=False).stdout.strip()
+    done = workspace_hook.run(["git", "-C", str(primary), "branch", "--show-current"], "SubagentStart")
+    dev = done.stdout.strip() if done else "unknown"
     return (f"Checkout rule: the primary checkout {primary} is on the development branch {dev}. "
             "Use it when that is the best way to complete the task; concurrent writers, experiments "
             "and conflicts require separate sibling worktrees and branches. Acquire authenticated "
