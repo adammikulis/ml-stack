@@ -1,10 +1,10 @@
 <template>
   <details class="panel benchmark-panel" id="cluster-sweep">
-    <summary><span>Benchmark models</span><span class="why" id="benchmark-summary">Compare models across your cluster</span></summary>
-    <p class="hint">Choose models and machines, then measure their answers using the same questions.</p>
+    <summary><span>Benchmark models</span><span class="why" id="benchmark-summary">Compare models across your pool</span></summary>
+    <p class="hint">Choose models and devices, then measure their answers using the same questions.</p>
     <div class="two benchmark-choices">
       <fieldset><legend>Models to compare</legend><div id="benchmark-models"></div></fieldset>
-      <fieldset><legend>Machines to use</legend><div id="benchmark-machines"></div></fieldset>
+      <fieldset><legend>Devices to use</legend><div id="benchmark-machines"></div></fieldset>
     </div>
     <div class="benchmark-options">
       <label for="benchmark-questions">Questions
@@ -62,6 +62,7 @@
         this.models = models;
         this.peers = peers;
         for (const name of [...this.selectedModels]) if (!models.includes(name)) this.selectedModels.delete(name);
+        for (const name of [...this.selectedMachines]) if (!peers.some(p => p.name === name)) this.selectedMachines.delete(name);
         if (first) peers.forEach((p) => this.selectedMachines.add(p.name));
         this.drawChoices();
       }
@@ -81,7 +82,7 @@
             this.peers.filter((p) => (p.models || []).includes(name)).map((p) => p.name).join(", "), i, "bench-model"))
         : [el("p", { class: "hint" }, "Install a model under Models to begin.")]));
       this.querySelector("#benchmark-machines").replaceChildren(...this.peers.map((p, i) =>
-        this.choice(this.selectedMachines, p.name, p.name, p.is_self ? "This machine" : "Cluster machine", i, "bench-machine")));
+        this.choice(this.selectedMachines, p.name, p.name, p.is_self ? "This device" : "Pool device", i, "bench-machine")));
     }
 
     paintStatus() {
@@ -96,15 +97,15 @@
         ? "Benchmarking is unavailable on this machine."
         : measuring ? "A benchmark is running. Results appear in recent runs when it finishes."
           : !this.selectedModels.size ? "Choose at least one model to compare."
-            : !this.selectedMachines.size ? "Choose at least one machine."
+            : !this.selectedMachines.size ? "Choose at least one device."
               : !validLimit ? "Enter a positive whole number of questions." : "Ready to benchmark your selection.";
     }
 
     async start() {
       if (this.run.disabled) return;
       this.pending = true;
-      this.message = "";
-      this.status.textContent = "Starting benchmark…";
+      this.message = "Starting benchmark…";
+      this.status.textContent = this.message;
       this.paintStatus();
       try {
         const response = await api("/ui/bench/sweep", { method: "POST", body: JSON.stringify({
@@ -112,10 +113,10 @@
           peers: this.peers.map((p) => p.name).filter((x) => this.selectedMachines.has(x)),
           sample: this.questions.value === "all" ? 0 : Number(this.limit.value), label: this.label.value.trim(),
         }) });
-        this.message = response.error || "Benchmark started. You can leave this screen while it runs.";
+        this.message = (response.error || (response.ok === false ? "Could not start benchmark." : "")) || "Benchmark started. You can leave this screen while it runs.";
         this.status.textContent = this.message;
-        if (!response.error) this.bench.measuring = { pid: response.pid };
-      } catch (error) { this.status.textContent = `Could not start benchmark: ${error.message}`; }
+        if (!response.error && response.ok !== false) this.bench.measuring = { pid: response.pid };
+      } catch (error) { this.message = `Could not start benchmark: ${error.message}`; this.status.textContent = this.message; }
       finally { this.pending = false; this.paintStatus(); }
     }
 
@@ -123,10 +124,10 @@
       this.stop.disabled = true;
       try {
         const response = await api("/ui/bench/stop", { method: "POST", body: JSON.stringify({ pid: this.bench.measuring.pid }) });
-        this.message = response.error || "Benchmark stopped.";
+        this.message = response.error || (response.ok === false ? "Could not stop benchmark." : "Benchmark stopped.");
         this.status.textContent = this.message;
-        if (!response.error) this.bench.measuring = null;
-      } finally { this.stop.disabled = false; this.paintStatus(); this.loadHistory(); }
+        if (!response.error && response.ok !== false) this.bench.measuring = null;
+      } catch (error) { this.message = `Could not stop benchmark: ${error.message}`; this.status.textContent = this.message; } finally { this.stop.disabled = false; this.paintStatus(); this.loadHistory(); }
     }
 
     async loadHistory() {

@@ -38,7 +38,7 @@
       const result = await M.api('/ui/coordination?discover=1');
       const choices = M.el('div', {});
       if (!result.ok) choices.textContent = result.error || 'Discovery unavailable.';
-      else if (!result.coordinators?.length) choices.textContent = 'No shared coordinator found. Pair both devices with the same cluster, then select a coordinator.';
+      else if (!result.coordinators?.length) choices.textContent = 'No shared coordinator found. Pair both devices with the same pool, then select a coordinator.';
       for (const row of result.coordinators || []) {
         const join = M.el('button', {type:'button'}, `Connect to ${row.name}`);
         join.onclick = () => this.change({action:'connect', name:row.name});

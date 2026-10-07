@@ -1,12 +1,13 @@
+<style>cluster-view .peer, cluster-view .group, cluster-view fieldset { min-width:0; } cluster-view .url, cluster-view .name, cluster-view .loaded-models { overflow-wrap:anywhere; } @media(max-width:600px) { cluster-view .grid, cluster-view .two { grid-template-columns:minmax(0,1fr); } cluster-view .searchrow { flex-wrap:wrap; } cluster-view input, cluster-view select { max-width:100%; min-width:0; } cluster-view .stat { flex-wrap:wrap; } }</style>
 <!-- cluster-view: the machines on this network, the clusters this one is in, and a sweep across them -->
 <template>
   <main id="cluster" hidden>
-    <h1>Cluster</h1>
+    <h1>Compute pool</h1>
     <p class="sub" id="cluster-sub"></p>
     <div class="stat" id="cluster-stat"></div>
     <div class="group" id="cluster-pause"></div>
-    <div id="cluster-cards"></div>
-    <div class="group" id="cluster-joined"></div>
+    <section aria-label="Pool devices"><h2>Devices</h2><p class="hint">Available devices accept jobs from your pool. Serving models and resource usage appear below.</p><div id="cluster-cards"></div></section>
+    <details class="group" data-advanced><summary>Manage pool connections</summary><div id="cluster-joined"></div></details>
     <fleet-benchmark></fleet-benchmark>
   </main>
 </template>
@@ -103,7 +104,7 @@
         ? el("div", { class: "labels" }, d.labels.map((l) => el("span", { class: "label" }, l)))
         : null,
       el("div", { class: "loaded-models" },
-        el("h3", {}, "Loaded models"),
+        el("h3", {}, "Serving models"),
         ...(d.serving || []).length
           ? d.serving.flatMap((server) => (server.models || []).map((model) =>
               el("div", { class: "row" },
@@ -112,7 +113,7 @@
                   [(server.slot_context || server.context) ? `${Number(server.slot_context || server.context).toLocaleString()} tokens` : "",
                     server.draft_status === "active" ? "MTP active" : server.spec_type === "draft-mtp" ? "MTP configured" : "", `${server.slots || 1} slot(s)`]
                     .filter(Boolean).join(" · ")))))
-          : [el("div", { class: "hint" }, "No models loaded")] ),
+          : [el("div", { class: "hint" }, "No models serving · choose a model in Models to start")] ),
       ...meters,
       el("div", { class: "state" },
         el("span", { class: `pulse ${state.cls}` }),
@@ -142,15 +143,15 @@
       const peers = r.peers || [];
       this.peers = peers;
       const totalSlots = peers.reduce((a, p) => a + (p.slots || 1), 0);
-      const busy = peers.reduce((a, p) => a + ((p.slots || 1) - (p.free ?? 0)), 0);
+      const busy = peers.reduce((a, p) => a + ((p.slots || 1) - (p.free ?? (p.busy ? 0 : (p.slots || 1)))), 0);
 
       this.querySelector("#cluster-sub").textContent =
-        peers.length === 1 ? "One machine." : `${peers.length} machines on this network.`;
+        peers.length === 1 ? "One device ready to share compute." : `${peers.length} devices sharing compute in this pool.`;
       const paused = peers.filter((p) => ((p.device || {}).availability || {}).paused);
       this.drawPause(peers.length, paused.length);
       this.querySelector("#cluster-stat").replaceChildren(
         el("div", {}, el("div", { class: "n" }, peers.length),
-           el("div", { class: "k" }, "machines")),
+           el("div", { class: "k" }, "devices")),
         el("div", {}, el("div", { class: "n" }, `${busy}/${totalSlots}`),
            el("div", { class: "k" }, "slots in use")),
         el("div", {}, el("div", { class: "n" }, `${paused.length}/${peers.length}`),
@@ -164,8 +165,8 @@
         peers.length ? el("div", { class: "grid" }, peers.map(peerCard)) : null,
         alone
           ? el("div", { class: "empty" },
-              el("div", { class: "big" }, "Just this machine so far"),
-              el("div", {}, "Install ml-stack on another machine and open it."),
+              el("div", { class: "big" }, "Your pool starts here"),
+              el("div", {}, "Install Poolside on another device to add its spare compute."),
               el("div", {}, "Dev connects trusted devices automatically. You can also pair manually below."))
           : null));
 
@@ -222,13 +223,13 @@
         note.replaceChildren(this.pauseNote);
         this.draw();
       };
-      const stop = el("button", { class: "ghost small" }, "Pause every machine");
+      const stop = el("button", { class: "ghost small" }, "Pause pool");
       stop.onclick = () => send(false, stop);
-      const go = el("button", { class: "ghost small" }, "Take work again");
+      const go = el("button", { class: "ghost small" }, "Resume pool");
       go.onclick = () => send(true, go);
 
       this.querySelector("#cluster-pause").replaceChildren(
-        el("h2", {}, "Everyone's machines"),
+        el("h2", {}, "Pool availability"),
         el("div", { class: "hint" },
           paused
             ? `${paused} of ${total} machine${total === 1 ? "" : "s"} ${paused === 1 ? "is" : "are"} paused.`
@@ -248,8 +249,8 @@
         this.draw();
       };
       joined.replaceChildren(
-        el("h2", {}, "Clusters"),
-        el("div", { class: "hint" }, "This machine shares work with each cluster listed here."),
+        el("h2", {}, "Pool connections"),
+        el("div", { class: "hint" }, "This device shares compute with each pool listed here."),
         ...M.kids((rows[0]?.mode || this.clusterMode) === "dev" ? el("button", { class: "ghost small", onclick: async () => {
           const state = await api("/ui/setup");
           const result = await api("/ui/setup/initial", { method: "POST", body: JSON.stringify({
@@ -260,12 +261,13 @@
         ...(rows.length ? rows.map((c, i) =>
           el("div", { class: "row" },
             el("span", {}, el("b", {}, c.group),
-              el("span", { class: "why" }, i === 0 ? "Primary cluster" : "Also joined")),
+              el("span", { class: "why" }, i === 0 ? "Primary pool" : "Also joined")),
             el("button", { class: "ghost small", onclick: async () => {
               const left = await api("/ui/clusters", { method: "DELETE",
                 body: JSON.stringify({ group: c.group }) });
-              if (!left.error) await refresh();
-            } }, "Leave"))) : [el("div", { class: "hint" }, "No cluster joined.")]),
+              if (left.error || left.ok === false) { joined.append(el("div", { class: "err", role: "alert" }, left.error || "Could not leave this pool.")); return; }
+              await refresh();
+            } }, "Leave"))) : [el("div", { class: "hint" }, "No pool joined.")]),
         M.clusterForm({ endpoint: "/ui/clusters", groups: rows.map(c => c.group), group: rows[0]?.group || "default", onComplete: refresh }));
     }
 

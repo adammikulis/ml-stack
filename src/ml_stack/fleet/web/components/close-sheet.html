@@ -1,6 +1,6 @@
 <!-- close-sheet: the question the native window asks when the close button is clicked -->
 <template>
-  <ml-sheet id="close-sheet" heading="Close ml-stack?" dismissible="true">
+  <ml-sheet id="close-sheet" heading="Close Poolside?" dismissible="true">
     <p class="sub" id="close-why"></p>
     <div class="choices">
       <button class="choice" id="close-background">
@@ -51,15 +51,15 @@
         this.remember.checked = true;
         const clustered = !!(window.fleetModel && window.fleetModel.inCluster);
         this.why.textContent = clustered
-          ? "This machine is part of your cluster. Keeping it running lets the others "
+          ? "This machine is part of your pool. Keeping it running lets the others "
             + "send it work while the window is shut."
           : "Keeping it running lets this machine answer, and lets the machines you add "
             + "later send it work while the window is shut.";
         this.querySelector("#close-background-d").textContent = clustered
-          ? "Stays in the cluster. Open it again any time."
+          ? "Stays in the pool. Open it again any time."
           : "Stays reachable. Open it again any time.";
         this.querySelector("#close-quit-d").textContent = clustered
-          ? "Leaves the cluster until you open it again."
+          ? "Leaves the pool until you open it again."
           : "Stops answering until you open it again.";
         this.sheet.setAttribute("open", "");
       };
