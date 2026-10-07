@@ -1,7 +1,23 @@
+<style>
+model-browser .model-browser{padding:0}
+model-browser .section-heading h2{font-size:21px;margin:0 0 8px}
+model-browser .browser-toolbar{display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin:20px 0}
+model-browser .search-field{flex:1;min-width:180px}
+model-browser .search-field input{width:100%;box-sizing:border-box}
+model-browser #browser-results{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,280px),1fr));gap:16px}
+model-browser .model-row{display:flex;flex-direction:column;align-items:stretch;gap:16px;background:var(--bg-raised);padding:20px;border:1px solid var(--line);border-radius:16px;min-width:0;margin:0}
+model-browser .model-info{min-width:0;overflow-wrap:anywhere}
+model-browser .model-info>b{font-size:16px}
+model-browser .variant-choice{display:block;font-size:12px;margin:16px 0}
+model-browser .variant-choice select{display:block;max-width:100%;margin-top:8px}
+model-browser .model-actions{margin-top:auto}
+model-browser .model-actions button{background:var(--poolside-cyan);color:var(--poolside-cyan-ink,var(--poolside-navy,#1b1f3a));border:0;border-radius:10px;font-weight:700}
+model-browser #browser-pages{display:flex;gap:12px;align-items:center;margin-top:20px}
+</style>
 <template>
   <section class="model-browser" aria-label="Model library">
-    <div class="section-heading"><div><h2>Your model library</h2>
-      <p class="hint">Run a model here, copy it from your Pool, or browse new models.</p></div></div>
+    <div class="section-heading"><div><h2>Find your next model</h2>
+      <p class="hint">Copy weights from a device you own, or discover a new model to download.</p></div></div>
     <div class="browser-toolbar">
       <div class="segmented" role="group" aria-label="Model source">
         <button type="button" data-source="network" aria-pressed="true">In your Pool</button>

@@ -44,6 +44,7 @@ from .session import parse_cookie
 from .setup_jobs import jobs, libraries, provenance, server
 from .setup_recovery_routes import SetupRecoveryRoutes
 from .startup_models import choices
+from .themes import default_appearance, registry, resolve
 from .workspace_routes import WorkspaceRoutes
 
 ASSETS = Path(__file__).parent / "web"
@@ -386,6 +387,8 @@ class SettingsRoutes:
             from .updates import current_version
             self.send(200, {
                 "settings": ui.settings.public() if ui.settings else {},
+                "theme_registry": registry(),
+                "resolved_theme": resolve(ui.settings.appearance if ui.settings else default_appearance()),
                 "name": ui.name,
                 "group": cluster_group(ui.cluster_key_path),
                 "version": current_version(),

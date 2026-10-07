@@ -3,13 +3,15 @@
 import re
 import shlex
 
+from ml_stack.workspace import fleet_routes
+
 from .discovery import memberships
 from .projects import lan_host
 
 
 class ProjectBoardRoutes:
     def route(self) -> bool:
-        match = re.fullmatch(r"/ui/projects/([a-f0-9]{32})/(board|invite|adopt)", self.path)
+        match = re.fullmatch(r"/ui/projects/([a-f0-9]{32})/(board(?:/[a-z]+)?|invite|adopt)", self.path)
         if match is None:
             return super().route()
         projects = getattr(self.ui, "projects", None)
@@ -27,6 +29,13 @@ class ProjectBoardRoutes:
                     or self.header("Sec-Fetch-Site", "same-origin") != "same-origin"):
                 self.send(403, {"error": "project board changes come from this page"})
                 return True
+            if match[2].startswith("board/"):
+                project = projects.get(match[1])
+                if project.authority_machine != projects.machine or not project.board_host:
+                    self.send(409, {"error": "open the Board on this project's authoritative device"})
+                    return True
+                return fleet_routes.route(self, workspace=host.workspace(match[1]),
+                                          prefix=f"/ui/projects/{match[1]}/board/")
             if match[2] == "board" and self.method == "GET":
                 self.send(200, host.status(match[1]))
             elif match[2] == "invite" and self.method == "POST":

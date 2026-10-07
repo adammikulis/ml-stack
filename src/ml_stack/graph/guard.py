@@ -24,7 +24,8 @@ def host_ok(host: str, port: int) -> bool:
     return tail == "" or (tail.isdigit() and int(tail) == port)
 
 
-def refusal(method: str, headers: dict[str, str], port: int) -> tuple[int, str] | None:
+def refusal(method: str, headers: dict[str, str], port: int, *,
+            schemes: tuple[str, ...] = ("http",)) -> tuple[int, str] | None:
     """The status and message for a request the server will not route, or None.
 
     ``headers`` is keyed by lower-case name. A POST must come from a loopback origin on this
@@ -38,7 +39,7 @@ def refusal(method: str, headers: dict[str, str], port: int) -> tuple[int, str] 
     origin = headers.get("origin")
     if origin is not None:
         parts = urlsplit(origin)
-        if parts.scheme != "http" or not host_ok(parts.netloc, port):
+        if parts.scheme not in schemes or not host_ok(parts.netloc, port):
             return 403, "a request from another origin"
     claimed = headers.get("content-length", "0").strip() or "0"
     if not claimed.isascii() or not claimed.isdigit():

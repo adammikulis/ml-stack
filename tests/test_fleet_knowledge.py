@@ -94,6 +94,22 @@ def test_graph_browser_navigation_search_and_neighbor(daemon, tmp_path, playwrig
         expect(detail.get_by_role('heading', name='Alpha model', exact=True)).to_be_visible()
         expect(detail).to_contain_text('precision')
         expect(detail).to_contain_text('trained_for')
+        palette = page.evaluate("""() => {
+            const root = document.documentElement;
+            root.style.setProperty('--poolside-yellow', '#ffd166');
+            root.style.setProperty('--poolside-yellow-ink', '#000000');
+            const label = document.querySelector('knowledge-view .graph-node-label');
+            const caption = document.querySelector('knowledge-view .graph-node-caption');
+            const light = [getComputedStyle(label).fill, getComputedStyle(caption).fill];
+            root.style.setProperty('--poolside-yellow', '#101010');
+            root.style.setProperty('--poolside-yellow-ink', '#ffffff');
+            const custom = [getComputedStyle(label).fill, getComputedStyle(caption).fill];
+            root.style.removeProperty('--poolside-yellow');
+            root.style.removeProperty('--poolside-yellow-ink');
+            return {light, custom};
+        }""")
+        assert palette == {'light': ['rgb(0, 0, 0)', 'rgb(255, 209, 102)'],
+                           'custom': ['rgb(255, 255, 255)', 'rgb(16, 16, 16)']}
         expect(detail.locator('details')).not_to_have_attribute('open', '')
         detail.get_by_role('button', name='Inspect Beta training', exact=True).press('Enter')
         expect(detail.get_by_role('heading', name='Beta training', exact=True)).to_be_visible()

@@ -1,13 +1,40 @@
 <style>
-tasks-view{display:contents}tasks-view .task-controls{display:flex;gap:12px;flex-wrap:wrap;margin:16px 0}tasks-view .task-controls input{flex:1;min-width:160px}tasks-view .task-layout{display:grid;grid-template-columns:minmax(220px,340px) minmax(0,1fr);gap:16px}tasks-view .task-row{display:block;width:100%;text-align:left;margin-bottom:8px}tasks-view .task-row small{display:block;color:var(--muted)}tasks-view dl{display:grid;grid-template-columns:130px minmax(0,1fr);gap:8px}tasks-view dd{margin:0;overflow-wrap:anywhere}tasks-view .task-metrics{display:flex;gap:18px;flex-wrap:wrap}tasks-view .task-metrics strong{display:block;font-size:24px}tasks-view details{margin:14px 0}tasks-view summary{cursor:pointer}@media(max-width:700px){tasks-view .task-layout{grid-template-columns:1fr}}
+tasks-view { display:contents; }
+tasks-view .workspace { padding:calc(28px * var(--ui-density,1)) calc(32px * var(--ui-density,1)); }
+tasks-view .work-heading { display:flex; justify-content:space-between; gap:24px; align-items:center; margin-bottom:24px; }
+tasks-view .work-heading h1 { margin:0 0 8px; }
+tasks-view .work-heading p { margin:0; max-width:650px; }
+tasks-view .work-mark { border-radius:16px; padding:calc(14px * var(--ui-density,1)) calc(18px * var(--ui-density,1)); background:var(--poolside-yellow); color:var(--poolside-yellow-ink,var(--poolside-navy)); font-weight:700; white-space:nowrap; }
+tasks-view .task-controls { display:flex; gap:12px; align-items:center; margin:20px 0; }
+tasks-view .task-controls input { flex:1; min-width:100px; }
+tasks-view .task-layout { display:grid; grid-template-columns:minmax(0,1.5fr) minmax(300px,1fr); gap:22px; align-items:start; }
+tasks-view .task-list { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
+tasks-view .task-column { background:var(--bg-sunken); border-radius:14px; padding:calc(12px * var(--ui-density,1)); min-height:300px; }
+tasks-view .task-column h2 { display:flex; justify-content:space-between; font-size:0.929rem; margin:3px 0 14px; }
+tasks-view .task-column h2 span { color:var(--muted); }
+tasks-view .task-row { display:block; width:100%; text-align:left; margin:0 0 10px; padding:calc(16px * var(--ui-density,1)) calc(12px * var(--ui-density,1)); background:var(--bg-raised); color:var(--text); border:1px solid var(--line); border-radius:10px; box-shadow:0 2px 5px #1b1f3a05; }
+tasks-view .task-row[aria-pressed=true] { border-color:var(--poolside-yellow-ink,var(--poolside-navy)); box-shadow:0 0 0 1px var(--poolside-navy); }
+tasks-view .task-row small { display:block; color:var(--muted); margin-top:10px; font-size:0.786rem; overflow-wrap:anywhere; }
+tasks-view .task-row .task-state { display:inline-block; margin-top:12px; font-size:0.714rem; background:var(--poolside-yellow); color:var(--poolside-yellow-ink,var(--poolside-navy)); padding:calc(3px * var(--ui-density,1)) calc(7px * var(--ui-density,1)); border-radius:5px; }
+tasks-view .task-detail { background:var(--bg-raised); border:1px solid var(--line); border-radius:16px; padding:calc(24px * var(--ui-density,1)); min-height:300px; }
+tasks-view .task-detail h2 { margin-top:0; }
+tasks-view dl { display:grid; grid-template-columns:110px minmax(0,1fr); gap:8px; font-size:0.857rem; }
+tasks-view dt { color:var(--muted); } tasks-view dd { margin:0; overflow-wrap:anywhere; }
+tasks-view .task-metrics { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; }
+tasks-view .task-metrics > div { padding:calc(16px * var(--ui-density,1)); background:var(--bg-raised); border:1px solid var(--line); border-radius:12px; font-size:0.857rem; }
+tasks-view .task-metrics strong { display:block; font-size:1.786rem; margin-bottom:6px; }
+tasks-view details { margin:14px 0; } tasks-view summary { cursor:pointer; }
+tasks-view .task-composer { background:var(--bg-raised); border:1px solid var(--line); border-radius:12px; padding:calc(16px * var(--ui-density,1)); }
+@media(max-width:1100px) { tasks-view .task-layout { grid-template-columns:1fr; } }
+@media(max-width:650px) { tasks-view .workspace { padding:calc(20px * var(--ui-density,1)); } tasks-view .task-list { grid-template-columns:1fr; } tasks-view .task-column { min-height:0; } tasks-view .task-metrics { grid-template-columns:repeat(2,1fr); } tasks-view .work-mark { display:none; } tasks-view .task-controls { flex-wrap:wrap; } }
 </style>
 <template>
 <section class="workspace" hidden>
-<h1>Jobs &amp; outcomes</h1><p class="intro">Create an implementation task, follow its worker, and review the evidence against your acceptance criteria.</p>
+<header class="work-heading"><div><h1>Move work forward</h1><p class="intro">Give an agent a clear task. Follow its progress, inspect the evidence, and review the outcome.</p></div><span class="work-mark">Ideas → outcomes</span></header>
 <div class="task-metrics"></div>
 <div class="task-controls"><input aria-label="Search tasks" placeholder="Search tasks"><select aria-label="Task status"><option value="">All statuses</option></select><button class="task-refresh">Refresh</button></div>
 <p class="status" role="status"></p>
-<details><summary>Create a task</summary><form class="task-create"><label>Title<input name="title" required maxlength="200"></label><label>Description<textarea name="description" maxlength="20000"></textarea></label><label>Acceptance criteria, one per line<textarea name="acceptance" required></textarea></label><button>Create task</button></form></details>
+<details class="task-composer"><summary>＋ Create a task</summary><form class="task-create"><label>Title<input name="title" required maxlength="200"></label><label>Description<textarea name="description" maxlength="20000"></textarea></label><label>Acceptance criteria, one per line<textarea name="acceptance" required></textarea></label><button>Create task</button></form></details>
 <div class="task-layout"><div class="task-list"></div><article class="workspace-card task-detail"><p>Select a task to inspect its evidence.</p></article></div>
 </section>
 </template>
@@ -26,8 +53,15 @@ class TasksView extends HTMLElement{
  async load(){if(this.loading||this.submitting)return;this.loading=true;try{const data=await W.api('/ui/tasks');this.rows=data.tasks||[];this.metrics=data.metrics||{};this.paint();this.note.textContent=`${this.rows.length} tasks. Worker checkpoints are claims until independently verified.`;}catch(error){W.status(this.note,error);}finally{this.loading=false;}}
  paint(){const metrics=this.querySelector('.task-metrics');metrics.replaceChildren(...[['Accepted outcomes',this.metrics?.verified_outcomes],['Accepted artifacts',this.metrics?.accepted_artifacts],['Failures',this.metrics?.failures],['Blocked seconds',Math.round(this.metrics?.blocked_seconds||0)]].map(([label,value])=>E('div',{},E('strong',{},String(value||0)),label)));
  const query=this.search.value.toLowerCase();const rows=this.rows.filter(row=>(!this.filter.value||row.state===this.filter.value)&&`${row.title} ${row.description} ${row.worker||''} ${row.base_id||''}`.toLowerCase().includes(query));
- this.querySelector('.task-list').replaceChildren(...rows.map(row=>E('button',{class:'task-row',type:'button','aria-pressed':String(row.id===this.selected),onclick:()=>{this.selected=row.id;this.paint();}},row.title,E('small',{},`${row.state} · ${row.base_id||'Unassigned account'}`))));
- if(!rows.length)this.querySelector('.task-list').append(E('p',{},'No matching tasks.'));
+ const lanes=[['Ready',['queued']],['In progress',['working','blocked']],['Review & done',['review','accepted','completed','rejected']]];
+ this.querySelector('.task-list').replaceChildren(...lanes.map(([label,states])=>{
+  const matching=rows.filter(row=>states.includes(row.state));
+  const lane=E('section',{class:'task-column','aria-label':label},E('h2',{},label,E('span',{},String(matching.length))));
+  lane.append(...matching.map(row=>E('button',{class:'task-row',type:'button','aria-pressed':String(row.id===this.selected),onclick:()=>{this.selected=row.id;this.paint();}},row.title,E('small',{},row.worker||row.base_id||'Awaiting assignment'),E('span',{class:'task-state'},row.state))));
+  if(!matching.length)lane.append(E('p',{class:'hint'},'No tasks here.'));
+  return lane;
+ }));
+ if(!rows.length)this.querySelector('.task-list').prepend(E('p',{class:'hint'},'No matching tasks.'));
  const row=this.rows.find(row=>row.id===this.selected);if(row)this.details(row);else{this.detailKey='';this.querySelector('.task-detail').replaceChildren(E('p',{},'Select a task to inspect its evidence.'));}}
  field(list,label,value){if(value!==undefined&&value!==null&&value!=='')list.append(E('dt',{},label),E('dd',{},value instanceof Node?value:String(value)));}
  evidence(title,value){return E('details',{'data-advanced':''},E('summary',{},title),E('pre',{},W.json(value)));}

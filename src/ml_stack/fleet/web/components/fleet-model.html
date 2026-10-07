@@ -75,12 +75,47 @@ cluster-view, chat-view, models-view, settings-view, fit-view, data-view, traini
       if (M.preferences.always_show_advanced) node.open = true;
     }
   };
+  function luminance(hex) {
+    const digits=hex.slice(1), full=digits.length === 3 ? [...digits].map(c=>c+c).join("") : digits;
+    const rgb=[0,2,4].map(at=>parseInt(full.slice(at,at+2),16)/255)
+      .map(channel=>channel<=.04045 ? channel/12.92 : ((channel+.055)/1.055)**2.4);
+    return rgb[0]*.2126 + rgb[1]*.7152 + rgb[2]*.0722;
+  }
+  function foreground(fill, navy) {
+    const light=luminance(fill), ink=luminance(navy);
+    if ((Math.max(light,ink)+.05)/(Math.min(light,ink)+.05)>=4.5) return navy;
+    return (light+.05)/.05 >= 1.05/(light+.05) ? "#000000" : "#ffffff";
+  }
+  M.applyTheme = function () {
+    const theme = M.preferences.resolved_theme;
+    const root = document.documentElement;
+    root.dataset.theme = theme?.base === "dark" ? "dark" : "light";
+    root.dataset.density = theme?.density || "comfortable";
+    const colors = {
+      pink:"--poolside-pink", orange:"--poolside-orange", yellow:"--poolside-yellow",
+      cyan:"--poolside-cyan", navy:"--poolside-navy", background:"--ml-bg",
+      panel:"--ml-surface", sunken:"--ml-sunken", text:"--ml-text", muted:"--ml-muted", border:"--ml-line"
+    };
+    for (const [key, variable] of Object.entries(colors)) {
+      if (theme?.colors?.[key]) root.style.setProperty(variable, theme.colors[key]);
+      else root.style.removeProperty(variable);
+    }
+    const palette=getComputedStyle(root), navy=palette.getPropertyValue("--poolside-navy").trim();
+    for (const color of ["pink","orange","yellow","cyan","navy"]) {
+      root.style.setProperty(`--poolside-${color}-ink`,
+        foreground(palette.getPropertyValue(`--poolside-${color}`).trim(),navy));
+    }
+    if (theme?.colors?.pink) root.style.setProperty("--ml-accent", theme.colors.pink);
+    else root.style.removeProperty("--ml-accent");
+    root.style.setProperty("--ui-font-size", `${theme?.font_size || 14}px`);
+  };
   M.setPreferences = function (settings) {
     const previous = M.preferences.always_show_advanced;
     M.preferences = {...settings, always_show_advanced:settings.always_show_advanced === true};
     if (previous && !M.preferences.always_show_advanced) {
       for (const node of document.querySelectorAll("details[data-advanced]")) node.open = false;
     }
+    M.applyTheme();
     M.applyAdvanced();
     window.dispatchEvent(new CustomEvent("fleet-preferences", {detail:M.preferences}));
   };
@@ -94,7 +129,7 @@ cluster-view, chat-view, models-view, settings-view, fit-view, data-view, traini
   }, true);
   M.loadPreferences = async function () {
     const result = await request("/ui/settings");
-    if (result.ok && !result.error) M.setPreferences(result.settings || {});
+    if (result.ok && !result.error) M.setPreferences({...result.settings, resolved_theme:result.resolved_theme});
   };
 
   /** An ml-ui element with its properties set; a property set before the element is defined
@@ -170,7 +205,8 @@ cluster-view, chat-view, models-view, settings-view, fit-view, data-view, traini
     if (name === "cluster" && ["sign-in", "first-run"].includes(M.route) && available(M.requestedRoute)) {
       name = M.requestedRoute;
     }
-    if (IN_APP.includes(name) && !available(name)) name = available("cluster") ? "cluster" : "fit";
+    if (name === "cluster" && ["sign-in", "first-run"].includes(M.route) && !available(M.requestedRoute)) name = available("chat") ? "chat" : "fit";
+    if (IN_APP.includes(name) && !available(name)) name = available("chat") ? "chat" : "fit";
     if (IN_APP.includes(name)) {
       M.requestedRoute = name;
       if (remember && location.hash !== `#${name}`) history.pushState(null, "", `#${name}`);
@@ -235,7 +271,7 @@ cluster-view, chat-view, models-view, settings-view, fit-view, data-view, traini
       }
       const hash = location.hash.slice(1);
       const asked = available(hash) ? hash
-        : (location.pathname.replace(/\/$/, "") === "/ui/fit" ? "fit" : "cluster");
+        : (location.pathname.replace(/\/$/, "") === "/ui/fit" ? "fit" : "chat");
       const opened = document.querySelector(`${asked}-view`) ? asked
         : (IN_APP.find((n) => document.querySelector(`${n}-view`)) || asked);
       M.requestedRoute = opened;

@@ -16,7 +16,7 @@ from ml_stack.fleet.onboard.lan import require_local_url
 from ml_stack.fleet.remote import Peer, device_address
 from ml_stack.graph.store import GraphStore
 from ml_stack.http import ServerError, open_stream
-from ml_stack.workspace import coordinator_client, tokens
+from ml_stack.workspace import coordinator_client, device_metadata, tokens
 from ml_stack.workspace.chain import held
 from ml_stack.workspace.identity import Denied, valid_id
 
@@ -108,7 +108,7 @@ class RemoteWorkspace:
         self._prepare_storage()
         result = self._request("enroll", {"name": name, "model": model,
                                           "harness": harness, "cluster": self.cluster, "cluster_id": self.cluster_id,
-                                          "authority_machine": authority_machine})
+                                          "authority_machine": authority_machine, "device": device_metadata.current()})
         name, token = str(result["id"]), str(result["token"])
         if result.get("project_id") != self.project_id:
             raise Denied("agent enrollment returned another project")

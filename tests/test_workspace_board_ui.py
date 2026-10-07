@@ -184,3 +184,56 @@ def test_drafts_are_scoped_to_channel_and_survive_reload_without_posting(kit, se
     assert not posts
     assert not ws.board.ui_read(kit.owner, '#ops')['messages']
     context.close()
+
+
+@pytest.mark.slow
+def test_readable_sessions_and_authenticated_child_keep_exact_dm_and_message_ids(kit, served, browser):
+    ws = kit.ws
+    first, second = (kit.agent(name) for name in ('codex-first', 'codex-second'))
+    for token in (first, second):
+        ws.registry.record_device_claim(token, {'os': 'macOS', 'hostname': 'test-machine'})
+        ws.register_session(token)
+    child = ws.registry.delegate(ws.auth(first), 'review', 600, (), 10)
+    ws.board.create(first, '#sessions')
+    ws.send(child, '#sessions', 'note', 'child message', subject='Readable child')
+    page = browser.new_context(bypass_csp=True).new_page()
+    page.goto(f'http://127.0.0.1:{served}/')
+    first_name = 'Codex · Mac · session 1'
+    second_name = 'Codex · Mac · session 2'
+    page.get_by_role('button', name=first_name, exact=True).wait_for()
+    page.get_by_role('button', name=second_name, exact=True).wait_for()
+    assert page.get_by_role('button', name=first_name, exact=True).get_attribute('title').startswith('codex-first ·')
+    page.get_by_role('combobox', name='Message an agent').select_option('codex-second')
+    page.get_by_role('button', name='Open', exact=True).click()
+    page.wait_for_function("document.querySelector('ml-board').view.b === 'codex-second'")
+    page.get_by_role('button', name='#sessions', exact=False).click()
+    page.locator('ml-board .row .meta').filter(has_text='Subagent · review (parent Codex · Mac · session 1)').wait_for()
+    page.get_by_role('button', name='Readable child', exact=False).click()
+    author = page.locator('ml-board .who')
+    author.wait_for()
+    assert author.inner_text().startswith('Subagent · review (parent Codex · Mac · session 1)')
+    assert author.get_attribute('title') == 'codex-first/review'
+    page.close()
+
+
+@pytest.mark.slow
+def test_maximum_length_authenticated_child_dm_survives_reload(kit, served, browser):
+    parent_name, child_name = 'p' * 48, 'c' * 48
+    parent = kit.agent(parent_name)
+    kit.ws.registry.delegate(kit.ws.auth(parent), child_name, 600, (), 10)
+    identity = parent_name + '/' + child_name
+    assert len(identity) == 97
+    context = browser.new_context()
+    page = context.new_page()
+    page.goto(f'http://127.0.0.1:{served}/')
+    chooser = page.get_by_role('combobox', name='Message an agent')
+    chooser.select_option(identity)
+    page.get_by_role('button', name='Open', exact=True).click()
+    page.wait_for_function("identity => document.querySelector('ml-board').view.b === identity", arg=identity)
+    editor = page.locator('ml-board textarea')
+    editor.fill('Pending child message')
+    page.reload()
+    page.wait_for_function("identity => document.querySelector('ml-board').view.b === identity", arg=identity)
+    assert page.locator('ml-board textarea').input_value() == 'Pending child message'
+    assert page.evaluate("document.querySelector('ml-board').view.a") == 'owner'
+    context.close()

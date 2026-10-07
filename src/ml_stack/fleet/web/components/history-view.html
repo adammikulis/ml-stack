@@ -1,21 +1,30 @@
 <style>
 history-view { display:contents; }
+history-view .workspace { padding:calc(28px * var(--ui-density,1)) calc(32px * var(--ui-density,1)); }
+history-view .activity-heading { display:flex; justify-content:space-between; align-items:center; margin-bottom:22px; }
+history-view .activity-heading h1 { margin:0 0 8px; } history-view .activity-heading p { margin:0; }
+history-view .activity-heading > span { background:var(--poolside-yellow); color:var(--poolside-yellow-ink,var(--poolside-navy)); padding:calc(14px * var(--ui-density,1)) calc(18px * var(--ui-density,1)); border-radius:12px; font-weight:600; }
+history-view .history-controls { background:var(--bg-raised); border:1px solid var(--line); border-radius:14px; padding:calc(18px * var(--ui-density,1)); }
+history-view .activity-reputation { margin:24px 0; padding:calc(18px * var(--ui-density,1)); background:var(--bg-raised); border:1px solid var(--line); border-radius:12px; }
+history-view .activity-reputation > summary { font-weight:600; }
+history-view .history-agent { border:1px solid var(--line); background:var(--bg-raised); border-radius:14px; padding:calc(20px * var(--ui-density,1)); }
+
 history-view .history-controls { display:flex; flex-wrap:wrap; gap:12px; align-items:end; margin-bottom:16px; }
 history-view .history-controls label { margin:0; flex:1 1 180px; }
 history-view .history-controls input,history-view .history-controls select { display:block; width:100%; margin-top:6px; }
 history-view .history-economy { display:flex; flex-wrap:wrap; gap:12px; margin:12px 0; }
-history-view .history-metric { min-width:140px; padding:12px; background:var(--panel); border:1px solid var(--line); border-radius:8px; }
-history-view .history-metric strong { display:block; font-size:22px; }
+history-view .history-metric { min-width:140px; padding:calc(12px * var(--ui-density,1)); background:var(--panel); border:1px solid var(--line); border-radius:8px; }
+history-view .history-metric strong { display:block; font-size:1.571rem; }
 history-view .history-agent { margin-bottom:16px; }
-history-view .history-agent>summary { font-size:18px; padding:4px 0; }
-history-view .history-count { color:var(--muted); font-size:13px; margin-left:10px; }
-history-view .history-action { border-top:1px solid var(--line); padding:12px 0; }
+history-view .history-agent>summary { font-size:1.286rem; padding:calc(4px * var(--ui-density,1)) 0; }
+history-view .history-count { color:var(--muted); font-size:0.929rem; margin-left:10px; }
+history-view .history-action { border-top:1px solid var(--line); padding:calc(12px * var(--ui-density,1)) 0; }
 history-view summary { cursor:pointer; overflow-wrap:anywhere; }
 history-view .history-action summary { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
 history-view .history-action summary:before { content:'▸'; }
 history-view .history-action[open] summary:before { content:'▾'; }
-history-view time { color:var(--muted); font-size:12px; }
-history-view .history-action dl { display:grid; grid-template-columns:110px minmax(0,1fr); gap:8px; font-size:13px; }
+history-view time { color:var(--muted); font-size:0.857rem; }
+history-view .history-action dl { display:grid; grid-template-columns:110px minmax(0,1fr); gap:8px; font-size:0.929rem; }
 history-view dt { color:var(--muted); }
 history-view dd { margin:0; overflow-wrap:anywhere; white-space:pre-wrap; }
 history-view .history-links { display:flex; flex-wrap:wrap; gap:12px; margin-top:12px; }
@@ -23,8 +32,7 @@ history-view .history-links { display:flex; flex-wrap:wrap; gap:12px; margin-top
 </style>
 <template>
 <section class="workspace" hidden>
-  <h1>History</h1>
-  <p class="intro">Actions grouped by agent. Open an action to see its recorded details.</p>
+  <header class="activity-heading"><div><h1>What’s happening</h1><p class="intro">Follow your team’s activity. Open an action to inspect its recorded evidence.</p></div><span>Activity</span></header>
   <p class="intro"><strong>Runs are free.</strong> Credits record earned work; running an agent does not spend them. Credits and ratings do not restrict access.</p>
   <div class="history-controls">
     <label>Agent<select id="history-agent"><option value="">All agents</option></select></label>
@@ -32,7 +40,7 @@ history-view .history-links { display:flex; flex-wrap:wrap; gap:12px; margin-top
     <button id="history-refresh" type="button">Refresh</button>
   </div>
   <p class="status" id="history-status" role="status">Loading activity…</p>
-  <section aria-label="Agent credits and work reputation"><h2>Credits and work reputation</h2><div id="history-credits"></div></section>
+  <details class="activity-reputation"><summary>Credits &amp; work reputation</summary><section aria-label="Agent credits and work reputation"><div id="history-credits"></div></section></details>
   <h2>Recent actions</h2>
   <div id="history-list"></div>
   <p class="intro">Shows up to 500 recent recorded actions. Prompts, tool arguments, outputs, and message bodies are omitted from the activity log.</p>

@@ -14,6 +14,7 @@ pytestmark = pytest.mark.slow
 
 def test_context_length_uses_tokens_and_saves_the_chosen_limit(joined, open_page):
     page, errors = open_page(joined, cookie=joined.cookie, path='/ui/#settings')
+    page.get_by_role('tab', name='Models & providers').click()
     slider = page.get_by_role('slider', name='Context length')
     slider.wait_for()
     assert slider.get_attribute('aria-valuetext') == '8,192 tokens'
@@ -24,10 +25,10 @@ def test_context_length_uses_tokens_and_saves_the_chosen_limit(joined, open_page
     page.wait_for_selector('#settings-note .ok')
     _, saved, _ = joined.call('/ui/settings',cookie=joined.cookie)
     assert saved['settings']['context'] == 16384
-    assert not page.locator('#settings-advanced').get_attribute('open')
     assert not page.locator('#settings-removal button.danger').is_visible()
-    page.locator('#settings-advanced summary').click()
+    page.get_by_role('tab', name='Maintenance', exact=True).click()
     page.locator('#settings-removal button.danger').wait_for()
+    page.get_by_role('tab', name='Models & providers').click()
     slider.focus()
     slider.press('End')
     assert slider.get_attribute('aria-valuetext') == '1,048,576 tokens'
@@ -83,6 +84,7 @@ def test_decision_lab_shows_only_inputs_for_the_selected_operation(joined, open_
 
 def test_interactive_chat_command_is_given_to_the_person_without_a_job(joined, open_page):
     page, errors = open_page(joined,cookie=joined.cookie,path='/ui/#tools')
+    page.get_by_role('tab', name='Command library', exact=True).click()
     runner = page.locator('tools-view #runner')
     command = runner.get_by_label('Installed command',exact=True)
     command.select_option('ml-stack-chat')
@@ -91,6 +93,8 @@ def test_interactive_chat_command_is_given_to_the_person_without_a_job(joined, o
     runner.get_by_role('button',name='Run command',exact=True).click()
     page.wait_for_function("document.querySelector('tools-view #runner pre').textContent.includes('Run this command in your own terminal')")
     assert 'ml-stack-chat' in runner.locator('pre').inner_text()
+    assert runner.locator('#runner-status').is_visible()
+    assert 'human-only' in runner.locator('#runner-status').inner_text()
     assert joined.runner.snapshot() == []
     assert not errors
 
@@ -123,7 +127,6 @@ def test_central_advanced_preference_expands_pages_and_survives_reload(joined, o
     preference.check()
     page.click('#settings-save')
     expect(page.locator('#settings-note .ok')).to_contain_text('Preferences saved')
-    expect(page.locator('#settings-advanced')).to_have_attribute('open', '')
     _, saved, _ = joined.call('/ui/settings', cookie=joined.cookie)
     assert saved['settings']['always_show_advanced'] is True
     page.evaluate("window.fleetModel.go('training')")
@@ -141,7 +144,6 @@ def test_central_advanced_preference_expands_pages_and_survives_reload(joined, o
     preference.uncheck()
     page.click('#settings-save')
     expect(page.locator('#settings-note .ok')).to_contain_text('Preferences saved')
-    expect(page.locator('#settings-advanced')).not_to_have_attribute('open', '')
     assert not errors
 
 
@@ -173,6 +175,7 @@ def test_central_output_default_saves_and_survives_reloading(joined, open_page):
     from playwright.sync_api import expect
 
     page, errors = open_page(joined, cookie=joined.cookie, path='/ui/#settings')
+    page.get_by_role('tab', name='Models & providers').click()
     output = page.get_by_label('Default maximum output tokens', exact=True)
     expect(output).to_have_value('8192')
     output.fill('2048')
@@ -181,6 +184,7 @@ def test_central_output_default_saves_and_survives_reloading(joined, open_page):
     _, defaults, _ = joined.call('/ui/conversations/defaults', cookie=joined.cookie)
     assert defaults['settings']['max_output_tokens'] == 2048
     page.reload()
+    page.get_by_role('tab', name='Models & providers').click()
     expect(output).to_have_value('2048')
     output.fill('')
     page.locator('#settings-save').click()
@@ -188,5 +192,93 @@ def test_central_output_default_saves_and_survives_reloading(joined, open_page):
     _, defaults, _ = joined.call('/ui/conversations/defaults', cookie=joined.cookie)
     assert defaults['settings']['max_output_tokens'] is None
     page.reload()
+    page.get_by_role('tab', name='Models & providers').click()
     expect(output).to_have_value('')
+    assert not errors
+
+
+def test_settings_switch_sections_without_losing_unsaved_values(joined, open_page):
+    from playwright.sync_api import expect
+
+    page, errors = open_page(joined, cookie=joined.cookie, path='/ui/#settings')
+    panels = page.locator('settings-view [data-pane]:visible')
+    expect(panels).to_have_count(1)
+    expect(panels).to_have_attribute('data-pane', 'appearance')
+    expect(page.locator('#settings-removal')).not_to_be_visible()
+    page.get_by_role('tab', name='Appearance & advanced').focus()
+    page.keyboard.press('ArrowDown')
+    expect(panels).to_have_attribute('data-pane', 'models')
+    expect(page.get_by_role('tab', name='Models & providers')).to_be_focused()
+    sizing = page.evaluate("""() => {
+        const root = document.documentElement;
+        const pane = document.querySelector('settings-view [data-pane="models"]');
+        const heading = pane.querySelector('header h2');
+        const before = {padding:parseFloat(getComputedStyle(pane).paddingLeft),
+                        font:parseFloat(getComputedStyle(heading).fontSize),
+                        rootFont:parseFloat(getComputedStyle(root).fontSize)};
+        const originalFont = root.style.fontSize;
+        const originalDensity = root.style.getPropertyValue('--ui-density');
+        root.style.setProperty('--ui-density', '.8'); root.style.fontSize = '20px';
+        const after = {padding:parseFloat(getComputedStyle(pane).paddingLeft),
+                       font:parseFloat(getComputedStyle(heading).fontSize)};
+        root.style.fontSize = originalFont;
+        if(originalDensity) root.style.setProperty('--ui-density', originalDensity);
+        else root.style.removeProperty('--ui-density');
+        return {before, after};
+    }""")
+    assert sizing['after']['padding'] == pytest.approx(sizing['before']['padding'] * .8)
+    assert sizing['after']['font'] == pytest.approx(sizing['before']['font'] * 20 / sizing['before']['rootFont'], abs=.03)
+    page.get_by_role('tab', name='Models & providers').click()
+    output = page.get_by_label('Default maximum output tokens', exact=True)
+    output.fill('4096')
+    page.get_by_role('tab', name='Compute & device').click()
+    expect(panels).to_have_count(1)
+    expect(panels).to_have_attribute('data-pane', 'compute')
+    page.get_by_role('tab', name='Models & providers').click()
+    expect(output).to_have_value('4096')
+    page.get_by_role('button', name='Save preferences', exact=True).click()
+    expect(page.locator('#settings-note .ok')).to_contain_text('Preferences saved')
+    page.reload()
+    page.get_by_role('tab', name='Models & providers').click()
+    expect(output).to_have_value('4096')
+    page.get_by_role('tab', name='Maintenance', exact=True).click()
+    expect(page.locator('#settings-removal button.danger')).to_be_visible()
+    expect(page.locator('#settings-chatting')).not_to_be_visible()
+    page.screenshot(path='/private/tmp/poolside-rebuild-settings-maintenance.png', full_page=True)
+    assert not errors
+
+
+def test_tool_library_keyboard_tabs_and_errors_stay_with_the_runner(joined, open_page):
+    from playwright.sync_api import expect
+
+    page, errors = open_page(joined, cookie=joined.cookie, path='/ui/#tools')
+    decision = page.get_by_role('tab', name='Decision lab', exact=True)
+    decision.focus()
+    page.keyboard.press('ArrowRight')
+    library = page.get_by_role('tab', name='Command library', exact=True)
+    expect(library).to_be_focused()
+    expect(library).to_have_attribute('aria-selected', 'true')
+    expect(page.get_by_role('tabpanel', name='Command library', exact=True)).to_be_visible()
+    expect(page.get_by_role('tabpanel', name='Decision lab', exact=True)).not_to_be_visible()
+    runner = page.locator('tools-view #runner')
+    runner.get_by_label('Installed command', exact=True).select_option('ml-stack-doctor')
+    runner.locator('details summary').click()
+    args = runner.get_by_label('Arguments as JSON array', exact=True)
+    args.fill('["--help", 42]')
+    runner.get_by_role('button', name='Review', exact=True).click()
+    expect(runner.locator('#runner-status')).to_contain_text('Arguments must be a JSON array of strings.')
+    expect(runner.locator('#runner-status')).to_be_visible()
+    assert joined.runner.snapshot() == []
+    args.fill('["--help"]')
+    page.route('**/ui/workspace/jobs', lambda route: route.fulfill(status=400, json={'error':'Command admission unavailable'})
+               if route.request.method == 'POST' else route.continue_())
+    runner.get_by_role('button', name='Run command', exact=True).click()
+    expect(runner.locator('#runner-status')).to_contain_text('Command admission unavailable')
+    expect(runner).to_be_visible()
+    expect(library).to_have_attribute('aria-selected', 'true')
+    library.focus()
+    page.keyboard.press('End')
+    expect(page.get_by_role('tab', name='Running jobs', exact=True)).to_be_focused()
+    page.keyboard.press('Home')
+    expect(decision).to_be_focused()
     assert not errors

@@ -1,0 +1,140 @@
+"""Authenticated local person access to canonical project conversations."""
+
+import io
+import json
+from types import SimpleNamespace
+
+import pytest
+
+from ml_stack.fleet.project_board_routes import ProjectBoardRoutes
+from ml_stack.fleet.routes import Base
+from ml_stack.workspace import tokens
+from ml_stack.workspace.service import Workspace
+
+PROJECT = "a" * 32
+OTHER = "b" * 32
+
+
+class Request(ProjectBoardRoutes, Base):
+    def send(self, status, payload, extra=None):
+        self.handler.send_response(status)
+        self.handler.wfile.write(json.dumps(payload).encode())
+
+
+@pytest.fixture
+def canonical(tmp_path):
+    workspaces = {}
+    for ident in (PROJECT, OTHER):
+        ws = Workspace(tmp_path / ident)
+        owner = ws.init("demo-owner")
+        tokens.store(ws.base, tokens.OWNER_FILE, owner)
+        agent = ws.mint(owner, "demo-worker")
+        ws.send(agent, "#general", "note", ident)
+        workspaces[ident] = ws
+    projects = {ident: SimpleNamespace(authority_machine="local", board_host="http://127.0.0.1:8770")
+                for ident in workspaces}
+    def get(ident):
+        if ident not in projects:
+            raise ValueError("Project is not registered here")
+        return projects[ident]
+    ui = SimpleNamespace(projects=SimpleNamespace(machine="local", get=get),
+                         workspaces=SimpleNamespace(workspace=lambda ident: workspaces[ident]),
+                         authed=lambda cookie: cookie == "signed-in", host_ok=lambda host: host == "127.0.0.1:8770")
+    def call(suffix, *, project=PROJECT, method="GET", body=None, **options):
+        cookie = options.get("cookie", "signed-in")
+        ip = options.get("ip", "127.0.0.1")
+        origin = options.get("origin", "http://127.0.0.1:8770")
+        raw = json.dumps(body).encode() if body is not None else b""
+        headers = {"Host": "127.0.0.1:8770", "Cookie": cookie, "Origin": origin,
+                   "Content-Type": "application/json", "Content-Length": str(len(raw))}
+        codes = []
+        handler = SimpleNamespace(path=f"/ui/projects/{project}/board/{suffix}", command=method,
+                                  client_address=(ip, 1000), headers=headers,
+                                  rfile=io.BytesIO(raw), wfile=io.BytesIO(),
+                                  server=SimpleNamespace(server_address=("127.0.0.1", 8770)),
+                                  send_response=codes.append, send_header=lambda *args: None,
+                                  end_headers=lambda: None)
+        assert Request(ui, handler).route()
+        return codes[0], json.loads(handler.wfile.getvalue())
+    return call, workspaces, projects
+
+
+def test_selected_canonical_project_messages_and_person_post(canonical):
+    call, workspaces, _ = canonical
+    status, result = call("messages?board=%23general")
+    assert status == 200
+    assert [row["body"] for row in result["messages"]] == [PROJECT]
+    status, posted = call("post", method="POST", body={"to": "#general", "body": "person message"})
+    assert status == 200 and posted["to"] == "#general"
+    status, result = call("messages?board=%23general")
+    assert result["messages"][-1]["body"] == "person message"
+    assert result["messages"][-1]["from"] == "demo-owner"
+    assert len(workspaces[OTHER].board._rows()) == 1
+
+
+@pytest.mark.parametrize("kwargs", [{"cookie": ""}, {"ip": "192.0.2.8"},
+                                   {"method": "POST", "origin": "http://evil.test",
+                                    "body": {"to": "#general", "body": "hostile"}}])
+def test_canonical_person_board_rejects_foreign_requests(canonical, kwargs):
+    call, _, _ = canonical
+    assert call("post" if kwargs.get("method") == "POST" else "boards", **kwargs)[0] == 403
+
+
+def test_missing_remote_or_unconfigured_project_never_falls_back(canonical):
+    call, _, projects = canonical
+    assert call("boards", project="c" * 32)[0] == 409
+    projects[PROJECT].authority_machine = "foreign"
+    assert call("boards")[0] == 409
+    projects[PROJECT].authority_machine = "local"
+    projects[PROJECT].board_host = ""
+    assert call("boards")[0] == 409
+
+
+def test_person_identity_is_required_and_never_created(canonical):
+    call, workspaces, _ = canonical
+    ws = workspaces[PROJECT]
+    owner_path = tokens.directory(ws.base) / tokens.OWNER_FILE
+    owner = tokens.read_file(owner_path)
+    agent = ws.mint(owner, "other-worker")
+    tokens.store(ws.base, tokens.OWNER_FILE, agent)
+    assert call("boards")[0] == 403
+    owner_path.unlink()
+    assert call("boards")[0] == 503
+    assert not owner_path.exists()
+
+
+@pytest.mark.parametrize("method", ["PUT", "DELETE", "PATCH"])
+def test_canonical_person_board_refuses_unsupported_methods(canonical, method):
+    assert canonical[0]("boards", method=method)[0] == 405
+
+
+def test_canonical_person_threads_direct_messages_and_ack(canonical):
+    call, workspaces, _ = canonical
+    status, root = call("post", method="POST", body={"to": "#general", "body": "root"})
+    assert status == 200
+    status, _reply = call("post", method="POST", body={"to": "#general", "body": "reply", "reply_to": root["seq"]})
+    assert status == 200
+    status, thread = call(f"thread?root={root['seq']}")
+    assert status == 200
+    assert {row["body"] for row in thread["messages"]} == {"root", "reply"}
+    status, sent = call("post", method="POST", body={"to": "demo-worker", "body": "direct"})
+    assert status == 200
+    status, direct = call("dm?a=demo-owner&b=demo-worker")
+    assert status == 200 and direct["messages"][-1]["body"] == "direct"
+    status, ack = call("ack", method="POST", body={"to": "demo-worker", "through": sent["seq"]})
+    assert status == 200 and ack["through"] == sent["seq"]
+    assert workspaces[PROJECT].board.store.marks("demo-owner")["dm:demo-worker"] == sent["seq"]
+
+
+@pytest.mark.parametrize('scheme', ['http', 'https'])
+def test_canonical_person_post_accepts_exact_browser_origin(canonical, scheme):
+    status, sent = canonical[0]('post', method='POST', origin=f'{scheme}://127.0.0.1:8770',
+                                body={'to': '#general', 'body': 'browser message'})
+    assert status == 200 and sent['to'] == '#general'
+
+
+@pytest.mark.parametrize('origin', ['https://127.0.0.1:8771', 'https://localhost:8770',
+                                   'https://evil.test:8770', 'https://127.0.0.1:8770/'])
+def test_canonical_person_post_rejects_different_browser_origin(canonical, origin):
+    assert canonical[0]('post', method='POST', origin=origin,
+                         body={'to': '#general', 'body': 'foreign message'})[0] == 403

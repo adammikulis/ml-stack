@@ -163,7 +163,8 @@ class Registry:
                 "model_state": str(entry.get("model_state", "")),
                 "device": dict(entry.get("device", {})),
                 "models": list(entry.get("models", [])),
-                "label_models": dict(entry.get("label_models", {}))}
+                "label_models": dict(entry.get("label_models", {})),
+                "created": float(entry.get("created", 0)), "presentation": dict(entry.get("presentation", {}))}
 
     def model_of(self, name: str, label: str = "") -> tuple[str, str]:
         """``(model, state)`` shown for ``name`` (and its helper ``label``): the label's own
@@ -180,6 +181,34 @@ class Registry:
         if parent.get("model") and (label or "/" in name):
             return str(parent["model"]), INHERITED
         return "", ""
+
+    def ensure_presentation(self, name: str) -> None:
+        """Assign a stable readable ordinal, including expired and revoked records."""
+        with held(self.path.with_name('agents.lock')):
+            agents = self._load()
+            entry = agents.get(name)
+            if not entry or entry.get('role') != AGENT or entry.get('parent') or entry.get('presentation'):
+                return
+            device = entry.get('device', {}).get('device_id')
+            family = 'codex' if name == 'codex' or name.startswith('codex-') else name
+            peers = [row.get('presentation', {}) for row in agents.values()]
+            ordinal = max((row.get('ordinal', 0) for row in peers
+                           if row.get('family') == family), default=0) + 1
+            entry['presentation'] = {'device': device, 'family': family, 'ordinal': ordinal, 'kind': 'unknown'}
+            self._save(agents)
+
+    def register_session(self, token: str) -> None:
+        """An actor's main-session presentation; never adds rights or removes parentage."""
+        self.ensure_presentation(self.authenticate(token).id)
+        with held(self.path.with_name('agents.lock')):
+            who = self.authenticate(token)
+            if who.role != AGENT or who.parent:
+                raise Denied('only a top-level standard agent registers a main session')
+            agents = self._load()
+            entry = agents[who.id]
+            presentation = entry.setdefault('presentation', {})
+            presentation['kind'] = 'main'
+            self._save(agents)
 
     def record_device_claim(self, token: str, metadata: dict) -> None:
         """Record an authenticated actor's device report without granting device authority."""

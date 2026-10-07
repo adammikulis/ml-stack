@@ -17,7 +17,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from ml_stack import activity
 from ml_stack.fleet.onboard.web import Call, Listener, Reply as WebReply
-from ml_stack.graph.guard import host_ok, refusal
+from ml_stack.graph.guard import refusal
 from ml_stack.ui import assets
 from ml_stack.workspace import coordinator_config, plain, tokens
 from ml_stack.workspace.identity import HUMAN, Denied
@@ -62,15 +62,15 @@ def _checked(method: str, headers: Mapping[str, str], port: int, writes: bool = 
         return 405, {**headers, "Allow": "GET"}, blob
     if method == "POST" and (headers.get("origin") is None or headers.get("sec-fetch-site", "same-origin") != "same-origin"):
         return _json(403, {"error": "a post comes from this page"})
-    found = refusal(method, dict(headers), port)
+    found = refusal(method, dict(headers), port, schemes=("http", "https"))
     if found:
         return _json(found[0], {"error": found[1]})
     site = headers.get("sec-fetch-site")
     if site is not None and site not in ("same-origin", "none"):
         return _json(403, {"error": "a request from another site"})
     origin = headers.get("origin")
-    if origin is not None and not (urlsplit(origin).scheme == "http"
-                                   and host_ok(urlsplit(origin).netloc, port)):
+    if origin is not None and origin not in {
+            f"http://{headers.get('host', '')}", f"https://{headers.get('host', '')}"}:
         return _json(403, {"error": "a request from another origin"})
     return None
 
@@ -108,6 +108,8 @@ def respond(ws: Workspace, req: Request) -> Reply:
     except (Denied, OSError):
         return _json(503, {"error": "the person's identity is not set up: run `ml-stack-workspace setup`"})
     try:
+        if ws.auth(token).role != HUMAN:
+            raise Denied("only the person reads or posts from the page")
         query = parse_qs(parts.query, max_num_fields=8)
         route = parts.path[len(PREFIX):]
         if req.method == "POST":
@@ -145,7 +147,9 @@ def _answer(api: Any, token: str, route: str, query: Mapping[str, list[str]]) ->
         if me.role != HUMAN:
             raise Denied("only the person reads the agent directory from the page")
         return {"owner_id": me.id, "agents": [
-            {"id": row["id"], "role": row["role"], "device": row["device"]}
+            {"id": row["id"], "role": row["role"], "device": row["device"],
+             "display_name": row["display_name"], "session_kind": row["session_kind"],
+             "parent": row["parent"], "coordinator_eligible": row["coordinator_eligible"]}
             for row in api.ws.registered()[:200] if row["id"] != me.id]}
     if route == "threads":
         found = _board(query)
