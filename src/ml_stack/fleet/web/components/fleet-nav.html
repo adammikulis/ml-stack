@@ -15,7 +15,7 @@ fleet-nav { display: contents; }
 <template>
   <aside class="sidebar" aria-label="Workspace navigation">
     <a class="brand" href="#chat"><span class="dot"></span>ml-stack</a>
-    <div class="sidebar-caption">Local intelligence studio</div>
+    <div class="sidebar-caption">Intelligence workspace</div>
     <input class="nav-search" id="nav-search" type="search" aria-label="Find a page"
       placeholder="Find a page…" aria-keyshortcuts="Control+k Meta+k">
     <nav class="tabs" id="nav-tabs" aria-label="Main navigation"></nav>
@@ -27,21 +27,41 @@ fleet-nav { display: contents; }
   </aside>
   <header class="workspace-header">
     <div><span class="eyebrow" id="nav-section"></span><strong id="nav-title"></strong></div>
-    <span class="header-hint">Your models. Your machines.</span>
+    <button class="ghost workspace-guide" id="nav-guide" type="button">Demo guide <span aria-hidden="true">↗</span></button>
     <button class="workspace-jobs-indicator" id="nav-jobs" type="button" hidden>Jobs</button>
   </header>
+  <dialog id="nav-demo" aria-labelledby="demo-title">
+    <div class="demo-heading"><div><span class="eyebrow">Ten ways to explore</span><h1 id="demo-title">Your intelligence workspace</h1></div>
+      <button class="ghost small" id="demo-close" type="button" aria-label="Close demo guide">Close</button></div>
+    <p class="sub">Start a conversation, train a model or connect a team. Each stop opens a working part of the workspace.</p>
+    <div class="demo-grid" id="demo-slices"></div>
+  </dialog>
 </template>
 <script>
 (function () {
   const M = window.fleetModel;
   const el = M.el;
   const GROUPS = [
-    ["Workspace", [["Chat", "chat", "Conversations"], ["Board", "board", "Channels, threads & agents"], ["Models", "models", "Browse & serve"],
-      ["Data", "data", "Files & datasets"], ["Projects & agents", "projects", "Projects & worker setup"]]],
-    ["Develop", [["Training", "training", "Recipes & runs"], ["Gym", "gym", "Environments & policies"],
-      ["Benchmarks", "benchmarks", "Measure & compare"], ["Capacity", "fit", "Memory & throughput"]]],
-    ["Manage", [["Fleet", "cluster", "Machines & clusters"], ["Tools", "tools", "Explore capabilities"],
-      ["Tasks", "tasks", "Claims, evidence & reviews"], ["History", "history", "Agent actions & details"], ["Settings", "settings", "Preferences & setup"]]],
+    ["Conversations", [["Chat", "chat", "Talk with your models"], ["Board", "board", "Channels, threads & agents"]]],
+    ["Models", [["Models", "models", "Discover, download & serve"], ["Tools", "tools", "Connected capabilities"]]],
+    ["Work", [["Tasks", "tasks", "Plan, assign & review"], ["Projects & agents", "projects", "Team workspaces"],
+      ["Training", "training", "Fine-tuning recipes & runs"], ["Gym", "gym", "RL scenarios & policies"],
+      ["Benchmarks", "benchmarks", "Measure & compare"], ["History", "history", "Activity & evidence"]]],
+    ["Knowledge", [["Graph inspector", "knowledge", "Explore facts & relationships"], ["Data", "data", "Files & datasets"]]],
+    ["Fleet", [["Cluster", "cluster", "Machines & live resources"], ["Capacity", "fit", "Model fit & throughput"],
+      ["Settings", "settings", "Workspace preferences & setup"]]],
+  ];
+  const DEMOS = [
+    ["Chat with a model", "chat", "Choose a served model, send a question and watch its response arrive."],
+    ["Bring a team together", "board", "Follow channels, open threads and coordinate people and agents."],
+    ["Find the right model", "models", "Browse models, inspect variants and prepare a model for serving."],
+    ["Explore connected knowledge", "knowledge", "Inspect graph facts and follow their relationships."],
+    ["Turn plans into work", "tasks", "Inspect task claims, evidence and independent reviews."],
+    ["Fine-tune a model", "training", "Choose a recipe and dataset, then follow a training run."],
+    ["Train in a simulated world", "gym", "Explore an RL scenario, policy controls and recordings."],
+    ["Measure model quality", "benchmarks", "Run a benchmark and compare measured results."],
+    ["Explore your fleet", "cluster", "Inspect connected machines and their available resources."],
+    ["Prepare your workspace", "settings", "Configure preferences, libraries and advanced options."],
   ];
   const here = ([, name]) => !!document.querySelector(`${name}-view`);
 
@@ -63,6 +83,16 @@ fleet-nav { display: contents; }
           if (first) { event.preventDefault(); event.key === "Enter" ? first.click() : first.focus(); }
         }
       };
+      this.guide = this.querySelector("#nav-demo");
+      this.querySelector("#nav-guide").onclick = () => {
+        this.querySelector("#demo-slices").replaceChildren(...DEMOS.filter(([, route]) => here(["", route]))
+          .map(([title, route, description], index) => el("button", {class:"demo-slice", type:"button",
+            onclick: () => { this.guide.close(); M.go(route); }},
+            el("span", {class:"demo-number"}, String(index + 1).padStart(2, "0")),
+            el("strong", {}, title), el("span", {class:"demo-description"}, description))));
+        this.guide.showModal();
+      };
+      this.querySelector("#demo-close").onclick = () => this.guide.close();
       this.jobs = this.querySelector("#nav-jobs");
       this.jobs.onclick = () => M.go("training");
       this.onKey = (event) => {
