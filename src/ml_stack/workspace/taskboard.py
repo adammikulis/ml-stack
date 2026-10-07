@@ -8,7 +8,7 @@ from typing import Any
 from uuid import uuid4
 
 from ml_stack.graph.store import GraphStore
-from ml_stack.workspace import integration_view, task_actions, task_scope
+from ml_stack.workspace import integration_view, task_actions, task_scope, task_summary
 from ml_stack.workspace.chain import held
 from ml_stack.workspace.coordination import workspace_id
 from ml_stack.workspace.device_accounts import account_for
@@ -135,7 +135,8 @@ class TaskBoard:
         """Read a task with its native lease, checkpoints, artifacts and independent reviews."""
         self._auth(token)
         with self._store() as graph:
-            return self._details(self._task(graph, ident), *self._records(graph))
+            task = self._details(self._task(graph, ident), *self._records(graph))
+            return {**task, 'activity': task_summary.inspection(task, self.ws.clock())}
 
     def subscribe(self, token: str, ident: str, *, subscriber: str | None = None) -> dict[str, Any]:
         """Follow task status changes in the caller's inbox."""
@@ -257,9 +258,11 @@ class TaskBoard:
         with self._store() as graph:
             index, related = self._records(graph)
             tasks = [self._details(node['attrs'], index, related) for node in graph.nodes('task')]
+        now = self.ws.clock()
+        tasks = [{**task, 'activity': task_summary.inspection(task, now)} for task in tasks]
         tasks.sort(key=lambda task: -task['created_at'])
         counts = Counter(task['state'] for task in tasks)
-        return {'tasks': tasks, 'metrics': {'states': dict(counts),
+        return {'tasks': tasks, 'overview': task_summary.overview(tasks, now), 'metrics': {'states': dict(counts),
                 'verified_outcomes': counts['completed'],
                 'accepted_artifacts': sum(len(task['proposal']['artifacts']) for task in tasks
                                           if task['state'] == 'completed'),

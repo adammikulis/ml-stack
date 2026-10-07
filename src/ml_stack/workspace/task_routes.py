@@ -10,10 +10,10 @@ from ml_stack.workspace.service import Workspace
 from ml_stack.workspace.taskboard import TaskBoard
 
 
-def route(request) -> bool:
-    if request.path != '/ui/tasks':
+def route(request, *, workspace=None, prefix="/ui/tasks", project=None) -> bool:
+    if request.path != prefix:
         return False
-    configured = coordinator_config.load(limits.root())
+    configured = coordinator_config.load(limits.root()) if workspace is None else {}
     if configured.get('mode') == 'remote':
         request.send(409, {'error': 'Task authority is on the selected shared coordinator.',
                            'coordinator': configured['endpoint'], 'workspace': configured['workspace']})
@@ -30,7 +30,7 @@ def route(request) -> bool:
             request.send(code, json.loads(raw))
             return True
     try:
-        ws = Workspace()
+        ws = Workspace() if workspace is None else workspace
         token = tokens.read_file(tokens.directory(ws.base) / tokens.OWNER_FILE)
         if ws.auth(token).role != HUMAN:
             raise Denied('task inspection requires the workspace person owner')
@@ -42,7 +42,15 @@ def route(request) -> bool:
             body = object_body(request)
             action = body.get('action', 'create')
             if action == 'create' and set(body) <= {'action', 'spec'}:
-                result = board.create(token, body.get('spec'))
+                spec = body.get('spec')
+                if project is not None:
+                    if not isinstance(spec, dict):
+                        raise ValueError('a task specification is required')
+                    scope = spec.get('project', {})
+                    if not isinstance(scope, dict) or scope.get('key', project['key']) != project['key']:
+                        raise Denied('the task belongs to another project')
+                    spec = {**spec, 'project': project}
+                result = board.create(token, spec)
             elif action == 'review' and set(body) == {'action', 'id', 'decision'}:
                 result = task_outcomes.review(ws, token, body['id'], body['decision'])
             elif action == 'credit' and set(body) == {'action', 'id'}:
