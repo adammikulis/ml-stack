@@ -65,8 +65,8 @@ def test_phone_navigation_and_chat_do_not_overflow(joined, open_page):
     page.set_viewport_size({"width": 390, "height": 844})
     page.wait_for_selector("#chat:not([hidden])")
     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
-    page.locator('nav a[href="#settings"]').scroll_into_view_if_needed()
-    page.click('nav a[href="#settings"]')
+    page.locator('fleet-nav nav a[href="#settings"]').scroll_into_view_if_needed()
+    page.click('fleet-nav nav a[href="#settings"]')
     page.wait_for_selector("#settings:not([hidden])")
     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
     assert not errors

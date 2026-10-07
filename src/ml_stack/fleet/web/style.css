@@ -476,3 +476,6 @@ input[type="range"] {
 
 .brand .dot { background:linear-gradient(135deg,var(--poolside-pink),var(--poolside-orange)); }
 .demo-number { color:var(--poolside-orange); }
+
+@media(max-width:640px) { .sidebar { min-width:0; } .workspace-header { flex-wrap:wrap; }
+  .workspace-header > div { min-width:0; flex:1; } .workspace-header strong { overflow-wrap:anywhere; } }
