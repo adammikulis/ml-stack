@@ -9,7 +9,14 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack.files import read_json
-from ml_stack.workspace import device_sessions, onboard, remote_tasks, remote_workers, tokens
+from ml_stack.workspace import (
+    device_metadata,
+    device_sessions,
+    onboard,
+    remote_tasks,
+    remote_workers,
+    tokens,
+)
 from ml_stack.workspace.boards import ANNOUNCE
 from ml_stack.workspace.chain import held
 from ml_stack.workspace.claims import Conflict, normal
@@ -134,8 +141,14 @@ class WorkspaceHost:
             if model:
                 model = clean_model(model)
             harness = clean_harness(str(body.get("harness") or ""))
+            device = body.get("device")
+            if device is not None:
+                device = device_metadata.normalize({**device, "verification": "agent-reported",
+                                                    "source": "agent-report", "peer_id": None})
             scope = {"key": project_id, "name": project.name, "cluster": cluster, "cluster_id": cluster_id}
             name, token = ws.registry.enroll_project(wanted.strip().lower(), scope, onboard.TOKEN_S)
+            if device is not None:
+                ws.registry.record_device_claim(token, device)
             if model or harness:
                 ws.registry.record_model(name, model, harness, CLAIMED)
             ws.board.place(name, scope)

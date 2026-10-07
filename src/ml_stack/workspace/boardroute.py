@@ -145,7 +145,9 @@ def _answer(api: Any, token: str, route: str, query: Mapping[str, list[str]]) ->
         if me.role != HUMAN:
             raise Denied("only the person reads the agent directory from the page")
         return {"owner_id": me.id, "agents": [
-            {"id": row["id"], "role": row["role"], "device": row["device"]}
+            {"id": row["id"], "role": row["role"], "device": row["device"],
+             "display_name": row["display_name"], "session_kind": row["session_kind"],
+             "parent": row["parent"], "coordinator_eligible": row["coordinator_eligible"]}
             for row in api.ws.registered()[:200] if row["id"] != me.id]}
     if route == "threads":
         found = _board(query)

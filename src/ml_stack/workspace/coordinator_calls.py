@@ -12,7 +12,7 @@ from ml_stack.workspace.taskboard import TaskBoard
 READS = frozenset({'whoami', 'agents', 'inbox', 'thread', 'outbox', 'claims', 'who',
                    'status', 'tasks', 'task', 'notes-search', 'notes-get',
                    'audit-verify', 'audit-head'})
-WRITES = frozenset({'send', 'announce', 'ack', 'hello-model', 'notes-add', 'claim',
+WRITES = frozenset({'main-session', 'send', 'announce', 'ack', 'hello-model', 'notes-add', 'claim',
                     'release', 'heartbeat', 'task-create', 'task-claim', 'task-credit', 'task-review', 'task-heartbeat', 'task-checkpoint', 'task-submit'})
 REQUEST_ID = re.compile(r'[a-f0-9]{32}')
 MAX_OUTCOME = 256 * 1024
