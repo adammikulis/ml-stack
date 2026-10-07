@@ -2,6 +2,8 @@
 model-browser .model-browser{padding:0}
 model-browser .section-heading h2{font-size:21px;margin:0 0 8px}
 model-browser .browser-toolbar{display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin:20px 0}
+model-browser .segmented button{background:var(--bg-sunken);color:var(--text);border:1px solid var(--line);border-radius:10px;padding:10px 14px}
+model-browser .segmented button[aria-pressed=true]{background:var(--poolside-orange,#ff8a3d);color:var(--poolside-orange-ink,var(--poolside-navy,#1b1f3a));border-color:transparent;font-weight:750}
 model-browser .search-field{flex:1;min-width:180px}
 model-browser .search-field input{width:100%;box-sizing:border-box}
 model-browser #browser-results{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,280px),1fr));gap:16px}
