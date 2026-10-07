@@ -24,8 +24,11 @@ def test_recorded_checkout_registered_from_unrelated_runtime_directory(tmp_path,
     unrelated = tmp_path / "runtime"
     unrelated.mkdir()
     monkeypatch.chdir(unrelated)
-    monkeypatch.setattr(projects, "__file__", str(tmp_path / "installed/ml_stack/fleet/projects.py"))
-    monkeypatch.setattr(runtime_wheel, "source_checkout", lambda: checkout)
+    installed = tmp_path / "installed/ml_stack/fleet"
+    installed.mkdir(parents=True)
+    (installed / runtime_wheel.ORIGIN).write_text(str(checkout))
+    monkeypatch.setattr(projects, "__file__", str(installed / "projects.py"))
+    monkeypatch.setattr(runtime_wheel, "__file__", str(installed / "runtime_wheel.py"))
     monkeypatch.setattr(projects.source, "build", lambda *args: pytest.fail("source was exported"))
     registry = projects.ProjectRegistry(tmp_path / "registry", "device", projects.local_candidates())
     assert registry.candidates() == [{"id": projects.identity(checkout), "name": "source"}]
