@@ -1,7 +1,7 @@
 {
- "surfaces": 787,
+ "surfaces": 789,
  "by_status": {
-  "covered": 463,
+  "covered": 465,
   "partial": 199,
   "uncovered": 53,
   "n/a": 72,
@@ -100,7 +100,7 @@
    "unmapped": 0
   },
   "spawn": {
-   "covered": 46,
+   "covered": 48,
    "partial": 62,
    "uncovered": 0,
    "n/a": 2,
@@ -10290,6 +10290,19 @@
    "note": "The interpreter comes from the fixed library catalog or the running Python; the probe uses a fixed -c program and an argv list, without model, peer or browser text"
   },
   {
+   "id": "spawn:fleet/environment.py:Environment.require_current_runtime",
+   "kind": "spawn",
+   "source": "fleet/environment.py:Environment.require_current_runtime",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_fleet_environment.py::test_runtime_revision_probe_rejects_stale_literal_hostile_interpreter",
+    "tests/test_fleet_environment.py::test_frozen_runtime_requires_exact_bundled_commit_before_work"
+   ],
+   "note": "Real interpreter paths containing shell punctuation remain literal argv; unstamped and mismatched revisions cannot start work, and probing has an explicit timeout and no shell"
+  },
+  {
    "id": "spawn:fleet/jobs.py:JobRunner._run_one",
    "kind": "spawn",
    "source": "fleet/jobs.py:JobRunner._run_one",
@@ -10300,6 +10313,20 @@
     "tests/test_redteam_spawn.py::test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line"
    ],
    "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
+  },
+  {
+   "id": "spawn:fleet/managed_compute.py:report",
+   "kind": "spawn",
+   "source": "fleet/managed_compute.py:report",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_fleet_managed_compute.py::test_managed_probe_uses_literal_hostile_path_and_redacts_real_child_environment",
+    "tests/test_fleet_managed_compute.py::test_managed_compute_does_not_advertise_unverified_capabilities",
+    "tests/test_fleet_managed_compute.py::test_frozen_report_probes_the_job_interpreter_and_keeps_provenance"
+   ],
+   "note": "A real child receives a literal hostile interpreter path and a credential-redacted environment; malformed output, missing provenance, missing executables, timeout and failing exits cannot advertise capabilities"
   },
   {
    "id": "spawn:fleet/measuring.py:BenchHost.export",
