@@ -1,64 +1,56 @@
 <!-- settings-view: what this machine does, what it can train with, and taking it off again -->
 <style>
-settings-view .settings-toolbar { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin:0 0 24px; }
+settings-view { display:contents; }
+settings-view #settings { padding:28px 32px; max-width:1320px; width:100%; }
+settings-view .settings-heading { display:flex; align-items:center; gap:16px; margin-bottom:24px; }
+settings-view .settings-heading h1 { margin:0; }
+settings-view .settings-heading p { margin:6px 0 0; }
+settings-view .settings-icon { display:grid; place-items:center; width:52px; height:52px; background:var(--poolside-pink,#ff5fa2); color:var(--poolside-navy,#1b1f3a); border-radius:16px; font-size:28px; }
+settings-view .settings-layout { display:grid; grid-template-columns:220px minmax(0,1fr); gap:32px; }
+settings-view .settings-sections { display:flex; flex-direction:column; gap:5px; align-self:start; }
+settings-view .settings-sections button { margin:0; text-align:left; background:transparent; color:var(--text); border:0; padding:13px 15px; border-radius:10px; font-weight:500; }
+settings-view .settings-sections button[aria-selected="true"] { background:var(--poolside-navy,#1b1f3a); color:white; }
+settings-view .settings-content { min-width:0; }
+settings-view .settings-pane { border:1px solid var(--line); background:var(--bg-raised,#fff); border-radius:18px; padding:26px; }
+settings-view .settings-pane[hidden] { display:none; }
+settings-view .settings-pane > header { border-bottom:1px solid var(--line); padding-bottom:18px; margin-bottom:22px; }
+settings-view .settings-pane > header h2 { font-size:23px; margin:0 0 8px; }
+settings-view .settings-pane .group { border:0; border-radius:0; padding:0; margin:0 0 24px; background:transparent; }
+settings-view .settings-pane .group:last-child { margin-bottom:0; }
+settings-view .settings-pane h3 { font-size:15px; margin:22px 0 12px; }
+settings-view .settings-pane .opt { padding:12px; border:1px solid var(--line); border-radius:10px; margin-bottom:8px; }
+settings-view .settings-toolbar { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin:16px 0; }
 settings-view .settings-toolbar button { width:auto; margin:0; }
-settings-view #settings-note { margin-top:12px; min-height:24px; }
-settings-view #settings-libs .library-kind { display:inline-block; font-size:11px; border:1px solid var(--line); border-radius:20px; padding:2px 8px; margin:4px 0; }
-settings-view #settings-libs { scroll-margin-top:20px; }
+settings-view .settings-footer { display:flex; align-items:center; gap:18px; margin-top:20px; }
+settings-view #settings-save { width:auto; min-width:150px; margin:0; background:var(--poolside-pink,#ff5fa2); color:var(--poolside-navy,#1b1f3a); }
+settings-view #settings-note { min-height:24px; }
+settings-view .library-kind { display:inline-block; font-size:11px; border:1px solid var(--line); border-radius:20px; padding:2px 8px; margin:4px 8px; }
 settings-view [aria-busy="true"] { opacity:.8; }
-settings-view #settings { max-width:1120px; margin:0 auto; }
-settings-view #settings .group { padding:22px; border:1px solid var(--line); border-radius:14px; background:var(--panel, var(--bg)); margin-bottom:16px; }
-settings-view #settings h2 { margin-top:0; font-size:17px; }
-settings-view #settings .opt { padding:10px 0; }
-settings-view .settings-sections { display:flex; gap:8px; flex-wrap:wrap; margin:18px 0; }
-settings-view .settings-sections a { border:1px solid var(--line); border-radius:20px; padding:7px 12px; font-size:13px; text-decoration:none; color:var(--text); }
-settings-view #settings-save { max-width:240px; margin-bottom:24px; }
-settings-view #settings-interface { border-left:3px solid var(--accent); }
-settings-view #settings-advanced { padding:18px; border:1px solid var(--line); border-radius:14px; }
-settings-view #settings-advanced > summary { cursor:pointer; font-weight:600; }
-settings-view #settings-advanced[open] > summary { margin-bottom:18px; }
-settings-view #settings-removal { border-color:var(--danger, #cf5a68) !important; }
-settings-view .group { scroll-margin-top:24px; }
-@media (max-width:600px) { settings-view #settings .group { padding:16px; } }
+settings-view #settings-removal { border-top:1px solid var(--line); padding-top:24px; }
+@media(max-width:760px) { settings-view #settings { padding:20px; } settings-view .settings-layout { grid-template-columns:1fr; gap:16px; } settings-view .settings-sections { flex-direction:row; overflow:auto; } settings-view .settings-sections button { white-space:nowrap; } settings-view .settings-pane { padding:20px; } }
 </style>
 <template>
   <main id="settings" hidden>
-    <h1>Settings</h1>
-    <p class="sub" id="settings-sub"></p>
-    <p class="hint">Choose how this workspace looks, which models it uses, and how this device contributes.</p>
-    <nav class="settings-sections" aria-label="Settings sections">
-      <a href="#settings" data-section="settings-interface">Interface</a>
-      <a href="#settings" data-section="settings-chatting">Models</a>
-      <a href="#settings" data-section="settings-left">Device</a>
-      <a href="#settings" data-section="settings-credentials">Credentials</a>
-      <a href="#settings" data-section="settings-advanced">Maintenance</a>
-    </nav>
-    <div class="settings-toolbar">
-      <button class="ghost" id="settings-open-libraries" type="button">Libraries &amp; simulators</button>
-      <span class="hint">Install capabilities once and reuse them across launches.</span>
-    </div>
-    <div class="group" id="settings-interface"></div>
-    <div class="two">
-      <div id="settings-left"></div>
-      <div id="settings-right">
-        <div class="group" id="settings-chatting"></div>
-        <div class="group" id="settings-updates"></div>
-        <div id="settings-when"></div>
+    <header class="settings-heading"><span class="settings-icon" aria-hidden="true">⚙</span><div><h1>Settings</h1><p class="sub" id="settings-sub"></p></div></header>
+    <div class="settings-layout">
+      <nav class="settings-sections" aria-label="Settings sections" role="tablist">
+        <button type="button" role="tab" data-section="appearance" aria-selected="true">Appearance &amp; advanced</button>
+        <button type="button" role="tab" data-section="models" aria-selected="false">Models &amp; providers</button>
+        <button type="button" role="tab" data-section="compute" aria-selected="false">Compute &amp; device</button>
+        <button type="button" role="tab" data-section="libraries" aria-selected="false">Libraries &amp; simulators</button>
+        <button type="button" role="tab" data-section="credentials" aria-selected="false">Credentials</button>
+        <button type="button" role="tab" data-section="maintenance" aria-selected="false">Maintenance</button>
+      </nav>
+      <div class="settings-content">
+        <section class="settings-pane" data-pane="appearance" role="tabpanel"><header><h2>Make room for your workflow</h2><p class="hint">Choose how much detail you see as you learn Poolside.</p></header><div class="group" id="settings-interface"></div></section>
+        <section class="settings-pane" data-pane="models" role="tabpanel" hidden><header><h2>Models &amp; providers</h2><p class="hint">Set defaults for new conversations and choose where models come from.</p></header><div class="group" id="settings-chatting"></div></section>
+        <section class="settings-pane" data-pane="compute" role="tabpanel" hidden><header><h2>Your device in the pool</h2><p class="hint">Decide when this device contributes and what happens when you need it.</p></header><div id="settings-left"></div><div id="settings-when"></div><div class="group" id="settings-wired"><h2>GPU memory</h2><wired-memory></wired-memory></div></section>
+        <section class="settings-pane" data-pane="libraries" role="tabpanel" hidden><header><h2>Libraries &amp; simulators</h2><p class="hint">Add training and simulation capabilities to managed environments.</p></header><div class="group" id="settings-libs"></div></section>
+        <section class="settings-pane" data-pane="credentials" role="tabpanel" hidden><header><h2>Provider credentials</h2><p class="hint">Connect services using locally stored tokens and API keys.</p></header><div class="group" id="settings-credentials"></div></section>
+        <section class="settings-pane" data-pane="maintenance" role="tabpanel" hidden><header><h2>Keep Poolside ready</h2><p class="hint">Updates, device setup, and storage management.</p></header><div class="group" id="settings-updates"></div><div class="group" id="settings-again"></div><div class="group" id="settings-removal"></div></section>
+        <footer class="settings-footer"><button id="settings-save">Save preferences</button><div id="settings-note" role="status" aria-live="polite"></div></footer>
       </div>
     </div>
-    <button id="settings-save">Save</button>
-    <div class="group" id="settings-credentials"></div>
-    <details class="aside" id="settings-advanced">
-      <summary>Advanced options: runtimes and maintenance</summary>
-      <div class="group" id="settings-wired">
-        <h2>GPU memory</h2>
-        <wired-memory></wired-memory>
-      </div>
-      <div class="group" id="settings-libs"></div>
-      <div class="group" id="settings-again"></div>
-      <div class="group" id="settings-removal"></div>
-    </details>
-    <div id="settings-note" role="status" aria-live="polite"></div>
   </main>
 </template>
 <script>
@@ -76,21 +68,22 @@ settings-view .group { scroll-margin-top:24px; }
       this.note = this.querySelector("#settings-note");
       this.save = this.querySelector("#settings-save");
       this.save.onclick = () => this.apply();
-      for (const link of this.querySelectorAll("[data-section]")) link.onclick = event => {
-        event.preventDefault();
-        const section = this.querySelector(`#${link.dataset.section}`);
-        if (section.tagName === "DETAILS") section.open = true;
-        section.scrollIntoView({behavior:"smooth", block:"start"});
-      };
-      this.querySelector("#settings-open-libraries").onclick = () => {
-        this.querySelector("#settings-advanced").open = true;
-        this.querySelector("#settings-libs").scrollIntoView({behavior:"smooth", block:"start"});
-      };
+      for (const button of this.querySelectorAll("[data-section]")) {
+        button.onclick = () => this.selectSection(button.dataset.section);
+      }
       M.onRoute((route) => {
         const on = route === "settings";
         this.box.hidden = !on;
         if (on) this.loadSettings();
       });
+    }
+
+    selectSection(section) {
+      for (const pane of this.querySelectorAll("[data-pane]")) pane.hidden = pane.dataset.pane !== section;
+      for (const button of this.querySelectorAll("[data-section]")) {
+        button.setAttribute("aria-selected", String(button.dataset.section === section));
+      }
+      this.save.hidden = !["appearance", "models", "compute", "maintenance"].includes(section);
     }
 
     loadSettings() {
@@ -283,7 +276,7 @@ settings-view .group { scroll-margin-top:24px; }
       } catch (error) { this.note.replaceChildren(el("div", {class:"err"}, error.message)); }
       finally {
         this.save.disabled = false;
-        this.save.textContent = "Save";
+        this.save.textContent = "Save preferences";
         this.box.setAttribute("aria-busy", "false");
       }
     }

@@ -1,13 +1,45 @@
-<style>cluster-view .peer, cluster-view .group, cluster-view fieldset { min-width:0; } cluster-view .url, cluster-view .name, cluster-view .loaded-models { overflow-wrap:anywhere; } @media(max-width:600px) { cluster-view .grid, cluster-view .two { grid-template-columns:minmax(0,1fr); } cluster-view .searchrow { flex-wrap:wrap; } cluster-view input, cluster-view select { max-width:100%; min-width:0; } cluster-view .stat { flex-wrap:wrap; } }</style>
+<style>
+cluster-view { display:contents; }
+cluster-view #cluster { padding:28px 32px; max-width:1500px; width:100%; }
+cluster-view .pool-hero { display:flex; align-items:center; justify-content:space-between; gap:24px; padding:26px; background:var(--poolside-cyan); color:var(--poolside-navy); border-radius:18px; margin-bottom:24px; }
+cluster-view .pool-hero h1 { margin:0 0 8px; font-size:30px; } cluster-view .pool-hero p { margin:0; color:inherit; }
+cluster-view .pool-hero .pool-emblem { font-size:48px; font-weight:800; letter-spacing:-5px; }
+cluster-view #cluster-stat { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin-bottom:24px; }
+cluster-view #cluster-stat > div { background:var(--bg-raised); border:1px solid var(--line); padding:18px; border-radius:12px; }
+cluster-view #cluster-stat .n { font-size:26px; } cluster-view #cluster-stat .k { color:var(--muted); font-size:12px; margin-top:5px; }
+cluster-view .pool-layout { display:grid; grid-template-columns:minmax(0,1fr) 320px; align-items:start; gap:24px; }
+cluster-view .pool-device-heading { display:flex; align-items:center; justify-content:space-between; margin-bottom:18px; }
+cluster-view .pool-device-heading h2 { margin:0; }
+cluster-view #cluster-cards .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:16px; }
+cluster-view .peer { border:1px solid var(--line); border-radius:16px; background:var(--bg-raised); padding:22px; min-width:0; }
+cluster-view .peer.self { border-top:4px solid var(--poolside-cyan); }
+cluster-view .peer .name { font-size:17px; font-weight:700; }
+cluster-view .peer .url { font-size:11px; color:var(--muted); margin-top:5px; }
+cluster-view .peer .loaded-models { padding:14px 0; margin:14px 0; border-top:1px solid var(--line); border-bottom:1px solid var(--line); }
+cluster-view .peer .loaded-models h3 { font-size:12px; margin:0 0 8px; }
+cluster-view .pool-control { background:var(--bg-raised); border:1px solid var(--line); border-radius:16px; padding:22px; }
+cluster-view #cluster-pause { margin:0; padding:0; border:0; }
+cluster-view #cluster-pause h2 { margin-top:0; font-size:17px; }
+cluster-view #cluster-pause .searchrow { display:flex; flex-wrap:wrap; gap:8px; margin-top:16px; }
+cluster-view #cluster-pause input,cluster-view #cluster-pause select { width:100%; min-width:0; }
+cluster-view .pool-config { margin-top:22px; padding-top:20px; border-top:1px solid var(--line); }
+cluster-view .pool-config button { width:100%; margin-top:14px; }
+cluster-view .pool-connections { margin:24px 0; border:1px solid var(--line); border-radius:12px; padding:18px; background:var(--bg-raised); }
+cluster-view .pool-connections summary { cursor:pointer; font-weight:600; }
+cluster-view .url,cluster-view .name,cluster-view .loaded-models { overflow-wrap:anywhere; }
+@media(max-width:1000px) { cluster-view .pool-layout { grid-template-columns:1fr; } }
+@media(max-width:600px) { cluster-view #cluster { padding:20px; } cluster-view #cluster-stat { grid-template-columns:repeat(2,1fr); } cluster-view .pool-hero { padding:20px; } cluster-view .pool-emblem { display:none; } cluster-view .stat { flex-wrap:wrap; } }
+</style>
 <!-- cluster-view: the machines on this network, the clusters this one is in, and a sweep across them -->
 <template>
   <main id="cluster" hidden>
-    <h1>Compute pool</h1>
-    <p class="sub" id="cluster-sub"></p>
+    <header class="pool-hero"><div><h1>Your spare compute, together</h1><p class="sub" id="cluster-sub"></p></div><span class="pool-emblem" aria-hidden="true">◌◌◌</span></header>
     <div class="stat" id="cluster-stat"></div>
-    <div class="group" id="cluster-pause"></div>
-    <section aria-label="Pool devices"><h2>Devices</h2><p class="hint">Available devices accept jobs from your pool. Serving models and resource usage appear below.</p><div id="cluster-cards"></div></section>
-    <details class="group" data-advanced><summary>Manage pool connections</summary><div id="cluster-joined"></div></details>
+    <div class="pool-layout">
+      <section aria-label="Pool devices"><header class="pool-device-heading"><h2>Devices in your pool</h2><span class="hint">Live resource usage</span></header><div id="cluster-cards"></div></section>
+      <aside class="pool-control"><div id="cluster-pause"></div><div class="pool-config"><h3>How this device contributes</h3><p class="hint">Configure startup, training capabilities, and availability in device settings.</p><button class="ghost" id="pool-device-settings" type="button">Open device settings</button></div></aside>
+    </div>
+    <details class="pool-connections" data-advanced><summary>Pool connections &amp; pairing</summary><div id="cluster-joined"></div></details>
     <fleet-benchmark></fleet-benchmark>
   </main>
 </template>
@@ -113,7 +145,7 @@
                   [(server.slot_context || server.context) ? `${Number(server.slot_context || server.context).toLocaleString()} tokens` : "",
                     server.draft_status === "active" ? "MTP active" : server.spec_type === "draft-mtp" ? "MTP configured" : "", `${server.slots || 1} slot(s)`]
                     .filter(Boolean).join(" · ")))))
-          : [el("div", { class: "hint" }, "No models serving · choose a model in Models to start")] ),
+          : [el("div", { class: "hint" }, "No models serving · start one from Studio")] ),
       ...meters,
       el("div", { class: "state" },
         el("span", { class: `pulse ${state.cls}` }),
@@ -126,6 +158,10 @@
       if (this.wired) return;
       this.wired = true;
       this.box = this.querySelector("#cluster");
+      this.querySelector("#pool-device-settings").onclick = () => {
+        M.go("settings");
+        document.querySelector("settings-view").selectSection("compute");
+      };
       this.sweep = { models: new Set(), peers: new Set(), sample: "", label: "", note: "" };
       M.onRoute((route) => {
         const on = route === "cluster";
