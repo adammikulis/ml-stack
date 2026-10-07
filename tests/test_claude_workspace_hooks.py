@@ -59,7 +59,7 @@ def test_session_event_forwards_exact_model_as_a_claim(commands, model):
     assert done.returncode == 0 and not done.stdout and not done.stderr
     records = json.loads(calls.read_text())
     assert records[0]['session'] == 'native-main-1' and records[0]['harness'] == 'claude-code'
-    assert records[1]['argv'] == ['main-session', '--agent', 'claude-code']
+    assert records[1]['argv'] == ['main-session', '--agent', 'claude-code', '--harness', 'claude-code']
     assert records[0]['argv'] == ['whoami', '--agent', 'claude-code', '--model',
                                            model['id'] if isinstance(model, dict) else model,
                                            '--harness', 'claude-code']
@@ -79,7 +79,7 @@ def test_missing_model_registers_session_without_guessing_and_explains_it(comman
     records = json.loads(calls.read_text())
     assert records[0] == {'argv': ['whoami', '--agent', 'claude-code', '--harness', 'claude-code'],
                           'session': 'native-with-unknown-model', 'harness': 'claude-code'}
-    assert records[1]['argv'] == ['main-session', '--agent', 'claude-code']
+    assert records[1]['argv'] == ['main-session', '--agent', 'claude-code', '--harness', 'claude-code']
     assert 'model unavailable' in done.stderr and 'no model claim recorded' in done.stderr
 
 

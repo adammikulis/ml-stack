@@ -161,6 +161,7 @@ class Registry:
                 "strikes": int(entry.get("strikes", 0)),
                 "model": str(entry.get("model", "")), "harness": str(entry.get("harness", "")),
                 "model_state": str(entry.get("model_state", "")),
+                "harness_state": str(entry.get("harness_state", entry.get("model_state", "") if entry.get("harness") else "")),
                 "device": dict(entry.get("device", {})),
                 "models": list(entry.get("models", [])),
                 "label_models": dict(entry.get("label_models", {})),
@@ -195,8 +196,9 @@ class Registry:
             entry['presentation'] = {'device': device, 'ordinal': ordinal, 'kind': 'unknown'}
             self._save(agents)
 
-    def register_session(self, token: str) -> None:
+    def register_session(self, token: str, harness: str = "") -> None:
         """An actor's main-session presentation; never adds rights or removes parentage."""
+        clean_harness(harness)
         self.ensure_presentation(self.authenticate(token).id)
         with held(self.path.with_name('agents.lock')):
             who = self.authenticate(token)
@@ -204,6 +206,13 @@ class Registry:
                 raise Denied('only a top-level standard agent registers a main session')
             agents = self._load()
             entry = agents[who.id]
+            if harness:
+                confidence = entry.get('harness_state', entry.get('model_state', '') if entry.get('harness') else '')
+                trusted = confidence == VERIFIED
+                if trusted and entry.get('harness') and entry['harness'] != harness:
+                    raise Denied('the harness was recorded by its launcher; a report cannot replace it')
+                entry['harness'] = harness
+                entry['harness_state'] = VERIFIED if trusted else CLAIMED
             presentation = entry.setdefault('presentation', {})
             presentation['kind'] = 'main'
             self._save(agents)
@@ -249,11 +258,13 @@ class Registry:
             before = (str(entry.get("model", "")), str(entry.get("model_state", "")))
             if not model:
                 entry["harness"] = harness
+                entry["harness_state"] = state if harness else ""
                 self._save(agents)
                 return before
             entry["model"], entry["model_state"] = model, state
             if harness:
                 entry["harness"] = harness
+                entry["harness_state"] = state
             if before != (model, state):
                 history = [*entry.get("models", []), {"model": model, "verified": state == VERIFIED,
                                                       "since": self.clock()}]

@@ -27,7 +27,7 @@ def main() -> int:
     command.extend(["--harness", "claude-code"])
     registered = workspace_hook.run(command, "SessionStart", environment=environment)
     if registered and not event.get("agent_id"):
-        workspace_hook.run(["ml-stack-workspace", "main-session", "--agent", "claude-code"],
+        workspace_hook.run(["ml-stack-workspace", "main-session", "--agent", "claude-code", "--harness", "claude-code"],
                            "SessionStart", environment=environment)
     return 0
 
