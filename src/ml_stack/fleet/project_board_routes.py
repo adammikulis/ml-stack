@@ -4,6 +4,7 @@ import re
 import shlex
 
 from .discovery import memberships
+from .projects import lan_host
 
 
 class ProjectBoardRoutes:
@@ -29,9 +30,16 @@ class ProjectBoardRoutes:
             if match[2] == "board" and self.method == "GET":
                 self.send(200, host.status(match[1]))
             elif match[2] == "invite" and self.method == "POST":
+                project = projects.get(match[1])
+                if project.authority_machine != projects.machine:
+                    raise ValueError("Create agent access on the project's authority device")
+                network_host = lan_host(self.ui.peer_port)
+                if not network_host:
+                    raise ValueError("No reachable network address is available for sharing this Board")
                 req = self.body()
                 made = host.invite(match[1], str(req.get("hint") or ""), int(req.get("uses") or 1))
-                made["host"] = projects.get(match[1]).board_host
+                made["host"] = network_host
+                made["authority_machine"] = project.authority_machine
                 groups = [member.group for member in memberships(self.ui.cluster_key_path)]
                 selected_cluster = groups[0] if len(groups) == 1 else "CLUSTER"
                 made["command"] = (f"ml-stack-workspace remote join {made['code']} --name NAME "

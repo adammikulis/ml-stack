@@ -60,7 +60,14 @@ def lan_host(port: int) -> str:
                 return ""
         except (ValueError, KeyError, TypeError, IndexError):
             return ""
-    return f"{'http' if tls.disabled() else 'https'}://{address}:{port}"
+    try:
+        parsed = ipaddress.ip_address(address)
+        if parsed.is_loopback or parsed.is_unspecified or parsed.is_multicast or not parsed.is_private:
+            return ""
+    except ValueError:
+        return ""
+    host = f"[{address}]" if parsed.version == 6 else address
+    return f"{'http' if tls.disabled() else 'https'}://{host}:{port}"
 
 
 def bootstrap() -> bytes:
