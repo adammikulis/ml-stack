@@ -87,7 +87,7 @@ def test_stale_runtime_does_not_advertise_compute_or_start_jobs(environment, mon
     assert expected["compute_runtime"]["ready"] is False
     monkeypatch.setattr(JobRunner, "_spawn", lambda self, upto: None)
     runner = JobRunner(tmp_path, environment=environment)
-    job = runner.submit("training", ["python", "-m", "ml_stack.train"])
+    job = runner.submit("training", ["python", "-m", "ml_stack.train"], str(tmp_path))
     runner._run_one(job)
     assert job.state == "failed" and job.pid is None
     assert "Refresh Training essentials" in runner.log_path(job.id).read_text()
@@ -95,6 +95,7 @@ def test_stale_runtime_does_not_advertise_compute_or_start_jobs(environment, mon
 
 def test_non_python_job_runs_with_stale_managed_runtime(environment, monkeypatch, tmp_path):
     import sys
+
     from ml_stack.fleet.jobs import JobRunner
 
     def stale():
@@ -104,6 +105,6 @@ def test_non_python_job_runs_with_stale_managed_runtime(environment, monkeypatch
     monkeypatch.setattr(JobRunner, "_spawn", lambda self, upto: None)
     runner = JobRunner(tmp_path, environment=environment)
     argv = ["cmd", "/c", "echo", "done"] if sys.platform == "win32" else ["/bin/echo", "done"]
-    job = runner.submit("implementation-tool", argv)
+    job = runner.submit("implementation-tool", argv, str(tmp_path))
     runner._run_one(job)
     assert job.state == "done" and job.returncode == 0

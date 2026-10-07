@@ -51,6 +51,24 @@ def test_built_desktop_wheel_carries_full_commit_and_distribution_metadata(build
         assert "ml_stack/fleet/daemon.py" in archive.namelist()
 
 
+def test_desktop_builder_bootstraps_without_an_installed_project(tmp_path):
+    from tests.test_runtime_wheel import _dependency_wheels
+
+    manifest = tmp_path / "requirements.whl"
+    with zipfile.ZipFile(manifest, "w") as archive:
+        archive.writestr("bootstrap.dist-info/METADATA", "Requires-Dist: packaging\n")
+    house = _dependency_wheels(manifest, tmp_path / "dependencies")
+    python_home = tmp_path / "python"
+    subprocess.run([sys.executable, "-m", "venv", str(python_home)], check=True, capture_output=True)
+    python = python_home / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
+    subprocess.run([str(python), "-m", "pip", "install", "--no-index", "--no-deps",
+                    "--find-links", str(house), "packaging"], check=True, capture_output=True)
+    script = ("import runpy, sys; "
+              f"builder = runpy.run_path({str(ROOT / 'packaging/build.py')!r}); "
+              "assert callable(builder['STAMP']); assert 'ml_stack' not in sys.modules")
+    subprocess.run([str(python), "-I", "-c", script], check=True, capture_output=True, text=True)
+
+
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS application bundles")
 def test_window_signs_the_built_application_name(builder, tmp_path, monkeypatch):
     sidecar = tmp_path / "daemon"
