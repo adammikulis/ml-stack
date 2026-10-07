@@ -48,6 +48,8 @@ def _read():
 
 def _validate(config):
     try:
+        if not isinstance(config, dict) or set(config) != {'address', 'token'}:
+            raise ValueError('invalid configuration fields')
         host, port = config['address']
         token = config['token']
         if not isinstance(host, str) or not isinstance(port, int) or isinstance(port, bool) or not 0 < port < 65536:
@@ -102,9 +104,12 @@ def registered():
     _private(path.parent.lstat(), directory=True)
     record = {'pid': os.getpid(), 'started': psutil.Process().create_time(),
               'nonce': secrets.token_hex(32), 'config': config}
+    raw = json.dumps(record)
+    if len(raw.encode('utf-8')) > LIMIT:
+        raise OSError('WSL discovery registration exceeds its message limit')
     with writing(path) as temporary:
         temporary.chmod(0o600)
-        temporary.write_text(json.dumps(record), encoding='utf-8')
+        temporary.write_text(raw, encoding='utf-8')
     try:
         yield
     finally:
