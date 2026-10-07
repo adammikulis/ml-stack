@@ -442,8 +442,10 @@ class TestTheSettingsView:
     def test_choosing_a_job_and_saving_says_it_saved(self, joined, open_page):
         page, errors = open_page(joined, cookie=joined.cookie)
         page.click("nav.tabs a:has-text('Settings')")
+        page.get_by_role("tab", name="Compute & device").click()
         page.wait_for_selector("#settings-left .group")
         page.locator("#settings-left").get_by_label("Both", exact=True).check()
+        page.get_by_role("tab", name="Models & providers").click()
         page.check("#download_sources-both")
         page.click("#settings-save")
         page.wait_for_selector("#settings-note .ok")
@@ -469,7 +471,7 @@ class TestTheSettingsView:
     def test_the_remove_section_lists_what_would_go(self, joined, open_page):
         page, errors = open_page(joined, cookie=joined.cookie)
         page.click("nav.tabs a:has-text('Settings')")
-        page.locator("#settings-advanced summary").click()
+        page.get_by_role("tab", name="Maintenance", exact=True).click()
         page.wait_for_selector("#settings-removal label.opt")
         assert "cannot be undone" not in page.locator("#settings-removal").inner_text()
         page.click("#settings-removal button.danger")
