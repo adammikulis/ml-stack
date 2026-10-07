@@ -22,6 +22,7 @@ from ml_stack.serve.manager import serve
 from ml_stack.workspace import (
     localagent as la,
     localeffort as le,
+    localinbox,
     localprofile as lp,
     localtools as lt,
     plain,
@@ -173,6 +174,9 @@ class Loop:
         self.steps = self.tasks = self.ignored = 0
         self.effort = agent.effort
 
+    def agent_orders(self, row: dict[str, Any]) -> str:
+        return la.obeys(self.ws, self.agent, row)
+
     def obeyed(self, sender: str) -> bool:
         probe = {"from": sender, "state": "clear", "type": "task", "to": self.agent.name}
         return bool(la.obeys(self.ws, self.agent, probe))
@@ -218,6 +222,7 @@ class Loop:
         extension = lt.workspace_extension(self.ws, self.token, identity, state, self.obeyed)
         agent = chatting.Chat(guarded, person, tools=chatting.tools_for_chat(person=person),
                               role=self.agent.role, task=True, extension=extension)
+        agent.message_boundary = localinbox.Boundary(self, row, agent)
         agent.rounds = self.caps.rounds
         agent.limits.limits = replace(agent.limits.limits,
                                       calls=(min(agent.role.max_calls, self.caps.calls)

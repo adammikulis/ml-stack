@@ -32,6 +32,7 @@ class Conversation(Model):
         self.lock = asyncio.Lock()
 
     async def get_response(self, *args: Any, **kwargs: Any) -> ModelResponse:
+        await self.boundary()
         said, calls = await asyncio.to_thread(self.chat._say, self.schemas)
         self.steps += 1
         output: list[Any] = []
@@ -56,8 +57,14 @@ class Conversation(Model):
         raise NotImplementedError('Conversation text is streamed through the person interface')
         yield
 
+    async def boundary(self) -> None:
+        callback = getattr(self.chat, 'message_boundary', None)
+        if callback is not None:
+            await asyncio.to_thread(callback)
+
     async def invoke(self, context: Any, arguments: str) -> str:
         async with self.lock:
+            await self.boundary()
             if self.chat.person.finished or self.chat.person.left:
                 return json.dumps({'stopped': True})
             await asyncio.to_thread(self.chat._answer, self.calls[context.tool_call_id],
