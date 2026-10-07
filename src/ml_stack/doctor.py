@@ -6,7 +6,6 @@ editable install), the bench store and the managed llama.cpp builds. Each is a `
 
 from __future__ import annotations
 
-import argparse
 import json
 import os
 import re
@@ -16,9 +15,10 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-from ml_stack import checks
+from ml_stack import bench, checks, hook_diagnostics
 from ml_stack.bench.underway import measuring, measuring_file
 from ml_stack.checks import Finding, ask
+from ml_stack.command import Group, flag, option
 from ml_stack.log import say
 from ml_stack.serve.binary import child_env, managed_current, managed_named
 from ml_stack.serve.build_platform import server_name
@@ -228,9 +228,7 @@ def _measuring(home: Path) -> Finding | None:
 
 def _newest_run_at(store: Path) -> tuple[float, int]:
     """When the newest kept run was written, as epoch seconds, and how many there are."""
-    from ml_stack.bench import runs
-
-    kept = runs(store) if store.exists() else []
+    kept = bench.runs(store) if store.exists() else []
     at = 0.0
     for one in kept:
         try:
@@ -258,9 +256,7 @@ def bench_of(home: Path) -> list[Finding]:
         return out
     store = home / "runs.ladybug"
     try:
-        from ml_stack.bench import empties
-
-        hollow = empties(store)
+        hollow = bench.empties(store)
     except Exception as exc:  # noqa: BLE001
         out.append(Finding(name="bench: runs", good=False, said=f"{store} did not open: {exc}"))
         return out
@@ -361,8 +357,6 @@ def look_checkouts(repos: list[Path] | None = None, *, bench_home: Path | None =
     """The repositories and the working state, without changing a thing: hooks, the
     working tree, the branch, worktrees, the editable install, the bench store, and the
     managed llama.cpp builds."""
-    from ml_stack.bench import home_dir
-
     out: list[Finding] = []
     seen_python: set[Path] = set()
     repos = repositories(None) if repos is None else repos
@@ -389,41 +383,42 @@ def look_checkouts(repos: list[Path] | None = None, *, bench_home: Path | None =
             found = install_of(repo, checkout=checkout, python=python)
             if found is not None:
                 out.append(found)
-    out.extend(bench_of(home_dir() if bench_home is None else bench_home))
+    out.extend(bench_of(bench.home_dir() if bench_home is None else bench_home))
     out.extend(builds_of(managed_current() if current is None else current,
                          managed_named() if named is None else named))
     return out
 
 
-def main(argv: list[str] | None = None) -> int:
-    """``ml-stack-doctor`` -- the repositories and the working state, at the start of a
-    session. Exit 0 when every finding is good, 1 otherwise."""
-    words = list(sys.argv[1:] if argv is None else argv)
-    if words[:1] == ["hooks"]:
-        from ml_stack.hook_diagnostics import main as hooks_main
-        return hooks_main(words[1:])
-    ap = argparse.ArgumentParser(
-        prog="ml-stack-doctor",
-        description="Check what ml-stack-setup does not: the checkouts (hooks, working "
-                    "tree, branch, worktrees, the editable install), the bench store "
-                    "(empty runs, a dead lock, a log with no run) and the managed "
-                    "llama.cpp. Offers a fix for what has one; never pushes.",
-        epilog="ml-stack-doctor hooks [ID] inspects local hook failures, first occurrence, "
-               "checkout branch and installed runtime revision.")
-    ap.add_argument("--repo", action="append", metavar="PATH",
-                    help="a checkout to look at; may repeat. Default: those "
-                         f"${CHECKOUTS} lists, separated by {os.pathsep!r}")
-    ap.add_argument("--bench-home", metavar="PATH",
-                    help="the bench's home (default: where ml-stack-bench keeps its store)")
-    ap.add_argument("--yes", action="store_true",
-                    help="run every offered fix without asking")
-    args = ap.parse_args(argv)
+def _findings(args) -> int:
+    if args.action == "hooks":
+        return hook_diagnostics.inspect(args)
     say("ml-stack: the repositories and the working state\n")
     findings = look_checkouts(
         repositories(args.repo) if args.repo else None,
         bench_home=Path(args.bench_home).expanduser() if args.bench_home else None)
     ask(findings, yes=args.yes)
     return 0 if all(f.good for f in findings) else 1
+
+
+COMMAND = Group(
+    "ml-stack-doctor",
+    "Check what ml-stack-setup does not: the checkouts (hooks, working tree, branch, "
+    "worktrees, the editable install), the bench store (empty runs, a dead lock, a log "
+    "with no run) and the managed llama.cpp. Offers a fix for what has one; never pushes.",
+    options=[flag("action", nargs="?", choices=("hooks",), help="inspect local hook failures"),
+             flag("id", nargs="?", help="hook diagnostic ID; omitted lists recent failures"),
+             flag("--repo", action="append", metavar="PATH",
+                  help="a checkout to look at; may repeat. Default: those "
+                       f"${CHECKOUTS} lists, separated by {os.pathsep!r}"),
+             flag("--bench-home", metavar="PATH",
+                  help="the bench's home (default: where ml-stack-bench keeps its store)"),
+             option("yes", help="run every offered fix without asking")],
+    run=_findings,
+    epilog="ml-stack-doctor hooks [ID] inspects local hook failures, first occurrence, "
+           "checkout branch and installed runtime revision.")
+
+
+main = COMMAND.run
 
 
 if __name__ == "__main__":

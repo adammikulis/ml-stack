@@ -34,7 +34,7 @@ def test_failed_event_emits_same_reference_on_both_streams_without_input(monkeyp
     assert "PRIVATE TOOL INPUT" not in json.dumps(held)
     assert secret not in stderr + out.getvalue() + json.dumps(held)
     assert "frames" in held and all("line" in frame and "code" not in frame for frame in held["frames"])
-    assert hook_diagnostics.main([held["id"]]) == 0
+    assert hook_diagnostics.COMMAND.run([held["id"]]) == 0
     inspected = json.loads(capsys.readouterr().out)
     assert inspected["id"] == held["id"] and inspected["runtime"] == held["runtime"]
 
@@ -95,9 +95,9 @@ def test_inspector_rejects_path_traversal_and_redacts_modified_records(capsys):
     identifier = re.search(r"diagnostic=([a-f0-9]{32})", message)[1]
     path = hook_diagnostics.directory() / f"{identifier}.json"
     path.write_text(json.dumps({"reason": "Bearer " + "a" * 30}))
-    assert hook_diagnostics.main([identifier]) == 0
+    assert hook_diagnostics.COMMAND.run([identifier]) == 0
     assert "a" * 30 not in capsys.readouterr().out
-    assert hook_diagnostics.main(["../fixture"]) == 2
+    assert hook_diagnostics.COMMAND.run(["../fixture"]) == 2
 
 
 def test_nudge_failure_keeps_reference_visible_in_post_context(monkeypatch, capsys):
@@ -120,7 +120,7 @@ def test_occurrence_preserves_first_branch_runtime_and_counts_after_detail_reten
                                      metadata={"checkout": {"branch": "feat/second", "head": "b" * 40}})
     second_id = re.search(r"diagnostic=([a-f0-9]{32})", second)[1]
     assert not (hook_diagnostics.directory() / f"{first_id}.json").exists()
-    assert hook_diagnostics.main([second_id]) == 0
+    assert hook_diagnostics.COMMAND.run([second_id]) == 0
     held = json.loads(capsys.readouterr().out)
     occurrence = held["occurrence"]
     assert occurrence["count"] == 2 and occurrence["first_id"] == first_id
@@ -192,7 +192,7 @@ def test_inspector_refuses_symlinked_record_instead_of_reading_target(tmp_path, 
     private.write_text('{"fixture": "PRIVATE FILE CONTENT"}')
     path.unlink()
     path.symlink_to(private)
-    assert hook_diagnostics.main([path.stem]) == 2
+    assert hook_diagnostics.COMMAND.run([path.stem]) == 2
     assert "PRIVATE FILE CONTENT" not in capsys.readouterr().out
 
 

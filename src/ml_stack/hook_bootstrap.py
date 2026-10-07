@@ -9,6 +9,7 @@ import time
 from pathlib import Path
 
 from ml_stack.hook_diagnostics import record
+from ml_stack.worktreerules import checkout_metadata
 
 POST_SECONDS = 8.0
 STARTED = time.monotonic()
@@ -27,7 +28,6 @@ def stage(name: str) -> None:
 
 def metadata(payload: dict) -> None:
     """Capture checkout and hashed correlation identifiers without tool input."""
-    from ml_stack.worktreerules import checkout_metadata
     METADATA.update(checkout_metadata(payload.get("cwd") or str(Path.cwd())))
     for name in ("session_id", "tool_use_id", "call_id"):
         value = payload.get(name)
