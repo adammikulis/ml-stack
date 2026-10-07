@@ -188,3 +188,38 @@ def test_models_apply_to_live_world_without_reset_or_extra_click(gym_page):
     assert result[0]['payload']['decision_checkpoint'] == '/models/trained'
     assert result[1]['payload']['controller'] == 'native-idm'
     assert not errors
+
+
+def test_setup_initializes_world_fields_and_single_step_keeps_policy(gym_page):
+    page, errors = gym_page
+    assert page.get_by_label('Road layout', exact=True).input_value() == 'SCSCS'
+    page.evaluate("""() => {const g=document.querySelector('gym-view');
+      g.session='step-policy';g.controller.value='ppo';g.checkpoint.value='/tmp/policy.zip';
+      g.calls=[];g.control=async(command,payload)=>g.calls.push({command,payload});g.paintActions();}""")
+    page.get_by_role('button', name='Single step', exact=True).click()
+    assert page.evaluate("document.querySelector('gym-view').calls.map(call=>call.command)") == ['step']
+    page.evaluate("document.querySelector('gym-view').session=null")
+    assert not errors
+
+
+def test_invalid_json_preserves_attached_session(gym_page):
+    page, errors = gym_page
+    result = page.evaluate("""async () => {const g=document.querySelector('gym-view');
+      g.session='preserved-world';g.config.value='[]';const closed=[];g.close=async()=>closed.push(g.session);
+      await g.start();const result={closed,session:g.session,note:g.note.textContent};g.session=null;return result;}""")
+    assert result['closed'] == [] and result['session'] == 'preserved-world'
+    assert 'JSON object' in result['note']
+    assert not errors
+
+
+def test_repeated_start_submits_one_session_and_preserves_existing_world(gym_page):
+    page, errors = gym_page
+    result = page.evaluate("""async () => {const g=document.querySelector('gym-view'),w=window.workspaceModel;
+      g.session='original-world';g.stream=async()=>{};g.loadSessions=async()=>{};
+      const original=w.post,calls=[];let finish;w.post=async(path,body)=>{calls.push({path,body});return new Promise(resolve=>finish=resolve);};
+      const first=g.start();await g.start();const before=g.session;
+      finish({id:'new-world',environment:'car',controller:'decider',status:'paused',sequence:0});await first;
+      w.post=original;const result={calls,before,after:g.session,pending:g.pending};g.session=null;return result;}""")
+    assert len(result['calls']) == 1
+    assert result['before'] == 'original-world' and result['after'] == 'new-world'
+    assert not result['pending'] and not errors

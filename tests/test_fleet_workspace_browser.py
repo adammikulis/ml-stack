@@ -35,6 +35,17 @@ def test_dataset_upload_preview_and_specialist_help(tmp_path, monkeypatch, playw
         parsed = _parser().parse_args(args['args'])
         assert parsed.recipe == 'text-lm'
         assert parsed.data == 'datasets/demo.jsonl'
+        page.locator('fleet-nav a[href="#training"]').click()
+        page.get_by_label('Recipe', exact=True).select_option('tool-calls')
+        page.get_by_label('Base model ID or local directory').fill('models/demo-base')
+        page.get_by_label('Fine-tuning strategy').select_option('adapter')
+        specification = page.evaluate("document.querySelector('training-view').spec()")
+        parsed = _parser().parse_args(specification['args'])
+        assert parsed.lora and 'base=models/demo-base' in parsed.set
+        page.get_by_label('Fine-tuning strategy').select_option('full')
+        specification = page.evaluate("document.querySelector('training-view').spec()")
+        parsed = _parser().parse_args(specification['args'])
+        assert not parsed.lora and 'lora=false' in parsed.set
         page.locator('fleet-nav a[href="#gym"]').click()
         page.get_by_label('Controller', exact=True).select_option('ppo')
         page.get_by_label('PPO checkpoint path').fill('/tmp/policy.zip')

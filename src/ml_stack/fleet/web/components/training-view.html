@@ -10,8 +10,9 @@ training-view .training-form textarea { min-height:90px; }
 </style>
 <template>
   <section class="workspace" hidden>
-    <h1>Training</h1>
-    <p class="intro">Choose a workflow and dataset, check its configuration, then follow your run.</p>
+    <h1>Training lab</h1>
+    <p class="intro">Prepare your dataset, review a configuration check, then train and follow the run.</p>
+    <div class="workspace-actions"><button type="button" id="browse-data">1 · Prepare data</button><button type="button" id="open-gym">Explore live RL worlds</button></div>
     <div class="workspace-grid">
       <div class="workspace-card training-form" id="config"></div>
       <div class="workspace-card"><workspace-jobs></workspace-jobs></div>
@@ -27,8 +28,10 @@ training-view .training-form textarea { min-height:90px; }
       this.wired = true;
       this.host = this.querySelector('section');
       this.form = this.querySelector('#config');
+      this.querySelector('#browse-data').onclick = () => M.go('data');
+      this.querySelector('#open-gym').onclick = () => M.go('gym');
       const b = this.form;
-      b.append(E('h2', {}, 'New training run'));
+      b.append(E('h2', {}, '2 · Configure a run'));
       this.mode = W.field(b, 'Workflow', 'select');
       [['recipe', 'Supervised / tool calling'], ['decider', 'Decision model'],
        ['rl', 'Reinforcement learning']].forEach(([value, text]) => this.mode.append(E('option', {value}, text)));
@@ -40,12 +43,14 @@ training-view .training-form textarea { min-height:90px; }
       this.data = W.field(b, 'Dataset path (relative to files root)', 'input', {placeholder:'datasets/examples.jsonl'});
       this.out = W.field(b, 'Output directory (relative to files root)', 'input', {value:'models/my-run'});
       this.name = W.field(b, 'Run name', 'input', {value:'my-run'});
-      this.advanced = E('details', {class:'aside'}, E('summary', {}, 'Advanced options'));
+      this.advanced = E('details', {class:'aside', 'data-advanced':''}, E('summary', {}, 'Advanced options'));
       this.expert = E('div');
       this.advanced.append(this.expert);
       b.append(this.advanced);
       this.options = W.field(this.advanced, 'Additional CLI arguments (JSON array)', 'textarea');
       this.options.value = '[]';
+      this.lora = W.field(b, 'Fine-tuning strategy', 'select');
+      this.lora.append(E('option', {value:'adapter'}, 'LoRA adapter'), E('option', {value:'full'}, 'All model weights'));
       this.dry = W.field(b, 'Run mode', 'select');
       this.dry.append(E('option', {value:'true'}, 'Check configuration'), E('option', {value:'false'}, 'Train model'));
       this.preview = E('pre', {}, 'Review the command before starting.');
@@ -110,6 +115,7 @@ training-view .training-form textarea { min-height:90px; }
       const rl = this.mode.value === 'rl';
       W.visible(this.data, !rl); W.visible(this.out, !rl); W.visible(this.name, !rl);
       W.visible(this.size, this.mode.value === 'recipe');
+      W.visible(this.lora, this.mode.value === 'recipe' && this.recipe.value === 'tool-calls');
       let fields = [];
       if (this.mode.value === 'recipe') {
         const recipe = (this.recipes || []).find(item => item.id === this.recipe.value);
@@ -120,7 +126,8 @@ training-view .training-form textarea { min-height:90px; }
         if ([...this.size.options].some(option => option.value === chosen)) this.size.value = chosen;
         this.requirements.textContent = `${recipe.blurb} Dataset fields: ${recipe.data.fields.join(', ')}. Minimum ${recipe.data.min_rows} rows.`;
         const defaults = recipe.sizes[this.size.value]?.defaults || {};
-        fields = recipe.fields.map(field => ({...field, default:defaults[field.name] ?? field.default}));
+        fields = recipe.fields.filter(field => field.name !== 'lora').map(field => ({...field, default:defaults[field.name] ?? field.default}));
+        if (recipe.id === 'tool-calls') fields.unshift({name:'base', label:'Base model ID or local directory', type:'text', default:recipe.sizes[this.size.value]?.base || ''});
       } else if (rl) {
         const environment = (this.environments || []).find(item => item.id === this.recipe.value);
         this.requirements.textContent = environment?.available
@@ -140,7 +147,7 @@ training-view .training-form textarea { min-height:90px; }
                   {name:'seed', label:'Seed', type:'int', default:0}];
       }
       for (const field of fields) {
-        const host = ['steps', 'epochs', 'timesteps'].includes(field.name) ? this.parameters : this.expert;
+        const host = ['steps', 'epochs', 'timesteps', 'base'].includes(field.name) ? this.parameters : this.expert;
         let input;
         if (field.type === 'bool') {
           input = W.field(host, field.label, 'select');
@@ -178,6 +185,7 @@ training-view .training-form textarea { min-height:90px; }
       if (!Array.isArray(extra) || extra.some(item => typeof item !== 'string')) throw Error('Additional arguments must be a JSON array of strings.');
       let command, args;
       if (this.mode.value !== 'rl' && !this.data.value.trim()) throw Error('Choose a dataset path before starting.');
+      if (this.mode.value !== 'rl' && (!this.out.value.trim() || !this.name.value.trim())) throw Error('Choose an output directory and run name before starting.');
       if (this.mode.value === 'decider') {
         command = 'ml-stack-decide'; args = ['train', '--data', this.data.value, '--name', this.name.value, '--out', this.out.value];
       } else if (this.mode.value === 'rl') {
@@ -188,8 +196,10 @@ training-view .training-form textarea { min-height:90px; }
         if (this.inputs.checkpoint.value) args.push('--checkpoint', this.inputs.checkpoint.value);
       } else { command = 'ml-stack-train-run'; args = ['--recipe', this.recipe.value, '--data', this.data.value, '--out', this.out.value]; }
       if (this.mode.value === 'recipe') {
+        if (this.recipe.value === 'tool-calls' && this.lora.value === 'adapter') args.push('--lora');
         if (this.size.value) args.push('--size', this.size.value);
         for (const [key, input] of Object.entries(this.inputs)) args.push('--set', `${key}=${input.value}`);
+        if (this.recipe.value === 'tool-calls') args.push('--set', `lora=${this.lora.value === 'adapter'}`);
       }
       if (this.mode.value === 'decider') for (const [key, input] of Object.entries(this.inputs)) args.push('--' + key.replaceAll('_', '-'), input.value);
       if (this.dry.value === 'true' && this.mode.value !== 'rl') args.push('--dry-run');
