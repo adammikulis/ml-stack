@@ -57,8 +57,11 @@ def test_rl_text_and_brand_surfaces_remain_readable_across_themes(joined, open_p
         '--ml-text':'#f3fff4','--ml-muted':'#b7d4bf','--ml-accent':'#f6c865',
         '--ml-on-accent':'#253522'}))root.style.setProperty(key,value);
       const style=node=>getComputedStyle(node);
+      const canvas=document.createElement('canvas');canvas.width=canvas.height=1;
+      const context=canvas.getContext('2d',{willReadFrequently:true});
       const luminance=color=>{
-        const channels=color.match(/[\d.]+/g).slice(0,3).map(Number).map(v=>{
+        context.fillStyle=color;context.fillRect(0,0,1,1);
+        const channels=[...context.getImageData(0,0,1,1).data].slice(0,3).map(v=>{
           v/=255;return v<=.04045?v/12.92:Math.pow((v+.055)/1.055,2.4);
         });
         return channels[0]*.2126+channels[1]*.7152+channels[2]*.0722;
