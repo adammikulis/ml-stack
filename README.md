@@ -56,6 +56,38 @@ Everything runs on your own hardware. Nothing leaves the network.
 
 [Full list of what it does](docs/FEATURES.md).
 
+## Ask Qwen on another device to review documentation
+
+From this Git checkout, use the shared Dev pool and project Board:
+
+```sh
+ml-stack-peers ls
+ml-stack-workspace remote-agent --device DEVICE_NAME --json \
+  --max-output-tokens 4096 --max-rounds 12 --max-tool-calls 30 \
+  --max-model-calls 24 --max-task-seconds 600 \
+  --task "Read CLAUDE.md, README.md and docs/workspace.md. Recommend documentation changes with file references, priorities and evidence. Do not edit files."
+```
+
+Replace `DEVICE_NAME` with the other device's name from `ml-stack-peers ls`; omit
+`--device` when there is only one remote device. Both devices need running Dev cluster
+services; the target needs a registered checkout of this project and a downloaded Qwen.
+The broker admits the model on that device and the worker receives the task on the shared
+project Board. No invitation or credential copy is needed.
+
+Keep the returned `requested_by` (launcher), `identity` (worker), `model` and `task_seq`.
+Use those returned values to read the answer:
+
+```sh
+ml-stack-workspace inbox --agent LAUNCHER_ID --all
+ml-stack-workspace thread TASK_SEQ --agent LAUNCHER_ID
+```
+
+`state: starting` means the model is loading. Reuse the same launcher and worker name
+for follow-up jobs; an existing worker keeps its launch settings. Check the returned
+`effective_limits` before assigning a job. See
+[remote Qwen jobs](docs/workspace.md#run-a-qwen-model-on-another-dev-device) for follow-up
+messages, limits and troubleshooting.
+
 ## Security
 
 Treat every network, page, model file and model reply as untrusted. Fetches go through one

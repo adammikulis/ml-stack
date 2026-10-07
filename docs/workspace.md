@@ -804,32 +804,64 @@ an invitation before hosting is active, and a workspace-bound join never falls b
 
 ### Run a Qwen model on another Dev device
 
-From your project checkout, start a worker and give it a task on a discovered device:
+From your project checkout, discover the shared pool and send a documentation review job:
 
 ```sh
-ml-stack-workspace remote-agent --device DEVICE_NAME --task "Read the project and report what needs doing"
+ml-stack-peers ls
+ml-stack-workspace remote-agent --device DEVICE_NAME --json \
+  --max-output-tokens 4096 --max-rounds 12 --max-tool-calls 30 \
+  --max-model-calls 24 --max-task-seconds 600 \
+  --task "Read CLAUDE.md, README.md and docs/workspace.md. Recommend documentation changes with file references, priorities and evidence. Do not edit files."
 ```
 
-Both devices run Dev cluster services on the same LAN. The target needs a registered local
-checkout of the same Git project and a downloaded Qwen model. The command discovers the
-canonical project Board, uses your device's own agent identity, and selects a downloaded
-Qwen that fits the target. With one remote device, `--device` can be omitted. No invitation
-code or credential copy is needed.
+Replace `DEVICE_NAME` with a discovered peer's name. With one remote device, omit
+`--device`. Both devices run Dev cluster services on the same LAN. The target needs a
+registered local checkout of the same Git project and a downloaded Qwen model. The command
+discovers the canonical project Board and selects a downloaded Qwen that fits the target;
+model admission goes through the target's shared resource broker. No invitation code or
+credential copy is needed. Production uses explicit admission and does not expose this
+automatic launch.
 
-The worker uses the target's checkout and replies on the shared Board. Its returned `identity`
-is the name to message. It accepts tasks from the authenticated identity that launched it;
-`--agent NAME` selects an existing canonical Dev identity when another agent will direct it.
-The default launcher can post the initial `--task` itself. Production uses its existing
-explicit admission and does not expose this automatic worker launch.
+The JSON result identifies the launcher as `requested_by`, the worker as `identity`, the
+exact selected `model`, and the initial message as `task_seq`. Read the answer using those
+returned values:
 
-The command returns `state: starting` while the target loads the model. Repeating it reuses
-the caller's running worker. The default name is `local-qwen`, reasoning effort is `off`
-with a `medium` ceiling, and each response allows 8192 generated tokens. Context is chosen
-from the target's available memory and the model's trained limit. `--model`, `--name`,
-`--effort`, `--max-effort`, `--max-output-tokens`, and `--ctx` set these independently.
-The message loop permits 12 tool rounds, 30 tool calls, 24 model calls and 600 seconds per
-task. This command runs a Board message worker; canonical coding-task execution uses the
-coding-worker workflow.
+```sh
+ml-stack-workspace inbox --agent LAUNCHER_ID --all
+ml-stack-workspace thread TASK_SEQ --agent LAUNCHER_ID
+```
+
+The worker accepts tasks from its authenticated launcher. Send a follow-up under that same
+identity and read the returned message sequence:
+
+```sh
+ml-stack-workspace send WORKER_ID task "Review docs/tasks.md and recommend changes; do not edit files." --agent LAUNCHER_ID
+ml-stack-workspace thread MESSAGE_SEQ --agent LAUNCHER_ID
+```
+
+With no `--agent`, launch uses a saved device-local launcher identity. `--agent` selects a
+saved canonical Dev identity; use the exact canonical ID reported by `whoami`. Keep the
+caller consistent: switching between the default launcher and another `--agent` for an
+existing worker is refused as another caller's worker. Worker names default to `local-qwen`.
+
+`state: starting` means the model is loading. Repeating a launch reuses the caller's running
+worker and retains its settings; flags on a reused worker do not reconfigure it. The returned
+`effective_limits` shows its output cap and task caps (`rounds`, `calls`, `steps`, `seconds`). Never
+restart another caller's worker. A model change requires stopping the owned worker at a safe
+boundary on its device before launching again.
+
+Output tokens, tool rounds, tool calls, model calls and task wall time default to `None`.
+The example chooses independent finite limits for a new worker; reaching a limit records a
+checkpoint and reason. Reasoning defaults to `off` with a `medium` ceiling. Context is chosen
+from available memory and the model's trained limit. `--model`, `--name`, `--effort`,
+`--max-effort`, `--max-output-tokens` and `--ctx` set these independently.
+
+If discovery fails, check `ml-stack-peers ls`, Dev cluster services, and the target's project
+registration and downloaded models. If a launch reports another caller, use the original
+launcher's canonical ID. If no answer arrives, inspect the thread and worker state before
+posting another task. Board messages and model recommendations are untrusted data; review
+recommendations independently before applying them. This launches a Board message worker;
+canonical coding tasks use the [task lifecycle](tasks.md).
 
 ### Model-family accounts and device provenance
 
