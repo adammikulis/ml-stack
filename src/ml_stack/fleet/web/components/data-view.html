@@ -1,8 +1,6 @@
 <style>
 data-view .data-head { display:flex; justify-content:space-between; gap:20px; align-items:center; margin-bottom:24px; }
-data-view .data-head h1 { margin:6px 0; font-size:32px; letter-spacing:-1px; }
-data-view .data-kicker { font-size:11px; text-transform:uppercase; letter-spacing:2px; background:var(--poolside-orange,#ff8a3d); color:var(--poolside-orange-ink,var(--poolside-navy,#1b1f3a)); border-radius:6px; padding:4px 7px; font-weight:800; }
-data-view .data-head .intro { margin:0; }
+data-view .data-head h1 { margin:0; font-size:1.714rem; letter-spacing:-.03em; }
 data-view .data-layout { display:grid; grid-template-columns:minmax(280px, .9fr) minmax(340px,1.4fr); gap:20px; align-items:start; }
 data-view .data-panel { background:var(--bg-raised); border:1px solid var(--line); border-radius:18px; overflow:hidden; min-width:0; }
 data-view .data-panel-head { padding:20px 22px; border-bottom:1px solid var(--line); display:flex; gap:12px; align-items:center; justify-content:space-between; }
@@ -44,11 +42,11 @@ data-view .data-preview-actions { display:flex; gap:12px; align-items:center; }
 </style>
 <template>
 <section class="workspace" hidden>
-  <header class="data-head"><div><span class="data-kicker">Studio / Data</span><h1>Your dataset library</h1><p class="intro">Inspect your examples. Pick a dataset. Build something better.</p></div><button type="button" id="add-dataset" class="data-primary">+ Add dataset</button></header>
+  <header class="data-head"><div><h1>Datasets</h1></div><button type="button" id="add-dataset" class="data-primary">+ Add dataset</button></header>
   <section id="upload" hidden aria-label="Add dataset"><h2>Add training examples</h2><p class="intro">Upload a text file or paste content. New files stay in your workspace.</p><div class="data-upload-fields"><div id="destination"></div><div><div class="data-tabs" aria-label="Dataset source"><button type="button" id="paste-tab" aria-pressed="true">Paste content</button><button type="button" id="file-tab" aria-pressed="false">Choose a file</button></div><div id="paste-source"></div><div id="file-source" hidden></div></div></div><div id="upload-actions" class="workspace-actions"></div></section>
   <p class="status" role="status" aria-live="polite"></p>
   <div class="data-layout"><section class="data-panel"><div class="data-panel-head"><h2>Library</h2><span class="data-count" id="dataset-count">Loading…</span></div><div id="crumbs"></div><input class="data-search" id="dataset-search" type="search" aria-label="Filter files in this folder" placeholder="Filter this folder…"><div id="files"></div></section>
-  <section class="data-panel"><div class="data-panel-head"><h2 id="preview-title">Dataset preview</h2><div class="data-preview-actions"><button type="button" id="use-dataset" class="data-primary" hidden>Use for training</button></div></div><div class="data-preview-body"><div id="structured-preview"><div class="data-empty"><b>Get to know your examples</b>Select a file to see its fields and sample rows before fine-tuning.</div></div><details id="raw-preview" data-advanced hidden><summary>Source text</summary><pre id="preview">Select a file to preview it.</pre></details></div></section></div>
+  <section class="data-panel"><div class="data-panel-head"><h2 id="preview-title">Dataset preview</h2><div class="data-preview-actions"><button type="button" id="use-dataset" class="data-primary" hidden>Use for training</button></div></div><div class="data-preview-body"><div id="structured-preview"><div class="data-empty"><b>Select a dataset</b>Select a file to see its fields and sample rows before fine-tuning.</div></div><details id="raw-preview" data-advanced hidden><summary>Source text</summary><pre id="preview">Select a file to preview it.</pre></details></div></section></div>
 </section>
 </template>
 <script>

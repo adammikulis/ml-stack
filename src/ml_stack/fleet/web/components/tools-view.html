@@ -3,7 +3,6 @@ tools-view { display:contents; }
 tools-view .workspace { padding:calc(28px * var(--ui-density,1)) calc(32px * var(--ui-density,1)); }
 tools-view .tools-heading { display:flex; align-items:center; justify-content:space-between; gap:24px; margin-bottom:22px; }
 tools-view .tools-heading h1 { margin:0 0 8px; } tools-view .tools-heading p { margin:0; }
-tools-view .tools-heading span { border-radius:12px; background:var(--poolside-yellow); color:var(--poolside-yellow-ink,var(--poolside-navy)); padding:calc(14px * var(--ui-density,1)) calc(18px * var(--ui-density,1)); font-weight:600; }
 tools-view .tool-tabs { display:flex; gap:8px; border-bottom:1px solid var(--line); margin-bottom:24px; padding-bottom:12px; }
 tools-view .tool-tabs button { margin:0; width:auto; background:transparent; color:var(--text); border:0; padding:calc(12px * var(--ui-density,1)) calc(18px * var(--ui-density,1)); border-radius:10px; }
 tools-view .tool-tabs button[aria-selected=true] { background:var(--poolside-yellow); color:var(--poolside-yellow-ink,var(--poolside-navy)); }
@@ -17,12 +16,12 @@ tools-view #catalogue h3 { margin:0 0 10px; font-size:1.000rem; overflow-wrap:an
 tools-view #search { max-width:500px; }
 tools-view #runner { margin-top:24px; max-width:850px; }
 @media(max-width:1100px) { tools-view .workspace-grid { grid-template-columns:1fr; } }
-@media(max-width:650px) { tools-view .workspace { padding:calc(20px * var(--ui-density,1)); } tools-view .tools-heading span { display:none; } tools-view .tool-tabs { overflow:auto; } tools-view .tool-tabs button { white-space:nowrap; } }
+@media(max-width:650px) { tools-view .workspace { padding:calc(20px * var(--ui-density,1)); } tools-view .tool-tabs { overflow:auto; } tools-view .tool-tabs button { white-space:nowrap; } }
 </style>
 <template><section class="workspace" hidden>
-<header class="tools-heading"><div><h1>Tools for the next step</h1><p class="intro">Make a decision, explore a specialist workflow, or inspect a running command.</p></div><span>Build &amp; explore</span></header>
+<header class="tools-heading"><div><h1>Tools</h1></div></header>
 <nav class="tool-tabs" role="tablist" aria-label="Tool workspace"><button type="button" role="tab" data-tool="decision" aria-selected="true">Decision lab</button><button type="button" role="tab" data-tool="library" aria-selected="false">Command library</button><button type="button" role="tab" data-tool="jobs" aria-selected="false">Running jobs</button></nav>
-<div class="tool-panel" data-tool-panel="decision"><div class="workspace-grid"><div class="workspace-card" id="decision"></div><aside class="workspace-card"><h2>Choose with confidence</h2><p class="hint">Give a decision model a situation and a closed set of options. Evaluate labelled cases to understand its probabilities.</p><p class="hint">The default decider is Strands 2B. Use the advanced controls to choose a backend or checkpoint.</p></aside></div></div>
+<div class="tool-panel" data-tool-panel="decision"><div class="workspace-grid"><div class="workspace-card" id="decision"></div><aside class="workspace-card"><h2>Decision models</h2><p class="hint">Give a decision model a situation and a closed set of options. Evaluate labelled cases to understand its probabilities.</p><p class="hint">The default decider is Strands 2B. Use the advanced controls to choose a backend or checkpoint.</p></aside></div></div>
 <div class="tool-panel" data-tool-panel="library" hidden><h2>Specialist command library</h2><p id="library-status" class="status" role="status" aria-live="polite"></p><input id="search" type="search" aria-label="Search tools" placeholder="Search graph, speech, ingest, security, workspace…"><div class="cards" id="catalogue"></div><div class="workspace-card" id="runner"></div></div>
 <div class="tool-panel" data-tool-panel="jobs" hidden><div class="workspace-card"><workspace-jobs></workspace-jobs></div></div>
 </section></template>

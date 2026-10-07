@@ -1,8 +1,6 @@
 <style>
 benchmarks-view .evaluate-head { display:flex; justify-content:space-between; align-items:center; gap:20px; margin-bottom:24px; }
-benchmarks-view .evaluate-head h1 { font-size:32px; letter-spacing:-1px; margin:6px 0; }
-benchmarks-view .evaluate-head .intro { margin:0; }
-benchmarks-view .evaluate-kicker { font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:2px; background:var(--poolside-orange,#ff8a3d); color:var(--poolside-orange-ink,var(--poolside-navy,#1b1f3a)); border-radius:6px; padding:4px 7px; }
+benchmarks-view .evaluate-head h1 { font-size:1.714rem; letter-spacing:-.03em; margin:0; }
 benchmarks-view .evaluate-layout { display:grid; grid-template-columns:minmax(300px,.8fr) minmax(340px,1.4fr); gap:22px; align-items:start; }
 benchmarks-view .evaluate-card { background:var(--bg-raised); border:1px solid var(--line); border-radius:18px; padding:22px; min-width:0; }
 benchmarks-view .evaluate-card h2 { margin:0 0 8px; font-size:18px; }
@@ -47,7 +45,7 @@ benchmarks-view details { margin-top:16px; font-size:12px; }
 </style>
 <template>
 <section class="workspace" hidden>
-<header class="evaluate-head"><div><span class="evaluate-kicker">Studio / Evaluate</span><h1>Find the right model</h1><p class="intro">Compare quality and cost with the same questions across your pool.</p></div><button type="button" id="evaluate-library" class="evaluate-secondary">Model library ↗</button></header>
+<header class="evaluate-head"><div><h1>Benchmarks</h1></div><button type="button" id="evaluate-library" class="evaluate-secondary">Model library ↗</button></header>
 <div class="evaluate-layout"><section class="evaluate-card" id="config"><h2>Set up a comparison</h2><p class="intro">Choose models, choose where to run them, then review your measurement.</p><div class="evaluate-step"><span>1</span> Models to compare</div><div id="model-choices">Loading your model library…</div><div class="evaluate-step"><span>2</span> Devices to use</div><div id="device-choices">Loading your pool…</div><div class="evaluate-step"><span>3</span> Measurement</div><div id="measure-fields"></div><div class="evaluate-actions" id="evaluate-actions"></div><p class="status" role="status" aria-live="polite"></p><details id="command-review" hidden><summary>Reviewed command</summary><pre id="command"></pre></details><details class="aside" data-advanced><summary>Advanced options</summary><div id="advanced-fields"></div></details></section>
 <div class="evaluate-main"><section class="evaluate-card"><div class="evaluate-state" id="run-state"><span class="evaluate-state-icon" aria-hidden="true">◷</span><div><h2 id="state-title">Measurement status</h2><p id="summary" role="status" aria-live="polite">Checking your pool…</p></div></div><p id="progress"></p><button type="button" id="stop-sweep" class="evaluate-secondary" hidden>Stop sweep</button><details data-advanced><summary>Runtime details</summary><pre id="status"></pre></details></section>
 <section class="evaluate-card"><h2>Measured quality & cost</h2><p class="intro">Recorded scores only. F1 combines precision and recall; time is per question.</p><div id="results" class="evaluate-table"></div><div class="evaluate-actions"><button type="button" id="evaluate-charts" class="evaluate-secondary">Explore charts ↗</button><button type="button" id="evaluate-capacity" class="evaluate-secondary">Plan capacity ↗</button></div></section>

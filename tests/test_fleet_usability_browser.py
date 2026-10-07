@@ -115,6 +115,11 @@ def test_four_workspaces_context_pages_and_theme_navigation(usability_page):
     primary = page.get_by_role('navigation', name='Main navigation')
     expect(primary.locator('a')).to_have_count(4)
     assert page.get_by_role('searchbox', name='Find a page').count() == 0
+    headings = {'Models': ('models-view', 'Models'), 'Fine-tune': ('training-view', 'Fine-tuning'),
+                'Worlds': ('gym-view', 'Reinforcement learning'), 'Evaluate': ('benchmarks-view', 'Benchmarks'),
+                'Data': ('data-view', 'Datasets'), 'Projects': ('projects-view', 'Projects'),
+                'Tools': ('tools-view', 'Tools'), 'Graph': ('knowledge-view', 'Graph inspector'),
+                'History': ('history-view', 'Activity'), 'Devices': ('cluster-view', 'Devices')}
     for group, titles in [('Studio', ['Models', 'Fine-tune', 'Worlds', 'Evaluate', 'Data']),
                           ('Work', ['Tasks', 'Projects', 'Tools', 'Graph', 'History']),
                           ('Pool', ['Devices', 'Capacity'])]:
@@ -124,6 +129,11 @@ def test_four_workspaces_context_pages_and_theme_navigation(usability_page):
         for title in titles:
             context.get_by_role('link', name=title, exact=True).click()
             expect(context.get_by_role('link', name=title, exact=True)).to_have_attribute('aria-current', 'page')
+            if title in headings:
+                component, heading = headings[title]
+                expect(page.locator(component).get_by_role('heading', level=1)).to_have_text(heading)
+            if title == 'Capacity':
+                expect(page.locator('fit-view').get_by_role('heading', level=1)).to_have_count(1)
         assert primary.evaluate('(nav)=>nav.scrollHeight <= nav.clientHeight')
     page.get_by_role('link', name='Settings', exact=True).click()
     expect(page.locator('#app')).to_have_attribute('data-workspace', 'settings')

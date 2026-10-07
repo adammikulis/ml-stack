@@ -3,7 +3,6 @@ history-view { display:contents; }
 history-view .workspace { padding:calc(28px * var(--ui-density,1)) calc(32px * var(--ui-density,1)); }
 history-view .activity-heading { display:flex; justify-content:space-between; align-items:center; margin-bottom:22px; }
 history-view .activity-heading h1 { margin:0 0 8px; } history-view .activity-heading p { margin:0; }
-history-view .activity-heading > span { background:var(--poolside-yellow); color:var(--poolside-yellow-ink,var(--poolside-navy)); padding:calc(14px * var(--ui-density,1)) calc(18px * var(--ui-density,1)); border-radius:12px; font-weight:600; }
 history-view .history-controls { background:var(--bg-raised); border:1px solid var(--line); border-radius:14px; padding:calc(18px * var(--ui-density,1)); }
 history-view .activity-reputation { margin:24px 0; padding:calc(18px * var(--ui-density,1)); background:var(--bg-raised); border:1px solid var(--line); border-radius:12px; }
 history-view .activity-reputation > summary { font-weight:600; }
@@ -32,15 +31,14 @@ history-view .history-links { display:flex; flex-wrap:wrap; gap:12px; margin-top
 </style>
 <template>
 <section class="workspace" hidden>
-  <header class="activity-heading"><div><h1>What’s happening</h1><p class="intro">Follow your team’s activity. Open an action to inspect its recorded evidence.</p></div><span>Activity</span></header>
-  <p class="intro"><strong>Runs are free.</strong> Credits record earned work; running an agent does not spend them. Credits and ratings do not restrict access.</p>
+  <header class="activity-heading"><div><h1>Activity</h1></div></header>
   <div class="history-controls">
     <label>Agent<select id="history-agent"><option value="">All agents</option></select></label>
     <label>Search actions<input id="history-search" type="search" placeholder="Tool, model, task, or status…"></label>
     <button id="history-refresh" type="button">Refresh</button>
   </div>
   <p class="status" id="history-status" role="status">Loading activity…</p>
-  <details class="activity-reputation"><summary>Credits &amp; work reputation</summary><section aria-label="Agent credits and work reputation"><div id="history-credits"></div></section></details>
+  <details class="activity-reputation"><summary>Credits &amp; work reputation</summary><section aria-label="Agent credits and work reputation"><p class="intro"><strong>Runs are free.</strong> Credits record earned work; running an agent does not spend them. Credits and ratings do not restrict access.</p><div id="history-credits"></div></section></details>
   <h2>Recent actions</h2>
   <div id="history-list"></div>
   <p class="intro">Shows up to 500 recent recorded actions. Prompts, tool arguments, outputs, and message bodies are omitted from the activity log.</p>
