@@ -5,7 +5,7 @@ one hook event on stdin and writes the decision as JSON: the destructive-action 
 the role decide, and a call that asks is raised in the Requests inbox and waits for the person.
 ``post`` runs ``ml-stack-workspace nudge`` and passes what it prints on as context. The role,
 label and paths are on the command line the launcher wrote, never read from the environment or
-from the call. A hook that crashes exits 2, which both harnesses read as a block.
+from the call. Admission hook failures block calls; notification failures produce diagnostics.
 """
 
 from __future__ import annotations
@@ -192,8 +192,10 @@ def run(argv: Sequence[str] | None = None, stdin: IO[str] | None = None,
         stdout: IO[str] | None = None) -> int:
     """Read one hook event and write the answer; a failure exits 2, which blocks the call."""
     os.environ[ENV_NONINTERACTIVE] = "1"
+    words = list(sys.argv[1:] if argv is None else argv)
+    notification = bool(words and words[0] == "post")
     try:
-        event, opts = _options(list(sys.argv[1:] if argv is None else argv))
+        event, opts = _options(words)
         payload = json.loads((stdin or sys.stdin).read() or "{}")
         payload = payload if isinstance(payload, dict) else {}
         label = opts.get("label", ["harness"])[-1]
@@ -201,16 +203,19 @@ def run(argv: Sequence[str] | None = None, stdin: IO[str] | None = None,
                     opts.get("protect", []), float(opts.get("wait", [WAIT_S])[-1]))
         out = pre(payload, rail) if event == "pre" else stop(rail) if event == "stop" else post(label, rail)
     except FAILURES as exc:
-        sys.stderr.write(f"ml-stack hook failed, call blocked: {_diagnostic(exc)}\n")
-        return 2
+        outcome = "notification unavailable" if notification else "call blocked"
+        sys.stderr.write(f"ml-stack hook failed, {outcome}: {_diagnostic(exc)}\n")
+        return 0 if notification else 2
     if out:
         (stdout or sys.stdout).write(json.dumps(out, sort_keys=True) + "\n")
     return 0
 
 
 def _block(kind: type[BaseException], value: BaseException, _trace: object) -> None:
-    sys.stderr.write(f"ml-stack hook failed, call blocked: {_diagnostic(value)}\n")
-    os._exit(2)
+    notification = sys.argv[1:2] == ["post"]
+    outcome = "notification unavailable" if notification else "call blocked"
+    sys.stderr.write(f"ml-stack hook failed, {outcome}: {_diagnostic(value)}\n")
+    os._exit(0 if notification else 2)
 
 
 if __name__ == "__main__":  # pragma: no cover

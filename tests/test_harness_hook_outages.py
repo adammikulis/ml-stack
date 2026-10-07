@@ -70,3 +70,23 @@ def test_launcher_suffix_does_not_bypass_canonical_mutation_authority(monkeypatc
                             harnesshook.Rail('plan-and-go', 'worker', [str(tmp_path)]))
     assert result['hookSpecificOutput']['permissionDecision'] == 'deny'
     assert 'connection refused' in result['hookSpecificOutput']['permissionDecisionReason']
+
+
+@pytest.mark.parametrize('error', [Denied('board offline'), OSError('connection refused'),
+                                  RuntimeError('daemon unavailable')])
+def test_outer_post_failure_keeps_completed_tool_results(error, monkeypatch, capsys):
+    def broken(_label, _rail):
+        raise error
+    monkeypatch.setattr(harnesshook, 'post', broken)
+    assert harnesshook.run(['post'], io.StringIO('{}'), io.StringIO()) == 0
+    diagnostic = capsys.readouterr().err
+    assert 'notification unavailable' in diagnostic and str(error) in diagnostic
+
+
+def test_unhandled_post_failure_is_nonblocking(monkeypatch, capsys):
+    exits = []
+    monkeypatch.setattr(harnesshook.sys, 'argv', ['harnesshook', 'post'])
+    monkeypatch.setattr(harnesshook.os, '_exit', exits.append)
+    harnesshook._block(Denied, Denied('daemon unavailable'), None)
+    assert exits == [0]
+    assert 'notification unavailable: Denied: daemon unavailable' in capsys.readouterr().err
