@@ -373,6 +373,27 @@ class Environment:
         have = target.installed()
         return _library_installed(library, have, target._cache)
 
+    def require_current_runtime(self, *, python: Path | str | None = None) -> None:
+        """Require the bundled source revision in a frozen app's job interpreter."""
+        from .managed_compute import process_environment
+
+        if not getattr(sys, "frozen", False):
+            return
+        found = self.wheels()
+        wheels = list(found.glob("ml_stack-*.whl")) if found else []
+        expected = wheel_commit(wheels[0]) if len(wheels) == 1 else ""
+        if not expected:
+            raise OSError("The app's stamped runtime wheel is unavailable")
+        script = ("from importlib.metadata import distribution; from pathlib import Path; "
+                  "p=Path(distribution('ml-stack').locate_file('ml_stack/fleet/built-from')); "
+                  "print(p.read_text().strip() if p.is_file() else '')")
+        result = subprocess.run([str(python or self.python), "-I", "-c", script],
+                                capture_output=True, text=True, timeout=15, env=process_environment())
+        actual = result.stdout.strip() if result.returncode == 0 else ""
+        if actual != expected:
+            raise OSError("Refresh Training essentials in Libraries before starting work: "
+                          f"managed runtime {actual or 'unstamped'}; app runtime {expected}")
+
     def state(self, vendor: str = "") -> dict[str, Any]:
         have = self.installed()
         return {
@@ -390,9 +411,15 @@ class Environment:
         target = self.for_library(lib)
         if target is not self:
             have = target.installed()
+        installed = _library_installed(lib, have, target._cache)
+        if installed and lib.name == "core":
+            try:
+                target.require_current_runtime()
+            except (OSError, subprocess.SubprocessError):
+                installed = False
         return {"name": lib.name, "title": lib.title, "blurb": lib.blurb,
                 "size_mb": lib.size_mb, "default": lib.default,
-                "installed": _library_installed(lib, have, target._cache),
+                "installed": installed,
                 "version": have.get(_base(lib.packages[0]), ""),
                 "python_version": target.python_version,
                 "python": str(target.python) if target.exists else ""}

@@ -301,3 +301,30 @@ def test_installed_pyenv_python_is_reused_when_current_shim_cannot_run(tmp_path,
 
     monkeypatch.setattr(environment.subprocess, 'run', run)
     assert str(Environment(tmp_path, python_version=version).host_python()) == '/tmp/installed/python'
+
+
+@pytest.mark.parametrize("actual", ["", "b" * 40, "a" * 40])
+def test_frozen_runtime_requires_exact_bundled_commit_before_work(tmp_path, monkeypatch, actual):
+    import subprocess
+    from ml_stack.fleet import environment
+
+    managed = Environment(tmp_path)
+    wheel = tmp_path / "ml_stack-0.2.1-py3-none-any.whl"
+    wheel.touch()
+    monkeypatch.setattr(environment.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(managed, "wheels", lambda: tmp_path)
+    monkeypatch.setattr(environment, "wheel_commit", lambda path: "a" * 40)
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, actual + "\n", "")
+
+    monkeypatch.setattr(environment.subprocess, "run", run)
+    if actual == "a" * 40:
+        managed.require_current_runtime()
+    else:
+        with pytest.raises(OSError, match="Refresh Training essentials"):
+            managed.require_current_runtime()
+    assert calls[0][:3] == [str(managed.python), "-I", "-c"]
+    assert len(calls) == 1

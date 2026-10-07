@@ -28,12 +28,19 @@ def run(argv: list[str], **kw) -> None:
 
 
 def wheels() -> list[Path]:
+    from ml_stack.fleet.runtime_wheel import stamp
+
     DIST.mkdir(exist_ok=True)
     for old in DIST.glob("ml_stack-*.whl"):
         old.unlink()
     run([sys.executable, "-m", "build", "--wheel", "--outdir", str(DIST), str(ROOT)],
         stdout=subprocess.DEVNULL)
-    return sorted(DIST.glob("*.whl"))
+    made = sorted(DIST.glob("*.whl"))
+    commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+    for wheel in made:
+        if wheel.name.startswith("ml_stack-"):
+            stamp(wheel, commit, ROOT)
+    return made
 
 
 def wheelhouse(out: Path) -> list[Path]:
