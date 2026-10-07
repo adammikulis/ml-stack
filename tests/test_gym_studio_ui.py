@@ -21,8 +21,11 @@ def test_scenario_cards_drive_setup_and_preserve_live_control_access(joined, ope
     page.locator('gym-view .gym-scenario[data-environment="car"] button').first.click()
     assert page.get_by_label('Environment', exact=True).input_value() == 'car'
     assert page.get_by_label('Controller', exact=True).input_value() == 'decider'
-    assert not page.locator('gym-view #config details[data-advanced]').get_attribute('open')
+    assert not page.locator('gym-view #config .gym-advanced').get_attribute('open')
     assert not page.get_by_label('Seed', exact=True).is_visible()
+    assert not page.locator('gym-view .gym-world-settings').get_attribute('open')
+    start = page.get_by_role('button', name='Start session', exact=True).bounding_box()
+    assert start and start['y'] + start['height'] < page.viewport_size['height']
     assert page.locator('gym-view .gym-stage').is_visible()
     assert page.get_by_role('button', name='Single step', exact=True).is_visible()
     layout = page.evaluate("""() => {
@@ -31,6 +34,6 @@ def test_scenario_cards_drive_setup_and_preserve_live_control_access(joined, ope
       return {setup:setup.width,stage:stage.width,canvasRight:stage.left>=setup.right};
     }""")
     assert layout['canvasRight'] and layout['stage'] > layout['setup']
-    page.locator('gym-view #config details[data-advanced] > summary').click()
+    page.locator('gym-view #config .gym-advanced > summary').click()
     assert page.get_by_label('Seed', exact=True).is_visible()
     assert not errors

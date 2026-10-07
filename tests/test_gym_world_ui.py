@@ -18,6 +18,7 @@ def gym_page(joined, open_page):
     page, errors = open_page(joined, cookie=joined.cookie, path='/ui/#gym')
     page.wait_for_function("document.querySelector('gym-view')?.catalogue.length > 0")
     page.get_by_label('Environment', exact=True).select_option('car')
+    page.locator('gym-view .gym-world-settings > summary').click()
     page.get_by_label('Simulation mode', exact=True).select_option('world')
     return page, errors
 
@@ -160,7 +161,7 @@ def test_attach_restores_map_from_world_definition(gym_page):
     page.evaluate("""() => {const g=document.querySelector('gym-view');g.stream=async()=>{};
         const option=document.createElement('option');option.value='attached-map';
         option.textContent='Saved country road';g.live.append(option);}""")
-    page.locator('gym-view #config > details > summary').click()
+    page.locator('gym-view #config > .gym-advanced > summary').click()
     page.get_by_label('Live sessions', exact=True).select_option('attached-map')
     page.get_by_role('button', name='Attach to live session', exact=True).click()
     page.wait_for_function("""() => {const g=document.querySelector('gym-view');
