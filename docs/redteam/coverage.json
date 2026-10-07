@@ -1,7 +1,7 @@
 {
- "surfaces": 780,
+ "surfaces": 783,
  "by_status": {
-  "covered": 456,
+  "covered": 459,
   "partial": 199,
   "uncovered": 53,
   "n/a": 72,
@@ -37,7 +37,7 @@
    "unmapped": 0
   },
   "egress": {
-   "covered": 42,
+   "covered": 44,
    "partial": 48,
    "uncovered": 0,
    "n/a": 0,
@@ -51,7 +51,7 @@
    "unmapped": 0
   },
   "human": {
-   "covered": 97,
+   "covered": 98,
    "partial": 0,
    "uncovered": 0,
    "n/a": 0,
@@ -567,6 +567,19 @@
    "note": "run by the person with the person's own arguments; an agent reaches these commands only through an mcp-tool or chat-tool row, which carry the hostile-argument tests"
   },
   {
+   "id": "cli:ml-stack-cluster",
+   "kind": "cli",
+   "source": "ml_stack.fleet.join:main",
+   "trust": "the person at a terminal; arguments may carry text from outside",
+   "attacker": "hostile argument text or path reaches the command",
+   "status": "partial",
+   "tests": [
+    "tests/test_redteam_fleet.py",
+    "tests/test_peer_pairing.py"
+   ],
+   "note": "the daemon's handler and the pairing exchange are attacked; the join and peer-book argument parsing are not"
+  },
+  {
    "id": "cli:ml-stack-codex",
    "kind": "cli",
    "source": "ml_stack.codex:launch",
@@ -618,19 +631,6 @@
    "status": "n/a",
    "tests": [],
    "note": "run by the person with the person's own arguments; an agent reaches these commands only through an mcp-tool or chat-tool row, which carry the hostile-argument tests"
-  },
-  {
-   "id": "cli:ml-stack-cluster",
-   "kind": "cli",
-   "source": "ml_stack.fleet.join:main",
-   "trust": "the person at a terminal; arguments may carry text from outside",
-   "attacker": "hostile argument text or path reaches the command",
-   "status": "partial",
-   "tests": [
-    "tests/test_redteam_fleet.py",
-    "tests/test_peer_pairing.py"
-   ],
-   "note": "the daemon's handler and the pairing exchange are attacked; the join and peer-book argument parsing are not"
   },
   {
    "id": "cli:ml-stack-graph",
@@ -1773,6 +1773,22 @@
    "note": "loopback and LAN calls to servers the person configured; the net-no-bypass scan keeps public hosts out, answers from a hostile server (oversized, slow, malformed JSON) are not sent"
   },
   {
+   "id": "egress:fleet/daemon_control.py:request_replacement",
+   "kind": "egress",
+   "source": "fleet/daemon_control.py:request_replacement",
+   "trust": "addresses and redirects named by pages, repositories and peers",
+   "attacker": "a redirect or address sends the request somewhere the person did not choose",
+   "status": "covered",
+   "tests": [
+    "tests/test_daemon_control.py::test_owned_idle_replacement_retains_admission_and_rejects_new_work",
+    "tests/test_daemon_control.py::test_other_control_instance_never_requests_shutdown",
+    "tests/test_daemon_control.py::test_control_record_rejects_symlink_and_public_mode",
+    "tests/test_daemon_control.py::test_launcher_replacement_refuses_redirect_before_second_endpoint",
+    "tests/test_daemon_control.py::test_launcher_replacement_refuses_forged_acknowledgment"
+   ],
+   "note": "owned private records bind a fixed loopback instance; redirects cannot move launcher authentication to another endpoint and forged replacement acknowledgments refuse"
+  },
+  {
    "id": "egress:fleet/discovery.py:_trusted",
    "kind": "egress",
    "source": "fleet/discovery.py:_trusted",
@@ -1821,6 +1837,18 @@
     "tests/test_net_no_bypass.py"
    ],
    "note": "loopback and LAN calls to servers the person configured; the net-no-bypass scan keeps public hosts out, answers from a hostile server (oversized, slow, malformed JSON) are not sent"
+  },
+  {
+   "id": "egress:fleet/launch.py:_wait_for_exit",
+   "kind": "egress",
+   "source": "fleet/launch.py:_wait_for_exit",
+   "trust": "addresses and redirects named by pages, repositories and peers",
+   "attacker": "a redirect or address sends the request somewhere the person did not choose",
+   "status": "covered",
+   "tests": [
+    "tests/test_fleet_launch.py::test_launcher_waits_for_tcp_close_when_health_is_unavailable"
+   ],
+   "note": "a fixed loopback TCP probe treats timeouts and unhealthy listeners as live; only connection refusal authorizes starting the replacement"
   },
   {
    "id": "egress:fleet/models.py:<module>",
@@ -4530,6 +4558,26 @@
    "id": "human:workspace/task_scope.py:eligible",
    "kind": "human",
    "source": "workspace/task_scope.py:eligible",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item",
+    "tests/test_requests_floor.py::test_the_request_commands_refuse_a_process_an_agent_started",
+    "tests/test_redteam_requests.py::test_a_model_cannot_answer_its_own_request_by_any_tool_name_or_command_text",
+    "tests/test_workspace_model.py::test_only_a_person_or_launcher_process_records_a_verified_model",
+    "tests/test_workspace_model.py::test_an_agent_cannot_verify_itself_or_overwrite_a_verified_model_or_set_anothers",
+    "tests/test_workspace_model.py::test_a_claimed_model_changes_no_right"
+   ],
+   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+  },
+  {
+   "id": "human:workspace/task_source_recovery.py:_worker",
+   "kind": "human",
+   "source": "workspace/task_source_recovery.py:_worker",
    "trust": "an agent process or a peer",
    "attacker": "an agent or a forged grant takes an action only a person may take",
    "status": "covered",
