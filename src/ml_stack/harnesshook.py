@@ -152,7 +152,7 @@ def post(label: str, rail: Rail | None = None) -> dict[str, Any]:
     except FAILURES as error:
         warning = f"workspace checkpoint unavailable: {_diagnostic(error)}"
         sys.stderr.write(warning + "\n")
-    text = warning or nudge(label)
+    text = "\n".join(part for part in (warning, nudge(label)) if part)
     if not text:
         return {}
     return {"hookSpecificOutput": {"hookEventName": HOOK_EVENTS["post"],
