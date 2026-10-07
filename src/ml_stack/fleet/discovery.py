@@ -436,7 +436,7 @@ def windows_firewall_line(http_port: int = DEFAULT_HTTP_PORT,
 
 def _socket(*, broadcast: bool = False, bind: tuple[str, int] | None = None,
             group: str | None = None) -> socket.socket | wsl_network.DiscoverySocket:
-    if os.environ.get(wsl_network.ENV):
+    if wsl_network.wsl_registration.configuration() is not None:
         return wsl_network.DiscoverySocket({"broadcast": broadcast, "bind": bind, "group": group})
     return _native_socket(broadcast=broadcast, bind=bind, group=group)
 
