@@ -62,15 +62,15 @@ def _checked(method: str, headers: Mapping[str, str], port: int, writes: bool = 
         return 405, {**headers, "Allow": "GET"}, blob
     if method == "POST" and (headers.get("origin") is None or headers.get("sec-fetch-site", "same-origin") != "same-origin"):
         return _json(403, {"error": "a post comes from this page"})
-    found = refusal(method, dict(headers), port)
+    found = refusal(method, dict(headers), port, schemes=("http", "https"))
     if found:
         return _json(found[0], {"error": found[1]})
     site = headers.get("sec-fetch-site")
     if site is not None and site not in ("same-origin", "none"):
         return _json(403, {"error": "a request from another site"})
     origin = headers.get("origin")
-    if origin is not None and not (urlsplit(origin).scheme == "http"
-                                   and host_ok(urlsplit(origin).netloc, port)):
+    if origin is not None and origin not in {
+            f"http://{headers.get('host', '')}", f"https://{headers.get('host', '')}"}:
         return _json(403, {"error": "a request from another origin"})
     return None
 

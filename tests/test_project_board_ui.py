@@ -124,3 +124,17 @@ def test_canonical_person_threads_direct_messages_and_ack(canonical):
     status, ack = call("ack", method="POST", body={"to": "demo-worker", "through": sent["seq"]})
     assert status == 200 and ack["through"] == sent["seq"]
     assert workspaces[PROJECT].board.store.marks("demo-owner")["dm:demo-worker"] == sent["seq"]
+
+
+@pytest.mark.parametrize('scheme', ['http', 'https'])
+def test_canonical_person_post_accepts_exact_browser_origin(canonical, scheme):
+    status, sent = canonical[0]('post', method='POST', origin=f'{scheme}://127.0.0.1:8770',
+                                body={'to': '#general', 'body': 'browser message'})
+    assert status == 200 and sent['to'] == '#general'
+
+
+@pytest.mark.parametrize('origin', ['https://127.0.0.1:8771', 'https://localhost:8770',
+                                   'https://evil.test:8770', 'https://127.0.0.1:8770/'])
+def test_canonical_person_post_rejects_different_browser_origin(canonical, origin):
+    assert canonical[0]('post', method='POST', origin=origin,
+                         body={'to': '#general', 'body': 'foreign message'})[0] == 403
