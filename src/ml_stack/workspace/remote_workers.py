@@ -350,6 +350,7 @@ def main_cli(args):
         f"{reply['identity']} is {reply['state']} on {args.device or 'the discovered remote device'} with {reply['model']}")
     if not args.json:
         say(f"Caller: {reply['requested_by']}")
+        say(f"Requested context: {reply['requested_context']}")
         say("Effective limits: " + json.dumps(reply['effective_limits'], sort_keys=True))
         if 'task_seq' in reply:
             project = shlex.quote(str(Path(args.project).resolve()))

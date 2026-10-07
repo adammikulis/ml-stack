@@ -196,9 +196,10 @@ def test_repeated_launch_reuses_owned_running_worker(devices, monkeypatch):
     assert first['effective_limits'] == second['effective_limits'] == {
         'context': 32768, 'max_output_tokens': 1234,
         'task_caps': {'rounds': None, 'calls': None, 'steps': None, 'seconds': None}}
-    changed = devices.target._request('worker', {**devices.body, 'max_output_tokens': 99,
+    changed = devices.target._request('worker', {**devices.body, 'ctx': 65536, 'max_output_tokens': 99,
                                               'task_caps': {'rounds': 2}})
     assert changed['effective_limits'] == first['effective_limits']
+    assert changed['requested_context'] == 32768
 
 
 def test_cli_discovers_target_without_a_saved_project_connection(devices, monkeypatch):
@@ -550,12 +551,13 @@ def test_connection_acl_failure_preserves_destination_without_credential_bytes(t
 
 def test_cli_prints_authenticated_followup_and_effective_limits(monkeypatch, capsys, tmp_path):
     reply = {'identity': 'worker', 'state': 'running', 'model': 'Qwen3.8-test',
-             'requested_by': 'caller', 'task_seq': 17,
+             'requested_by': 'caller', 'task_seq': 17, 'requested_context': 'auto',
              'effective_limits': {'max_output_tokens': None, 'task_caps': {'rounds': None}}}
     monkeypatch.setattr(remote_workers, 'run', lambda args: reply)
     project = tmp_path / 'project space'
     assert remote_workers.main_cli(SimpleNamespace(json=False, device='target', project=str(project))) == 0
     output = capsys.readouterr().out
     assert 'Caller: caller' in output
+    assert 'Requested context: auto' in output
     assert f"cd '{project.resolve()}' && ml-stack-workspace thread 17 --agent caller" in output
     assert '"max_output_tokens": null' in output
