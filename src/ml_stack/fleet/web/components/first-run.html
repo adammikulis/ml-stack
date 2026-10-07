@@ -52,6 +52,7 @@ first-run button { margin-top: 12px; }
       this.summary.textContent = `Poolside setup · ${at + 1} of ${STAGES.length} · ${STAGES[at]}`;
       this.stepper.replaceChildren(el("div", { slot: `step-${at}` },
         ...nodes, this.installStatus, this.modelInstall?.status));
+      M.applyAdvanced?.(this.card);
     }
 
     go(n) { this.state.step = n; this.paint(); }
@@ -349,7 +350,9 @@ first-run button { margin-top: 12px; }
           "installs the model server and the GPU runtime needed on this machine",
           (on) => { kept.chat = on; }),
         this.modelInstall.panel,
-        M.contextPicker(kept.context, (n) => { kept.context = n; }),
+        el("details", { "data-advanced": "", class: "aside" },
+          el("summary", {}, "Advanced model settings"),
+          M.contextPicker(kept.context, (n) => { kept.context = n; })),
         offered.length ? el("div", { class: "cap" }, el("span", {}, "TRAINING")) : null,
         ...offered.map((lib) =>
           this.optBox(`lib_${lib.name}`, want.has(lib.name), lib.title,
