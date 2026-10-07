@@ -75,6 +75,17 @@ cluster-view, chat-view, models-view, settings-view, fit-view, data-view, traini
       if (M.preferences.always_show_advanced) node.open = true;
     }
   };
+  function luminance(hex) {
+    const digits=hex.slice(1), full=digits.length === 3 ? [...digits].map(c=>c+c).join("") : digits;
+    const rgb=[0,2,4].map(at=>parseInt(full.slice(at,at+2),16)/255)
+      .map(channel=>channel<=.04045 ? channel/12.92 : ((channel+.055)/1.055)**2.4);
+    return rgb[0]*.2126 + rgb[1]*.7152 + rgb[2]*.0722;
+  }
+  function foreground(fill, navy) {
+    const light=luminance(fill), ink=luminance(navy);
+    if ((Math.max(light,ink)+.05)/(Math.min(light,ink)+.05)>=4.5) return navy;
+    return (light+.05)/.05 >= 1.05/(light+.05) ? "#000000" : "#ffffff";
+  }
   M.applyTheme = function () {
     const theme = M.preferences.resolved_theme;
     const root = document.documentElement;
@@ -88,6 +99,11 @@ cluster-view, chat-view, models-view, settings-view, fit-view, data-view, traini
     for (const [key, variable] of Object.entries(colors)) {
       if (theme?.colors?.[key]) root.style.setProperty(variable, theme.colors[key]);
       else root.style.removeProperty(variable);
+    }
+    const palette=getComputedStyle(root), navy=palette.getPropertyValue("--poolside-navy").trim();
+    for (const color of ["pink","orange","yellow","cyan","navy"]) {
+      root.style.setProperty(`--poolside-${color}-ink`,
+        foreground(palette.getPropertyValue(`--poolside-${color}`).trim(),navy));
     }
     if (theme?.colors?.pink) root.style.setProperty("--ml-accent", theme.colors.pink);
     else root.style.removeProperty("--ml-accent");

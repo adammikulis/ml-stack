@@ -2,6 +2,8 @@
   color-scheme: light;
   --poolside-pink:#ff5fa2; --poolside-orange:#ff8a3d; --poolside-yellow:#ffd166;
   --poolside-cyan:#2de2e6; --poolside-navy:#1b1f3a;
+  --poolside-pink-ink:#1b1f3a; --poolside-orange-ink:#1b1f3a; --poolside-yellow-ink:#1b1f3a;
+  --poolside-cyan-ink:#1b1f3a; --poolside-navy-ink:#fff; --accent-foreground:var(--poolside-pink-ink);
   --ml-bg:#f4f5f7; --ml-surface:#fff; --ml-sunken:#eaedf2;
   --ml-line:#e0e3e9; --ml-line-strong:#b9b6c1; --ml-text:#1b1f3a;
   --ml-muted:#616779; --ml-accent:#ff5fa2; --ml-accent-ink:color-mix(in srgb,var(--poolside-pink) 55%,#000);
@@ -130,7 +132,7 @@ input:focus, select:focus {
 .hint { font-size: 12px; color: var(--dim); margin-top: 6px; }
 button {
   margin-top: 22px; width: 100%; padding: 11px 16px; border-radius: 8px;
-  background: var(--accent); color: var(--ml-on-accent); border: 0; font-size: 14.5px;
+  background:var(--accent); color:var(--accent-foreground); border: 0; font-size: 14.5px;
   font-weight: 650; font-family: inherit; cursor: pointer;
   transition: filter .15s, opacity .15s;
 }

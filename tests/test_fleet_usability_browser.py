@@ -132,14 +132,16 @@ def test_four_workspaces_context_pages_and_theme_navigation(usability_page):
         assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--poolside-pink').trim()") == '#ff5fa2'
         page.screenshot(path=f'/private/tmp/poolside-rebuild-shell-{theme}.png', full_page=True)
     page.evaluate("""()=>window.fleetModel.setPreferences({...window.fleetModel.preferences,
-      resolved_theme:{base:'dark', colors:{background:'#112233', pink:'#aa77cc'},font_size:18,density:'compact'}})""")
+      resolved_theme:{base:'dark', colors:{background:'#112233', pink:'#aa77cc',yellow:'#111111'},font_size:18,density:'compact'}})""")
     assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--ml-bg').trim()") == '#112233'
     assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--poolside-pink').trim()") == '#aa77cc'
     assert page.evaluate("getComputedStyle(document.body).fontSize") == '18px'
     expect(page.locator('html')).to_have_attribute('data-density', 'compact')
+    assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--poolside-yellow-ink').trim()") == '#ffffff'
     page.evaluate("()=>window.fleetModel.setPreferences({...window.fleetModel.preferences,resolved_theme:{base:'light'}})")
     assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--ml-bg').trim()") == '#f4f5f7'
     assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--poolside-pink').trim()") == '#ff5fa2'
+    assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--poolside-yellow-ink').trim()") == '#1b1f3a'
     page.set_viewport_size({'width': 390, 'height': 844})
     assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
     expect(primary.locator('a')).to_have_count(4)
