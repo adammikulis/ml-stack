@@ -3,7 +3,6 @@ projects-view { display:contents; }
 projects-view #projects { padding:calc(28px * var(--ui-density,1)) calc(32px * var(--ui-density,1)); max-width:1500px; width:100%; }
 projects-view .project-heading { display:flex; justify-content:space-between; align-items:center; gap:20px; margin-bottom:24px; }
 projects-view .project-heading h1 { margin:0 0 8px; } projects-view .project-heading p { margin:0; }
-projects-view .project-heading .project-count { background:var(--poolside-yellow); color:var(--poolside-yellow-ink,var(--poolside-navy)); padding:calc(14px * var(--ui-density,1)) calc(18px * var(--ui-density,1)); border-radius:12px; font-weight:600; }
 projects-view .project-layout { display:grid; grid-template-columns:300px minmax(0,1fr); gap:24px; align-items:start; }
 projects-view .panel { background:var(--bg-raised); border:1px solid var(--line); border-radius:16px; padding:calc(22px * var(--ui-density,1)); margin:0 0 18px; }
 projects-view .panel h2 { margin-top:0; font-size:1.286rem; }
@@ -19,7 +18,7 @@ projects-view #project-command { white-space:pre-wrap; overflow-wrap:anywhere; }
 </style>
 <template>
   <main id="projects" class="settingsmain" hidden>
-    <header class="project-heading"><div><h1>A home for your team’s work</h1><p class="hint">Share source, connect agents, and follow the conversation around each project.</p></div><span class="project-count">Projects &amp; agents</span></header>
+    <header class="project-heading"><div><h1>Projects</h1></div></header>
     <p id="projects-note" role="status"></p>
     <div class="project-layout"><aside><section class="panel"><h2>Share a local project</h2>
       <label for="project-candidate">Project</label><select id="project-candidate"></select>
@@ -27,7 +26,7 @@ projects-view #project-command { white-space:pre-wrap; overflow-wrap:anywhere; }
       <p class="hint">Sharing publishes the tracked source snapshot. Agent access is a separate step.</p>
     </section>
     <section class="panel"><h2>Shared projects</h2><div id="project-list"></div></section></aside>
-    <div><section class="panel" id="project-empty"><h2>Bring a project into the conversation</h2><p class="hint">Choose a shared project to see its agents, source, and team activity. Share a local project to start working across your pool.</p></section><section class="panel" id="project-board" hidden>
+    <div><section class="panel" id="project-empty"><h2>Select a project</h2><p class="hint">Choose a shared project to see its agents, source, and team activity. Share a local project to start working across your pool.</p></section><section class="panel" id="project-board" hidden>
       <h2 id="project-title"></h2><p id="project-authority"></p><p id="project-board-state" role="status"></p>
       <p id="project-source"></p>
       <button id="project-checkout">Get source on this device</button>

@@ -18,13 +18,9 @@
   fit-view nav.views button.on { color: var(--text); border-bottom-color: var(--accent); }
   fit-view { display:contents; }
   fit-view #fit { padding:calc(28px * var(--ui-density,1)) calc(32px * var(--ui-density,1)); width:100%; }
-  fit-view .capacity-heading { display:flex; align-items:center; justify-content:space-between; gap:24px; margin-bottom:24px; }
-  fit-view .capacity-heading h1 { font-size:2.143rem; margin:0 0 8px; }
-  fit-view .capacity-heading p { margin:0; }
-  fit-view .capacity-heading > span { padding:calc(14px * var(--ui-density,1)) calc(18px * var(--ui-density,1)); border-radius:12px; background:var(--poolside-cyan); color:var(--poolside-cyan-ink,var(--poolside-navy)); font-weight:600; }
   fit-view .wrap { max-width:1500px; margin:0; padding:0 0 calc(40px * var(--ui-density,1)); width:100%; }
   fit-view #fit-body { background:var(--bg-raised); border:1px solid var(--line); border-radius:16px; margin-top:20px; padding:calc(24px * var(--ui-density,1)); overflow:auto; }
-  @media(max-width:700px) { fit-view #fit { padding:calc(20px * var(--ui-density,1)); } fit-view .capacity-heading > span { display:none; } }
+  @media(max-width:700px) { fit-view #fit { padding:calc(20px * var(--ui-density,1)); } }
 
   fit-view svg .point { stroke: var(--bg-raised); stroke-width: 1.2; }
   fit-view svg .front { fill: none; stroke: var(--good); stroke-width: 1.4; stroke-dasharray: 4 3; }
@@ -104,7 +100,6 @@
   <div id="fit" hidden>
     <fit-model></fit-model>
     <fit-charts></fit-charts>
-    <header class="capacity-heading"><div><h1>Plan what your pool can run</h1><p class="hint">Compare measured model capacity, quality, and live usage before committing compute.</p></div><span>Capacity planner</span></header>
     <header class="fit-top">
       <h1 id="fit-heading">What fits</h1>
       <nav class="views" id="fit-views"></nav>

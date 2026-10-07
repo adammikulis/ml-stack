@@ -199,12 +199,13 @@ class TestTheSplitBetweenTheFitComponents:
             page = browser.new_page(color_scheme="light")
             page.goto(f'http://127.0.0.1:{served.port}/ui/')
             assert page.locator('html').get_attribute('lang') == 'en'
-            assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--ml-bg').trim()") == '#f4f5f7'
+            expect(page.locator('html')).to_have_attribute('data-theme', 'dark')
+            assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--ml-bg').trim()") == '#141518'
             assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--ml-accent').trim()") == '#ff5fa2'
             page.get_by_role('navigation', name='Main navigation').get_by_role('link', name='Pool', exact=True).click()
             nav = page.get_by_role('navigation', name='Workspace pages')
             nav.locator('a[href="#fit"]').click()
-            expect(page.locator('#nav-title')).to_have_text('Capacity')
+            expect(nav.locator('a[href="#fit"]')).to_have_attribute('aria-current', 'page')
             assert page.url.endswith('#fit')
             expect(page.locator('#models')).to_be_hidden()
             expect(page.locator('#fit-heading')).to_be_visible()
@@ -217,7 +218,8 @@ class TestTheSplitBetweenTheFitComponents:
             expect(page.locator('.demo-slice')).to_have_count(10)
             page.screenshot(path='/private/tmp/poolside-demo-guide.png', full_page=True)
             page.locator('.demo-slice').filter(has_text='Fine-tune a model').click()
-            expect(page.locator('#nav-title')).to_have_text('Fine-tune')
+            assert page.url.endswith('#training')
+            expect(page.locator('training-view > section.workspace')).to_be_visible()
             page.screenshot(path='/private/tmp/poolside-training-shell.png', full_page=True)
             page.set_viewport_size({'width':390,'height':844})
             page.locator('#nav-guide').click()

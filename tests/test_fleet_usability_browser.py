@@ -108,12 +108,18 @@ def test_four_workspaces_context_pages_and_theme_navigation(usability_page):
     from playwright.sync_api import expect
     served, page, errors = usability_page
     page.goto(f'http://127.0.0.1:{served.port}/ui/')
-    expect(page.locator('#nav-section')).to_have_text('Conversations')
-    expect(page.locator('#nav-title')).to_be_hidden()
-    assert page.locator('#nav-group').count() == 0
+    expect(page.locator('#app')).to_have_attribute('data-workspace', 'conversations')
+    assert page.locator('fleet-nav header').count() == 0
+    assert page.locator('#nav-title, #nav-section, #nav-group').count() == 0
+    assert page.locator('#workspace').bounding_box()['y'] == 0
     primary = page.get_by_role('navigation', name='Main navigation')
     expect(primary.locator('a')).to_have_count(4)
     assert page.get_by_role('searchbox', name='Find a page').count() == 0
+    headings = {'Models': ('models-view', 'Models'), 'Fine-tune': ('training-view', 'Fine-tuning'),
+                'Worlds': ('gym-view', 'Reinforcement learning'), 'Evaluate': ('benchmarks-view', 'Benchmarks'),
+                'Data': ('data-view', 'Datasets'), 'Projects': ('projects-view', 'Projects'),
+                'Tools': ('tools-view', 'Tools'), 'Graph': ('knowledge-view', 'Graph inspector'),
+                'History': ('history-view', 'Activity'), 'Devices': ('cluster-view', 'Devices')}
     for group, titles in [('Studio', ['Models', 'Fine-tune', 'Worlds', 'Evaluate', 'Data']),
                           ('Work', ['Tasks', 'Projects', 'Tools', 'Graph', 'History']),
                           ('Pool', ['Devices', 'Capacity'])]:
@@ -122,15 +128,27 @@ def test_four_workspaces_context_pages_and_theme_navigation(usability_page):
         assert context.locator('a').all_text_contents() == titles
         for title in titles:
             context.get_by_role('link', name=title, exact=True).click()
-            expect(page.locator('#nav-title')).to_have_text(title)
+            expect(context.get_by_role('link', name=title, exact=True)).to_have_attribute('aria-current', 'page')
+            if title in headings:
+                component, heading = headings[title]
+                expect(page.locator(component).get_by_role('heading', level=1)).to_have_text(heading)
+            if title == 'Capacity':
+                expect(page.locator('fit-view').get_by_role('heading', level=1)).to_have_count(1)
         assert primary.evaluate('(nav)=>nav.scrollHeight <= nav.clientHeight')
     page.get_by_role('link', name='Settings', exact=True).click()
-    expect(page.locator('#nav-section')).to_have_text('Settings')
+    expect(page.locator('#app')).to_have_attribute('data-workspace', 'settings')
+    assert page.locator('#workspace').bounding_box()['y'] == 0
     primary.get_by_role('link', name='Conversations', exact=True).click()
     expect(page.get_by_role('navigation', name='Workspace pages', include_hidden=True)).to_be_hidden()
     page.evaluate("location.hash = 'board'")
-    expect(page.locator('#nav-section')).to_have_text('Conversations')
-    expect(page.locator('#nav-title')).to_be_hidden()
+    expect(page.locator('#app')).to_have_attribute('data-workspace', 'conversations')
+    assert page.locator('#workspace').bounding_box()['y'] == 0
+    page.get_by_role('button', name='Explore Poolside', exact=True).click()
+    expect(page.locator('.demo-slice')).to_have_count(10)
+    page.locator('.demo-slice').filter(has_text='Fine-tune a model').click()
+    assert page.url.endswith('#training')
+    expect(page.get_by_role('button', name='Training jobs:', exact=False)).to_be_visible()
+    primary.get_by_role('link', name='Conversations', exact=True).click()
     for theme in ('light', 'dark'):
         page.evaluate('(theme)=>window.fleetModel.setPreferences({...window.fleetModel.preferences,resolved_theme:{base:theme}})', theme)
         expect(page.locator('html')).to_have_attribute('data-theme', theme)

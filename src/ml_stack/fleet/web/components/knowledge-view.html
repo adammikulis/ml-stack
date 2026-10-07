@@ -3,8 +3,6 @@ knowledge-view { display:contents; }
 knowledge-view .workspace { padding:calc(28px * var(--ui-density,1)) calc(32px * var(--ui-density,1)); }
 knowledge-view .knowledge-heading { display:flex; align-items:center; justify-content:space-between; margin-bottom:22px; }
 knowledge-view .knowledge-heading h1 { margin:0 0 8px; }
-knowledge-view .knowledge-heading p { margin:0; }
-knowledge-view .graph-label { background:var(--poolside-yellow); color:var(--poolside-yellow-ink,var(--poolside-navy)); padding:calc(13px * var(--ui-density,1)) calc(16px * var(--ui-density,1)); border-radius:12px; font-weight:600; }
 knowledge-view .knowledge-grid { display:grid; grid-template-columns:220px minmax(0,1fr); gap:20px; align-items:start; }
 knowledge-view .workspace-card { background:var(--bg-raised); border:1px solid var(--line); border-radius:16px; padding:calc(20px * var(--ui-density,1)); }
 knowledge-view .workspace-card h2 { margin-top:0; font-size:1.214rem; }
@@ -40,7 +38,7 @@ knowledge-view #counts { font-size:0.857rem; margin:12px 0 0; }
 </style>
 <template>
 <section class="workspace" hidden>
-  <header class="knowledge-heading"><div><h1>Connect the dots</h1><p class="intro">Explore the knowledge behind your models, tasks, and documents.</p></div><span class="graph-label">Graph inspector</span></header>
+  <header class="knowledge-heading"><div><h1>Graph inspector</h1></div></header>
   <p class="status" role="status" aria-live="polite"></p>
   <div class="knowledge-grid">
     <aside class="workspace-card">

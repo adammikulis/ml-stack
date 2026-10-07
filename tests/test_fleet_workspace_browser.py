@@ -83,7 +83,7 @@ def check_training_controls(page, pw):
     assert not parsed.lora and 'lora=false' in parsed.set
 
 
-def test_short_views_start_below_workspace_header(tmp_path, playwright):
+def test_short_views_start_below_context_navigation(tmp_path, playwright):
     served = Serving(tmp_path)
     served.ui.settings.setup_done = True
     try:
@@ -91,8 +91,9 @@ def test_short_views_start_below_workspace_header(tmp_path, playwright):
         page = browser.new_page(viewport={"width": 1440, "height": 1200})
         page.goto(f'http://127.0.0.1:{served.port}/ui')
         for route in ('fit', 'knowledge', 'tools'):
-            page.locator(f'fleet-nav a[href="#{route}"]').click()
-            header = page.locator('.workspace-header').bounding_box()
+            page.evaluate("(route)=>location.hash=route", route)
+            page.wait_for_function("(route)=>window.fleetModel.route===route", arg=route)
+            header = page.locator('.context-navigation').bounding_box()
             workspace = page.locator('#workspace').bounding_box()
             assert header and workspace
             assert abs(workspace['y'] - header['y'] - header['height']) < 2
