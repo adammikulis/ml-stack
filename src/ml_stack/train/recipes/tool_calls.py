@@ -23,6 +23,7 @@ from typing import Any
 
 import numpy as np
 
+from ml_stack.train.recipes.base import resolve_base
 from ml_stack.train.recipes.built import Built
 
 IGNORE = -100
@@ -211,7 +212,7 @@ def build_tool_caller(spec: dict[str, Any], config: dict[str, Any], data: Path |
             "'tools'), which ml-stack-train-tools writes.")
 
     size = config.get("size") or sorted(spec["sizes"])[0]
-    base = str(manifest.get("base") or spec["sizes"][size]["base"])
+    base, _ = resolve_base(spec, config, manifest)
     context = int(config["context"])
     seed = int(config.get("seed") or 0)
     device = device_for()
