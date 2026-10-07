@@ -10,18 +10,19 @@ from __future__ import annotations
 import contextlib
 import json
 import os
-import signal
 import subprocess
 import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
+from typing import NamedTuple
 
 import pytest
 
 from ml_stack import gate, home
 from ml_stack.http import Server, ServerError, request_json
+from ml_stack.serve.process import kill_process_tree
 
 SRC = str(Path(__file__).resolve().parent.parent / "src")
 HOLD_S = 0.3
@@ -182,21 +183,27 @@ def test_requests_are_served_in_the_order_they_arrived(servers):
 
 
 HOLDER = """
-import sys, time
+import os, sys, time
 from ml_stack import gate
 with gate.turn(sys.argv[1]):
-    print('held', flush=True)
+    print(f'held {os.getpid()}', flush=True)
     time.sleep(60)
 """
 
 
-def holder(url: str) -> subprocess.Popen:
+class Held(NamedTuple):
+    process: subprocess.Popen
+    pid: int
+
+
+def holder(url: str) -> Held:
     proc = subprocess.Popen([sys.executable, "-c", HOLDER, url],
                             env={**os.environ, "PYTHONPATH": SRC},
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     assert proc.stdout is not None
-    assert proc.stdout.readline().strip() == b"held", proc.stderr.read() if proc.stderr else b""
-    return proc
+    notice = proc.stdout.readline().strip().split()
+    assert len(notice) == 2 and notice[0] == b"held", proc.stderr.read() if proc.stderr else b""
+    return Held(proc, int(notice[1]))
 
 
 def test_a_holder_that_is_killed_frees_the_line(servers):
@@ -205,8 +212,8 @@ def test_a_holder_that_is_killed_frees_the_line(servers):
     queued = worker(one.url, "after")
     time.sleep(0.5)
     assert queued.poll() is None, "the request waits while the holder is alive"
-    dead.send_signal(signal.SIGKILL)
-    dead.wait(timeout=10)
+    kill_process_tree(dead.process.pid, grace_s=0.1)
+    dead.process.wait(timeout=10)
     began = time.time()
     run_all([queued])
     assert time.time() - began < 3.0
@@ -229,8 +236,8 @@ def test_a_request_that_waits_too_long_says_who_it_waited_for(servers, monkeypat
         assert one.windows == []
         assert [r["pid"] for r in gate.snapshot()["gpu"]] == [held.pid]
     finally:
-        held.kill()
-        held.wait(timeout=10)
+        kill_process_tree(held.process.pid, grace_s=0.1)
+        held.process.wait(timeout=10)
     assert gate.snapshot() == {}, "a timed-out request leaves no ticket behind"
 
 
@@ -246,8 +253,8 @@ def test_only_generation_on_registered_local_servers_is_queued(servers):
         finally:
             free.close()
     finally:
-        held.kill()
-        held.wait(timeout=10)
+        kill_process_tree(held.process.pid, grace_s=0.1)
+        held.process.wait(timeout=10)
 
 
 def test_pools_queue_apart(servers):
@@ -260,8 +267,8 @@ def test_pools_queue_apart(servers):
         request_json(second.url, payload={}, timeout=5)
         assert len(second.windows) == 1
     finally:
-        held.kill()
-        held.wait(timeout=10)
+        kill_process_tree(held.process.pid, grace_s=0.1)
+        held.process.wait(timeout=10)
 
 
 def test_a_thread_holding_the_pool_can_send_a_nested_request(servers):
@@ -293,8 +300,8 @@ def test_a_streamed_request_waits_for_its_turn_like_any_other(servers, monkeypat
             next(request_stream(one.url, payload={}, timeout=5))
         assert why.value.status == 429 and one.windows == []
     finally:
-        held.kill()
-        held.wait(timeout=10)
+        kill_process_tree(held.process.pid, grace_s=0.1)
+        held.process.wait(timeout=10)
 
 
 def test_parallel_block_is_named_and_logged(servers, caplog):
@@ -306,8 +313,8 @@ def test_parallel_block_is_named_and_logged(servers, caplog):
         assert len(one.windows) == 1
         assert "bench sweep" in caplog.text
     finally:
-        held.kill()
-        held.wait(timeout=10)
+        kill_process_tree(held.process.pid, grace_s=0.1)
+        held.process.wait(timeout=10)
 
 
 def test_the_benchmarks_that_measure_streams_in_flight_together_send_them_in_parallel(
@@ -324,8 +331,8 @@ def test_the_benchmarks_that_measure_streams_in_flight_together_send_them_in_par
         assert "for its turn" in speed._one(client, "hello", generate=4)["error"], (
             "the same request outside the benchmark waits in line")
     finally:
-        held.kill()
-        held.wait(timeout=10)
+        kill_process_tree(held.process.pid, grace_s=0.1)
+        held.process.wait(timeout=10)
 
 
 def test_conversations_measured_in_flight_together_are_sent_in_parallel(servers, monkeypatch):
@@ -346,5 +353,5 @@ def test_conversations_measured_in_flight_together_are_sent_in_parallel(servers,
                              label="x", client=client)
         assert [row.error for row in rows] == ["", ""]
     finally:
-        held.kill()
-        held.wait(timeout=10)
+        kill_process_tree(held.process.pid, grace_s=0.1)
+        held.process.wait(timeout=10)

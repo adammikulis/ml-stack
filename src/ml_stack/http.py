@@ -275,7 +275,8 @@ def _queued(url: str) -> Iterator[None]:
         yield
         return
     try:
-        with gate.turn(url):
+        control = http_cancel.active()
+        with gate.turn(url, cancelled=control.is_set if control is not None else None):
             yield
     except gate.QueueTimeout as exc:
         raise ServerError(str(exc), status=429) from exc

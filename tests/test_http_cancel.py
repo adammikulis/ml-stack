@@ -103,3 +103,36 @@ def test_unlimited_sdk_can_cancel_during_tls_handshake():
         finally:
             server.shutdown()
             worker.join(1)
+
+
+def test_cancelling_queued_request_removes_its_resource_ticket(tmp_path, monkeypatch):
+    from ml_stack import gate
+    from ml_stack.http import ServerError, request_json
+    from ml_stack.http_cancel import Cancellation, scope
+
+    path = tmp_path / 'admission'
+    path.mkdir()
+    monkeypatch.setattr(gate, 'pool_of', lambda _url: 'cancel-test')
+    monkeypatch.setattr(gate, '_dir', lambda _pool: path)
+    control, errors = Cancellation(), []
+    def work():
+        try:
+            with scope(control):
+                request_json('http://127.0.0.1:1/v1/chat/completions', payload={}, timeout=None)
+        except ServerError as error:
+            errors.append(error)
+    with gate.turn('http://127.0.0.1:1/v1/chat/completions'):
+        worker = threading.Thread(target=work)
+        worker.start()
+        deadline = time.monotonic() + 2
+        while len(gate._tickets(path)) < 2 and time.monotonic() < deadline:
+            time.sleep(0.005)
+        assert len(gate._tickets(path)) == 2
+        assert all((path / name).stat().st_size < 1024 for name in gate._tickets(path))
+        control.set()
+        worker.join(1)
+        assert not worker.is_alive()
+        assert len(errors) == 1 and errors[0].status == 429
+        assert 'cancelled while waiting' in str(errors[0])
+        assert len(gate._tickets(path)) == 1
+    assert gate._tickets(path) == []
