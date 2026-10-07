@@ -173,6 +173,8 @@ def test_learning_prompts_preserve_draft_and_team_channels_are_connected(chat_br
     expect(composer).to_have_value("Help me design a reproducible training experiment. Ask me about the model, data, and success criteria.")
     page.screenshot(path="/private/tmp/poolside-conversations-desktop.png", full_page=True)
     page.set_viewport_size({"width": 390, "height": 844})
+    expect(page.locator("chat-view .chats")).to_be_hidden()
+    page.get_by_role("button", name="Channels and model chats ▾").click()
     expect(page.locator("chat-view .chats")).to_be_visible()
     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
     page.screenshot(path="/private/tmp/poolside-conversations-mobile.png", full_page=True)

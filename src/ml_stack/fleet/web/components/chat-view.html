@@ -1,6 +1,7 @@
 <template>
   <main class="chatmain" id="chat" hidden>
-    <aside class="chats" aria-label="Conversations">
+    <button class="conversation-mobile-nav ghost" id="conversation-mobile-nav" aria-expanded="false" aria-controls="conversation-sidebar">Channels and model chats ▾</button>
+    <aside class="chats" id="conversation-sidebar" aria-label="Conversations">
       <div class="conversation-space"><span class="conversation-space-mark" aria-hidden="true">✦</span><div><strong>Poolside</strong><small>Your shared workspace</small></div></div>
       <button id="chat-new" class="conversation-new">＋ New conversation</button>
       <label class="conversation-search" for="chat-search"><input type="search" id="chat-search" placeholder="Search model chats…" aria-label="Search conversations"></label>

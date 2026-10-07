@@ -99,6 +99,12 @@
   class ConversationsWorkspace {
     constructor(chat) {
       this.chat = chat;
+      this.mobile = chat.querySelector('#conversation-mobile-nav');
+      this.mobile.onclick = () => {
+        const open = this.mobile.getAttribute('aria-expanded') !== 'true';
+        this.mobile.setAttribute('aria-expanded', String(open));
+        chat.box.dataset.sidebar = String(open);
+      };
       this.board = chat.querySelector('ml-board');
       this.team = chat.querySelector('#conversation-team');
       this.model = chat.querySelector('#conversation-model');
@@ -114,6 +120,8 @@
     }
     route(route) {
       this.active = route === 'board';
+      this.mobile.setAttribute('aria-expanded', 'false');
+      this.chat.box.dataset.sidebar = 'false';
       this.team.hidden = !this.active;
       this.model.hidden = this.active;
       if (this.navigationData) this.navigation(this.navigationData);
