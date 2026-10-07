@@ -89,7 +89,7 @@ theme-editor .theme-status { min-height:24px; }
         el('summary',{},'Customize colors and layout'),
         el('div',{class:'theme-fields'},el('label',{},'Theme name',name),el('label',{},'Base',base),
           el('label',{},'Font size',size),el('label',{},'Density',density)),fields,actions);
-      controls.open = M.preferences.always_show_advanced || this.appearance.active_theme.startsWith('custom-');
+      controls.open = M.preferences.always_show_advanced || !this.registry.some(row => row.id === this.appearance.active_theme);
       this.replaceChildren(el('h2',{},'Appearance'),el('p',{class:'sub'},'Choose a theme or tune every color. Changes preview immediately; save to keep them.'),
         presets,el('label',{},'Theme',choice),controls,this.status);
     }
