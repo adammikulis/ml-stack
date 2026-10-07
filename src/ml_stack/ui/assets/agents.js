@@ -71,17 +71,17 @@ class MlAgents extends MlElement {
       placeholder: "optional" });
     this.roleControl = h("ml-select", { label: "What it may do", value: "" });
     this.effort = h("ml-select", { label: "Reasoning effort", hint: "Off thinks least and answers fastest", value: "off" });
-    this.profile = h("ml-select", { label: "Kind of work", hint: "Coding serves a 256K context with Qwen3.8-27B",
+    this.profile = h("ml-select", { label: "Kind of work", hint: "Auto context uses the model capacity and admitted memory",
       value: "chat" });
     this.profile.options = [{value:"chat",label:"Chat"},{value:"coding",label:"Coding"}];
-    this.contextField = h("input", { type:"text", id:"context", value:"32K" });
+    this.contextField = h("input", { type:"text", id:"context", placeholder:"Auto", value:"" });
     this.outputField = h("input", { type:"number", id:"output-tokens", min:"1", step:"1", placeholder:"None", value:"" });
     this.capFields = Object.fromEntries(["rounds", "calls", "steps", "seconds"].map(key => [key,
       h("input", {type:"number", id:`task-${key}`, min:"1", step:key === "seconds" ? "any" : "1", placeholder:"None"})]));
     this.limitNote = h("p", {class:"note"});
     for (const field of [this.outputField, ...Object.values(this.capFields)]) field.addEventListener("input", () => this.update());
     this.harness = h("ml-select", { label:"Harness", value:"ml-stack-agent" });
-    this.profile.addEventListener("change", event => { if (event.detail?.value) { this.contextField.value = event.detail.value === "coding" ? "256K" : "32K"; this.update(); } });
+    this.profile.addEventListener("change", event => { if (event.detail?.value) { this.update(); } });
     this.ceiling = h("ml-select", { label: "Maximum reasoning effort", hint: "It can raise its own effort up to this",
       value: "medium" });
     this.go = h("button", { class: "go", type: "button", onclick: () => this.start() }, "Start a local agent");
@@ -197,7 +197,7 @@ class MlAgents extends MlElement {
     this.projectField.value = saved.project; this.roleControl.value = saved.role;
     this.profile.value = saved.profile; this.effort.value = saved.effort;
     this.ceiling.value = saved.max_effort; this.harness.value = saved.harness;
-    this.contextField.value = String(saved.ctx);
+    this.contextField.value = saved.ctx ? String(saved.ctx) : "";
     this.outputField.value = saved.max_output_tokens ?? "";
     for (const [key, field] of Object.entries(this.capFields)) field.value = saved.task_caps?.[key] ?? "";
     this.update();
@@ -222,7 +222,7 @@ class MlAgents extends MlElement {
 
   update() {
     if (!this.list) return;
-    const effective = [`output tokens: ${this.outputField.value || "None"}`,
+    const effective = [`context: ${this.contextField.value || "Auto"}`, `output tokens: ${this.outputField.value || "None"}`,
       ...Object.entries(this.capFields).map(([key,field]) => `${({rounds:"turns",calls:"tool calls",steps:"model calls",seconds:"wall seconds"})[key]}: ${field.value || "None"}`)];
     this.limitNote.textContent = `Effective limits — ${effective.join(", ")}.`
       + (this.capFields.seconds.value === "" ? " Task wall time is None. Tasks could run indefinitely until you cancel them." : "");

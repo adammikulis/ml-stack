@@ -128,3 +128,22 @@ def test_auto_model_hints_are_resolved_for_each_work_profile(served, monkeypatch
     assert code == 200
     assert result['profiles']['coding']['name'] == 'Qwen3.8-27B'
     assert result['profiles']['chat']['name'] == 'Qwen3.6-35B-A3B'
+
+
+@pytest.mark.slow
+def test_auto_context_stays_automatic_when_work_profile_changes(served, browser):
+    server, kit, _, _ = served
+    localagent.save(kit.ws, replace(localagent.load(kit.ws, "local-worker"), ctx=0))
+    page = browser.new_page()
+    try:
+        page.goto(f"http://127.0.0.1:{server.port}/ui/#board")
+        page.locator("#board-agents > summary").click()
+        controls = page.locator("ml-agents")
+        controls.locator("input#context").wait_for()
+        page.wait_for_function("document.querySelector('ml-agents')?.shadowRoot?.querySelector('#name')?.value === 'local-worker'")
+        assert controls.locator("input#context").input_value() == ""
+        assert controls.locator("input#context").get_attribute("placeholder") == "Auto"
+        page.evaluate("document.querySelector('ml-agents').profile.dispatchEvent(new CustomEvent('change', {detail:{value:'chat'}}))")
+        assert controls.locator("input#context").input_value() == ""
+    finally:
+        page.close()
