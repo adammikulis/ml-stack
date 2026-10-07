@@ -14,13 +14,13 @@ gym-view .gym-section-title span { color:var(--muted,#757381); font-size:12px; }
 gym-view #environments { display:grid; grid-template-columns:repeat(auto-fit,minmax(155px,1fr)); gap:12px; }
 gym-view .gym-scenario { padding:16px; border-radius:14px; border:1px solid var(--line,#e5ddd4); background:var(--bg-raised,#fff); min-width:0; position:relative; }
 gym-view .gym-scenario[data-selected=true] { border-color:var(--poolside-orange,#ff8a3d); box-shadow:0 0 0 2px color-mix(in srgb,var(--poolside-orange,#ff8a3d) 18%,transparent); }
-gym-view .gym-scenario-icon { display:flex; align-items:center; justify-content:center; width:40px; height:40px; border-radius:12px; background:color-mix(in srgb,var(--scenario-color) 20%,white); color:var(--poolside-navy,#1b1f3a); font-size:22px; margin-bottom:12px; }
+gym-view .gym-scenario-icon { display:flex; align-items:center; justify-content:center; width:40px; height:40px; border-radius:12px; background:color-mix(in srgb,var(--scenario-color) 20%,white); color:#1b1f3a; font-size:22px; margin-bottom:12px; }
 gym-view .gym-scenario h3 { font-size:14px; margin:0 0 6px; }
 gym-view .gym-scenario p:not(.gym-ready) { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; min-height:36px; }
 gym-view .gym-scenario p { font-size:12px; color:var(--muted,#757381); line-height:1.5; margin:0 0 12px; }
 gym-view .gym-scenario .gym-ready { color:var(--text,#1b1f3a); font-size:11px; font-weight:700; }
 gym-view .gym-scenario button { padding:6px 10px; min-height:30px; width:100%; background:var(--bg-sunken,#f6f1ea); border:0; font-size:12px; color:inherit; }
-gym-view .gym-scenario[data-selected=true] button { background:var(--poolside-orange,#ff8a3d); color:var(--poolside-navy,#1b1f3a); }
+gym-view .gym-scenario[data-selected=true] button { background:var(--poolside-orange,#ff8a3d); color:var(--poolside-orange-ink,#1b1f3a); }
 gym-view .gym-layout { display:grid; grid-template-columns:280px minmax(0,1fr); align-items:start; gap:20px; }
 gym-view .gym-setup,gym-view .gym-live { border:1px solid var(--line,#e5ddd4); background:var(--bg-raised,#fff); border-radius:16px; min-width:0; }
 gym-view .gym-setup { padding:20px; }
@@ -31,7 +31,7 @@ gym-view #config label { margin-top:14px; font-size:12px; font-weight:600; }
 gym-view #config .intro { font-size:12px; margin:10px 0; }
 gym-view #config details { border-top:1px solid var(--line,#e5ddd4); padding:14px 0 0; margin-top:16px; }
 gym-view #config summary { font-size:12px; font-weight:700; cursor:pointer; }
-gym-view .gym-start { width:auto; background:var(--poolside-orange,#ff8a3d); color:var(--poolside-navy,#1b1f3a); font-weight:750; border:0; min-height:42px; }
+gym-view .gym-start { width:auto; background:var(--poolside-orange,#ff8a3d); color:var(--poolside-orange-ink,#1b1f3a); font-weight:750; border:0; min-height:42px; }
 gym-view .gym-close { width:auto; background:transparent; border:1px solid var(--line,#e5ddd4); color:var(--muted,#757381); }
 gym-view .gym-launch-actions { display:flex; gap:8px; flex-wrap:wrap; }
 gym-view .gym-live-header { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:12px; padding:18px 20px; }
@@ -41,9 +41,9 @@ gym-view #gym-note { font-size:12px; margin:0; min-height:0; }
 gym-view .gym-stage { position:relative; height:450px; background:var(--poolside-navy,#1b1f3a); overflow:hidden; margin:0 12px; border-radius:12px; }
 gym-view .gym-stage img { width:100%; height:450px; object-fit:contain; }
 gym-view gym-scene { display:block; width:100%; height:450px; touch-action:none; }
-gym-view #scene-empty { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; height:100%; margin:0; padding:32px; box-sizing:border-box; text-align:center; color:#fffaf4; }
+gym-view #scene-empty { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; height:100%; margin:0; padding:32px; box-sizing:border-box; text-align:center; color:var(--poolside-navy-ink,#fffaf4); }
 gym-view #scene-empty strong { font-size:22px; letter-spacing:-.03em; }
-gym-view #scene-empty span { max-width:340px; color:#c7c9da; font-size:13px; line-height:1.6; }
+gym-view #scene-empty span { max-width:340px; color:var(--poolside-navy-ink,#c7c9da); font-size:13px; line-height:1.6; }
 gym-view .gym-empty-mark { display:flex; gap:8px; align-items:end; height:72px; margin-bottom:10px; }
 gym-view .gym-empty-mark i { display:block; width:18px; border-radius:6px; background:var(--poolside-orange,#ff8a3d); height:44px; transform:rotate(-12deg); }
 gym-view .gym-empty-mark i:nth-child(2) { height:68px; background:var(--poolside-pink,#ff5fa2); }
@@ -53,7 +53,7 @@ gym-view .gym-stage:fullscreen { margin:0; border-radius:0; height:100vh; }
 gym-view .gym-stage:fullscreen gym-scene,gym-view .gym-stage:fullscreen img { height:100vh; }
 gym-view #controls { padding:0 20px 18px; margin:16px 0 0; gap:8px; }
 gym-view #controls button { background:var(--bg-sunken,#f6f1ea); border:1px solid var(--line,#e5ddd4); color:inherit; border-radius:8px; }
-gym-view #controls button:first-child { background:var(--poolside-cyan,#2de2e6); color:var(--poolside-navy,#1b1f3a); border-color:transparent; font-weight:750; }
+gym-view #controls button:first-child { background:var(--poolside-cyan,#2de2e6); color:var(--poolside-cyan-ink,#1b1f3a); border-color:transparent; font-weight:750; }
 gym-view .gym-shortcuts { margin-left:auto; font-size:11px; color:var(--muted,#757381); }
 gym-view .gym-metrics { display:grid; grid-template-columns:repeat(auto-fit,minmax(110px,1fr)); gap:1px; background:var(--line,#e5ddd4); border-top:1px solid var(--line,#e5ddd4); border-bottom:1px solid var(--line,#e5ddd4); }
 gym-view .gym-metrics > div { background:var(--bg-raised,#fff); padding:16px 20px; }

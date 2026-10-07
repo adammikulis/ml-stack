@@ -55,7 +55,10 @@ def test_rl_text_and_brand_surfaces_remain_readable_across_themes(joined, open_p
       if(theme==='custom')for(const [key,value]of Object.entries({
         '--ml-bg':'#102f28','--ml-surface':'#183d34','--ml-sunken':'#123329',
         '--ml-text':'#f3fff4','--ml-muted':'#b7d4bf','--ml-accent':'#f6c865',
-        '--ml-on-accent':'#253522'}))root.style.setProperty(key,value);
+        '--ml-on-accent':'#253522','--poolside-orange':'#264a73',
+        '--poolside-orange-ink':'#ffffff','--poolside-cyan':'#223f3d',
+        '--poolside-cyan-ink':'#ffffff','--poolside-navy':'#edf6fe',
+        '--poolside-navy-ink':'#1b1f3a'}))root.style.setProperty(key,value);
       const style=node=>getComputedStyle(node);
       const canvas=document.createElement('canvas');canvas.width=canvas.height=1;
       const context=canvas.getContext('2d',{willReadFrequently:true});
