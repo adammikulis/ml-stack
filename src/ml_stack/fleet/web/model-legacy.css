@@ -1,0 +1,22 @@
+.model-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 0; border-bottom: 1px solid var(--line); }
+.model-info { min-width: 0; flex: 1; }
+.model-info b, .model-info .why { display: block; overflow-wrap: anywhere; }
+.browser-controls { display: flex; gap: 12px; flex-wrap: wrap; }
+.browser-empty { padding: 26px 0; color: var(--muted); }
+#browser-pages { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; }
+#browser-pages:empty { display: none; }
+#download-rows ml-progress { display: block; padding: 8px 0; }
+.capacity-panel fit-view .wrap { padding: 0 0 24px; }
+.capacity-panel fit-view header.fit-top { padding: 18px 0; flex-wrap: wrap; }
+.variant-choice { display: flex; align-items: center; gap: 10px; margin: 9px 0; font-size: 12px; }
+.quant-select { max-width: 300px; padding: 6px 8px; min-width: 180px; font-size: 13px; }
+.model-actions { flex-shrink: 0; }
+.quant-filters { display: flex; gap: 16px; flex-wrap: wrap; }
+.quant-filters label { margin-top: 4px; font-size: 12px; }
+.quant-filters select { margin-left: 8px; padding: 5px 8px; font-size: 12px; }
+.model-reasoning { border-left: 2px solid var(--line); margin: 0 0 14px; padding-left: 12px; color: var(--muted); }
+.model-reasoning summary { cursor: pointer; font-size: 13px; }
+.reasoning-text { white-space: pre-wrap; font: 13px/1.6 var(--sans); margin-top: 10px; overflow-wrap: anywhere; }
+.reply-activity { display: block; color: var(--muted); font-size: 12px; margin-top: 10px; }
+.reply-activity:empty { display: none; }
+
