@@ -71,9 +71,9 @@
         chat.picker.prepend(el("option", { value: "" }, "Choose a coding model…"));
         chat.picker.value = "";
       }
-      chat.pickrow.hidden = !models.length && !selected && !chat.modelPicker?.library.some((one) => one.servable);
+      chat.pickrow.hidden = false;
       chat.askrow.hidden = !models.length && !selected;
-      chat.options.hidden = !models.length && !selected;
+      chat.options.hidden = false;
       chat.none.hidden = !!models.length;
       chat.none.replaceChildren(document.createTextNode(this.active ? this.data?.model_problem || "Choose a downloaded model to start Coding. " : "No model is running. "),
         el("a", {href:"#models"}, "Open Models"), document.createTextNode(" to prepare a model, then return here."));
