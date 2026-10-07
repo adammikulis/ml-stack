@@ -14,12 +14,12 @@ from typing import TYPE_CHECKING, Any
 
 from ml_stack.net import scan as netscan, sniff
 from ml_stack.net.scanners import default_scanners
-from ml_stack.workspace import plain
+from ml_stack.workspace import coordination_access, plain
 from ml_stack.workspace.boardapi import Held, data_line
 from ml_stack.workspace.boards import ANNOUNCE
 from ml_stack.workspace.chain import ChainLog
 from ml_stack.workspace.filestore import FileStore, Unavailable, handle_of
-from ml_stack.workspace.identity import AGENT, HUMAN, Denied, Identity, valid_id
+from ml_stack.workspace.identity import HUMAN, Denied, Identity, valid_id
 from ml_stack.workspace.screen import Refused, fence, injection_markers, refusals
 
 if TYPE_CHECKING:
@@ -116,9 +116,7 @@ class FileApi:
                 and self.ws.bus.live(r)]
 
     def _row_ok(self, who: Identity, row: dict[str, Any], boards: dict[str, Any]) -> bool:
-        if row["to"].startswith("#"):
-            return self.ws.board.can_read(who, row["to"], boards)
-        return who.role != AGENT or who.id in (row["from"], row["to"])
+        return coordination_access.can_read_row(self.ws, who, row, boards)
 
     def _readable(self, who: Identity, rows: list[dict[str, Any]] | None = None
                   ) -> dict[str, dict[str, Any]]:

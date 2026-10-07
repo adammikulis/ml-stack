@@ -8,7 +8,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from ml_stack.workspace import board_graph_merge, plain
+from ml_stack.workspace import board_graph_merge, coordination_access, plain
 from ml_stack.workspace.boards import ANNOUNCE, ANNOUNCE_MARK, GENERAL, MODES, STYPES, Boards
 from ml_stack.workspace.bus import TYPES
 from ml_stack.workspace.identity import AGENT, HUMAN, Denied, Identity, valid_id
@@ -93,13 +93,16 @@ class BoardApi:
             raise Denied(f"a delegated identity cannot {what}")
 
     def can_read(self, who: Identity, name: str, boards: dict[str, Any] | None = None) -> bool:
-        """Whether ``who`` may read board ``name``: a member, or a person or lead (read-only)."""
+        """Whether a reader belongs to the board or its recorded project."""
         if not plain.name_ok(name):
             return False
         found = (self.store.state()[0] if boards is None else boards).get(name)
         if found is None:
             return False
-        return who.role != AGENT or name in (GENERAL, ANNOUNCE) or self._root(who) in found["members"]
+        return (who.role != AGENT or name in (GENERAL, ANNOUNCE)
+                or self._root(who) in found["members"]
+                or bool(found["project"] and found["project"]
+                        == coordination_access.project_key(self.ws, who.id)))
 
     def require_read(self, who: Identity, name: str) -> None:
         """`Denied` unless ``who`` may read ``name``; says the same for a board that is absent."""
@@ -360,9 +363,9 @@ class BoardApi:
         return {"root": root, "messages": [self._plain(r) for r in rows[:200]]}
 
     # -- direct conversations -------------------------------------------------------------
-    @staticmethod
-    def _pair_ok(who: Identity, a: str, b: str) -> None:
-        if who.role == AGENT and who.id not in (a, b):
+    def _pair_ok(self, who: Identity, a: str, b: str) -> None:
+        if (who.role == AGENT and who.id not in (a, b)
+                and not coordination_access.shared_pair(self.ws, who, a, b)):
             raise Denied(f"{who.id} is not part of that conversation")
 
     def _pair_rows(self, a: str, b: str) -> list[dict[str, Any]]:
@@ -372,8 +375,7 @@ class BoardApi:
 
     def dm(self, token: str, other: str, between: str = "", limit: int = 50,
            mark: bool = True) -> list[dict[str, Any]]:
-        """The conversation of the caller with ``other`` (or of ``between`` and ``other``,
-        for a person or lead), both directions, oldest first."""
+        """An authorized conversation in both directions, oldest first."""
         who = self._who(token)
         a = between or who.id
         if not (valid_id(other) and valid_id(a)):
@@ -389,7 +391,7 @@ class BoardApi:
         return out
 
     def ui_dm(self, token: str, a: str, b: str, limit: int = 100) -> list[dict[str, Any]]:
-        """Plain, bounded messages between ``a`` and ``b`` for a page; a person or lead only."""
+        """Plain, bounded messages of an authorized conversation for a page."""
         who = self._who(token)
         if not (valid_id(a) and valid_id(b)):
             raise ValueError("name two agent ids")
@@ -398,14 +400,14 @@ class BoardApi:
                 for r in self._pair_rows(a, b)[-max(limit, 0):]]
 
     def dm_list(self, token: str) -> list[dict[str, Any]]:
-        """The conversations the caller is in, or every pair for a person or lead."""
+        """The caller's discoverable addressed and shared project conversations."""
         who = self._who(token)
         marks, pairs = self.store.marks(who.id), {}
         for r in self.ws.bus.log.rows():
             if r["kind"] != "msg" or r["to"].startswith("#") or r["to"] == "*" \
                     or not self.ws.bus.live(r):
                 continue
-            if who.role == AGENT and who.id not in (r["from"], r["to"]):
+            if not coordination_access.can_read_row(self.ws, who, r):
                 continue
             key = tuple(sorted((r["from"], r["to"])))
             p = pairs.setdefault(key, {"a": key[0], "b": key[1], "messages": 0, "last": 0.0,
@@ -442,10 +444,12 @@ class BoardApi:
             root = self.ws.bus.get(int(target)) if target.isdigit() else None
             if root is None:
                 raise ValueError(f"no message {plain.line(target, 20)}")
-            if not root["to"].startswith("#"):
+            if root["to"].startswith("#"):
+                self.require_read(who, root["to"])
+            elif not coordination_access.shared_pair(self.ws, who, root["from"], root["to"]):
                 self.ws.audit("board.denied", who.id, act="subscribe-dm")
-                raise Denied("direct messages are never subscribed to; they reach your inbox")
-            self.require_read(who, root["to"])
+                raise Denied("subscribe to direct coordination within your project")
+            self._thread_access(who, self.ws.bus.thread(root["seq"]))
             target = str(int(root.get("thread") or root["seq"]))
         return target
 
@@ -554,15 +558,18 @@ class BoardApi:
         return (key, mine[key]) if key in mine else (None, "")
 
     def routed(self, who: Identity, after: int, mode: str) -> list[dict[str, Any]]:
-        """Live board messages after ``after`` that ``who``'s subscriptions deliver as ``mode``;
+        """Live authorized messages after ``after`` subscribed in ``mode``;
         a subscription delivers nothing from before it was made."""
         if who.parent:
             return []
         boards, subs = self.store.state()
         mine, since = subs.get(who.id, {}), self.store.sinces().get(who.id, {})
         found = []
-        for r in self._rows(after=after):
-            if r["seq"] <= after or r["from"] == who.id or not self.can_read(who, r["to"], boards):
+        for r in self.ws.bus.log.after(after):
+            if (r["kind"] != "msg" or not self.ws.bus.live(r) or r["seq"] <= after
+                    or r["from"] == who.id
+                    or (mode == "inbox" and r["to"] in (who.id, "*"))
+                    or not coordination_access.can_read_row(self.ws, who, r, boards)):
                 continue
             key, got = self._match(mine, {**r, "mentions": r.get("mentions", [])}, who.id)
             if got == mode and (key is None or key[0] == "mentions"
@@ -577,18 +584,22 @@ class BoardApi:
         who = dict.fromkeys([*subs, *full["mentions"]])
         return [m for m in who if m != row["from"]
                 and self._match(subs.get(m, {}), full, m)[1] == "inbox"
-                and self.can_read(Identity(m, AGENT), row["to"], boards)]
+                and coordination_access.can_read_row(self.ws, Identity(m, AGENT), row, boards)]
 
     def wake_names(self, row: dict[str, Any]) -> list[str]:
         """The wake-pipe names to signal for ``row``: its recipient and subscribers by plain id,
         and everyone who may be following its board or conversation by each follower name."""
-        direct = set(self.listeners(row)) if row["to"].startswith("#") else (
-            set() if row["to"] == "*" else {row["to"]})
+        direct = set(self.listeners(row))
+        if not row["to"].startswith("#") and row["to"] != "*":
+            direct.add(row["to"])
         boards = self.store.state()[0] if row["to"].startswith("#") else {}
         found = boards.get(row["to"])
         following = set(self.ws.registry.ids() if row["to"] == GENERAL else
                         found["members"] if found else ()) | set(self.ws.registry.readers())
         following |= {row["from"], *direct}
+        following |= {name for name in self.ws.registry.ids()
+                      if self.ws.registry.role_of(name)
+                      and coordination_access.can_read_row(self.ws, Identity(name, AGENT), row, boards)}
         return [*direct, *(f"{n}{s}" for n in following for s in FOLLOWERS)]
 
     # -- following -------------------------------------------------------------------------
@@ -608,7 +619,8 @@ class BoardApi:
         if not plain_text:  # the same default caps as every other agent-facing read
             limit, backlog = min(limit, lim.read_items), min(backlog, lim.read_items)
         rows = self.ws.bus.log.after(0 if after < 0 else after)
-        found = [r for r in rows if r["kind"] == "msg" and self.ws.bus.live(r) and member(r)]
+        found = [r for r in rows if r["kind"] == "msg" and self.ws.bus.live(r) and member(r)
+                 and coordination_access.can_read_row(self.ws, who, r)]
         found = found[-backlog:] if after < 0 and backlog > 0 else [] if after < 0 else found[:limit]
         newest = rows[-1]["seq"] if rows else max(after, 0)
         if after >= 0 and len(found) == limit:
@@ -639,8 +651,8 @@ class BoardApi:
         for row in rows:
             if row["to"].startswith("#"):
                 self.require_read(who, row["to"])
-            elif who.role == AGENT:
-                self._pair_ok(who, row["from"], row["to"])
+            elif not coordination_access.can_read_row(self.ws, who, row):
+                raise Denied(f"{who.id} cannot read that coordination thread")
 
     # -- digests --------------------------------------------------------------------------
     def digest(self, token: str, ack: bool = False, thread: int = 0) -> dict[str, Any]:
@@ -655,6 +667,8 @@ class BoardApi:
         lines = []
         for (board, root), items in sorted(groups.items(), key=lambda g: g[1][-1]["seq"]):
             head = self.ws.bus.get(root)
+            if head and not coordination_access.can_read_row(self.ws, who, head):
+                head = None
             last = items[-1]
             lines.append(f"{board} thread {root} {data_line(head['subject'] if head else '', 60)!r}: "
                          f"{len(items)} new, last from {last['from']}: "
