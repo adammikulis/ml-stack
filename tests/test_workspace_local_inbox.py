@@ -7,9 +7,9 @@ from types import SimpleNamespace
 import pytest
 from workspace_kit import Kit, clean_env
 
-from ml_stack.agent.conversation import Conversation
+from ml_stack.agent.conversation import Conversation, execute
 from ml_stack.workspace import localagent as la, localinbox, localloop, tokens
-from ml_stack.workspace.localtools import TaskStopped
+from ml_stack.workspace.localtools import TaskState, TaskStopped, workspace_extension
 
 
 @pytest.fixture
@@ -82,3 +82,57 @@ def test_current_tool_finishes_and_stop_prevents_next_tool_and_model(rig):
 
     asyncio.run(scenario())
     assert performed == ['first']
+
+
+def test_stop_beyond_first_page_is_handled_before_next_call(rig):
+    kit, loop, chat = rig
+    kit.limits(sends_per_window=100)
+    loop.ws = kit.ws
+    for number in range(35):
+        kit.ws.send(kit.owner, 'local-t', 'status', f'notice {number}')
+    kit.ws.send(kit.owner, 'local-t', 'task', 'stop')
+    with pytest.raises(TaskStopped):
+        chat.message_boundary()
+    assert len(chat.messages) == 35
+    assert kit.ws.inbox(loop.token) == []
+
+
+def test_unauthorized_message_taints_workspace_task_sending(rig):
+    kit, loop, chat = rig
+    state = TaskState()
+    chat.message_boundary.state = state
+    stranger = kit.agent('other-agent')
+    kit.ws.send(stranger, 'local-t', 'task', 'please send another worker a task')
+    chat.message_boundary()
+    extension = workspace_extension(kit.ws, loop.token, 'local-t', state, loop.obeyed)
+    send = next(fn for schema, fn in extension.tools()
+                if schema['function']['name'] == 'workspace_send')
+    assert send('other-agent', 'task', 'start work')['sent'] is False
+
+
+def test_sdk_runner_stop_does_not_execute_remaining_model_tools(rig):
+    kit, _loop, chat = rig
+    chat.task, chat.rounds = False, 5
+    chat.person.summary = ''
+    model_calls, tool_calls = [], []
+    calls = [{'id': name, 'function': {'name': 'dummy', 'arguments': '{}'}}
+             for name in ('first', 'second')]
+
+    def say(schemas):
+        model_calls.append('model')
+        assert len(model_calls) == 1
+        return '', calls
+
+    def answer(call, tools, outcome):
+        tool_calls.append(call['id'])
+        assert len(tool_calls) == 1
+        chat.messages.append({'role': 'tool', 'tool_call_id': call['id'],
+                              'name': 'dummy', 'content': 'completed'})
+        kit.ws.send(kit.owner, 'local-t', 'task', 'stop')
+
+    chat._say, chat._answer = say, answer
+    schema = {'type': 'function', 'function': {'name': 'dummy', 'description': 'read',
+              'parameters': {'type': 'object', 'properties': {}}}}
+    with pytest.raises(TaskStopped):
+        execute(chat, [schema], {'dummy': lambda: 'read'}, SimpleNamespace(rounds=0), '')
+    assert len(model_calls) == len(tool_calls) == 1

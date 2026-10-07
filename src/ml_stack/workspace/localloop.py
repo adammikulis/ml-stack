@@ -222,7 +222,7 @@ class Loop:
         extension = lt.workspace_extension(self.ws, self.token, identity, state, self.obeyed)
         agent = chatting.Chat(guarded, person, tools=chatting.tools_for_chat(person=person),
                               role=self.agent.role, task=True, extension=extension)
-        agent.message_boundary = localinbox.Boundary(self, row, agent)
+        agent.message_boundary = localinbox.Boundary(self, row, agent, state)
         agent.rounds = self.caps.rounds
         agent.limits.limits = replace(agent.limits.limits,
                                       calls=(min(agent.role.max_calls, self.caps.calls)
