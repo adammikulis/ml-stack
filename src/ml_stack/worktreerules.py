@@ -42,7 +42,10 @@ def _git_environment() -> dict[str, str]:
 def checkout_metadata(directory: str | Path) -> dict[str, str]:
     """Read bounded checkout branch and HEAD metadata without starting Git."""
     def read(path: Path, limit: int = 4096) -> str:
-        with path.open("rb") as stream:
+        if path.is_symlink():
+            raise ValueError("Git metadata must be a plain file")
+        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        with os.fdopen(descriptor, "rb") as stream:
             value = stream.read(limit + 1)
         if len(value) > limit:
             raise ValueError("Git metadata exceeds its bound")
@@ -53,11 +56,15 @@ def checkout_metadata(directory: str | Path) -> dict[str, str]:
         if root is None:
             return {"cwd": str(here), "branch": "", "head": ""}
         git = root / ".git"
+        if git.is_symlink():
+            raise ValueError("Git metadata directory must be plain")
         if git.is_file():
             pointer = read(git)
             if not pointer.startswith("gitdir: "):
                 raise ValueError("invalid checkout Git directory")
             git = (root / pointer.removeprefix("gitdir: ")).resolve()
+            if git.parent.name != "worktrees" or git.parent.parent.name != ".git":
+                raise ValueError("Git worktree metadata directory is invalid")
         common = (git / read(git / "commondir")).resolve() if (git / "commondir").exists() else git
         head = read(git / "HEAD")
         branch = ""

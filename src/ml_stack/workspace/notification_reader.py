@@ -35,7 +35,7 @@ def binding(label: str, cwd: Path, session: str) -> dict:
             raise Denied('notification worktree differs from its saved project Board')
     if configured is None:
         raise Denied('notification requires an existing project binding')
-    if label == 'codex':
+    if label == 'codex' and 'sessions' in configured:
         if not isinstance(session, str) or not session or len(session) > 256 or any(
                 ord(char) < 33 or ord(char) > 126 for char in session):
             raise Denied('notification requires a valid hook session identifier')
@@ -50,7 +50,8 @@ def binding(label: str, cwd: Path, session: str) -> dict:
                 or any(chosen.get(key) != configured.get(key) for key in ('host', 'project_id'))):
             raise Denied('notification session has no authenticated saved binding')
         return chosen
-    if configured.get('agent') != label:
+    if (configured.get('agent') != label
+            and (label == 'codex' or configured.get('local_agent') != label)):
         raise Denied('notification reader differs from the saved launcher identity')
     return configured
 
@@ -62,7 +63,7 @@ def read(label: str, cwd: Path, session: str, *, canonical=None) -> str:
     if canonical is not None:
         remote, who = canonical
         if (who.id != actor or who.role != AGENT or remote.project_id != chosen['project_id']
-                or remote.host != chosen['host']):
+                or remote.host != chosen['host'].rstrip('/')):
             raise Denied('notification context does not match the saved project reader')
         return remote.call('nudge', tokens.load(remote.base, actor))
     remote = project_connection.RemoteWorkspace(

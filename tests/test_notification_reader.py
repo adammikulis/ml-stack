@@ -49,6 +49,41 @@ def test_explicit_launcher_parent_requires_saved_binding(saved):
         reader.binding('other-parent', root, 'child-thread')
 
 
+def test_legacy_root_requires_its_exact_saved_principal_without_thread_namespace(saved):
+    root, configured, _, _ = saved
+    configured.pop('sessions')
+    assert reader.binding('codex', root, 'root-one') is configured
+    configured['agent'] = 'other-root'
+    configured['local_agent'] = 'codex'
+    with pytest.raises(Denied, match='differs'):
+        reader.binding('codex', root, 'root-one')
+
+
+def test_local_launcher_alias_resolves_only_its_exact_saved_actor(saved):
+    root, configured, _, _ = saved
+    configured['local_agent'] = 'fixture-code'
+    configured['agent'] = 'fixture-project-actor'
+    assert reader.binding('fixture-code', root, '') is configured
+    with pytest.raises(Denied, match='differs'):
+        reader.binding('foreign-code', root, '')
+
+
+def test_authenticated_context_reuses_reader_without_discovery_or_reauthentication(saved, monkeypatch):
+    root, _, one, _ = saved
+    calls = []
+    remote = SimpleNamespace(base=root, project_id=one['project_id'], host=one['host'],
+                             call=lambda operation, token: calls.append(operation) or 'one unread')
+    who = SimpleNamespace(id=one['agent'], role='agent')
+    monkeypatch.setattr(reader.project_connection, 'RemoteWorkspace',
+                        lambda *a, **kw: pytest.fail('repeated discovery'))
+    monkeypatch.setattr(reader.tokens, 'load', lambda base, actor: 'existing-fixture')
+    assert reader.read('codex', root, 'root-one', canonical=(remote, who)) == 'one unread'
+    assert calls == ['nudge']
+    who.id = 'foreign-actor'
+    with pytest.raises(Denied, match='does not match'):
+        reader.read('codex', root, 'root-one', canonical=(remote, who))
+
+
 def test_saved_slot_authority_tampering_is_refused(saved):
     root, _, one, _ = saved
     one['project_id'] = 'b' * 32

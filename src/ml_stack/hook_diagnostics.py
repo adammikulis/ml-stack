@@ -62,7 +62,8 @@ def _ancestors(path: Path) -> None:
             held = ancestor.lstat()
         except FileNotFoundError:
             continue
-        if stat.S_ISLNK(held.st_mode) or held.st_uid not in (0, os.getuid()):
+        if (stat.S_ISLNK(held.st_mode) or held.st_uid not in (0, os.getuid())
+                or (held.st_mode & 0o022 and not held.st_mode & stat.S_ISVTX)):
             raise PermissionError("hook diagnostic ancestry is not owned plain storage")
 
 
@@ -86,8 +87,14 @@ def _open(root: Path, name: str, flags: int) -> int:
             os.close(descriptor)
             raise
         return descriptor
+    expected = root.lstat()
     parent = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
+        opened = os.fstat(parent)
+        if (not stat.S_ISDIR(opened.st_mode) or opened.st_uid != os.getuid() or opened.st_mode & 0o077
+                or (opened.st_dev, opened.st_ino) != (expected.st_dev, expected.st_ino)):
+            raise PermissionError("hook diagnostic directory changed or is not private")
+        _ancestors(root)
         descriptor = os.open(name, flags | os.O_NOFOLLOW, 0o600, dir_fd=parent)
         held = os.fstat(descriptor)
         if not stat.S_ISREG(held.st_mode) or held.st_uid != os.getuid() or held.st_mode & 0o077:
@@ -126,7 +133,9 @@ def _write(path: Path, value: dict) -> None:
 
 
 def _occurrence(root: Path, body: dict) -> dict:
-    signature = hashlib.sha256(f"{body['category']}:{body['reason']}".encode()).hexdigest()[:32]
+    normalized = re.sub(r"(?<![\w])(?:~|/)[^\s'\";,\]\)]+", "<path>", body["reason"])
+    normalized = re.sub(r"\b[0-9a-f]{8,}\b|\b\d+(?:\.\d+)*\b", "<value>", normalized)
+    signature = hashlib.sha256(f"{body['category']}:{normalized}".encode()).hexdigest()[:32]
     path = root / f"{signature}.signature.json"
     descriptor = _open(root, "occurrences.lock", os.O_RDWR | os.O_CREAT)
     started = time.monotonic()
@@ -141,9 +150,11 @@ def _occurrence(root: Path, body: dict) -> dict:
         if not prior and len(list(root.glob("*.signature.json"))) >= 2000:
             raise ValueError("hook diagnostic signature capacity reached")
         value = {"signature": signature, "category": body["category"], "count": prior.get("count", 0) + 1,
+                 "reason": body["reason"],
                  "first_seen": prior.get("first_seen", body["time"]), "last_seen": body["time"],
                  "first_id": prior.get("first_id", body["id"]), "last_id": body["id"],
                  "first_checkout": prior.get("first_checkout", body["trace"].get("checkout", {})),
+                 "last_checkout": body["trace"].get("checkout", {}),
                  "first_runtime": prior.get("first_runtime", body["runtime"])}
         _write(path, value)
         return value
