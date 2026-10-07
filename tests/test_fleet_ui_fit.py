@@ -188,7 +188,8 @@ class TestTheSplitBetweenTheFitComponents:
             assert anchor in html, f"the frame lost {anchor}"
 
     @pytest.mark.slow
-    def test_the_app_offers_it_beside_the_cluster_view(self, tmp_path, playwright):
+    def test_capacity_navigation_opens_models_panel_and_returns_to_cluster(self, tmp_path, playwright):
+        from playwright.sync_api import expect
         from test_fleet_ui import Serving
 
         served = Serving(tmp_path)
@@ -199,12 +200,13 @@ class TestTheSplitBetweenTheFitComponents:
             page.goto(f'http://127.0.0.1:{served.port}/ui/')
             nav = page.locator('fleet-nav nav')
             nav.locator('a[href="#fit"]').click()
-            assert page.locator('#nav-title').inner_text() == 'Capacity'
-            assert page.locator('#fit-heading').is_visible()
-            assert nav.locator('a[href="#cluster"]').is_visible()
+            expect(page.locator('#nav-title')).to_have_text('Models')
+            expect(page.locator('#model-capacity')).to_have_attribute('open', '')
+            expect(page.locator('#fit-heading')).to_be_visible()
+            expect(nav.locator('a[href="#cluster"]')).to_be_visible()
             nav.locator('a[href="#cluster"]').click()
-            assert page.locator('#cluster').is_visible()
-            assert not page.locator('#fit-heading').is_visible()
+            expect(page.locator('#cluster')).to_be_visible()
+            expect(page.locator('#fit-heading')).to_be_hidden()
         finally:
             browser.close()
             served.close()
