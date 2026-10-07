@@ -2,13 +2,23 @@
 <template>
   <div class="centre" id="first-run" hidden><div class="card" id="first-run-card"></div></div>
 </template>
+<style>
+first-run .centre { align-items: start; padding-top: 5vh; }
+first-run #first-run-card { max-width: 760px; width: 100%; border-radius: 18px; }
+first-run #first-run-card > p { letter-spacing: .04em; font-weight: 600; margin-bottom: 20px; }
+first-run .opt { border: 1px solid var(--border, #343b49); border-radius: 10px; padding: 12px; margin: 8px 0; }
+first-run .opt:has(input:checked) { border-color: var(--accent, #6c92ff); background: color-mix(in srgb, var(--accent, #6c92ff) 10%, transparent); }
+first-run .group { margin: 20px 0; }
+first-run .sub { line-height: 1.65; }
+first-run button { margin-top: 12px; }
+</style>
 <script>
 (function () {
   const M = window.fleetModel;
   const el = M.el;
   const api = M.api;
 
-  const STEPS = 9;
+  const STAGES = ["Device", "Pool", "Work", "Startup", "Downloads", "Capabilities", "Background", "Memory", "Ready"];
 
   class FirstRun extends HTMLElement {
     connectedCallback() {
@@ -17,9 +27,10 @@
       this.box = this.querySelector("#first-run");
       this.card = this.querySelector("#first-run-card");
       this.stepper = M.ui("ml-stepper", {
-        steps: Array.from({ length: STEPS }, (_, i) => ({ id: String(i), title: `Step ${i + 1}` })),
+        steps: STAGES.map((title, i) => ({ id: String(i), title })),
         controls: "none", compact: true });
-      this.card.append(this.stepper);
+      this.summary = el("p", { class: "hint", role: "status", "aria-live": "polite" });
+      this.card.append(this.summary, this.stepper);
       this.state = { step: 0, name: "", group: "", pass: "", clusters: [],
                      libraries: null, suggest: null, prefs: null, install: null };
       M.onRoute((route) => {
@@ -38,6 +49,7 @@
     show(...nodes) {
       const at = this.state.step;
       this.stepper.current = at;
+      this.summary.textContent = `Poolside setup · ${at + 1} of ${STAGES.length} · ${STAGES[at]}`;
       this.stepper.replaceChildren(el("div", { slot: `step-${at}` },
         ...nodes, this.installStatus, this.modelInstall?.status));
     }
@@ -74,11 +86,12 @@
         this.steps(0),
         el("h1", {}, "Set up this machine"),
         el("p", { class: "sub" },
-          "A few questions, and every answer can be changed afterwards."),
+          "Name your device, connect its compute, and choose its capabilities. Downloads can run in the background. You can change these choices in Settings."),
         el("label", { for: "n" }, "What should this machine be called?"),
         name,
         el("div", { class: "hint" }, "Other machines will show it under this name."),
-        el("label", { for: "device-mode" }, "Mode"), mode,
+        el("label", { for: "device-mode" }, "Connection policy"), mode,
+        el("div", { class: "hint" }, "Dev finds trusted devices nearby. Prod requires an explicit invitation."),
         el("button", { onclick: async () => {
           st.name = name.value.trim() || this.setup.name;
           st.mode = mode.value;
@@ -197,6 +210,11 @@
         const res = await api("/ui/setup/prefs", { method: "POST", body: JSON.stringify({
           ...pick, name: this.state.name,
           labels: pick.labels ? pick.labels.split(",") : [] }) });
+        if (res.error || (!res.ok && !res.manual)) {
+          go.disabled = false; go.textContent = "Continue";
+          outcome.replaceChildren(el("div", { class: "err", role: "alert" }, res.error || "Could not save startup preferences. Try again."));
+          return;
+        }
         if (res.manual) {
           go.disabled = false;
           go.textContent = "Continue";
@@ -288,11 +306,13 @@
                           .reduce((a, x) => a + (x.size_mb || 0), 0);
         size.textContent = mb
           ? `About ${mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb} MB`} to download, `
-            + "alongside ml-stack rather than into your system Python."
-          : "Installed alongside ml-stack, not into your system Python.";
+            + "in the Poolside runtime."
+          : "Installed in the Poolside runtime.";
       };
 
       go.onclick = async () => {
+        if (go.disabled) return;
+        go.disabled = true; later.disabled = true;
         const watch = (result, label) => {
           if (result.error) throw new Error(result.error);
           if (!result.job) return;
@@ -313,6 +333,7 @@
           });
           if (st.step === 5) this.go(6);
         } catch (error) { note.textContent = String(error); }
+        finally { go.disabled = false; later.disabled = false; }
       };
 
       paint();
@@ -344,14 +365,20 @@
     awayStep() {
       const kept = this.chosen();
       const st = this.state;
+      const note = el("div", { class: "err", role: "alert" });
       const go = el("button", {}, "Continue");
       go.onclick = async () => {
         go.disabled = true;
         go.innerHTML = '<span class="spin"></span> Saving…';
-        await api("/ui/setup/prefs", { method: "POST", body: JSON.stringify({
+        const result = await api("/ui/setup/prefs", { method: "POST", body: JSON.stringify({
           context: kept.context, auto_update: kept.updates,
           autodownload_models: kept.getModels, on_close: kept.onClose,
           autostart: (st.prefs || {}).autostart || "manual" }) });
+        if (!result.ok || result.error) {
+          go.disabled = false; go.textContent = "Continue";
+          note.textContent = result.error || "Could not save background preferences. Try again.";
+          return;
+        }
         this.go(7);
       };
       this.card.className = "card";
@@ -377,7 +404,7 @@
           input.onchange = () => { if (input.checked) kept.onClose = value; };
           return el("label", { class: "opt", for: id }, input, M.row(label, ""));
         }),
-        go);
+        go, note);
     }
 
     async wiredStep() {
@@ -398,11 +425,11 @@
     async doneStep() {
       const st = this.state;
       const saved = await api("/ui/setup/done", { method: "POST" });
-      if (saved.error) return this.show(el("div", { class: "err" }, saved.error),
+      if (!saved.ok || saved.error) return this.show(el("div", { class: "err", role: "alert" }, saved.error || "Could not finish setup. Try again."),
         el("button", { onclick: () => this.doneStep() }, "Retry"));
       const joined = st.clusters[0];
       const open = el("button", { onclick: () => location.reload() },
-        joined ? "Open the cluster" : "Open ml-stack");
+        joined ? "Open the cluster" : "Open Poolside");
       const ssh = el("div", { class: "aside" },
         el("div", { class: "hint" },
           "A machine with no screen — a server, a Pi — is set up over ssh instead:"),
@@ -447,7 +474,7 @@
         el("h1", {}, `Joined “${joined.group}”`),
         el("p", { class: "sub" }, "Now add your other machines. On each one:"),
         el("ol", { class: "howto" },
-          step(1, "Install ml-stack", "The same installer you used here."),
+          step(1, "Install Poolside", "The same installer you used here."),
           step(2, "Open it", "It asks the same questions there."),
           step(3, st.mode === "dev" && this.setup.selection !== "manual"
             ? "Choose Dev" : "Join the same cluster", st.mode === "dev" && this.setup.selection !== "manual"

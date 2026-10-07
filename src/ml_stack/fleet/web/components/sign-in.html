@@ -2,12 +2,13 @@
 <template>
   <div class="centre" id="signin" hidden>
     <div class="card">
+      <div class="hint">POOLSIDE</div>
       <h1>Sign in</h1>
-      <p class="sub">Type the passphrase this cluster was set up with.</p>
+      <p class="sub">Unlock this compute pool with its cluster passphrase.</p>
       <label for="p">Passphrase</label>
-      <input type="password" id="p" placeholder="the words you chose">
+      <input type="password" id="p" placeholder="Cluster passphrase" autocomplete="current-password">
       <button id="signin-go">Sign in</button>
-      <div id="signin-note"></div>
+      <div id="signin-note" role="alert" aria-live="polite"></div>
     </div>
   </div>
 </template>
@@ -37,6 +38,8 @@
     }
 
     async submit() {
+      if (this.go.disabled) return;
+      if (!this.pass.value.trim()) { M.signIn("Enter the cluster passphrase."); return; }
       this.go.disabled = true;
       this.go.textContent = "Checking…";
       const r = await M.api("/ui/session", { method: "POST",
