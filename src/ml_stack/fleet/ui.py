@@ -27,7 +27,6 @@ from .discovery import (
     named_apart,
     require_name,
 )
-from .join import default_root
 from .onboard.joining import (
     DEFAULT_JOIN_OPTIONS,
     JoinOptions,
@@ -38,6 +37,7 @@ from .onboard.joining import (
 )
 from .page import FIT_ONLY
 from .routes import ASSETS, UI_HEADER, asset_bytes, routes, write, write_json
+from .runtime_paths import default_root
 from .session import Sessions, Throttle, parse_cookie
 
 __all__ = ["ASSETS", "UI", "UI_HEADER", "asset_bytes", "routes", "serve_page"]

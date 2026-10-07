@@ -637,3 +637,19 @@ def test_remote_capability_request_refuses_unsafe_existing_storage(tmp_path, mon
     else:
         unsafe_path = remote.base if unsafe == 'base-mode' else tokens.directory(remote.base)
         assert unsafe_path.stat().st_mode & 0o777 == 0o755
+
+
+@pytest.mark.parametrize('limit,widen,expected', [(0, False, 3), (0, True, 3),
+                                               (1, False, 1), (-1, False, 1)])
+def test_canonical_inbox_reads_all_pending_messages_with_cli_defaults(host, limit, widen, expected):
+    sender, reader = joined(host, name='sender'), joined(host, name='reader')
+    for number in range(3):
+        code, sent = call(host, sender, 'send', 'reader', 'note', f'message {number}')
+        assert code == 200, sent
+    code, waiting = call(host, reader, 'nudge')
+    assert code == 200 and '3 waiting for you' in waiting['result']
+    code, inbox = call(host, reader, 'inbox', False, limit, False, widen)
+    assert code == 200 and len(inbox['result']) == expected
+    assert all('<untrusted ' in row['text'] for row in inbox['result'])
+    code, waiting = call(host, reader, 'nudge')
+    assert code == 200 and '3 waiting for you' in waiting['result']

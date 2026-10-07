@@ -876,6 +876,22 @@ note = "binds only to probe whether a port is free, to serve a local fit page on
 
 # -- network egress ------------------------------------------------------------------------
 [[group]]
+match = ["egress:fleet/daemon_control.py:request_replacement"]
+status = "covered"
+tests = ["tests/test_daemon_control.py::test_owned_idle_replacement_retains_admission_and_rejects_new_work",
+         "tests/test_daemon_control.py::test_other_control_instance_never_requests_shutdown",
+         "tests/test_daemon_control.py::test_control_record_rejects_symlink_and_public_mode",
+         "tests/test_daemon_control.py::test_launcher_replacement_refuses_redirect_before_second_endpoint",
+         "tests/test_daemon_control.py::test_launcher_replacement_refuses_forged_acknowledgment"]
+note = "owned private records bind a fixed loopback instance; redirects cannot move launcher authentication to another endpoint and forged replacement acknowledgments refuse"
+
+[[group]]
+match = ["egress:fleet/launch.py:_wait_for_exit"]
+status = "covered"
+tests = ["tests/test_fleet_launch.py::test_launcher_waits_for_tcp_close_when_health_is_unavailable"]
+note = "a fixed loopback TCP probe treats timeouts and unhealthy listeners as live; only connection refusal authorizes starting the replacement"
+
+[[group]]
 match = ["egress:fleet/wsl_ui.py:stdio"]
 status = "covered"
 tests = ["tests/test_wsl_ui.py::test_local_ui_relay_preserves_bytes_and_actual_loopback_peer",

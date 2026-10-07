@@ -12,7 +12,7 @@ from typing import Any
 from ml_stack.workspace import Workspace
 
 SRC = str(Path(__file__).resolve().parents[1] / "src")
-STRIPPED = ("CLAUDECODE", "ML_STACK_AGENT", "ML_STACK_NONINTERACTIVE", "ML_STACK_WORKSPACE_TOKEN",
+STRIPPED = ("CODEX_THREAD_ID", "CODEX_SESSION_ID", "CLAUDECODE", "ML_STACK_AGENT", "ML_STACK_NONINTERACTIVE", "ML_STACK_WORKSPACE_TOKEN",
             "ML_STACK_WORKSPACE_DENYLIST")
 
 

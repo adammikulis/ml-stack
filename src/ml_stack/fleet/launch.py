@@ -3,23 +3,28 @@
 from __future__ import annotations
 
 import argparse
+import socket
 import sys
 import threading
 import time
 import webbrowser
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from ml_stack.http import ServerError, request_json
 from ml_stack.log import say, warn
 
 from .cluster_modes import notice
+from .daemon_control import ControlError, request_replacement
 from .discovery import (
     DEFAULT_PORT as DISCOVERY_PORT,  # noqa: F401  (keeps ports in view)
     memberships,
 )
+from .measuring import same_commit
+from .runtime_paths import default_root
 from .updates import state
-from .wsl import WSLError, prepare, start
+from .wsl import WSLError, prepare, replace_running, start
 
 __all__ = ["already_running", "last_screen", "main", "wait_for_health"]
 
@@ -81,6 +86,29 @@ def last_screen(name: str, *, track: str = "", port: int = HTTP_PORT) -> list[st
             "  next        ml-stack-cluster status    -- other devices in the cluster"]
 
 
+def _root(arguments: list[str]) -> Path:
+    for index, arg in enumerate(arguments):
+        if arg.startswith("--root="):
+            return Path(arg.partition("=")[2]).expanduser()
+        if arg == "--root" and index + 1 < len(arguments):
+            return Path(arguments[index + 1]).expanduser()
+    return default_root()
+
+
+def _wait_for_exit(port: int, seconds: float = 20.0) -> bool:
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=0.5):
+                pass
+        except ConnectionRefusedError:
+            return True
+        except OSError:
+            pass
+        time.sleep(0.15)
+    return False
+
+
 def _open_when_ready(port: int, browser: bool, stopped: threading.Event) -> None:
     waiting = time.monotonic() + 20.0
     notified = False
@@ -107,7 +135,21 @@ def main(argv: list[str] | None = None, *,
 
     url = f"http://127.0.0.1:{known.port}/ui/"
 
+    linux_executable = None
     running = already_running(known.port)
+    expected = str(state().get("commit") or "")
+    if running is not None and not same_commit(str(running.get("commit") or ""), expected):
+        try:
+            if sys.platform == "win32":
+                replace_running(rest, known.port, running, expected)
+            else:
+                request_replacement(_root(rest), known.port, running, expected)
+            if not _wait_for_exit(known.port):
+                raise ControlError("The previous daemon is still exiting; retry shortly.")
+            running = None
+        except (ControlError, ServerError, WSLError, OSError, ValueError) as exc:
+            warn(str(exc))
+            return 1
     if running is not None:
         groups = memberships()
         say(notice(running.get("cluster_mode") or (groups[0].mode if groups else "dev")))
@@ -117,8 +159,7 @@ def main(argv: list[str] | None = None, *,
         say(f"  {url}")
         return 0
 
-    linux_executable = None
-    if sys.platform == "win32":
+    if sys.platform == "win32" and linux_executable is None:
         try:
             linux_executable = prepare()
         except (WSLError, OSError) as exc:

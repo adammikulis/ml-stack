@@ -180,3 +180,30 @@ Path(sys.argv[4]).write_text('finished')
             if process.poll() is None:
                 process.terminate()
                 process.wait(timeout=10)
+
+
+@pytest.mark.redteam
+def test_cancelled_graph_update_restores_worker_and_preserves_pending_scope(stopped, monkeypatch):
+    kit = stopped
+    original = localagent.load(kit.ws, 'native-worker')
+    before = kit.board.get(kit.parent, kit.task['id'])
+    scope_id = 'task-worktree:' + kit.task['id'].split(':')[1]
+    with GraphStore(kit.base / 'coordination.db') as graph:
+        original_scope = record(graph, scope_id, 'task-worktree')
+    real_save = recovery.save
+    def interrupt(graph, kind, row):
+        real_save(graph, kind, row)
+        if kind == 'task-worktree':
+            raise KeyboardInterrupt('Recovery cancelled')
+    monkeypatch.setattr(recovery, 'save', interrupt)
+    with pytest.raises(KeyboardInterrupt, match='cancelled'):
+        recovery.rebind(kit.ws, kit.parent, kit.worker_id, str(kit.target), 'Source recovery')
+    assert localagent.load(kit.ws, 'native-worker') == original
+    after = kit.board.get(kit.parent, kit.task['id'])
+    assert after['state'] == before['state'] and after['checkpoints'] == before['checkpoints']
+    with GraphStore(kit.base / 'coordination.db') as graph:
+        assert record(graph, scope_id, 'task-worktree') == original_scope
+        journals = graph.nodes('source-recovery')
+        assert len(journals) == 1 and journals[0]['attrs']['state'] == 'prepared'
+    monkeypatch.setattr(recovery, 'save', real_save)
+    assert recovery.rebind(kit.ws, kit.parent, kit.worker_id, str(kit.target), 'Resume source recovery')['verified']

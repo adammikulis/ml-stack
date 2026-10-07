@@ -10,6 +10,11 @@ from ml_stack import home, person
 from ml_stack.log import say
 
 
+def default_root() -> Path:
+    """Return the daemon directory under the machine state root."""
+    return home.state("traind")
+
+
 def configure(root: Path) -> None:
     """Route custom daemon installations to their own process state and cache."""
     if os.environ.get(home.ROOT_ENV) or root.resolve() == home.state("traind").resolve():

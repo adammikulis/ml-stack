@@ -1,7 +1,7 @@
 {
- "surfaces": 785,
+ "surfaces": 787,
  "by_status": {
-  "covered": 461,
+  "covered": 463,
   "partial": 199,
   "uncovered": 53,
   "n/a": 72,
@@ -37,7 +37,7 @@
    "unmapped": 0
   },
   "egress": {
-   "covered": 42,
+   "covered": 44,
    "partial": 48,
    "uncovered": 0,
    "n/a": 0,
@@ -1773,6 +1773,22 @@
    "note": "loopback and LAN calls to servers the person configured; the net-no-bypass scan keeps public hosts out, answers from a hostile server (oversized, slow, malformed JSON) are not sent"
   },
   {
+   "id": "egress:fleet/daemon_control.py:request_replacement",
+   "kind": "egress",
+   "source": "fleet/daemon_control.py:request_replacement",
+   "trust": "addresses and redirects named by pages, repositories and peers",
+   "attacker": "a redirect or address sends the request somewhere the person did not choose",
+   "status": "covered",
+   "tests": [
+    "tests/test_daemon_control.py::test_owned_idle_replacement_retains_admission_and_rejects_new_work",
+    "tests/test_daemon_control.py::test_other_control_instance_never_requests_shutdown",
+    "tests/test_daemon_control.py::test_control_record_rejects_symlink_and_public_mode",
+    "tests/test_daemon_control.py::test_launcher_replacement_refuses_redirect_before_second_endpoint",
+    "tests/test_daemon_control.py::test_launcher_replacement_refuses_forged_acknowledgment"
+   ],
+   "note": "owned private records bind a fixed loopback instance; redirects cannot move launcher authentication to another endpoint and forged replacement acknowledgments refuse"
+  },
+  {
    "id": "egress:fleet/discovery.py:_trusted",
    "kind": "egress",
    "source": "fleet/discovery.py:_trusted",
@@ -1821,6 +1837,18 @@
     "tests/test_net_no_bypass.py"
    ],
    "note": "loopback and LAN calls to servers the person configured; the net-no-bypass scan keeps public hosts out, answers from a hostile server (oversized, slow, malformed JSON) are not sent"
+  },
+  {
+   "id": "egress:fleet/launch.py:_wait_for_exit",
+   "kind": "egress",
+   "source": "fleet/launch.py:_wait_for_exit",
+   "trust": "addresses and redirects named by pages, repositories and peers",
+   "attacker": "a redirect or address sends the request somewhere the person did not choose",
+   "status": "covered",
+   "tests": [
+    "tests/test_fleet_launch.py::test_launcher_waits_for_tcp_close_when_health_is_unavailable"
+   ],
+   "note": "a fixed loopback TCP probe treats timeouts and unhealthy listeners as live; only connection refusal authorizes starting the replacement"
   },
   {
    "id": "egress:fleet/models.py:<module>",

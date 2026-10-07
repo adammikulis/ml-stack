@@ -22,8 +22,11 @@ def native_socket(*, bind=None, **_options):
 
 @pytest.fixture
 def bridge(monkeypatch):
+    target_host = discovery.primary_ip()
+    if not target_host or target_host.startswith("127."):
+        pytest.skip("the relay test needs a locally assigned LAN IPv4 address")
     with socket.socket() as reserved:
-        reserved.bind(("127.0.0.2", 0))
+        reserved.bind((target_host, 0))
         target = reserved.getsockname()
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as reserved:
         reserved.bind(("127.0.0.1", 0))

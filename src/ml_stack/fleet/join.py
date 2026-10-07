@@ -59,6 +59,7 @@ from .pausing import (
     peer_clients,
     remember_seen,
 )
+from .runtime_paths import default_root
 
 __all__ = [
     "STARTED_FILE",
@@ -68,7 +69,6 @@ __all__ = [
     "JoinError",
     "Joined",
     "checks",
-    "default_root",
     "describe",
     "join_machine",
     "leave_machine",
@@ -85,11 +85,6 @@ __all__ = [
     "table",
     "updating",
 ]
-
-
-def default_root() -> Path:
-    """The daemon's root: ``traind`` under the state root."""
-    return home.state("traind")
 
 
 STARTED_FILE = "fleet-daemon.json"

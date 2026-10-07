@@ -65,7 +65,7 @@ def resources(name, args, cwd):
                          if '>' in operator and not _null_sink(target))
             if verb in FILE_COMMANDS:
                 found.extend(('file', _path(word, here)) for word in words[1:] if not word.startswith('-'))
-            known = verb in FILE_COMMANDS or verb in ('git', 'ml-stack-serve', 'ml-stack-workspace') or ('install' in words and 'pip' in words[:3])
+            known = (verb == 'ml-stack' and words[1:] == ['--no-browser']) or verb in FILE_COMMANDS or verb in ('git', 'ml-stack-serve', 'ml-stack-workspace') or ('install' in words and 'pip' in words[:3])
             if not known and classify(Call('Bash', {'command': shlex.join(words)}), roots=(here,)).label != 'safe':
                 found.append(('worktree', _path('.', here)))
             if verb == 'git' and classify(Call('Bash', {'command': shlex.join(words)}), roots=(here,)).label != 'safe':

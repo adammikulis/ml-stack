@@ -32,6 +32,18 @@ def _reputation(ws, token, args, kwargs):
     return standings(ws, token, **kwargs)
 
 
+def _bound_arguments(bound, ws):
+    if "limit" in bound.arguments:
+        requested = int(bound.arguments["limit"])
+        default = ws.limits.read_items if requested == 0 else requested
+        bound.arguments["limit"] = (100 if bound.arguments.get("widen")
+                                    else min(max(default, 1), 100))
+    if "widen" in bound.arguments:
+        bound.arguments["widen"] = False
+    if "timeout_s" in bound.arguments:
+        bound.arguments["timeout_s"] = min(max(float(bound.arguments["timeout_s"]), 0), 20)
+
+
 class WorkspaceHost:
     """Serve isolated registered project boards to authenticated agents."""
 
@@ -250,12 +262,7 @@ class WorkspaceHost:
             owner, name = (ws.board, operation[6:]) if operation.startswith("board.") else (ws, operation)
             method = getattr(owner, name)
             bound = inspect.signature(method).bind(token, *args, **kwargs)
-            if "limit" in bound.arguments:
-                bound.arguments["limit"] = min(max(int(bound.arguments["limit"]), 1), 100)
-            if "widen" in bound.arguments:
-                bound.arguments["widen"] = False
-            if "timeout_s" in bound.arguments:
-                bound.arguments["timeout_s"] = min(max(float(bound.arguments["timeout_s"]), 0), 20)
+            _bound_arguments(bound, ws)
             result = method(*bound.args, **bound.kwargs)
         else:
             raise Denied("this operation is unavailable to remote agents")

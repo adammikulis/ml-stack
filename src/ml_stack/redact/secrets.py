@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 
 PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("workspace-token", re.compile(r"\bmlws1\.[A-Za-z0-9._/-]+\.[A-Za-z0-9_-]{8,}")),
+    ("cluster-token", re.compile(r"\bmlsk1\.[A-Za-z0-9_-]{8,}")),
     ("private-key", re.compile(
         r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(?:-----END [A-Z ]*PRIVATE KEY-----|\Z)", re.S)),
     ("aws-key", re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b")),
