@@ -1,4 +1,4 @@
-"""``ml-stack fleet share``: serve files to the devices that may have them.
+"""``ml-stack cluster share``: serve files to the devices that may have them.
 
 ``--models`` serves the machine's model store instead of a folder (`modelstore.py`): the GGUF and
 safetensors files `hub.discover` finds in the usual folders (or only in the ``--models-dir``

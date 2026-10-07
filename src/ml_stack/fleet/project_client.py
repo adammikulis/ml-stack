@@ -43,7 +43,7 @@ def register_local(root, key, project_id, port):
     except ServerUnreachable as error:
         raise ProjectError("Local Fleet is unavailable; start ml-stack and retry project joining") from error
     except ServerError as error:
-        raise ProjectError("local Fleet project registration failed") from error
+        raise ProjectError("local project registration failed") from error
 
 
 def read(peer: Peer, path: str, limit: int, *, deadline: float | None = None) -> bytes:

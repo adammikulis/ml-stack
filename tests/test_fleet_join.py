@@ -1,4 +1,4 @@
-"""``ml-stack-fleet``: one command makes a machine a peer, and the page's Join runs it too.
+"""``ml-stack-cluster``: one command makes a machine a peer, and the page's Join runs it too.
 
 The daemon it starts, the llama-server it fetches and the logon service it installs are the
 three things faked here -- each behind a parameter of `join_machine` -- and everything else
@@ -325,7 +325,7 @@ class TestStatus:
         assert "asr,vad" in first and "asr,vad" not in second
 
     def test_no_peers_says_what_to_run(self):
-        assert "ml-stack-fleet join" in table([])
+        assert "ml-stack-cluster join" in table([])
 
     def test_a_tracking_peer_shows_its_commit_and_the_branch_it_follows(self):
         """A fleet half on one commit and half on another is what this column exists to
@@ -421,7 +421,7 @@ class TestStatus:
 
     def test_status_in_no_cluster_says_join(self, key, capsys):
         assert main(["--cluster-key", str(key), "status"]) == 1
-        assert "ml-stack-fleet join" in capsys.readouterr().err
+        assert "ml-stack-cluster join" in capsys.readouterr().err
 
     def test_join_takes_the_passphrase_name_and_cluster_from_the_environment(
             self, key, tmp_path, monkeypatch):

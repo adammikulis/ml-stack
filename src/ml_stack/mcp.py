@@ -353,7 +353,7 @@ def bench_show(last: int = 0, since: str = "", extract: bool = False,
 
 def fleet_peers(timeout_s: float = 2.0) -> list[dict[str, Any]]:
     """Every peer on the LAN holding this machine's cluster key: what each serves, its
-    room, whether it is busy or measuring, and its commit (``ml-stack-fleet status``)."""
+    room, whether it is busy or measuring, and its commit (``ml-stack-cluster status``)."""
     from ml_stack.fleet.join import peers
     from ml_stack.fleet.launch import already_running
 

@@ -1,4 +1,4 @@
-"""``ml-stack fleet peers``: the paired devices a model download asks before the internet.
+"""``ml-stack cluster peers``: the paired devices a model download asks before the internet.
 
 ``peers`` lists them (with the rate last measured for each), ``add`` stores one by hand (its share
 address, the certificate its TLS is pinned to, the owner's manifest key and the request key from

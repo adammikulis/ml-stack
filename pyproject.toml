@@ -67,9 +67,9 @@ train = ["numpy>=1.24", "safetensors>=0.4"]
 train-lora = ["ml-stack[train,torch,transformers]", "peft>=0.21.0"]
 # a daemon on the LAN makes its own TLS certificate with this (or with openssl on PATH)
 fleet-tls = ["cryptography>=50"]
-# verifying the signature on a release or a tracked commit (`ml-stack-fleet` updates)
+# verifying the signature on a release or a tracked commit (`ml-stack-cluster` updates)
 fleet-update = ["cryptography>=50"]
-# adding a machine with a short code (`ml-stack-fleet listen` / `pair`): SPAKE2 from the
+# adding a machine with a short code (`ml-stack-cluster listen` / `pair`): SPAKE2 from the
 # maintained `spake2` package, Ed25519 signing from cryptography, the signing key in the OS
 # keystore through `keyring`
 fleet-onboard = ["cryptography>=50", "spake2>=0.9", "keyring>=24", "py-machineid", "qrcode"]
@@ -159,7 +159,7 @@ ml-stack = "ml_stack.cli:main"
 ml-stack-traind = "ml_stack.cli.daemon:main"
 ml-stack-peers = "ml_stack.fleet.peers:main"
 # one command makes this machine a peer: checks, llama-server, passphrase, daemon, announce
-ml-stack-fleet = "ml_stack.fleet.join:main"
+ml-stack-cluster = "ml_stack.fleet.join:main"
 # the same functions the commands call, as MCP tools over stdio, for an agent to drive
 ml-stack-mcp = "ml_stack.mcp:main"
 ml-stack-train-run = "ml_stack.train.run:main"

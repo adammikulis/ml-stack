@@ -141,23 +141,23 @@ def _find_authority(project_id: str) -> tuple[str, str] | None:
             published.extend(row for row in rows if row["id"] == project_id)
         authorities = {row["authority_machine"] for row in published if row["authority_machine"]}
         if len(authorities) > 1:
-            raise Denied("this project has conflicting workspace authorities on the Fleet network")
+            raise Denied("this project has conflicting workspace authorities on the network")
         if not authorities:
             continue
         authority = next(iter(authorities))
         hosts = [peer for peer in peers if peer.beacon and peer.beacon.machine == authority]
         if len(hosts) != 1:
-            raise Denied("the project's workspace authority is missing or ambiguous on this Fleet network")
+            raise Denied("the project's workspace authority is missing or ambiguous on this network")
         candidates.append((member.group, hosts[0].base_url))
     if not candidates:
         return None
     if len(set(candidates)) != 1:
-        raise Denied("this project appears on more than one Fleet cluster; select one workspace authority")
+        raise Denied("this project appears on more than one cluster; select one workspace authority")
     return candidates[0]
 
 
 def auto_attach(cwd: Path | None = None) -> dict | None:
-    """Discover this Git project's one workspace through an enrolled Fleet cluster."""
+    """Discover this Git project's one workspace through an enrolled cluster."""
     current = (cwd or Path.cwd()).resolve()
     try:
         root = Path(git.run(["rev-parse", "--show-toplevel"], cwd=current).stdout.strip()).resolve()

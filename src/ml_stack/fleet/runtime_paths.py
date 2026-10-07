@@ -1,4 +1,4 @@
-"""State roots and startup output for a Fleet daemon process."""
+"""State roots and startup output for a cluster daemon process."""
 
 from __future__ import annotations
 
@@ -23,5 +23,5 @@ def configure(root: Path) -> None:
 def announce_token(token: str) -> None:
     """Display the daemon token to a person at an interactive terminal."""
     with contextlib.suppress(person.HumanRequired):
-        person.require_person("display the Fleet token")
+        person.require_person("display the cluster token")
         say(f"  token {token}")

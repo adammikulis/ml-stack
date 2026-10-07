@@ -229,7 +229,7 @@ def _speech_findings() -> list[Finding]:
 def _fleet_findings(*, port: int | None = None, discovery_port: int | None = None,
                     cluster_key_path: Path | str | None = None) -> list[Finding]:
     """Whether this machine has joined a cluster, its daemon answers, discovery hears it
-    among the peers ``ml-stack-fleet status`` would list, and its two ports are free or
+    among the peers ``ml-stack-cluster status`` would list, and its two ports are free or
     held by that same daemon.
 
     Stops naming fleet findings at the first thing that is wrong: a daemon cannot answer
@@ -245,12 +245,12 @@ def _fleet_findings(*, port: int | None = None, discovery_port: int | None = Non
     me = already_running(port)
     if not mine:
         out.append(Finding(name="fleet: joined", good=False, said="in no cluster",
-                           fix="ml-stack-fleet join --passphrase WORDS"))
+                           fix="ml-stack-cluster join --passphrase WORDS"))
     else:
         out.append(Finding(name="fleet: joined", good=True, said=f"cluster '{mine[0].group}'"))
         if me is None:
             out.append(Finding(name="fleet: daemon", good=False,
-                               said=f"does not answer on {port}", fix="ml-stack-fleet join"))
+                               said=f"does not answer on {port}", fix="ml-stack-cluster join"))
         else:
             out.append(Finding(name="fleet: daemon", good=True,
                                said=f"'{me.get('name', '?')}' answers on {port}"))
@@ -321,7 +321,7 @@ def _ports_finding(http_port: int, discovery_port: int, daemon: dict[str, object
         said="free" if not stuck else f"held by something else: {', '.join(map(str, stuck))}",
         fix="" if not stuck else f"lsof -nP -iTCP:{http_port} -iUDP:{discovery_port}",
         note="" if not stuck else
-             "ml-stack-fleet join needs both free to start the daemon and hear the LAN")
+             "ml-stack-cluster join needs both free to start the daemon and hear the LAN")
 
 
 def _scripts() -> list[str]:

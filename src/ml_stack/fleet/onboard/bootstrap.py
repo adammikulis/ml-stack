@@ -1,6 +1,6 @@
 """A machine with nothing installed asks for ml-stack; nobody pushes it.
 
-The owner runs ``ml-stack fleet bootstrap`` on a machine that has ml-stack. It serves, for a
+The owner runs ``ml-stack cluster bootstrap`` on a machine that has ml-stack. It serves, for a
 few minutes, a page at an unguessable address on the LAN. The owner opens it on the new
 machine (typed, or scanned from a QR code drawn from `Offer.url`), reads what would be
 installed, and runs the one command the page shows. The address carries the offer's

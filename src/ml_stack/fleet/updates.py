@@ -381,7 +381,7 @@ def quiet(**checks: Callable[[], bool] | None) -> Callable[[], bool]:
 
 # -- what this machine says about how it updates ----------------------------------------
 LAST: dict[str, Any] = {"tracking": "off", "checked_at": 0.0, "error": "", "commit": ""}
-"""The last look either loop took, for ``/health`` and so ``ml-stack-fleet status`` can
+"""The last look either loop took, for ``/health`` and so ``ml-stack-cluster status`` can
 show a peer's mode and when it last asked. Written by the loops, read by `state`."""
 
 _AGE: dict[str, float] = {}

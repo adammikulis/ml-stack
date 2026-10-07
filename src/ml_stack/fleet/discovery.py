@@ -551,9 +551,8 @@ class Advertiser:
         if reason in self._said:
             return
         self._said.add(reason)
-        warn(f"a {size}-byte beacon did not reach {addr[0]}:{addr[1]} ({reason}). "
-             f"Until one does, {self.beacon.name} is not in the fleet: the other "
-             "machines do not list it.")
+        warn(f"a {size}-byte beacon from {self.beacon.name} could not be sent to "
+             f"{addr[0]}:{addr[1]} ({reason}). Other discovery routes may still work.")
 
     def _sample(self) -> None:
         """Run ``refresh`` and keep what it produced as the beacon to send."""

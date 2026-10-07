@@ -161,7 +161,7 @@ def connect(base, name):
 def _connect(base, name, *, replace=False):
     candidates = [(peer, info) for peer, info in discover() if not name or peer.name == name]
     if len(candidates) != 1:
-        raise Denied('select one advertised coordinator by its Fleet name; none or several matched')
+        raise Denied('select one advertised coordinator by its device name; none or several matched')
     peer, info = candidates[0]
     coordinator_config.validate_endpoint(peer.base_url)
     selected = {'mode': 'remote', 'workspace': info['workspace'],

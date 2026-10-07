@@ -1,4 +1,4 @@
-"""``ml-stack-fleet plan``: which model each peer serves, and how many slots, for N users.
+"""``ml-stack-cluster plan``: which model each peer serves, and how many slots, for N users.
 
 Profiles, memory records and peers are invented; the command is driven through `join.main`
 against daemons on loopback, and ``--apply`` against the real daemon handler over a
@@ -288,7 +288,7 @@ class TestCommand:
 
     def test_in_no_cluster_it_says_join(self, tmp_path, capsys):
         assert main(["--cluster-key", str(tmp_path / "none.key"), "plan", "--users", "1"]) == 1
-        assert "ml-stack-fleet join" in capsys.readouterr().err
+        assert "ml-stack-cluster join" in capsys.readouterr().err
 
 
 # -- POST /serve, and --apply -------------------------------------------------------------

@@ -620,7 +620,7 @@
    "note": "run by the person with the person's own arguments; an agent reaches these commands only through an mcp-tool or chat-tool row, which carry the hostile-argument tests"
   },
   {
-   "id": "cli:ml-stack-fleet",
+   "id": "cli:ml-stack-cluster",
    "kind": "cli",
    "source": "ml_stack.fleet.join:main",
    "trust": "the person at a terminal; arguments may carry text from outside",

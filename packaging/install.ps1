@@ -18,7 +18,7 @@
 #   -Uninstall  takes it off, and leaves the model cache alone
 #
 # Every step past the install is an ml-stack command, not PowerShell: ml-stack-serve build,
-# ml-stack-setup, ml-stack-models fetch, ml-stack-fleet join, ml-stack-doctor.
+# ml-stack-setup, ml-stack-models fetch, ml-stack-cluster join, ml-stack-doctor.
 #
 # Unattended: ML_STACK_MODE, ML_STACK_NAME, ML_STACK_PASSPHRASE, ML_STACK_CLUSTER,
 # ML_STACK_MODELS, ML_STACK_ADOPT_CACHE, ML_STACK_REF, ML_STACK_OFFLINE_ZIP,
@@ -336,8 +336,8 @@ function Fetch-Models {
 
 function Join-Fleet {
     Step "joining the fleet"
-    $fleet = Join-Path $script:bin "ml-stack-fleet.exe"
-    if (-not (Test-Path $fleet)) { Write-Host "skipped: no ml-stack-fleet"; return }
+    $fleet = Join-Path $script:bin "ml-stack-cluster.exe"
+    if (-not (Test-Path $fleet)) { Write-Host "skipped: no ml-stack-cluster"; return }
     $argv = @("join", "--persist")
     if ($env:ML_STACK_NAME)    { $argv += @("--name", $env:ML_STACK_NAME) }
     if ($env:ML_STACK_CLUSTER) { $argv += @("--group", $env:ML_STACK_CLUSTER) }
@@ -345,7 +345,7 @@ function Join-Fleet {
     if ($env:ML_STACK_PASSPHRASE) { $argv += @("--passphrase", $env:ML_STACK_PASSPHRASE) }
     elseif (-not (Interactive)) {
         Write-Host "no passphrase, and no console to ask at. Set ML_STACK_PASSPHRASE and re-run,"
-        Write-Host "or run:  ml-stack-fleet join --persist"
+        Write-Host "or run:  ml-stack-cluster join --persist"
         return
     }
     & $fleet @argv

@@ -115,7 +115,7 @@ put a wrong name in the list; it cannot get anybody paired.
 
 ### The request and the notification
 
-A machine opens pairing deliberately (`ml-stack fleet listen --for 10m`); by default nothing
+A machine opens pairing deliberately (`ml-stack cluster listen --for 10m`); by default nothing
 listens. A request carries name, hostname, model and the fingerprint of the certificate the new
 device's daemon will serve. The owner sees all of it, plus the address the request came from and
 the fingerprint of the certificate the new device was *seen* to present.
@@ -227,7 +227,7 @@ sent when a request is created, once.
 
 ### Revocation
 
-`ml-stack fleet revoke NAME-OR-FINGERPRINT` marks the device revoked: it cannot ask again, and
+`ml-stack cluster revoke NAME-OR-FINGERPRINT` marks the device revoked: it cannot ask again, and
 the key it signs file requests with (issued at pairing, one per device) stops working, so the
 owner's machine serves it nothing. **It cannot take back the cluster key** the device was given:
 the cluster has one shared key. The command says so. The re-keying flow (mint a new key,
@@ -238,7 +238,7 @@ built. A device-only pairing (`--no-cluster`) has no cluster key to take back.
 
 Nobody pushes software to them. Opt-in paths, ranked by ease and then by safety:
 
-1. **An address on the LAN** (`ml-stack fleet bootstrap --share DIR`). The controller serves for
+1. **An address on the LAN** (`ml-stack cluster bootstrap --share DIR`). The controller serves for
    ten minutes, over HTTPS with a certificate made for the offer, an unguessable address
    `https://IP:PORT/b/TOKEN/#fp=CERT-FINGERPRINT` (`--advertise` names the address to print). The
    owner types it (or scans it as a QR code: drawing one needs a library, not built; the string
@@ -255,7 +255,7 @@ Nobody pushes software to them. Opt-in paths, ranked by ease and then by safety:
      checks and **without hashes**; a hash-locked requirements file in the manifest closes
      this (designed, not built).
    * Offers carry program files only: models and the cluster key are refused (tested).
-2. **SSH install** (`ml-stack fleet bootstrap --ssh [user@]host --share DIR`, built, owner
+2. **SSH install** (`ml-stack cluster bootstrap --ssh [user@]host --share DIR`, built, owner
    initiated, its own flag, never automatic). Properties, each a test:
    * the system `ssh` with the owner's keys, agent and config; `BatchMode=yes`, so a password is
      never asked for or seen; `StrictHostKeyChecking=yes` always, never `no`; no agent, X11 or
@@ -277,7 +277,7 @@ Nobody pushes software to them. Opt-in paths, ranked by ease and then by safety:
      tests; a pure-Python verifier would have been home-made crypto), that the key is the one
      the owner named, expiry, and the size and SHA-256 of every file, and that no other file came;
      only then a per-user venv (`~/.ml-stack/venv`, no sudo, no system Python touched) and
-     `pip install`; it then starts `ml-stack-fleet listen` so the normal pairing flow with a
+     `pip install`; it then starts `ml-stack-cluster listen` so the normal pairing flow with a
      code and pinned TLS completes. Models are not copied;
    * nothing is fetched from the internet by the remote side except pip's dependencies (the
      same gap as above); macOS and Linux targets only, Windows OpenSSH designed not built;
@@ -353,8 +353,8 @@ cluster key** (losing one is not losing the other). `onboard/signing.py`:
 * **Export, rotation and revocation need a person at a terminal** (a human grant that follows
   sentinel's rule: stdin and stdout are terminals, no agent marker in the environment, the
   person types the key id back; it is kept as `onboard/human.py` until sentinel is merged).
-  The commands are `ml-stack fleet devices [--learn] [--port P]                         paired devices: lan, tailnet or unreachable; Tailscale found or not
-ml-stack fleet signing show|export|rotate|revoke|confirm|accept`. An agent
+  The commands are `ml-stack cluster devices [--learn] [--port P]                         paired devices: lan, tailnet or unreachable; Tailscale found or not
+ml-stack cluster signing show|export|rotate|revoke|confirm|accept`. An agent
   has no path to the key.
 * **Manifests are short-lived** (3 days) and carry a serial that may not go backwards.
 * **New devices pin the public key at pairing**; its fingerprint is printed on both machines
@@ -542,19 +542,19 @@ whose pinned certificate answers on its tailnet address is listed with route `ta
 ## Commands
 
 ```
-ml-stack fleet listen [--for 10m] [--port 8772] [--no-cluster]    open pairing here; asks with a dialog
-ml-stack fleet requests                                            what is waiting
-ml-stack fleet accept ID --mine|--other | decline ID               answer; accept prints the code
-ml-stack fleet nearby                                              who is open to pairing
-ml-stack fleet pair --host H [--port P] [--code C]                 ask to join
-ml-stack fleet revoke NAME-OR-FINGERPRINT
-ml-stack fleet bootstrap --share DIR [--valid 10m]                 offer ml-stack on an address
-ml-stack fleet bootstrap --ssh [user@]host --share DIR [--dry-run] [--host-key-fingerprint SHA256:...]
-ml-stack fleet share --dir DIR [--sharing NAME=open|owner|never] [--licence NAME=ID,URL] [--source NAME=URL]
-ml-stack fleet share --models [--models-dir DIR ...] [--port 8773]  serve the model store
-ml-stack fleet peers [list|add|remove|on|off|limit]                the devices a model pull asks first
-ml-stack fleet fetch NAME... --from HOST:PORT                      fetch into staging (not installed)
-ml-stack fleet signing show|export FILE|rotate|revoke KEYID|confirm on|off|accept
+ml-stack cluster listen [--for 10m] [--port 8772] [--no-cluster]    open pairing here; asks with a dialog
+ml-stack cluster requests                                            what is waiting
+ml-stack cluster accept ID --mine|--other | decline ID               answer; accept prints the code
+ml-stack cluster nearby                                              who is open to pairing
+ml-stack cluster pair --host H [--port P] [--code C]                 ask to join
+ml-stack cluster revoke NAME-OR-FINGERPRINT
+ml-stack cluster bootstrap --share DIR [--valid 10m]                 offer ml-stack on an address
+ml-stack cluster bootstrap --ssh [user@]host --share DIR [--dry-run] [--host-key-fingerprint SHA256:...]
+ml-stack cluster share --dir DIR [--sharing NAME=open|owner|never] [--licence NAME=ID,URL] [--source NAME=URL]
+ml-stack cluster share --models [--models-dir DIR ...] [--port 8773]  serve the model store
+ml-stack cluster peers [list|add|remove|on|off|limit]                the devices a model pull asks first
+ml-stack cluster fetch NAME... --from HOST:PORT                      fetch into staging (not installed)
+ml-stack cluster signing show|export FILE|rotate|revoke KEYID|confirm on|off|accept
 ```
 
 All take `--json` and `--state DIR`. State is under `<state root>/onboard` (requests, devices,

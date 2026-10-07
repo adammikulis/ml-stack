@@ -584,8 +584,8 @@ def test_a_beacon_too_big_to_leave_the_machine_is_said_out_loud(key, port):
     assert adv.undelivered, "a beacon that was never sent was counted as sent"
     assert adv.last_error, "nothing recorded why the beacon did not go out"
     said = "".join(lines)
-    assert "not in the fleet" in said, said
-    assert "did not reach" in said, said
+    assert "could not be sent to" in said, said
+    assert "not in the fleet" not in said, said
 
 
 def test_a_beacon_that_fits_is_left_exactly_as_it_is():
@@ -834,3 +834,22 @@ class TestBelongingToSeveralClusters:
         clusters_path(anchor).parent.mkdir(parents=True, exist_ok=True)
         clusters_path(anchor).write_text("{not json")
         assert memberships(anchor) == []
+
+
+def test_failed_discovery_reply_does_not_claim_global_fleet_absence(key, port):
+    """A single unreachable query socket says nothing about other discovery routes."""
+    from ml_stack import log
+
+    lines: list[str] = []
+    with log.to(lambda stream, text: lines.append(text)), \
+            Advertiser(Beacon(name="reachable", port=8770), key,
+                       port=port, interval_s=0.2) as advertiser:
+        advertiser._undelivered(("192.168.1.123", 49152), OSError("route unavailable"), 100)
+        found = discover(key, timeout_s=1.0, port=port)
+
+    assert any(beacon.name == "reachable" for beacon in found)
+    said = "".join(lines)
+    assert "192.168.1.123:49152" in said
+    assert "route unavailable" in said
+    assert "Other discovery routes may still work" in said
+    assert "not in the fleet" not in said

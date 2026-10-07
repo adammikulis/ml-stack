@@ -95,7 +95,7 @@
         finally { check(); }
       };
       check();
-      this.replaceChildren(el("div", { class: "group", "aria-label": "Fleet invitations" },
+      this.replaceChildren(el("div", { class: "group", "aria-label": "Cluster invitations" },
         el("h3", {}, "Connect another machine"),
         el("p", { class: "hint" }, "Create an invite on a machine in your cluster, then paste it here on the machine joining. Both machines must be reachable on your network."),
         el("label", { for: `${scope}-invite` }, "Invitation"), invite, join, note));
@@ -158,7 +158,7 @@
             text.focus(); text.select();
             if (!document.execCommand("copy")) throw new Error("Select the invitation and copy it.");
           }
-          note.textContent = "Invite copied. On the other machine, open Fleet and choose Join with invite.";
+          note.textContent = "Invite copied. On the other machine, open ml-stack and choose Join with invite.";
         } catch { text.focus(); text.select(); note.textContent = "Select the invitation and copy it."; }
       };
       const revoke = el("button", { class: "ghost small" }, "Revoke invite");

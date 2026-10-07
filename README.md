@@ -62,7 +62,7 @@ Treat every network, page, model file and model reply as untrusted. Fetches go t
 pipeline with a host allow-list, size caps, hash pins and checks, and a quarantine for what
 fails; model servers start only through the machine's broker; the daemon is on loopback until
 a machine joins a cluster and is TLS with signed requests beyond it; one operating-system
-keystore item protects memory, the fleet signing key and stored credentials; and a watcher
+keystore item protects memory, the cluster signing key and stored credentials; and a watcher
 (sentinel) holds what changed or was forged until a person releases it at a terminal or from
 one dialog. An agent's process cannot do the things reserved to a person. These defences
 reduce what a fooled model can do; they do not make it impossible. Read
@@ -113,8 +113,8 @@ answers every prompt without a terminal to type at.
 Make this machine a peer, and see who else answers:
 
 ```
-ml-stack-fleet join --persist
-ml-stack-fleet status
+ml-stack-cluster join --persist
+ml-stack-cluster status
 ```
 
 Put a model up and talk to it:
@@ -222,7 +222,7 @@ on whichever machine is free rather than the one you are typing at.
 | [Installing](docs/install.md) | the four modes, the one model cache per machine, Windows, and an install a script drives |
 | [The agent workspace](docs/workspace.md) | one bus for the agents on a machine: messages, boards and threads, subscriptions, notes, claims, and a read-only Board page for you |
 | [The commands](docs/commands.md) | every `ml-stack-<command>`, what it takes and what it prints |
-| [The fleet](docs/fleet.md) | joining, placing people across machines, following a branch, and running work on peers from Python |
+| [Clusters](docs/fleet.md) | joining, placing people across machines, following a branch, and running work on peers from Python |
 | [Finding and serving a model](docs/serving.md) | one manager per machine, the settings each model scored best with, how many people fit in a card, llama.cpp builds and draft heads |
 | [Working with a graph](docs/graph.md) | the six things a model is given instead of the graph, how a question is asked, and a conversation of any length |
 | [Documents into a graph](docs/ingest.md) | a book read section by section, with the page and the model behind every claim |

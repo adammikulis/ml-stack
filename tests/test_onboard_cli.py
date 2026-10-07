@@ -1,4 +1,4 @@
-"""`ml-stack-fleet nearby | listen | pair | requests | accept | decline | revoke | bootstrap` as
+"""`ml-stack-cluster nearby | listen | pair | requests | accept | decline | revoke | bootstrap` as
 separate processes on loopback with throwaway state: the owner's terminal and the new machine
 are different processes sharing nothing but a TCP port."""
 

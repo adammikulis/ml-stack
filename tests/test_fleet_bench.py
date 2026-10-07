@@ -1042,7 +1042,7 @@ def _free_port(kind: int = socket.SOCK_STREAM) -> int:
 
 
 def _boot_daemon(tmp_path: Path, name: str, *, keyfile: Path, disco_port: int):
-    """A real ``ml-stack-fleet`` daemon in a subprocess, once it answers /health: (proc,
+    """A real ``ml-stack-cluster`` daemon in a subprocess, once it answers /health: (proc,
     log, open log handle)."""
     from ml_stack.fleet.discovery import derive_token, load_cluster_key
 
@@ -1085,7 +1085,7 @@ def _own_graph(where: Path) -> list[str]:
 
 @pytest.mark.slow
 def test_sweep_fleet_discovers_a_real_daemon_and_measures_on_it_for_real(tmp_path, monkeypatch):
-    """Nothing here is mocked: a real ``ml-stack-fleet`` daemon booted as a subprocess, found
+    """Nothing here is mocked: a real ``ml-stack-cluster`` daemon booted as a subprocess, found
     by real UDP discovery, given a real HTTP job that runs the real ``ml-stack-bench`` over a
     graph that is not the shipped community, on a llama-server-shaped process instead of a
     GPU; the run it keeps comes home. The graph and questions are gone from the

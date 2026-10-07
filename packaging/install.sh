@@ -13,7 +13,7 @@
 #   --uninstall takes it off, and leaves the model cache alone
 #
 # Every step past the install is an ml-stack command, not shell: `ml-stack-serve build`,
-# `ml-stack-setup`, `ml-stack-models fetch`, `ml-stack-fleet join`, `ml-stack-doctor`.
+# `ml-stack-setup`, `ml-stack-models fetch`, `ml-stack-cluster join`, `ml-stack-doctor`.
 # Nothing here reimplements what one of those already does.
 #
 # Answer every prompt with the environment and it runs unattended (a machine with no
@@ -245,7 +245,7 @@ link_scripts() {
   TO="${ML_STACK_DEST:-$HOME/.local/bin}"
   [ "$MODE" = system ] && TO="${ML_STACK_DEST:-/usr/local/bin}"
   mkdir -p "$TO" 2>/dev/null || true
-  for name in ml-stack ml-stack-traind ml-stack-fleet ml-stack-peers ml-stack-serve \
+  for name in ml-stack ml-stack-traind ml-stack-cluster ml-stack-peers ml-stack-serve \
               ml-stack-models ml-stack-bench ml-stack-setup ml-stack-doctor ml-stack-mcp; do
     [ -x "$FROM/$name" ] || continue
     ln -sf "$FROM/$name" "$TO/$name" 2>/dev/null || true
@@ -385,7 +385,7 @@ fetch_models() {
 
 join_fleet() {
   step "joining the fleet"
-  [ -x "$BIN/ml-stack-fleet" ] || { say "skipped: no ml-stack-fleet"; return 0; }
+  [ -x "$BIN/ml-stack-cluster" ] || { say "skipped: no ml-stack-cluster"; return 0; }
   set -- join --persist
   [ -n "${ML_STACK_NAME:-}" ] && set -- "$@" --name "$ML_STACK_NAME"
   [ -n "${ML_STACK_CLUSTER:-}" ] && set -- "$@" --group "$ML_STACK_CLUSTER"
@@ -394,10 +394,10 @@ join_fleet() {
     set -- "$@" --passphrase "$ML_STACK_PASSPHRASE"
   elif ! interactive; then
     say "no passphrase, and no terminal to ask at. Set ML_STACK_PASSPHRASE and re-run,"
-    say "or run:  ml-stack-fleet join --persist"
+    say "or run:  ml-stack-cluster join --persist"
     return 0
   fi
-  "$BIN/ml-stack-fleet" "$@" || say "  join did not finish; 'ml-stack-fleet join' retries"
+  "$BIN/ml-stack-cluster" "$@" || say "  join did not finish; 'ml-stack-cluster join' retries"
 }
 
 what_came_with_it() {

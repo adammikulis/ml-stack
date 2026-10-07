@@ -8,7 +8,7 @@ fingerprint is shown and the owner types it in full, and then only that key is t
 run. The remote side runs one fixed script (`remote_install.txt`, printed in full with its
 SHA-256 by ``--dry-run``) on files we copy: the wheel, the signed manifest, an OpenSSH signature
 over it. It checks the signature and every SHA-256 before pip, installs into a per-user venv
-and starts ``ml-stack-fleet listen``. Models are not copied; Windows targets are not built.
+and starts ``ml-stack-cluster listen``. Models are not copied; Windows targets are not built.
 """
 
 from __future__ import annotations

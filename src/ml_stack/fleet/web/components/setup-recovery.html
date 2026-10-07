@@ -3,7 +3,7 @@
   const M = window.fleetModel;
   window.setupRecovery = function (group, done) {
     const note = M.el("div", { class: "hint", "aria-live": "polite" },
-      "Ask a cluster owner to export a recovery file with ml-stack-fleet recovery export FILE. The file grants cluster access; choose it only if you trust its owner.");
+      "Ask a cluster owner to export a recovery file with ml-stack-cluster recovery export FILE. The file grants cluster access; choose it only if you trust its owner.");
     const file = M.el("input", { type: "file", id: "cluster-recovery-file", accept: ".json,.recovery,application/json,text/plain" });
     file.style.width = "100%"; file.style.minWidth = "0";
     const join = M.el("button", { disabled: true }, `Join ${group} with recovery file`);

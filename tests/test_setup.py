@@ -524,7 +524,7 @@ def test_fleet_finding_says_in_no_cluster_when_never_joined(tmp_path):
     assert found.keys() == {"fleet: joined", "ports"}
     assert not found["fleet: joined"].good
     assert found["fleet: joined"].said == "in no cluster"
-    assert "ml-stack-fleet join --passphrase" in found["fleet: joined"].fix
+    assert "ml-stack-cluster join --passphrase" in found["fleet: joined"].fix
 
 
 def test_fleet_finding_says_the_daemon_does_not_answer(tmp_path):
@@ -538,7 +538,7 @@ def test_fleet_finding_says_the_daemon_does_not_answer(tmp_path):
                              cluster_key_path=keyfile)}
     assert found["fleet: joined"].good
     assert not found["fleet: daemon"].good
-    assert found["fleet: daemon"].fix == "ml-stack-fleet join"
+    assert found["fleet: daemon"].fix == "ml-stack-cluster join"
     assert "fleet: seen" not in found
     assert found["ports"].good
 

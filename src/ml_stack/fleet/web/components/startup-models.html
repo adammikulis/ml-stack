@@ -5,7 +5,7 @@
 
   M.startupModels = async function (kept) {
     const panel = el("div", { class: "group" });
-    const status = el("div", { id: "startup-model-status", role: "status" });
+    const status = el("div", { id: "startup-model-status", role: "status", "aria-live": "polite" });
     let result;
     try {
       result = await M.api("/ui/models/startup");
@@ -41,7 +41,7 @@
     const opt = el("input", { type: "checkbox", id: "startup-model-download" });
     opt.checked = !!kept.downloadModel;
     opt.onchange = () => { kept.downloadModel = opt.checked; };
-    panel.append(el("h2", {}, "Choose a model"),
+    panel.append(el("h2", {}, "Optional first model"),
       el("div", { class: "hint", id: "startup-model-memory" },
         `${memory.pool || "Memory"}: ${M.gb(memory.capacity_gb)?.replace("GB", "GiB") || "unknown"} capacity, `
         + `${M.gb(memory.free_gb)?.replace("GB", "GiB") || "unknown"} free. `
@@ -49,7 +49,7 @@
       el("label", { for: select.id }, "Model"), select, detail,
       el("label", { class: "opt", for: opt.id }, opt,
         M.row("Download this model when I install and continue",
-          "Optional. You can finish setup and get a model later.")));
+          "Setup does not require a download. Browse Models when you are ready.")));
 
     const report = (g) => {
       status.replaceChildren(M.ui("ml-progress", {

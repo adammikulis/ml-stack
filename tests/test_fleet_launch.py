@@ -51,7 +51,7 @@ def test_with_nothing_answering_it_says_how_to_start_the_page():
     assert "cluster" not in text
     assert f"ml-stack                        -- starts it and opens http://127.0.0.1:{port}/ui/" \
         in text
-    assert "ml-stack-fleet join --persist" in text
+    assert "ml-stack-cluster join --persist" in text
 
 
 def test_with_a_daemon_answering_it_names_the_page_and_the_cluster(daemon):

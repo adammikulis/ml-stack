@@ -3,7 +3,7 @@
 macOS and Linux get a dialog with real buttons (Decline, Accept as mine, Accept as someone
 else's); the pairing code is in a second dialog, only after an Accept. Windows is designed
 (toast buttons need a registered app id), not built. With no desktop, the console fallback
-prints the request and `ml-stack fleet accept` / `decline` answer it. A stranger's text is
+prints the request and `ml-stack cluster accept` / `decline` answer it. A stranger's text is
 cleaned and passed to the system as an argument after ``--``, never spliced into a script.
 ``ML_STACK_NOTIFY`` picks the notifier: ``system`` (default), ``console`` or ``off``. The test
 suite sets ``console``, and shims on PATH make any real attempt fail the run.
@@ -170,8 +170,8 @@ class Console:
         self.say = say
 
     def ask(self, title: str, body: str) -> str:
-        self.say(f"{clean(title, 80)}: {clean(body, 300)} Answer with: ml-stack fleet accept "
-                 "ID --mine|--other, or ml-stack fleet decline ID")
+        self.say(f"{clean(title, 80)}: {clean(body, 300)} Answer with: ml-stack cluster accept "
+                 "ID --mine|--other, or ml-stack cluster decline ID")
         return "unavailable"
 
     def show_code(self, title: str, body: str) -> bool:

@@ -1,4 +1,4 @@
-"""``ml-stack fleet signing``: see the signing key, and the steps only a person may take."""
+"""``ml-stack cluster signing``: see the signing key, and the steps only a person may take."""
 
 from __future__ import annotations
 

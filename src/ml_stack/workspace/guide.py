@@ -129,7 +129,7 @@ def _offer(ws: Workspace, hint: str, plan: Plan, talk: Talk) -> str:
     config = coordinator_config.load(ws.base)
     if plan.remote and config.get("mode") != "host":
         raise ValueError("activate hosting first: run `ml-stack-workspace coordinator host` in your "
-                         "person terminal; then pair the receiving device into the same Fleet cluster")
+                         "person terminal; then pair the receiving device into the same cluster")
     offers = []
     if config.get("mode") == "host":
         offers = [(peer, info) for peer, info in coordinator_client.discover()
@@ -148,7 +148,7 @@ def _offer(ws: Workspace, hint: str, plan: Plan, talk: Talk) -> str:
         block = block.replace(f"join {code} --name",
                               f"join {code} --coordinator {shlex.quote(offers[0][0].name)} "
                               f"--workspace {shlex.quote(config['workspace'])} --name")
-        block = ("First enroll this device in the same Fleet cluster using person-approved pairing. "
+        block = ("First enroll this device in the same cluster using person-approved pairing. "
                  "This agent code does not grant cluster membership. Use PowerShell for this command on Windows.\n" + block)
     if plan.code_only or plan.wait_s <= 0:
         say(block)
