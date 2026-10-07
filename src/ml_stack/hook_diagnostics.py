@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import argparse
 import hashlib
 import json
 import os
@@ -15,8 +14,11 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
-from ml_stack import __version__, lock
+import ml_stack
+from ml_stack import home, lock, windows_private
+from ml_stack.command import Group, flag
 from ml_stack.files import writing
+from ml_stack.log import say, warn
 from ml_stack.redact.secrets import env_secrets, redact
 
 MAX_RECORD = 32768
@@ -27,7 +29,7 @@ IDENTIFIER = re.compile(r"[0-9a-f]{32}\Z")
 def clean(value: object) -> str:
     """Return a bounded, credential-redacted single-line value."""
     text, _ = redact(str(value), env_secrets(os.environ))
-    return " ".join(text.replace(str(Path.home()), "~").split())[:1000]
+    return " ".join(text.replace(str(home.user_home()), "~").split())[:1000]
 
 
 def reason(error: BaseException) -> str:
@@ -37,16 +39,15 @@ def reason(error: BaseException) -> str:
 
 def directory() -> Path:
     """Return the configured local diagnostic directory."""
-    return Path(os.environ.get("ML_STACK_HOME", str(Path.home() / ".ml-stack"))).expanduser() / "hook-diagnostics"
+    return home.state("hook-diagnostics")
 
 
 def _private(path: Path, *, folder: bool = False) -> None:
     held = path.lstat()
     allowed = stat.S_ISDIR(held.st_mode) if folder else stat.S_ISREG(held.st_mode)
     if sys.platform == "win32":
-        from ml_stack.windows_private import problem, validate
-        validate(path)
-        if not allowed or problem(path):
+        windows_private.validate(path)
+        if not allowed or windows_private.problem(path):
             raise PermissionError("hook diagnostics require an owned private Windows path")
     elif not allowed or held.st_uid != os.getuid() or held.st_mode & 0o077:
         raise PermissionError("hook diagnostics require an owned private plain path")
@@ -54,8 +55,7 @@ def _private(path: Path, *, folder: bool = False) -> None:
 
 def _ancestors(path: Path) -> None:
     if sys.platform == "win32":
-        from ml_stack.windows_private import validate
-        validate(path)
+        windows_private.validate(path)
         return
     for ancestor in (path, *path.parents):
         try:
@@ -72,12 +72,11 @@ def _open(root: Path, name: str, flags: int) -> int:
     _private(root, folder=True)
     if sys.platform == "win32":
         path = root / name
-        from ml_stack.windows_private import restrict, validate
-        validate(path)
+        windows_private.validate(path)
         descriptor = os.open(path, flags, 0o600)
         try:
             if flags & os.O_CREAT:
-                restrict(path)
+                windows_private.restrict(path)
             _private(path)
             held, current = os.fstat(descriptor), path.lstat()
             if (held.st_dev, held.st_ino) != (current.st_dev, current.st_ino):
@@ -123,8 +122,7 @@ def _write(path: Path, value: dict) -> None:
         raise ValueError("hook diagnostic record exceeds its bound")
     with writing(path) as temporary:
         if sys.platform == "win32":
-            from ml_stack.windows_private import restrict
-            restrict(temporary)
+            windows_private.restrict(temporary)
         descriptor = _open(path.parent, temporary.name, os.O_WRONLY)
         with os.fdopen(descriptor, "wb") as stream:
             stream.write(data)
@@ -167,7 +165,7 @@ def _occurrence(root: Path, body: dict) -> dict:
 def _runtime() -> dict[str, str]:
     marker = Path(__file__).parent / "fleet" / "built-from"
     commit = marker.read_text()[:100].strip() if marker.is_file() else "unstamped"
-    return {"version": __version__, "commit": clean(commit), "python": clean(sys.executable),
+    return {"version": ml_stack.__version__, "commit": clean(commit), "python": clean(sys.executable),
             "package": clean(Path(__file__).parent)}
 
 
@@ -183,15 +181,14 @@ def record(error: BaseException, event: str, stage: str, *, metadata: dict | Non
             raise PermissionError("hook diagnostic parent must be a plain directory")
         root.mkdir(mode=0o700, exist_ok=True)
         if sys.platform == "win32":
-            from ml_stack.windows_private import restrict
-            restrict(root)
+            windows_private.restrict(root)
         _private(root, folder=True)
         frames = [{"file": clean(frame.filename), "function": clean(frame.name), "line": frame.lineno}
                   for frame in traceback.extract_tb(error.__traceback__)[-20:]]
         body = {"id": identifier, "time": datetime.now(UTC).isoformat(), "event": clean(event),
                 "stage": clean(stage), "category": clean(f"{event}.{stage}.{type(error).__name__}"),
                 "reason": summary, "runtime": _runtime(), "frames": frames,
-                "trace": json.loads(redact(json.dumps(metadata or {}).replace(str(Path.home()), "~"), env_secrets(os.environ))[0])}
+                "trace": json.loads(redact(json.dumps(metadata or {}).replace(str(home.user_home()), "~"), env_secrets(os.environ))[0])}
         body["occurrence"] = _occurrence(root, body)
         _write(root / f"{identifier}.json", body)
         records = sorted((item for item in root.glob("*.json") if IDENTIFIER.fullmatch(item.stem)),
@@ -205,15 +202,12 @@ def record(error: BaseException, event: str, stage: str, *, metadata: dict | Non
     return f"[diagnostic={identifier}; stage={stage}; runtime={body['runtime']['version']}@{body['runtime']['commit']}] {summary}; inspect: python -m ml_stack.hook_diagnostics {identifier}"
 
 
-def main(argv: list[str] | None = None) -> int:
+def inspect(args) -> int:
     """Print recent local failure records or one diagnostic ID."""
-    parser = argparse.ArgumentParser(description="Inspect credential-redacted local hook failure records.")
-    parser.add_argument("id", nargs="?", help="diagnostic ID; omitted lists the latest 20 records")
-    args = parser.parse_args(argv)
     try:
         root = directory()
         if not root.exists():
-            print("No local hook failure records.")
+            say("No local hook failure records.")
             return 0
         _private(root, folder=True)
         if args.id and not IDENTIFIER.fullmatch(args.id):
@@ -227,12 +221,17 @@ def main(argv: list[str] | None = None) -> int:
                 if not IDENTIFIER.fullmatch(signature):
                     raise ValueError("invalid hook diagnostic signature")
                 value["occurrence"] = _read(root / f"{signature}.signature.json")
-            print(redact(json.dumps(value, sort_keys=True, indent=2), env_secrets(os.environ))[0])
+            say(redact(json.dumps(value, sort_keys=True, indent=2), env_secrets(os.environ))[0])
         return 0
     except (OSError, ValueError, TypeError, AttributeError, ImportError, RuntimeError) as error:
-        print(f"Hook diagnostics unavailable: {reason(error)}", file=sys.stderr)
+        warn(f"Hook diagnostics unavailable: {reason(error)}")
         return 2
 
 
+COMMAND = Group("ml-stack-doctor hooks", "Inspect credential-redacted local hook failure records.",
+                options=[flag("id", nargs="?", help="diagnostic ID; omitted lists the latest 20 failures")],
+                run=inspect)
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(COMMAND.run())

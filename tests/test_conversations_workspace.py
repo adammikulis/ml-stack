@@ -1,11 +1,12 @@
 """Shared team and model conversations driven through the Fleet page."""
 
 import pytest
-from test_fleet_chat_browser import chat_browser  # noqa: F401
+import test_fleet_chat_browser as chat_fixtures
 from workspace_kit import Kit, clean_env
 
 from ml_stack.workspace import tokens
 
+chat_browser = chat_fixtures.chat_browser
 pytestmark = pytest.mark.slow
 
 

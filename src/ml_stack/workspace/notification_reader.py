@@ -5,6 +5,8 @@ import sys
 from pathlib import Path
 
 from ml_stack import worktreerules
+from ml_stack.hook_diagnostics import reason
+from ml_stack.log import say, warn
 from ml_stack.workspace import project_connection, tokens
 from ml_stack.workspace.identity import AGENT, Denied, valid_id
 
@@ -79,8 +81,7 @@ def read(label: str, cwd: Path, session: str, *, canonical=None) -> str:
 
 if __name__ == '__main__':
     try:
-        print(read(sys.argv[1], Path(sys.argv[2]), sys.argv[3]))
+        say(read(sys.argv[1], Path(sys.argv[2]), sys.argv[3]))
     except (Denied, OSError, RuntimeError, ValueError, KeyError) as error:
-        from ml_stack.harnesshook import _diagnostic
-        print(_diagnostic(error), file=sys.stderr)
+        warn(reason(error))
         raise SystemExit(1) from None

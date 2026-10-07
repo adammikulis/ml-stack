@@ -428,7 +428,10 @@ redacted local record. Fix a hook regression and repeat these checks before cont
 that depends on it. Notification outages must warn without blocking completed local tools;
 independent authorization and unfinished-work completion checks remain enforced. Inspect
 records with `ml-stack-doctor hooks [ID]` or, without workspace imports,
-`python -m ml_stack.hook_diagnostics [ID]`. Record runtime cutover checks in the handoff.
+`python -m ml_stack.hook_diagnostics [ID]`. These bounded local incident logs preserve
+failure evidence while workspace services or graph startup are unavailable. The signature
+summary retains first occurrence time, checkout branch/HEAD, installed runtime revision and
+repeat count across detail rotation. Record runtime cutover checks in the handoff.
 
 Hooks and agent instructions preserve authenticated claims, named-file changes, independent
 review, and restrictions on destructive commands and `main`. Primary-checkout location alone
