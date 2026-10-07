@@ -68,3 +68,92 @@ def test_canonical_project_selection_never_falls_back_to_local_board(chat_browse
     assert seen and all(f'/ui/projects/{project}/board/' in url for url in seen)
     assert page.locator('chat-view ml-board').get_attribute('endpoint') == f'/ui/projects/{project}/board'
     assert page.get_by_label('Workspace', exact=True).input_value() != 'local'
+
+
+def test_new_dm_from_model_chat_opens_full_child_identity_and_survives_reload(chat_browser, monkeypatch, tmp_path):
+    from playwright.sync_api import expect
+
+    kit = Kit(clean_env(monkeypatch, tmp_path / 'workspace'))
+    kit.limits(sends_per_window=1000)
+    parent_name, child_name = 'p' * 48, 'c' * 48
+    parent = kit.agent(parent_name)
+    child = kit.ws.registry.delegate(kit.ws.auth(parent), child_name, 600, (), 10)
+    identity = parent_name + '/' + child_name
+    tokens.store(kit.base, tokens.OWNER_FILE, kit.owner)
+    kit.ws.send(child, 'owner', 'note', 'Ready to review this experiment.')
+    served, page = chat_browser
+    page.goto(f'http://127.0.0.1:{served.port}/ui#chat')
+    page.get_by_label('Workspace', exact=True).select_option('local')
+    direct = page.locator('#conversation-direct')
+    direct.locator('summary').get_by_text('+ New direct message', exact=True).click()
+    direct.get_by_label('Message an agent', exact=True).select_option(identity)
+    direct.get_by_role('button', name='Open', exact=True).click()
+    expect(page.locator('#conversation-team')).to_be_visible()
+    expect(page.locator('#conversation-model')).to_be_hidden()
+    board = page.locator('chat-view ml-board')
+    expect(board.locator('.msg pre')).to_contain_text('Ready to review this experiment.')
+    assert board.evaluate('node => node.view.b') == identity
+    board.get_by_label('Message', exact=True).fill('Review the held-out dataset.')
+    board.get_by_role('button', name='Send', exact=True).click()
+    expect(board.locator('.msg pre')).to_contain_text(['Ready to review this experiment.', 'Review the held-out dataset.'])
+    page.reload()
+    expect(page.locator('#conversation-team')).to_be_visible()
+    expect(board.locator('.msg pre')).to_contain_text(['Ready to review this experiment.', 'Review the held-out dataset.'])
+    assert board.evaluate('node => node.view.b') == identity
+
+
+@pytest.mark.parametrize('theme_tokens', [
+    ('light', '#ffffff', '#1b1f3a', '#ff5fa2', '#1b1f3a', 1),
+    ('dark', '#242943', '#edf0fa', '#ff5fa2', '#1b1f3a', .8),
+    ('custom', '#253d31', '#e8ffef', '#652891', '#ffffff', .65),
+])
+def test_conversation_surfaces_consume_resolved_theme_tokens(chat_browser, monkeypatch, tmp_path, theme_tokens):
+    from playwright.sync_api import expect
+
+    theme, surface, ink, pink, pink_ink, density = theme_tokens
+
+    kit = Kit(clean_env(monkeypatch, tmp_path / 'workspace'))
+    tokens.store(kit.base, tokens.OWNER_FILE, kit.owner)
+    kit.ws.board.create(kit.agent('theme-reviewer'), '#theme')
+    served, page = chat_browser
+    page.goto(f'http://127.0.0.1:{served.port}/ui#chat')
+    page.locator('#chat-model-button').wait_for(state='visible')
+    page.evaluate('''settings => {
+      const root = document.documentElement;
+      root.dataset.theme = settings.theme;
+      root.style.fontSize = '18px';
+      for (const [key,value] of Object.entries(settings.tokens)) root.style.setProperty(key,value);
+    }''', {'theme': theme, 'tokens': {
+        '--ml-bg': surface, '--ml-surface': surface, '--ml-sunken': surface,
+        '--ml-text': ink, '--ml-muted': ink, '--poolside-pink': pink,
+        '--poolside-pink-ink': pink_ink, '--ui-density': str(density), '--ml-font': 'Georgia, serif',
+    }})
+    expected = page.evaluate('''values => {
+      const sample = document.createElement('span'); document.body.append(sample);
+      const result = values.map(value => {sample.style.color=value; return getComputedStyle(sample).color;});
+      sample.remove(); return result;
+    }''', [surface, ink, pink, pink_ink])
+    actual = page.locator('#conversation-model').evaluate('''node => ({
+      background:getComputedStyle(node).backgroundColor, ink:getComputedStyle(node).color,
+      font:getComputedStyle(node).fontFamily, padding:parseFloat(getComputedStyle(node.querySelector('.chat-toolbar')).paddingLeft),
+      title:parseFloat(getComputedStyle(node.querySelector('h1')).fontSize)
+    })''')
+    assert actual['background'] == expected[0]
+    assert actual['ink'] == expected[1]
+    assert 'Georgia' in actual['font']
+    assert actual['padding'] == pytest.approx(28 * density)
+    assert actual['title'] > 20
+    send = page.locator('#chat-send').evaluate('node => ({bg:getComputedStyle(node).backgroundColor,ink:getComputedStyle(node).color})')
+    assert send == {'bg': expected[2], 'ink': expected[3]}
+    page.locator('#chat-model-button').click()
+    expect(page.locator('#chat-model-dialog')).to_be_visible()
+    assert page.locator('#chat-model-dialog').evaluate('node => getComputedStyle(node).backgroundColor') == expected[0]
+    page.get_by_role('button', name='Close', exact=True).click()
+    page.get_by_label('Workspace', exact=True).select_option('local')
+    page.locator('#conversation-channels').get_by_role('button', name='#theme', exact=True).click()
+    board = page.locator('chat-view ml-board')
+    expect(board.get_by_label('Message', exact=True)).to_be_visible()
+    assert board.locator('main header').evaluate('node => getComputedStyle(node).backgroundColor') == expected[0]
+    assert board.locator('.composer').evaluate('node => getComputedStyle(node).backgroundColor') == expected[0]
+    assert board.get_by_label('Message', exact=True).evaluate('node => getComputedStyle(node).color') == expected[1]
+    page.screenshot(path=f'/private/tmp/poolside-conversations-theme-{theme}.png', full_page=True)
