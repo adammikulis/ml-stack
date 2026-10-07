@@ -96,6 +96,7 @@ def test_wsl_installer_uses_cached_wheel_without_source_checkout(monkeypatch, tm
     assert len(calls) == 3
     argv, kwargs = calls[1]
     assert argv[-1].startswith("/tmp/wheel path; $(touch injected) `touch injected`.whl[")
+    assert "agents" in argv[-1].partition("[")[2].rstrip("]").split(",")
     assert "--upgrade" in argv
     assert "-e" not in argv
     assert not kwargs.get("shell")

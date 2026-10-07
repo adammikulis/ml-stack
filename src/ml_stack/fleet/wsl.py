@@ -84,7 +84,7 @@ print(json.dumps(dict(kernel=platform.release(), python=list(sys.version_info[:2
     if ready != "1":
         say("Preparing ml-stack's Linux runtime in Ubuntu.")
         _read("python3", "-m", "venv", runtime)
-    extras = "graph,store,web,hub,memory,plot,fleet-tls,fleet-update,fleet-onboard"
+    extras = "agents,graph,store,web,hub,memory,plot,fleet-tls,fleet-update,fleet-onboard"
     fingerprint = hashlib.sha256((wheel_digest + "\n" + extras + "\n" + linux_source + "\ncache-v1\n").encode()).hexdigest()
     marker = runtime + "/ml-stack-install"
     installed = _read(python, "-c", "import pathlib,sys; p=pathlib.Path(sys.argv[1]); "
