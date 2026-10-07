@@ -40,7 +40,8 @@ def test_frozen_daemon_keeps_graph_conversations_after_restart(tmp_path):
         readiness = call(port, "GET", "/ui/chat")
         assert readiness["runtime_ready"], readiness.get("runtime_error")
         assert call(port, "GET", "/ui/board/agents") == {"owner_id": "person", "agents": []}
-        assert call(port, "GET", "/ui/conversations/saved")["messages"] == legacy["messages"]
+        assert call(port, "GET", "/ui/conversations/saved")["messages"] == [
+            {**legacy["messages"][0], "reasoning": "", "status": "complete"}]
         made = call(port, "POST", "/ui/conversations", {"model": "chosen-model", "title": "Packaged chat",
                     "settings": {"project": "/tmp/project", "temperature": .4}})
         assert made["settings"]["temperature"] == .4
