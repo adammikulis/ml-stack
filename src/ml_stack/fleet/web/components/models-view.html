@@ -138,16 +138,16 @@ models-view .model-loading{padding:28px;border-radius:16px;background:var(--bg-r
         el("span", { class: "spin" }), ` Starting ${name}…`));
       try {
         const r = await api("/ui/serving", { method: "POST", body: JSON.stringify(name.includes("/") || name.includes("\\") ? { path: name } : { name }) });
+        const identity = (r.models || []).find(model => [name, name.split('/').pop(), label].includes(model));
         this.note.replaceChildren(r.error
           ? el("div", { class: "err" }, r.error)
-          : el("div", { class: "ok" }, `${label} is ready. `, el("button", {class:"ghost small", onclick:()=>this.openChat(label)}, "Open chat")));
+          : el("div", { class: "ok" }, `${label} is ready. `, el("button", {class:"ghost small", onclick:()=>this.openChat(identity || name.split('/').pop())}, "Open chat")));
         if (!r.error) {
           this.draw();
           const selected = this.selectedModel;
           if (selected?.from === "chat" && [selected.path, selected.name, selected.id].includes(name)) {
             this.selectedModel = null;
-            window.dispatchEvent(new CustomEvent("fleet-chat-ready", {detail:{model:label}}));
-            M.go("chat");
+            this.openChat(identity || name.split('/').pop());
           }
         }
       } catch (error) {
