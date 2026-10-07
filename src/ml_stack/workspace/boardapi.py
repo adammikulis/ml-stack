@@ -155,7 +155,9 @@ class BoardApi:
 
     def _plain(self, row: dict[str, Any]) -> dict[str, Any]:
         body, cut = plain.text(row["body"], self.ws.limits.board_message_chars)
+        from ml_stack.workspace.agent_display import metadata
         return {"seq": row["seq"], "type": row["type"], "from": row["from"],
+                **metadata(self.ws.registry, row["from"], row.get("label", "")),
                 "label": plain.line(row.get("label", ""), 48), "role": row["role"],
                 "to": row["to"], "ts": row["ts"], "thread": row.get("thread") or row["seq"],
                 "reply_to": row.get("reply_to", 0), "mentions": list(row.get("mentions", [])),
@@ -311,7 +313,7 @@ class BoardApi:
                                         "replies": 0, "unread": 0})
             if r["seq"] == root:
                 t.update(subject=data_line(r["subject"] or r["body"], 120), started=r["ts"],
-                         **{"from": r["from"]})
+                         **{"from": r["from"], "display_name": self._plain(r)["display_name"]})
             else:
                 t["replies"] += 1
             t["last"] = max(t["last"], r["ts"])

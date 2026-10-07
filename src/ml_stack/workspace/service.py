@@ -10,6 +10,7 @@ from typing import Any, TypedDict, Unpack
 
 from ml_stack.sentinel import human
 from ml_stack.workspace import (
+    agent_display,
     agent_invites,
     limits as limits_mod,
     reports,
@@ -264,6 +265,14 @@ class Workspace:
         clean_model(model)
         self._record_model(name, model, harness, VERIFIED if verified else CLAIMED)
 
+    def register_session(self, token: str, device: dict | None = None) -> dict[str, Any]:
+        """Register main-session presentation without granting capabilities."""
+        self._may(self.auth(token), "claim")
+        if device is not None:
+            self.registry.record_device_claim(token, device)
+        self.registry.register_session(token)
+        return agent_display.metadata(self.registry, self.auth(token).id)
+
     def claim_model(self, token: str, model: str, harness: str = "", label: str = "") -> dict[str, Any]:
         """The caller's own model as the caller says it (``claimed``); with ``label`` the model of
         that helper. Refused where a launcher recorded a different model."""
@@ -424,7 +433,7 @@ class Workspace:
             text = f"subject: {row['subject']}\n{row['body']}" if row["subject"] else row["body"]
         if reader is not None and not qid:
             text = self.files.render(reader, text)
-        sender = f"{row['from']}/{row['label']}" if row.get("label") else row["from"]
+        sender = agent_display.metadata(self.registry, row["from"], row.get("label", ""))["display_name"]
         model, model_state = row.get("model", ""), row.get("model_state", "")
         shown_model = "" if row["role"] == HUMAN else f" ({describe(model, model_state)})"
         screened = fence(text, f"workspace:{row['from']}#{row['seq']}",
@@ -804,5 +813,6 @@ class Workspace:
                             "unread": self.bus.pending(name), "expires": info["expires"],
                             "project": info["project"].get("name", ""),
                             "model": (shown := self.registry.model_of(name))[0],
-                            "model_state": shown[1], "harness": info["harness"], "device": info["device"]})
+                            "model_state": shown[1], "harness": info["harness"], "device": info["device"],
+                            **agent_display.metadata(self.registry, name)})
         return out

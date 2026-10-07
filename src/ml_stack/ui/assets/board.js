@@ -211,9 +211,7 @@ class MlBoard extends MlElement {
       this.me = line(b.me ?? "", 48);
       this.boards = b.boards ?? [];
       this.dms = d.conversations ?? [];
-      if (this.base().startsWith("/ui/")) {
-        try { this.agents = (await this.get("agents")).agents || []; } catch { this.agents = []; }
-      }
+      try { this.agents = (await this.get("agents")).agents || []; } catch { this.agents = []; }
       this.error = "";
       const view = this.view.kind === "none" && this.boards.length
         ? {kind:"board", name:(this.boards.find(board => board.name === "#general") || this.boards[0]).name} : this.view;
@@ -268,9 +266,9 @@ class MlBoard extends MlElement {
 
   update() {
     if (!this.nav) return;
-    const item = (label, count, current, onclick) => h("button", {
+    const item = (label, count, current, onclick, title = "") => h("button", {title,
       type: "button", "aria-current": current ? "true" : null, onclick },
-    h("span", {}, line(label, 60)), count ? h("span", { class: "count" }, String(count)) : null);
+    h("span", {}, line(label, 160)), count ? h("span", { class: "count" }, String(count)) : null);
     this.nav.replaceChildren(
       h("h3", {}, "Channels"),
       ...this.boards.map((b) => item(b.name, b.unread, this.view.name === b.name || this.view.board === b.name,
@@ -281,8 +279,8 @@ class MlBoard extends MlElement {
         this.view.kind === "dm" && this.view.a === c.a && this.view.b === c.b,
         () => this.open({ kind: "dm", a: c.a, b: c.b }))),
       ...(this.agents.length ? [h("h3", {}, "Agents"), ...this.agents.map(agent =>
-        item(agent.device?.label ? `${agent.id} · ${agent.device.label} (${agent.device.verification})` : agent.id, 0, this.view.kind === "dm" && [this.view.a, this.view.b].includes(agent.id),
-          () => this.open({kind:"dm", a:this.me, b:agent.id})))] : []));
+        item(agent.display_name || agent.id, 0, this.view.kind === "dm" && [this.view.a, this.view.b].includes(agent.id),
+          () => this.open({kind:"dm", a:this.me, b:agent.id}), `${agent.id} · ${agent.device?.verification || "unknown"}`))] : []));
     this.feed.replaceChildren(...this.pane());
     const key = JSON.stringify([this.target(), this.readonly, this.draft.error, Boolean(this.error), this.loading]);
     if (key !== this.composerKey) {
@@ -295,10 +293,10 @@ class MlBoard extends MlElement {
   newDm() {
     const box = this.agents.length
       ? h("select", {"aria-label":"Message an agent"}, h("option", {value:""}, "Choose an agent…"),
-          ...this.agents.map(agent => h("option", {value:agent.id}, line(agent.id, 48))))
-      : h("input", {type:"text", maxlength:"48", "aria-label":"Message an agent", placeholder:"agent id"});
+          ...this.agents.map(agent => h("option", {value:agent.id}, line(agent.display_name || agent.id, 160))))
+      : h("input", {type:"text", maxlength:"97", "aria-label":"Message an agent", placeholder:"agent id"});
     const open = () => {
-      const name = line(box.value, 48);
+      const name = line(box.value, 97);
       if (name) this.open({ kind: "dm", a: this.me, b: name });
     };
     box.addEventListener("keydown", (e) => { if (e.key === "Enter") open(); });
@@ -366,13 +364,14 @@ class MlBoard extends MlElement {
     const back = v.kind === "thread" && v.board
       ? h("button", { class: "back", type: "button", onclick: () => this.open({ kind: "board", name: v.board }) },
         `Back to ${line(v.board, 60)}`) : null;
-    const title = v.kind === "dm" ? `${line(v.a, 48)} and ${line(v.b, 48)}` : `Thread ${Number(v.root) || ""}`;
-    return [back, this.title(title, this.readonly ? "read only" : "live"),
+    const display = id => this.agents.find(agent => agent.id === id)?.display_name || id;
+    const title = v.kind === "dm" ? `${line(display(v.a), 160)} and ${line(display(v.b), 160)}` : `Thread ${Number(v.root) || ""}`;
+    return [back, this.title(title, this.readonly ? "read only" : "live", v.kind === "dm" ? `${v.a} and ${v.b}` : ""),
       ...this.messages(v.kind === "dm" ? v.a : "")];
   }
 
-  title(text, badge) {
-    return h("header", {}, h("h2", {}, text), h("span", {class:"badge"}, badge),
+  title(text, badge, identity = "") {
+    return h("header", {}, h("h2", {title:identity}, text), h("span", {class:"badge"}, badge),
       this.base().startsWith("/ui/") ? h("button", {class:"back", type:"button", onclick:() => this.markRead()}, "Mark read") : null);
   }
 
@@ -381,14 +380,14 @@ class MlBoard extends MlElement {
     return this.items.map((t) => h("button", { class: "row", type: "button",
       onclick: () => this.open({ kind: "thread", root: t.root, board: this.view.name }) },
     h("span", { class: "subject" }, line(t.subject) || "(no subject)"),
-    h("span", { class: "meta" }, ` ${line(t.from, 48)}, ${Number(t.replies) || 0} replies`
+    h("span", { class: "meta" }, ` ${line(t.display_name || t.from, 160)}, ${Number(t.replies) || 0} replies`
       + `${t.unread ? `, ${Number(t.unread)} unread` : ""}, ${when(t.last)}`)));
   }
 
   messages(first) {
     if (!this.items.length) return [h("p", { class: "state" }, "No messages.")];
     return this.items.map((m) => h("article", { class: `msg${first && m.from === first ? " sent" : ""}` },
-      h("div", { class: "who" }, `${line(m.from, 48)}`,
+      h("div", { class: "who", title:m.from }, `${line(m.display_name || m.from, 160)}`,
         m.role === "human" ? null : h("span", { class: "meta" }, ` (${m.model ? `${line(m.model, 80)}, ${line(m.model_state, 12)}` : "model unknown"})`),
         h("span", { class: "meta" }, `  ${line(m.type, 16)}, ${when(m.ts)}${m.held ? ", held in quarantine" : ""}`)),
       m.subject ? h("div", { class: "meta" }, line(m.subject)) : null,

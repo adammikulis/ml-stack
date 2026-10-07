@@ -184,7 +184,7 @@ def _text(value: Any) -> str:
         return _block([_row(v) for v in value], "subscriptions")
     if isinstance(value, list) and value and all(
             isinstance(v, dict) and {"id", "role", "model_state", "last_acted"} <= v.keys() for v in value):
-        return _block([f"{v['id']}  {v['role']}{'  child of ' + v['parent'] if v['parent'] else ''}  {describe(v['model'], v['model_state'])}"
+        return _block([f"{v.get('display_name', v['id'])}  {v['role']}{'  child of ' + v['parent'] if v['parent'] else ''}  {describe(v['model'], v['model_state'])}"
                        f"{'  ' + v['harness'] if v['harness'] else ''}" for v in value], "agents")
     if isinstance(value, dict) and {"kind", "key", "owner", "expires_in_s"} <= value.keys():
         soon = ", expiring soon" if value.get("expiring_soon") else ""
@@ -424,9 +424,9 @@ def _hello(args: argparse.Namespace, ws: Workspace) -> int:
 
 
 def _brief(args: argparse.Namespace, ws: Workspace) -> int:
-    me = args.agent or os.environ.get(tokens.AGENT_ENV, "")
-    if not me:
-        raise ValueError("name the parent with --agent NAME (or set ML_STACK_WORKSPACE_AGENT)")
+    args.token_file = getattr(args, "token_file", "")
+    context, token = _context(args)
+    me = context.auth(token).id
     say(onboard.brief(args.name, me), end="")
     return 0
 
@@ -600,6 +600,8 @@ TABLE: tuple[tuple[str, str, list[Any], Handler], ...] = (
     ("whoami", "who the token says you are; --model records your own model id as claimed", [
         flag("--model", default="", help="the exact model id you run as (a label, never a right)"),
         flag("--harness", default="", help="your harness, e.g. claude-code or codex")], _whoami),
+    ("main-session", "register main-session presentation; grants no rights", [],
+     lambda args, ws, token: ws.register_session(token, onboard.device_metadata.current())),
     ("hello-model", "record the model a helper LABEL of yours runs (claimed)", [
         flag("label_name", metavar="LABEL"), flag("model", metavar="MODEL")], _hello_model),
     ("agents", "every live identity with its role, model and whether the model is verified", [],

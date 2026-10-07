@@ -184,3 +184,33 @@ def test_drafts_are_scoped_to_channel_and_survive_reload_without_posting(kit, se
     assert not posts
     assert not ws.board.ui_read(kit.owner, '#ops')['messages']
     context.close()
+
+
+@pytest.mark.slow
+def test_readable_sessions_and_authenticated_child_keep_exact_dm_and_message_ids(kit, served, browser):
+    ws = kit.ws
+    first, second = (kit.agent(name) for name in ('codex-first', 'codex-second'))
+    for token in (first, second):
+        ws.registry.record_device_claim(token, {'os': 'macOS', 'hostname': 'test-machine'})
+        ws.register_session(token)
+    child = ws.registry.delegate(ws.auth(first), 'review', 600, (), 10)
+    ws.board.create(first, '#sessions')
+    ws.send(child, '#sessions', 'note', 'child message', subject='Readable child')
+    page = browser.new_context(bypass_csp=True).new_page()
+    page.goto(f'http://127.0.0.1:{served}/')
+    first_name = 'Codex · Mac · session 1'
+    second_name = 'Codex · Mac · session 2'
+    page.get_by_role('button', name=first_name, exact=True).wait_for()
+    page.get_by_role('button', name=second_name, exact=True).wait_for()
+    assert page.get_by_role('button', name=first_name, exact=True).get_attribute('title').startswith('codex-first ·')
+    page.get_by_role('combobox', name='Message an agent').select_option('codex-second')
+    page.get_by_role('button', name='Open', exact=True).click()
+    page.wait_for_function("document.querySelector('ml-board').view.b === 'codex-second'")
+    page.get_by_role('button', name='#sessions', exact=False).click()
+    page.locator('ml-board .row .meta').filter(has_text='Subagent · review (parent Codex · Mac · session 1)').wait_for()
+    page.get_by_role('button', name='Readable child', exact=False).click()
+    author = page.locator('ml-board .who')
+    author.wait_for()
+    assert author.inner_text().startswith('Subagent · review (parent Codex · Mac · session 1)')
+    assert author.get_attribute('title') == 'codex-first/review'
+    page.close()
