@@ -32,10 +32,15 @@ def needs_cryptography():
 
 def env_for(root):
     root.mkdir(exist_ok=True)
-    return {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path), "ML_STACK_HOME": str(root),
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path), "ML_STACK_HOME": str(root),
             "PYTHON_KEYRING_BACKEND": "onboard_support.FileKeyring",
             "ML_STACK_TEST_KEYRING": str(root / "keyring.json"), "DISPLAY": ":0",
             "ML_STACK_CLUSTER_KEY": str(root / "cluster.key"), "PYTHONUNBUFFERED": "1"}
+    prepared = subprocess.run(
+        [sys.executable, "-c", "from ml_stack.keystore import Keystore; Keystore().provision()"],
+        env=env, capture_output=True, text=True, timeout=30, check=False)
+    assert prepared.returncode == 0, prepared.stderr
+    return env
 
 
 def fleet(env, *args, stdin=None, timeout=60):
@@ -391,3 +396,12 @@ def test_a_click_on_accept_in_the_dialog_accepts_the_request_and_the_code_comes_
         assert ledger[0]["mine"] is True
     finally:
         stop(listener)
+
+
+def test_cli_fixture_provisions_only_its_file_keyring(tmp_path):
+    root = tmp_path / "isolated-device"
+    env = env_for(root)
+    assert env["PYTHON_KEYRING_BACKEND"] == "onboard_support.FileKeyring"
+    assert env["ML_STACK_NO_REAL_KEYSTORE"] == "1"
+    assert json.loads((root / "keyring.json").read_text())
+    assert json.loads((root / "keystore" / "provisioned.json").read_text())["at"]

@@ -238,3 +238,63 @@ def test_control_record_refuses_unknown_version(device):
     with pytest.raises(ControlError, match='invalid'):
         request_replacement(root, port, {'launcher_control': control.instance}, 'a' * 40)
     assert not stopped.is_set()
+
+
+@pytest.mark.redteam
+def test_launcher_replacement_refuses_redirect_before_second_endpoint(device, monkeypatch):
+    root, port, control, _busy, stopped, _active, _release = device
+    hits = []
+
+    class RedirectTarget(BaseHTTPRequestHandler):
+        def do_GET(self):
+            hits.append(self.path)
+            self.send_response(200)
+            self.end_headers()
+        def log_message(self, *_args):
+            pass
+
+    target = Server(('127.0.0.1', 0), RedirectTarget)
+    thread = threading.Thread(target=target.serve_forever, daemon=True)
+    thread.start()
+    def redirect(handler):
+        handler.send_response(302)
+        handler.send_header('Location', f'http://127.0.0.1:{target.server_address[1]}/foreign')
+        handler.send_header('Content-Length', '0')
+        handler.end_headers()
+        return True
+    monkeypatch.setattr(control, 'route', redirect)
+    try:
+        with pytest.raises(ControlError, match='loopback endpoint'):
+            request_replacement(root, port, {'launcher_control': control.instance}, 'a' * 40)
+        assert not hits and not stopped.is_set()
+    finally:
+        target.shutdown()
+        target.server_close()
+        thread.join(3)
+
+
+@pytest.mark.redteam
+@pytest.mark.parametrize('attack', ['identity', 'shape', 'stopping', 'malformed', 'oversized'])
+def test_launcher_replacement_refuses_forged_acknowledgment(device, monkeypatch, attack):
+    root, port, control, _busy, stopped, _active, _release = device
+    def forged(handler):
+        if attack == 'malformed':
+            body = b'{invalid'
+            handler.send_response(200)
+            handler.send_header('Content-Length', str(len(body)))
+            handler.end_headers()
+            handler.wfile.write(body)
+        else:
+            answer = {'instance': '0' * 32, 'stopping': True}
+            if attack == 'shape':
+                answer = []
+            elif attack == 'stopping':
+                answer = {'instance': control.instance, 'stopping': 'yes'}
+            elif attack == 'oversized':
+                answer = {'instance': control.instance, 'stopping': True, 'pad': 'x' * 5000}
+            handler._send(200, answer)
+        return True
+    monkeypatch.setattr(control, 'route', forged)
+    with pytest.raises(ControlError):
+        request_replacement(root, port, {'launcher_control': control.instance}, 'a' * 40)
+    assert not stopped.is_set()

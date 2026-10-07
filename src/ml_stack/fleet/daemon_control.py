@@ -12,9 +12,9 @@ import threading
 from functools import wraps
 from pathlib import Path
 
-from ml_stack import macauth
+from ml_stack import macauth, sealing
 from ml_stack.files import writing
-from ml_stack.http import request_json
+from ml_stack.http import Sealed, open_stream
 from ml_stack.lock import Busy
 from ml_stack.windows_private import restrict, validate
 
@@ -81,10 +81,28 @@ def request_replacement(root: Path, port: int, running: dict, expected: str) -> 
         raise ControlError('The running daemon does not match this launcher control record.')
     if not isinstance(capability, str) or not capability.startswith(macauth.PREFIX) or len(capability) > 128:
         raise ControlError('Daemon launcher control record is invalid.')
-    answer = request_json(f'http://127.0.0.1:{port}{ROUTE}', method='POST',
-                          payload={'instance': instance, 'expected': expected},
-                          token=capability, timeout=10)
-    if not isinstance(answer, dict) or answer.get('instance') != instance or not answer.get('stopping'):
+    endpoint = f'http://127.0.0.1:{port}{ROUTE}'
+
+    def guard(url):
+        if url != endpoint:
+            raise ControlError('Daemon replacement cannot leave its owned loopback endpoint.')
+        return url
+
+    body = json.dumps({'version': 1, 'instance': instance, 'expected': expected}).encode()
+    with open_stream(endpoint, method='POST', data=body, token=capability, timeout=10,
+                     headers={'Content-Type': 'application/json', sealing.HEADER: '2'}, guard=guard) as response:
+        limit = MAX_RECORD + sealing.NONCE_BYTES + 16
+        wire = response.read(limit + 1)
+        if len(wire) > limit:
+            raise ControlError('Daemon replacement acknowledgment exceeds its size limit.')
+        opened = getattr(response, 'sealed', Sealed()).open(response.status, response.headers, wire)
+        if len(opened) > MAX_RECORD:
+            raise ControlError('Daemon replacement acknowledgment exceeds its size limit.')
+        try:
+            answer = json.loads(opened)
+        except (ValueError, UnicodeError) as exc:
+            raise ControlError('Daemon replacement acknowledgment is not valid JSON.') from exc
+    if not isinstance(answer, dict) or answer.get('instance') != instance or answer.get('stopping') is not True:
         raise ControlError('Daemon replacement was not acknowledged.')
     return answer
 
@@ -115,10 +133,18 @@ class Control:
         body = handler._body(1024)
         if body is None:
             return True
-        if not self.auth.check('POST', handler.path, handler.headers, body).ok:
+        verdict = self.auth.check('POST', handler.path, handler.headers, body)
+        if not verdict.ok:
             handler._send(403, {'error': 'Daemon replacement requires its owned launcher.'})
             return True
         try:
+            mode = handler.headers.get(sealing.HEADER, '')
+            if mode in ('1', '2'):
+                key = sealing.box_key(verdict.secret)
+                host, target = macauth.parts(f"//{handler.headers.get('Host', '')}{handler.path}")
+                handler._opening = (key, verdict, mode == '2', handler.headers)
+                body = sealing.open_(key, body, sealing.request_data(
+                    'POST', target, host, verdict.at, verdict.nonce))
             request = json.loads(body)
             if not isinstance(request, dict) or request.get('instance') != self.instance:
                 raise ControlError('Daemon replacement instance does not match.')
@@ -131,7 +157,7 @@ class Control:
                         raise ControlError('Daemon has active work, downloads or setup; retry when it is idle.')
                     self.held = admitted.pop_all()
                     self.stopping = True
-        except (ControlError, Busy, ValueError, OSError) as exc:
+        except (ControlError, Busy, ValueError, OSError, sealing.SealError) as exc:
             handler._send(409, {'error': str(exc)})
             return True
         try:

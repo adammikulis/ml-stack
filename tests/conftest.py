@@ -231,7 +231,7 @@ def json_reply(payload: object, status: int = 200) -> tuple[int, bytes]:
 #: Environment a developer's shell may carry that would otherwise steer a test: the
 #: variables that move one corner of the state root, and the ones that pick a model or a
 #: ceiling.
-_STEERING = ("MLSTACK_BENCH_CEILING", "MLSTACK_BENCH_HOME", "MLSTACK_BENCH_TRACE",
+_STEERING = ("CODEX_THREAD_ID", "CODEX_SESSION_ID", "MLSTACK_BENCH_CEILING", "MLSTACK_BENCH_HOME", "MLSTACK_BENCH_TRACE",
              "MLSTACK_FIT_FILE", "MLSTACK_INGEST_HOME", "MLSTACK_JOBS_HOME",
              "MLSTACK_KOKORO_MODEL", "MLSTACK_KOKORO_VOICES", "MLSTACK_LIMITS_FILE",
              "MLSTACK_LLAMA_BUILD", "MLSTACK_PIPER_VOICE", "MLSTACK_PROFILES_FILE",
