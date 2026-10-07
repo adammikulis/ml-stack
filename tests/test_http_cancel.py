@@ -136,3 +136,33 @@ def test_cancelling_queued_request_removes_its_resource_ticket(tmp_path, monkeyp
         assert 'cancelled while waiting' in str(errors[0])
         assert len(gate._tickets(path)) == 1
     assert gate._tickets(path) == []
+
+
+def test_cancel_during_hostname_resolution_releases_sdk_opening_thread(monkeypatch):
+    import socket
+
+    entered, release, exited = threading.Event(), threading.Event(), threading.Event()
+    def blocked_resolver(*_args):
+        entered.set()
+        release.wait(3)
+        exited.set()
+        return []
+    monkeypatch.setattr(socket, 'getaddrinfo', blocked_resolver)
+    async def run():
+        url = 'http://unresolved.invalid/v1/chat/completions'
+        transport = FleetTransport(url, '')
+        task = asyncio.create_task(transport.handle_async_request(httpx.Request('POST', url, json={})))
+        assert await asyncio.to_thread(entered.wait, 1)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, 1)
+        await transport.aclose()
+    began = time.monotonic()
+    try:
+        asyncio.run(run())
+        assert time.monotonic() - began < 1
+        assert not exited.is_set()
+        assert len([t for t in threading.enumerate() if t.name.startswith('ml-stack-dns-')]) <= 2
+    finally:
+        release.set()
+        assert exited.wait(1)
