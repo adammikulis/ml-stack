@@ -384,8 +384,11 @@ class SettingsRoutes:
         if self.method == "GET":
             from . import autostart as auto
             from .updates import current_version
+            from .themes import default_appearance, registry, resolve
             self.send(200, {
                 "settings": ui.settings.public() if ui.settings else {},
+                "theme_registry": registry(),
+                "resolved_theme": resolve(ui.settings.appearance if ui.settings else default_appearance()),
                 "name": ui.name,
                 "group": cluster_group(ui.cluster_key_path),
                 "version": current_version(),

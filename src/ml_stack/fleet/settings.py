@@ -10,6 +10,8 @@ from typing import Any
 
 from ml_stack.records import Document
 
+from .themes import default_appearance, validate_appearance
+
 __all__ = ["Settings", "Suggestion", "apply_preferences", "suggest"]
 
 
@@ -47,6 +49,7 @@ class Settings:
     download_sources: str = ""
     chat_max_output_tokens: int | None = 8192
     always_show_advanced: bool = False
+    appearance: dict[str, Any] = field(default_factory=default_appearance)
     context: int = 8192
     """How much of a conversation a model is given to read. Costs memory per token."""
 
@@ -63,9 +66,15 @@ class Settings:
         return asdict(self)
 
 
+def _build(raw: dict[str, Any]) -> Settings:
+    values = {k: v for k, v in raw.items() if k in Settings.__dataclass_fields__}
+    if "appearance" in values:
+        values["appearance"] = validate_appearance(values["appearance"])
+    return Settings(**values)
+
+
 _DOC: Document[Settings] = Document(
-    build=lambda raw: Settings(**{k: v for k, v in raw.items()
-                                  if k in Settings.__dataclass_fields__}),
+    build=_build,
     unbuild=lambda one: dict(sorted(asdict(one).items())),
     empty=Settings)
 
@@ -155,6 +164,11 @@ def apply_preferences(settings: Settings, request: dict[str, Any]) -> str:
             values["context"] = max(512, min(1 << 20, int(request["context"])))
         except (TypeError, ValueError, OverflowError):
             return "Context length must be an integer."
+    if "appearance" in request:
+        try:
+            values["appearance"] = validate_appearance(request["appearance"])
+        except ValueError as exc:
+            return str(exc)
     for key, value in values.items():
         setattr(settings, key, value)
     return ""

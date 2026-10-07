@@ -1,0 +1,119 @@
+<style>
+theme-editor { display:block; }
+theme-editor .theme-presets, theme-editor .theme-actions { display:flex; gap:10px; flex-wrap:wrap; margin:16px 0; }
+theme-editor .theme-presets button { width:auto; min-width:160px; border:2px solid var(--line); background:var(--panel); color:var(--text); }
+theme-editor .theme-presets button[aria-pressed="true"] { border-color:var(--poolside-pink); }
+theme-editor .theme-swatches { display:flex; gap:5px; margin-top:8px; }
+theme-editor .theme-swatches i { width:23px; height:10px; border-radius:3px; }
+theme-editor .theme-fields { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:14px; margin:16px 0; }
+theme-editor label { display:flex; flex-direction:column; gap:7px; }
+theme-editor .theme-color { display:flex; align-items:center; gap:8px; }
+theme-editor input[type="color"] { width:40px; min-width:40px; height:36px; padding:2px; }
+theme-editor .theme-actions button { width:auto; margin:0; }
+theme-editor .theme-status { min-height:24px; }
+</style>
+<script>
+(() => {
+  const M = window.fleetModel, {el, api} = M;
+  const labels = {pink:'Pink accent',orange:'Orange accent',yellow:'Yellow accent',cyan:'Cyan accent',navy:'Navy accent',
+    background:'Background',panel:'Panel',sunken:'Inset background',text:'Text',muted:'Secondary text',border:'Borders'};
+  const copy = value => JSON.parse(JSON.stringify(value));
+  class ThemeEditor extends HTMLElement {
+    connectedCallback() {
+      if (this.ready) return;
+      this.ready = true;
+      this.status = el('p',{class:'theme-status',role:'status','aria-live':'polite'});
+      this.load().catch(error => this.fail(error));
+    }
+    fail(error) { this.status.textContent = error.message; if (!this.contains(this.status)) this.append(this.status); }
+    async load() {
+      const result = await api('/ui/settings');
+      if (!result.ok || result.error) throw Error(result.error || 'Could not load appearance.');
+      this.settings = result.settings;
+      this.appearance = copy(result.settings.appearance);
+      this.registry = result.theme_registry;
+      this.draft = copy(result.resolved_theme);
+      M.setPreferences({...result.settings,resolved_theme:result.resolved_theme});
+      this.draw();
+    }
+    preview() { M.setPreferences({...M.preferences,resolved_theme:copy(this.draft)}); }
+    draw() {
+      const choices = [...this.registry,...this.appearance.saved_themes];
+      const presets = el('div',{class:'theme-presets'});
+      for (const theme of this.registry) {
+        const button = el('button',{type:'button','aria-pressed':this.appearance.active_theme === theme.id,
+          onclick:() => this.select(theme.id)},theme.name);
+        const swatches = el('span',{class:'theme-swatches','aria-hidden':'true'});
+        for (const key of ['pink','orange','yellow','cyan','navy']) {
+          const swatch = el('i'); swatch.style.backgroundColor = theme.colors[key]; swatches.append(swatch);
+        }
+        button.append(swatches); presets.append(button);
+      }
+      const choice = el('select',{'aria-label':'Saved theme'});
+      for (const theme of choices) choice.append(el('option',{value:theme.id},theme.name));
+      choice.value = this.appearance.active_theme;
+      choice.onchange = () => this.select(choice.value);
+      const name = el('input',{type:'text',maxlength:48,value:this.draft.name,'aria-label':'Custom theme name'});
+      name.oninput = () => { this.draft.name = name.value; };
+      const base = el('select',{'aria-label':'Theme base'});
+      for (const item of this.registry) base.append(el('option',{value:item.base},item.base === 'light' ? 'Light' : 'Dark'));
+      base.value = this.draft.base;
+      base.onchange = () => { this.draft.base = base.value; this.preview(); };
+      const size = el('input',{type:'number',min:12,max:20,value:this.draft.font_size,'aria-label':'Interface font size'});
+      size.oninput = () => { const n = Number(size.value); if (Number.isInteger(n) && n >= 12 && n <= 20) { this.draft.font_size = n; this.preview(); } };
+      const density = el('select',{'aria-label':'Interface density'});
+      for (const value of ['comfortable','compact']) density.append(el('option',{value},value === 'compact' ? 'Compact' : 'Comfortable'));
+      density.value = this.draft.density;
+      density.onchange = () => { this.draft.density = density.value; this.preview(); };
+      const fields = el('div',{class:'theme-fields'});
+      for (const [key,label] of Object.entries(labels)) {
+        const color = el('input',{type:'color',value:this.draft.colors[key],'aria-label':label+' picker'});
+        const hex = el('input',{type:'text',maxlength:7,value:this.draft.colors[key],'aria-label':label});
+        const update = value => {
+          const valid = /^#[0-9a-fA-F]{6}$/.test(value);
+          hex.setCustomValidity(valid ? '' : 'Use a six-digit hex color.');
+          hex.setAttribute('aria-invalid',String(!valid));
+          if (valid) { this.draft.colors[key] = value.toLowerCase(); color.value = value; hex.value = value; this.preview(); }
+        };
+        color.oninput = () => update(color.value); hex.oninput = () => update(hex.value);
+        fields.append(el('label',{},label,el('span',{class:'theme-color'},color,hex)));
+      }
+      const save = el('button',{type:'button',onclick:() => this.saveCustom(false)},'Save theme');
+      const duplicate = el('button',{type:'button',class:'ghost',onclick:() => this.saveCustom(true)},'Save as new theme');
+      const reset = el('button',{type:'button',class:'ghost',onclick:() => this.reset()},'Reset to preset');
+      const cancel = el('button',{type:'button',class:'ghost',onclick:() => this.load().catch(error => this.fail(error))},'Discard preview');
+      const actions = el('div',{class:'theme-actions'},save,duplicate,reset,cancel);
+      if (!this.registry.some(row => row.id === this.appearance.active_theme)) actions.append(
+        el('button',{type:'button',class:'ghost',onclick:() => this.remove()},'Delete custom theme'));
+      this.replaceChildren(el('h2',{},'Appearance'),el('p',{class:'sub'},'Choose a theme or tune every color. Changes preview immediately; save to keep them.'),
+        presets,el('label',{},'Theme',choice),el('div',{class:'theme-fields'},el('label',{},'Theme name',name),
+        el('label',{},'Base',base),el('label',{},'Font size',size),el('label',{},'Density',density)),fields,actions,this.status);
+    }
+    async persist(appearance) {
+      const result = await api('/ui/settings',{method:'POST',body:JSON.stringify({appearance})});
+      if (!result.ok || result.error) throw Error(result.error || 'Could not save theme.');
+      await this.load(); this.status.textContent = 'Theme saved.';
+    }
+    async select(id) {
+      try { await this.persist({...this.appearance,active_theme:id}); } catch (error) { this.fail(error); }
+    }
+    async saveCustom(asNew) {
+      if ([...this.querySelectorAll('input')].some(input => !input.reportValidity())) return;
+      const draft = copy(this.draft), saved = copy(this.appearance.saved_themes);
+      const existing = saved.find(row => row.id === this.appearance.active_theme);
+      if (existing && !asNew) draft.id = existing.id;
+      else { let n = 1; while (saved.some(row => row.id === 'custom-'+n)) n++; draft.id = 'custom-'+n; }
+      if (this.registry.some(row => row.name === draft.name)) draft.name = 'My '+draft.base+' theme';
+      const index = saved.findIndex(row => row.id === draft.id);
+      if (index < 0) saved.push(draft); else saved[index] = draft;
+      try { await this.persist({active_theme:draft.id,saved_themes:saved}); } catch (error) { this.fail(error); }
+    }
+    async reset() { await this.select(this.draft.base); }
+    async remove() {
+      try { await this.persist({active_theme:this.draft.base,saved_themes:this.appearance.saved_themes.filter(row => row.id !== this.appearance.active_theme)}); }
+      catch (error) { this.fail(error); }
+    }
+  }
+  customElements.define('theme-editor',ThemeEditor);
+})();
+</script>
