@@ -86,3 +86,72 @@ def test_decision_tools_handoff_opens_recipe_step(joined, open_page):
     assert spec['command'] == 'ml-stack-decide'
     assert spec['args'][spec['args'].index('--data') + 1] == 'datasets/decisions.jsonl'
     assert not errors
+
+
+def test_review_reveals_invalid_advanced_training_field(joined, open_page):
+    page, errors = open_page(joined, cookie=joined.cookie, path='/ui/#training')
+    expect(page.get_by_label('Workflow', exact=True)).to_be_visible()
+    page.get_by_label('Workflow', exact=True).select_option('decider')
+    page.get_by_label('Dataset path (relative to files root)').fill('datasets/decisions.jsonl')
+    page.get_by_role('button', name='Continue to model & recipe').click()
+    advanced = page.locator('training-view #training-recipe details[data-advanced]')
+    advanced.locator('summary').click()
+    page.get_by_label('Batch size', exact=True).fill('0')
+    advanced.locator('summary').click()
+    page.get_by_role('button', name='Review this run').click()
+    posts = []
+    page.on('request', lambda request: posts.append(request.url)
+            if request.method == 'POST' and request.url.endswith('/ui/workspace/jobs') else None)
+    page.get_by_role('button', name='Review command', exact=True).click()
+    expect(page.get_by_label('Batch size', exact=True)).to_be_visible()
+    expect(page.get_by_label('Batch size', exact=True)).to_be_focused()
+    expect(page.locator('training-view #config > .status')).to_contain_text('highlighted training option')
+    assert not posts
+    page.get_by_label('Batch size', exact=True).fill('1')
+    page.get_by_role('button', name='Review this run').click()
+    page.get_by_role('button', name='Review command', exact=True).click()
+    expect(page.locator('training-view #config > .status')).to_contain_text('Command preview ready')
+    assert len(posts) == 1
+    assert not errors
+
+
+def test_fresh_rl_workflow_requires_no_dataset(joined, open_page):
+    page, errors = open_page(joined, cookie=joined.cookie, path='/ui/#training')
+    expect(page.get_by_label('Workflow', exact=True)).to_be_visible()
+    page.get_by_label('Workflow', exact=True).select_option('rl')
+    expect(page.get_by_label('Environment', exact=True)).to_be_visible()
+    expect(page.get_by_label('Training timesteps', exact=True)).to_be_visible()
+    assert page.get_by_label('Dataset path (relative to files root)').input_value() == ''
+    assert not page.get_by_label('Dataset path (relative to files root)').is_visible()
+    spec = page.evaluate("document.querySelector('training-view').spec()")
+    assert spec['command'] == 'ml-stack-gym' and '--data' not in spec['args']
+    assert not errors
+
+
+@pytest.mark.parametrize('theme', [
+    {'--bg-raised': '#ffffff', '--text': '#1b1f3a', '--good': '#14816c'},
+    {'--bg-raised': '#1a1d28', '--text': '#f4f4ff', '--good': '#68dfbc'},
+    {'--bg-raised': '#29222e', '--text': '#fff2dc', '--good': '#ffd166'},
+])
+def test_running_model_badge_preserves_theme_contrast(joined, open_page, theme):
+    page, errors = open_page(joined, cookie=joined.cookie, path='/ui/#models')
+    page.wait_for_function("window.fleetModel.route === 'models'")
+    page.evaluate("""theme => {
+      for (const [key,value] of Object.entries(theme)) document.documentElement.style.setProperty(key,value);
+      const library=document.querySelector('models-library');
+      library.update([{id:'theme-model',name:'Theme model',path:'/tmp/theme.gguf',family:'Qwen',
+        format:'gguf',quantization:'Q4',kind:'text',status:'installed',servable:true,size_bytes:1,
+        shards:1,is_complete:true,files:[]}],{can_serve:true,running:[{models:['theme.gguf'],port:12345}]},()=>{},()=>{});
+    }""", theme)
+    contrast = page.locator('models-library .model-running').evaluate("""node => {
+      const style=getComputedStyle(node),canvas=document.createElement('canvas');canvas.width=canvas.height=1;
+      const context=canvas.getContext('2d');
+      const luminance=css=>{context.clearRect(0,0,1,1);context.fillStyle=css;context.fillRect(0,0,1,1);
+        const data=context.getImageData(0,0,1,1).data;
+        const values=[...data].slice(0,3).map(channel=>{channel/=255;return channel<=.04045?channel/12.92:((channel+.055)/1.055)**2.4;});
+        return .2126*values[0]+.7152*values[1]+.0722*values[2];};
+      const text=luminance(style.color),surface=luminance(style.backgroundColor);
+      return (Math.max(text,surface)+.05)/(Math.min(text,surface)+.05);
+    }""")
+    assert contrast >= 4.5
+    assert not errors
