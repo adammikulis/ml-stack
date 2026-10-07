@@ -3,7 +3,7 @@
     <aside class="chats" aria-label="Conversations">
       <div class="conversation-space"><span class="conversation-space-mark" aria-hidden="true">✦</span><div><strong>Poolside</strong><small>Your shared workspace</small></div></div>
       <button id="chat-new" class="conversation-new">＋ New conversation</button>
-      <label class="conversation-search" for="chat-search"><input type="search" id="chat-search" placeholder="Search model chats…" aria-label="Search model chats"></label>
+      <label class="conversation-search" for="chat-search"><input type="search" id="chat-search" placeholder="Search model chats…" aria-label="Search conversations"></label>
       <section class="conversation-group"><h2>Team channels</h2><div id="conversation-channels" role="status">Connecting to workspace…</div></section>
       <section class="conversation-group"><h2>Direct messages</h2><div id="conversation-direct"></div></section>
       <section class="conversation-group"><h2>Model chats</h2><div id="chat-list"></div></section>
@@ -270,7 +270,7 @@
         this.sidebar.replaceChildren(...rows.map((c) =>
           el("div", { class: `chatrow${c.id === this.open ? " on" : ""}`, "data-conversation": c.id },
             el("a", { href: "#chat", onclick: (e) => {
-              e.preventDefault(); if (!this.request) { M.go("chat"); this.load(c.id); }
+              e.preventDefault(); if (!this.request) { this.open = c.id; if (M.route !== "chat") M.go("chat"); else this.load(c.id); }
             } }, c.title || "New chat"),
             el("details", { class: "chat-row-menu" },
               el("summary", { "aria-label": `Options for ${c.title || "New chat"}` }, "•••"),
@@ -396,7 +396,7 @@
           localStorage.setItem("ml-stack.chat.selected", made.id);
         }
         this.input.value = "";
-        if (this.heading.textContent === "New chat") this.heading.textContent = text.replace(/\s+/g, " ").slice(0, 60);
+        if (this.heading.textContent === "New conversation") this.heading.textContent = text.replace(/\s+/g, " ").slice(0, 60);
         this.list.querySelector(".chat-welcome")?.remove();
         userBody = this.say("user", text);
         reply = this.say("assistant", "");
