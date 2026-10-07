@@ -358,8 +358,17 @@ class TestWorkspaceCommands:
         assert harnessid.announce(harnessid.Seat(hostile, "claude-code"), "t", lambda _: None)
         argv = Path(f"{exe}.argv").read_text().splitlines()
         assert argv == ["announce", "joined", "t", "--agent", "claude-code", "--label", hostile]
+        seen = []
+        def run(command, **kwargs):
+            seen.append((command, kwargs))
+            return subprocess.CompletedProcess(command, 0, 'nudge text', '')
+        monkeypatch.setattr(harnesshook.subprocess, 'run', run)
         assert harnesshook.nudge(hostile) == "nudge text"
-        assert hostile in Path(f"{exe}.argv").read_text().splitlines()
+        command, options = seen[0]
+        assert command == [sys.executable, '-m', 'ml_stack.workspace.notification_reader',
+                           hostile, str(Path.cwd()), '']
+        assert options.get('shell', False) is False
+        assert options['timeout'] == harnesshook.NUDGE_S
 
     def test_a_failed_announcement_identifies_the_workspace_trust_check(self, monkeypatch):
         said = []
