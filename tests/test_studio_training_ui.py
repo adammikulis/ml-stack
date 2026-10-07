@@ -72,3 +72,15 @@ def test_library_chat_action_selects_server_identity(joined, open_page):
     expect(page).to_have_url(f'http://127.0.0.1:{joined.port}/ui/#chat')
     expect(page.locator('chat-view #model')).to_have_value('exact-model.gguf')
     assert not errors
+
+
+def test_decision_tools_handoff_opens_recipe_step(joined, open_page):
+    page, errors = open_page(joined, cookie=joined.cookie, path='/ui/#tools')
+    page.evaluate("document.querySelector('training-view').openRun({workflow:'decider',dataset:'datasets/decisions.jsonl'})")
+    expect(page.get_by_label('Workflow', exact=True)).to_have_value('decider')
+    expect(page.get_by_label('Recipe', exact=True)).to_be_visible()
+    page.get_by_role('button', name='Review this run').click()
+    spec = page.evaluate("document.querySelector('training-view').spec()")
+    assert spec['command'] == 'ml-stack-decide'
+    assert spec['args'][spec['args'].index('--data') + 1] == 'datasets/decisions.jsonl'
+    assert not errors
