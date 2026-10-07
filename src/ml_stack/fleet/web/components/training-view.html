@@ -265,25 +265,34 @@ training-view .eyebrow::before{content:"";display:inline-block;width:7px;height:
         : !rl && this.dry.value === 'true' ? (recipe ? 'Queue 20-step training smoke' : 'Queue configuration check') : 'Start training';
     }
 
+    revealField(input) {
+      this.showStep(1);
+      for (let parent = input.parentElement; parent && parent !== this.form; parent = parent.parentElement) {
+        if (parent.tagName === 'DETAILS') parent.open = true;
+      }
+      input.focus(); input.scrollIntoView({block:'center'});
+    }
+
     spec() {
       for (const input of Object.values(this.inputs)) if (!input.checkValidity()) {
-        this.showStep(1);
-        for (let parent = input.parentElement; parent && parent !== this.form; parent = parent.parentElement) {
-          if (parent.tagName === 'DETAILS') parent.open = true;
-        }
-        input.focus(); input.scrollIntoView({block:'center'}); input.reportValidity();
+        this.revealField(input); input.reportValidity();
         throw Error('Check the highlighted training option.');
       }
-      const extra = JSON.parse(this.options.value);
-      if (!Array.isArray(extra) || extra.some(item => typeof item !== 'string')) throw Error('Additional arguments must be a JSON array of strings.');
+      let extra;
+      try {
+        extra = JSON.parse(this.options.value);
+        if (!Array.isArray(extra) || extra.some(item => typeof item !== 'string')) throw Error('Additional arguments must be a JSON array of strings.');
+      } catch (error) { this.revealField(this.options); throw error; }
       let command, args;
       if (this.mode.value !== 'rl' && !this.data.value.trim()) throw Error('Choose a dataset path before starting.');
       if (this.mode.value !== 'rl' && (!this.out.value.trim() || !this.name.value.trim())) throw Error('Choose an output directory and run name before starting.');
       if (this.mode.value === 'decider') {
         command = 'ml-stack-decide'; args = ['train', '--data', this.data.value, '--name', this.name.value, '--out', this.out.value];
       } else if (this.mode.value === 'rl') {
-        const config = JSON.parse(this.inputs.config.value);
-        if (!config || Array.isArray(config) || typeof config !== 'object') throw Error('Environment configuration must be a JSON object.');
+        try {
+          const config = JSON.parse(this.inputs.config.value);
+          if (!config || Array.isArray(config) || typeof config !== 'object') throw Error('Environment configuration must be a JSON object.');
+        } catch (error) { this.revealField(this.inputs.config); throw error; }
         command = 'ml-stack-gym'; args = ['train', this.recipe.value, '--timesteps', this.inputs.timesteps.value,
           '--seed', this.inputs.seed.value, '--config', this.inputs.config.value];
         if (this.inputs.checkpoint.value) args.push('--checkpoint', this.inputs.checkpoint.value);
