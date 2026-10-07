@@ -41,6 +41,7 @@ from . import (
     projects as project_routes,
 )
 from .availability import Availability, parse_window
+from .daemon_control import protected
 from .deciding import MAX_REQUEST, Deciding
 from .device import device_report
 from .discovery import load_cluster_key, memberships
@@ -872,8 +873,6 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
             else:
                 self._send(200, {"ok": True, "partial": str(partial),
                                  "bytes": partial.stat().st_size})
-
-    from .daemon_control import protected
 
     for verb in ("GET", "HEAD", "POST", "PUT", "DELETE"):
         name = "do_" + verb

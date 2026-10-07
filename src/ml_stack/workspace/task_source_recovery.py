@@ -1,5 +1,6 @@
 """Authenticated relocation of inactive canonical task source bindings."""
 
+from contextlib import ExitStack
 from dataclasses import dataclass, replace
 from pathlib import Path
 from uuid import uuid4
@@ -75,7 +76,8 @@ def _pending(graph, worker, target):
 
 def _apply(ws, journal, runner, scopes):
     changed = replace(runner, project=journal['target'])
-    try:
+    with ExitStack() as rollback:
+        rollback.callback(localagent.save, ws, runner)
         localagent.save(ws, changed)
         with GraphStore(ws.base / 'coordination.db') as graph, graph.transaction():
             for scope in scopes:
@@ -91,9 +93,7 @@ def _apply(ws, journal, runner, scopes):
                 save(graph, 'checkpoint', event)
                 link(graph, scope['task'], event['id'], 'checkpoint')
             save(graph, 'source-recovery', {**journal, 'state': 'committed'})
-    except Exception:
-        localagent.save(ws, runner)
-        raise
+        rollback.pop_all()
 
 
 def rebind(ws, token: str, worker: str, project: str, reason: str) -> dict:

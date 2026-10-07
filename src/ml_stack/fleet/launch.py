@@ -24,7 +24,7 @@ from .discovery import (
 from .join import default_root
 from .measuring import same_commit
 from .updates import state
-from .wsl import WSLError, prepare, start
+from .wsl import WSLError, prepare, replace_running, start
 
 __all__ = ["already_running", "last_screen", "main", "wait_for_health"]
 
@@ -141,7 +141,6 @@ def main(argv: list[str] | None = None, *,
     if running is not None and not same_commit(str(running.get("commit") or ""), expected):
         try:
             if sys.platform == "win32":
-                from .wsl import replace_running
                 replace_running(rest, known.port, running, expected)
             else:
                 request_replacement(_root(rest), known.port, running, expected)

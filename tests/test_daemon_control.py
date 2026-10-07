@@ -166,3 +166,65 @@ def test_each_protected_http_method_refuses_new_requests_during_drain(device, ve
     protected(lambda _handler: pytest.fail('admitted work after drain'), lambda: control)(handler)
     assert replies[0][0] == 503
     assert handler.close_connection
+
+
+@pytest.mark.parametrize('failure', [ValueError, OSError])
+def test_failed_idle_check_releases_admission_and_allows_retry(device, failure):
+    root, port, control, _busy, stopped, _active, _release = device
+
+    def unavailable():
+        raise failure('idle state unavailable')
+
+    control.idle = unavailable
+    with pytest.raises(ServerError):
+        request_replacement(root, port, {'launcher_control': control.instance}, 'a' * 40)
+    assert not control.stopping and not stopped.is_set()
+    with only_one(root / 'runtime-install.lock', wait=False):
+        pass
+    control.idle = lambda: True
+    assert request_replacement(root, port, {'launcher_control': control.instance}, 'a' * 40)['stopping']
+
+
+def test_valid_machine_control_signature_from_lan_is_refused_before_body(device):
+    from types import SimpleNamespace
+
+    from ml_stack.macauth import sign
+
+    _root, port, control, _busy, stopped, _active, _release = device
+    body = json.dumps({'instance': control.instance}).encode()
+    host = f'127.0.0.1:{port}'
+    replies = []
+    handler = SimpleNamespace(path=ROUTE, client_address=('192.0.2.14', 1234),
+                              headers={'Host': host, **sign(control.capability, 'POST', f'http://{host}{ROUTE}', body)},
+                              _body=lambda _limit: pytest.fail('read remote control body'),
+                              _send=lambda *args: replies.append(args))
+    assert control.route(handler)
+    assert replies[0][0] == 403
+    assert not stopped.is_set() and not control.stopping
+
+
+def test_runtime_control_preserves_queued_jobs_even_when_otherwise_idle(tmp_path):
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+
+    from ml_stack.fleet.daemon_control import create
+    from ml_stack.macauth import sign
+
+    stopped = threading.Event()
+    queued = [1]
+    runtime = SimpleNamespace(root=tmp_path, port=8770, nothing_running=lambda: True,
+                              runner=SimpleNamespace(status=lambda: {'queued': queued[0]}),
+                              update_admission=nullcontext, httpd=SimpleNamespace(shutdown=stopped.set))
+    control = create(runtime)
+    body = json.dumps({'instance': control.instance}).encode()
+    host = '127.0.0.1:8770'
+    replies = []
+    handler = SimpleNamespace(path=ROUTE, client_address=('127.0.0.1', 1234),
+                              headers={'Host': host, **sign(control.capability, 'POST', f'http://{host}{ROUTE}', body)},
+                              _body=lambda _limit: body, _send=lambda *args: replies.append(args))
+    try:
+        assert control.route(handler)
+        assert replies[0][0] == 409
+        assert queued == [1] and not stopped.is_set() and not control.stopping
+    finally:
+        control.close()

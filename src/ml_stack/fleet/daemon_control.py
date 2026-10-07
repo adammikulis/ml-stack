@@ -13,6 +13,7 @@ from functools import wraps
 from pathlib import Path
 
 from ml_stack import macauth
+from ml_stack.files import writing
 from ml_stack.http import request_json
 from ml_stack.lock import Busy
 from ml_stack.windows_private import restrict, validate
@@ -99,16 +100,11 @@ class Control:
         self.held = contextlib.ExitStack()
         self.stopping = False
         self.active = 0
-        temporary = self.path.with_name(f'.{port}-{self.instance}.json')
-        fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        try:
-            with os.fdopen(fd, 'w') as stream:
-                json.dump({'port': port, 'instance': self.instance, 'capability': self.capability}, stream)
+        with writing(self.path) as temporary:
             if os.name == 'nt':
                 restrict(temporary)
-            temporary.replace(self.path)
-        finally:
-            temporary.unlink(missing_ok=True)
+            temporary.write_text(json.dumps({'port': port, 'instance': self.instance,
+                                             'capability': self.capability}), encoding='utf-8')
 
     def route(self, handler) -> bool:
         if handler.path != ROUTE:
@@ -129,11 +125,12 @@ class Control:
             with self.lock:
                 if self.stopping or self.active:
                     raise ControlError('Daemon has requests in progress; retry when it is idle.')
-                self.held.enter_context(self.admission())
-                if not self.idle():
-                    self.held.close()
-                    raise ControlError('Daemon has active work, downloads or setup; retry when it is idle.')
-                self.stopping = True
+                with contextlib.ExitStack() as admitted:
+                    admitted.enter_context(self.admission())
+                    if not self.idle():
+                        raise ControlError('Daemon has active work, downloads or setup; retry when it is idle.')
+                    self.held = admitted.pop_all()
+                    self.stopping = True
         except (ControlError, Busy, ValueError, OSError) as exc:
             handler._send(409, {'error': str(exc)})
             return True
