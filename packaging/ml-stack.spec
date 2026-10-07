@@ -3,7 +3,7 @@ import importlib.util
 import runpy
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_dynamic_libs, collect_submodules, copy_metadata
+from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs, collect_submodules, copy_metadata
 
 
 def package_dir(name):
@@ -15,6 +15,7 @@ datas = [
     (str(package_dir("ml_stack.contracts") / "_data"), "ml_stack/contracts/_data"),
     *copy_metadata("ml-stack"),
     *copy_metadata("openai-agents", recursive=True),
+    *collect_data_files("agents"),
 ]
 
 # The commit this was built from, beside ml_stack.fleet.measuring, which answers it.

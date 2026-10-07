@@ -192,6 +192,13 @@ def test_frozen_spec_includes_project_modules_without_project_exclusions(monkeyp
     hooks = type(sys)("PyInstaller.utils.hooks")
     hooks.collect_dynamic_libs = lambda name: []
     hooks.collect_submodules = lambda name: []
+    prompt = ("installed/agents/sandbox/memory/prompts/memory_consolidation_prompt.md",
+              "agents/sandbox/memory/prompts")
+    data_calls = []
+    def collect_data_files(name):
+        data_calls.append(name)
+        return [prompt]
+    hooks.collect_data_files = collect_data_files
     metadata_calls = []
     def copy_metadata(name, *, recursive=False):
         metadata_calls.append((name, recursive))
@@ -220,3 +227,5 @@ def test_frozen_spec_includes_project_modules_without_project_exclusions(monkeyp
     assert set(native_modules) <= set(captured["hiddenimports"])
     assert not any(name.startswith("ml_stack") for name in captured["excludes"])
     assert ("openai-agents", True) in metadata_calls
+    assert data_calls == ["agents"]
+    assert prompt in captured["datas"]
