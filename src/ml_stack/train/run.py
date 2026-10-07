@@ -27,6 +27,7 @@ from ml_stack.train import lora
 from ml_stack.train.metrics import MetricsLog
 from ml_stack.train.probes import probe_hook
 from ml_stack.train.recipes import Built, build, known, spec, tool_calls, validate
+from ml_stack.train.recipes.base import resolve_base
 from ml_stack.train.recipes.models import parameter_count
 from ml_stack.train.schedule import constant, warmup_cosine
 from ml_stack.train.trainer import Trainer, TrainReport
@@ -107,27 +108,15 @@ def parity(*, say: Callable[[str], None] = say, first: str = "torch",
 
 
 def _base_of(recipe_id: str, config: dict[str, Any], data: Path) -> tuple[str, dict[str, Any]]:
-    """``(base, the size's contract entry)`` -- what a plan needs before anything loads.
-
-    The same answer `build_tool_caller` reaches: the data's manifest names the base it was
-    rendered for, and the recipe's size entry is both the fallback and where the parameter
-    counts a wall-clock estimate needs are written down. A base the *data* names is not
-    that size's model, so the size's counts are not about it and are not used for it.
-    """
-    sizes = spec(recipe_id).get("sizes", {})
-    if not sizes:
-        return "", {}
-    size = config.get("size") or sorted(sizes)[0]
-    entry = dict(sizes.get(size, {}))
-    manifest_base = ""
+    """Return the selected base and matching recipe size estimates."""
     manifest = Path(data).expanduser() / "manifest.json"
+    metadata: dict[str, Any] = {}
     if manifest.is_file():
         try:
-            manifest_base = str(json.loads(manifest.read_text()).get("base") or "")
+            metadata = json.loads(manifest.read_text())
         except (OSError, json.JSONDecodeError):
-            manifest_base = ""
-    base = manifest_base or str(entry.get("base") or "")
-    return base, ({} if manifest_base and manifest_base != entry.get("base") else entry)
+            pass
+    return resolve_base(spec(recipe_id), config, metadata)
 
 
 def plan_for(recipe_id: str, config: dict[str, Any], data: Path, *,

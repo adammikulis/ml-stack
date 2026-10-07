@@ -11,7 +11,7 @@ training-view .training-form textarea { min-height:90px; }
 <template>
   <section class="workspace" hidden>
     <h1>Training lab</h1>
-    <p class="intro">Prepare your dataset, review a configuration check, then train and follow the run.</p>
+    <p class="intro">Prepare your dataset, review the command, then train and follow the run.</p>
     <div class="workspace-actions"><button type="button" id="browse-data">1 · Prepare data</button><button type="button" id="open-gym">Explore live RL worlds</button></div>
     <div class="workspace-grid">
       <div class="workspace-card training-form" id="config"></div>
@@ -52,12 +52,12 @@ training-view .training-form textarea { min-height:90px; }
       this.lora = W.field(b, 'Fine-tuning strategy', 'select');
       this.lora.append(E('option', {value:'adapter'}, 'LoRA adapter'), E('option', {value:'full'}, 'All model weights'));
       this.dry = W.field(b, 'Run mode', 'select');
-      this.dry.append(E('option', {value:'true'}, 'Check configuration'), E('option', {value:'false'}, 'Train model'));
+      this.dry.append(E('option', {value:'true'}, '20-step training smoke'), E('option', {value:'false'}, 'Train model'));
       this.preview = E('pre', {}, 'Review the command before starting.');
       this.reviewDetails = E('details', {class:'aside'}, E('summary', {}, 'Command preview'), this.preview);
       this.note = E('p', {class:'status', role:'status', 'aria-live':'polite'});
       this.reviewButton = W.button('Review command', () => this.review());
-      this.startButton = W.button('Queue configuration check', () => this.start());
+      this.startButton = W.button('Queue 20-step training smoke', () => this.start());
       this.retryButton = W.button('Retry loading workflows', () => this.load());
       this.retryButton.hidden = true;
       b.append(E('div', {class:'workspace-actions'}, this.reviewButton, this.startButton, this.retryButton),
@@ -127,7 +127,6 @@ training-view .training-form textarea { min-height:90px; }
         this.requirements.textContent = `${recipe.blurb} Dataset fields: ${recipe.data.fields.join(', ')}. Minimum ${recipe.data.min_rows} rows.`;
         const defaults = recipe.sizes[this.size.value]?.defaults || {};
         fields = recipe.fields.filter(field => field.name !== 'lora').map(field => ({...field, default:defaults[field.name] ?? field.default}));
-        if (recipe.id === 'tool-calls') fields.unshift({name:'base', label:'Base model ID or local directory', type:'text', default:recipe.sizes[this.size.value]?.base || ''});
       } else if (rl) {
         const environment = (this.environments || []).find(item => item.id === this.recipe.value);
         this.requirements.textContent = environment?.available
@@ -170,11 +169,13 @@ training-view .training-form textarea { min-height:90px; }
 
     paintActions() {
       const rl = this.mode.value === 'rl';
+      const recipe = this.mode.value === 'recipe';
+      this.dry.options[0].textContent = recipe ? '20-step training smoke' : 'Check configuration';
       const available = !rl || (this.environments || []).some(item => item.id === this.recipe.value && item.available);
       this.reviewButton.disabled = this.startButton.disabled = !!this.pending || !this.recipe.value || !available;
       this.form.setAttribute('aria-busy', String(!!this.pending));
       this.startButton.textContent = this.pending ? 'Working…'
-        : !rl && this.dry.value === 'true' ? 'Queue configuration check' : 'Start training';
+        : !rl && this.dry.value === 'true' ? (recipe ? 'Queue 20-step training smoke' : 'Queue configuration check') : 'Start training';
     }
 
     spec() {
@@ -218,7 +219,9 @@ training-view .training-form textarea { min-height:90px; }
         const result = await W.post('/ui/workspace/jobs', {...spec, ...(preview ? {preview:true} : {})});
         if (preview) {
           this.preview.textContent = result.command; this.reviewDetails.open = true;
-          this.note.textContent = 'Command preview ready. A configuration check validates the training options without training.';
+          this.note.textContent = this.mode.value === 'recipe' && this.dry.value === 'true'
+            ? 'Command preview ready. The smoke run trains for 20 steps and saves no checkpoint.'
+            : 'Command preview ready.';
         } else {
           this.note.textContent = `Queued ${result.id}. Follow progress in Runs.`;
           this.querySelector('workspace-jobs').selected = result.id;

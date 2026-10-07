@@ -37,7 +37,11 @@ def test_dataset_upload_preview_and_specialist_help(tmp_path, monkeypatch, playw
         assert parsed.data == 'datasets/demo.jsonl'
         page.locator('fleet-nav a[href="#training"]').click()
         page.get_by_label('Recipe', exact=True).select_option('tool-calls')
+        assert page.get_by_label('Base model ID or local directory').count() == 1
         page.get_by_label('Base model ID or local directory').fill('models/demo-base')
+        pw.expect(page.get_by_role('button', name='Queue 20-step training smoke', exact=True)).to_be_visible()
+        page.get_by_role('button', name='Review command', exact=True).click()
+        pw.expect(page.locator('training-view #config .status')).to_contain_text('trains for 20 steps')
         page.get_by_label('Fine-tuning strategy').select_option('adapter')
         specification = page.evaluate("document.querySelector('training-view').spec()")
         parsed = _parser().parse_args(specification['args'])

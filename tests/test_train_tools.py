@@ -309,6 +309,20 @@ class TestRecipe:
         row = json.loads((data / "train.jsonl").read_text().splitlines()[0])
         assert render(tokenizer, row["messages"], row["tools"], context=8) is None
 
+    def test_configured_local_base_trains_despite_different_manifest(self, dataset, tmp_path):
+        from ml_stack.train.run import _base_of, run
+
+        data, base = dataset
+        manifest_path = data / "manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest["base"] = "invented/unavailable-causal"
+        manifest_path.write_text(json.dumps(manifest))
+        config = {"base": str(base), "steps": 20, "context": 256, "batch_size": 4}
+        assert _base_of("tool-calls", config, data) == (str(base), {})
+        got = run("tool-calls", config, data, tmp_path / "run", dry=True)
+        assert got["steps"] == 20
+        assert not got["checkpoint"]
+
     def test_the_tiny_base_trains_and_checkpoints_through_the_existing_trainer(self, dataset,
                                                                                tmp_path):
         """Tied embeddings are the case: safetensors refuses a state dict that names one
