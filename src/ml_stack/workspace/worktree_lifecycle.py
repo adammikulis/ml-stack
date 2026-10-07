@@ -1,6 +1,10 @@
 """Durable ownership and completion checks for isolated coding checkouts."""
 
 import hashlib
+import os
+import shutil
+import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 
 from ml_stack import worktreerules
@@ -10,11 +14,49 @@ from ml_stack.workspace.chain import held
 from ml_stack.workspace.identity import Denied
 
 
+@contextmanager
+def _storage(base: Path, *, write: bool = False):
+    database = base / 'worktree-lifecycle.db'
+    with held(base / 'worktree-lifecycle.lock'):
+        if not write:
+            with GraphStore(database, read_only=True) as graph:
+                yield graph
+            return
+        if any(Path(str(database) + suffix).exists() for suffix in ('.wal', '.wal.checkpoint', '.shadow')):
+            raise Denied('lifecycle storage requires preserved checkpoint recovery')
+        staging = Path(tempfile.mkdtemp(prefix='worktree-lifecycle-stage-', dir=base))
+        staged = staging / database.name
+        if database.exists():
+            shutil.copyfile(database, staged)
+        with GraphStore(staged) as graph:
+            yield graph
+            expected = (graph.nodes(), graph.edges())
+        with GraphStore(staged, read_only=True) as graph:
+            actual = (graph.nodes(), graph.edges())
+        def normalize(rows):
+            return sorted(rows, key=lambda row: repr(sorted(row.items())))
+        if tuple(map(normalize, actual)) != tuple(map(normalize, expected)):
+            raise Denied('lifecycle staged checkpoint differs from the recorded graph')
+        if any(Path(str(staged) + suffix).exists() for suffix in ('.wal', '.wal.checkpoint', '.shadow')):
+            raise Denied('lifecycle staged checkpoint is incomplete; recovery evidence preserved')
+        staged.chmod(0o600)
+        with staged.open('rb') as source:
+            os.fsync(source.fileno())
+        staged.replace(database)
+        if os.name != 'nt':
+            directory = os.open(base, os.O_RDONLY)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
+        shutil.rmtree(staging)
+
+
 def scopes(base: Path, owner: str, label: str = '') -> list[dict]:
     database = base / 'worktree-lifecycle.db'
     if not database.exists():
         return []
-    with held(base / 'worktree-lifecycle.lock'), GraphStore(database) as graph:
+    with _storage(base) as graph:
         return [row['attrs'] for row in graph.nodes('worktree-lifecycle')
                 if row['attrs']['owner'] == owner
                 and (not label or row['attrs']['label'] in ('', label))]
@@ -35,7 +77,7 @@ def remember(base: Path, owner: str, label: str, path: str) -> None:
     development = repo.git(primary, 'branch', '--show-current') if primary else ''
     value = {'owner': owner, 'label': label, 'path': str(checkout),
              'primary': str(primary) if primary else '', 'branch': branch, 'development': development}
-    with held(base / 'worktree-lifecycle.lock'), GraphStore(base / 'worktree-lifecycle.db') as graph:
+    with _storage(base, write=True) as graph:
         previous = next((row['attrs'] for row in graph.nodes('worktree-lifecycle') if row['id'] == key), {})
         if not found and previous.get('primary'):
             value.update({name: previous[name] for name in ('primary', 'branch', 'development')})
@@ -57,7 +99,7 @@ def record_cleanup(base: Path, path: Path, proof: tuple[str, str],
                    primary: Path, development: str) -> None:
     """Record a completed maintained removal with its captured source and landed commits."""
     commit, landed = proof
-    with held(base / 'worktree-lifecycle.lock'), GraphStore(base / 'worktree-lifecycle.db') as graph:
+    with _storage(base, write=True) as graph:
         for row in graph.nodes('worktree-lifecycle'):
             scope = row['attrs']
             if scope['path'] == str(path):
@@ -104,7 +146,6 @@ def cleanup(base: Path, owner: str, path: str, claims, *, claim_owner: str = '')
 def pending(base: Path, owner: str, label: str = '') -> list[dict]:
     """Inspect the worker's durable scopes without removing files or Git references."""
     result = []
-    database = base / 'worktree-lifecycle.db'
     for scope in scopes(base, owner, label):
         path = Path(scope['path'])
         if scope['primary'] and path.exists():
@@ -118,7 +159,7 @@ def pending(base: Path, owner: str, label: str = '') -> list[dict]:
                     result.append({**scope, 'reasons': ['reserved checkout path remains']})
                 continue
             remember(base, scope['owner'], scope['label'], scope['path'])
-            with held(base / 'worktree-lifecycle.lock'), GraphStore(database) as graph:
+            with _storage(base) as graph:
                 scope = next(row['attrs'] for row in graph.nodes('worktree-lifecycle')
                              if row['attrs']['path'] == str(found[0])
                              and all(row['attrs'][key] == scope[key] for key in ('owner', 'label')))
