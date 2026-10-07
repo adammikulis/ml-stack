@@ -13,7 +13,7 @@ from pathlib import Path
 from ml_stack.log import say, warn
 from ml_stack.platform import launch
 
-from . import discovery, runtime_wheel, wsl_network
+from . import discovery, runtime_wheel, wsl_network, wsl_ui
 
 __all__ = ["WSLError", "command", "prepare", "start"]
 
@@ -117,24 +117,44 @@ print(json.dumps(dict(kernel=platform.release(), python=list(sys.version_info[:2
     return python
 
 
-def _bridge(executable: str, arguments: list[str]) -> wsl_network.NetworkBridge | None:
-    host = discovery.primary_ip()
-    if not host:
-        warn("LAN discovery is unavailable while Windows has no LAN address.")
-        return None
-    linux_host = _read(executable, "-c", "from ml_stack.fleet.discovery import primary_ip; print(primary_ip())")
+def _port(arguments: list[str]) -> int:
     port = 8770
     for index, arg in enumerate(arguments):
         if arg == "--port" and index + 1 < len(arguments):
             port = int(arguments[index + 1])
         elif arg.startswith("--port="):
             port = int(arg.partition("=")[2])
+    return port
+
+
+def _bridge(executable: str, arguments: list[str]) -> wsl_network.NetworkBridge | None:
+    host = discovery.primary_ip()
+    if not host:
+        warn("LAN discovery is unavailable while Windows has no LAN address.")
+        return None
+    linux_host = _read(executable, "-c", "from ml_stack.fleet.discovery import primary_ip; print(primary_ip())")
+    port = _port(arguments)
     bridge = wsl_network.NetworkBridge(host, (linux_host, port), discovery.default_group(),
                                       discovery.default_port(), discovery._native_socket)
     try:
         return bridge.start()
     except OSError as exc:
         raise WSLError(f"The Windows LAN bridge could not start: {exc}") from exc
+
+
+def _bridges(executable: str, arguments: list[str]) -> tuple[wsl_ui.LocalUIBridge, wsl_network.NetworkBridge | None]:
+    port = _port(arguments)
+    local_ui = wsl_ui.LocalUIBridge(command(executable, "-m", "ml_stack.fleet.wsl_ui", str(port)), port)
+    try:
+        local_ui.start()
+        bridge = _bridge(executable, arguments)
+    except OSError as exc:
+        local_ui.close()
+        raise WSLError(f"The Windows local UI bridge could not start: {exc}") from exc
+    except WSLError:
+        local_ui.close()
+        raise
+    return local_ui, bridge
 
 
 def start(argv: list[str], *, executable: str | None = None) -> int:
@@ -163,7 +183,7 @@ def start(argv: list[str], *, executable: str | None = None) -> int:
                 arguments[index] = name + "=" + value
             else:
                 arguments[index + 1] = value
-    bridge = _bridge(executable, arguments)
+    local_ui, bridge = _bridges(executable, arguments)
     if bridge:
         environment.append(wsl_network.ENV + "=" + bridge.config)
     try:
@@ -183,3 +203,4 @@ def start(argv: list[str], *, executable: str | None = None) -> int:
     finally:
         if bridge:
             bridge.close()
+        local_ui.close()

@@ -169,6 +169,8 @@ def test_udp_bridge_rejects_unknown_operation(bridge):
 def test_wsl_launcher_cleans_bridge_when_process_creation_fails(monkeypatch):
     bridge = MagicMock()
     bridge.config = "authenticated socket configuration"
+    local_ui = MagicMock()
+    monkeypatch.setattr(wsl.wsl_ui, "LocalUIBridge", lambda *_args: local_ui)
     monkeypatch.setattr(wsl, "_bridge", lambda *_args: bridge)
     monkeypatch.setattr(wsl, "command", lambda *args: list(args))
     monkeypatch.setattr(wsl, "_read", lambda *_args: "/linux/python")
@@ -183,6 +185,8 @@ def test_wsl_launcher_cleans_bridge_when_process_creation_fails(monkeypatch):
     with pytest.raises(OSError, match="child creation failed"):
         wsl.start([], executable="linux-python")
     bridge.close.assert_called_once()
+    local_ui.start.assert_called_once()
+    local_ui.close.assert_called_once()
 
 
 def test_wsl_offline_runtime_does_not_require_lan_listener(monkeypatch):

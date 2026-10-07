@@ -241,6 +241,18 @@ def test_wsl_start_preserves_service_setup_and_closes_owned_resources(monkeypatc
 
     monkeypatch.setattr(wsl, "_read", lambda *args: "/usr/bin:/bin" if args[0] == "printenv"
                         else "/mnt/c/runtime/python.exe")
+    class LocalUI:
+        def __init__(self, argv, port):
+            assert argv[-3:] == ["-m", "ml_stack.fleet.wsl_ui", "8771"]
+            assert port == 8771
+
+        def start(self):
+            events.append("local-start")
+
+        def close(self):
+            events.append("local-close")
+
+    monkeypatch.setattr(wsl.wsl_ui, "LocalUIBridge", LocalUI)
     monkeypatch.setattr(wsl, "_bridge", lambda *args: bridge)
     monkeypatch.setattr(wsl, "command", lambda *args: ["wsl.exe", "--exec", *args])
     monkeypatch.setattr(wsl, "launch", owned_launch)
@@ -255,8 +267,8 @@ def test_wsl_start_preserves_service_setup_and_closes_owned_resources(monkeypatc
     assert "PATH=/home/test/runtime/bin:/usr/bin:/bin" in argv
     assert wsl.wsl_network.ENV + "=bridge-config" in argv
     assert kwargs == {"stdin": subprocess.PIPE}
-    assert events == [("wait", {}, False), "pipe-close",
-                      ("wait", {"timeout": 10}, True), "bridge-close"]
+    assert events == ["local-start", ("wait", {}, False), "pipe-close",
+                      ("wait", {"timeout": 10}, True), "bridge-close", "local-close"]
 
 
 def test_model_namespace_allows_granted_reads_and_denies_host_loopback(tmp_path):
