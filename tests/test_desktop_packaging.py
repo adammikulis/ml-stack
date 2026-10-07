@@ -147,16 +147,42 @@ def test_frozen_collects_wheel_modules_and_dynamic_entrypoints(frozen_collector,
         "ml_stack/ingest/cli.py", "ml_stack/workspace/remote_host.py",
         "ml_stack/ui/assets/index.html", "ml_stack-1.0.dist-info/METADATA",
         "../bin/ml-stack", "ml_stack/non-module.py",
-    ]], entry_points=entries)
+    ]], entry_points=entries, locate_file=lambda file: ROOT / "src" / str(file))
     monkeypatch.setattr(frozen_collector, "distribution", lambda name: installed)
     datas, modules = frozen_collector.collect_project()
     assert calls == ["ml_stack.ui_routes", "ml_stack.workspace_hosts"]
-    assert datas == [("plugin-metadata", group) for group in calls]
+    assert (str(ROOT / "src/ml_stack/workspace/remote_host.py"), "ml_stack/workspace") in datas
+    assert datas[-2:] == [("plugin-metadata", group) for group in calls]
     assert modules == [
         "ml_stack", "ml_stack.bench.cli", "ml_stack.fleet.daemon", "ml_stack.ingest.cli",
         "ml_stack.workspace.agent_routes", "ml_stack.workspace.remote_host",
         "ml_stack.workspace.task_routes", "ml_stack.world", "plugin_provider.routes",
     ]
+
+
+def test_frozen_source_claim_git_module_is_available_for_parsing(frozen_collector, monkeypatch, tmp_path):
+    import ast
+    import shutil
+    from pathlib import PurePosixPath
+    from types import SimpleNamespace
+
+    hooks = type(sys)("PyInstaller.utils.hooks")
+    hooks.collect_entry_point = lambda group: ([], [])
+    monkeypatch.setitem(sys.modules, "PyInstaller.utils.hooks", hooks)
+    file = PurePosixPath("ml_stack/net/git.py")
+    installed = SimpleNamespace(files=[file], entry_points=[],
+                                locate_file=lambda path: ROOT / "src" / str(path))
+    monkeypatch.setattr(frozen_collector, "distribution", lambda name: installed)
+    datas, _ = frozen_collector.collect_project()
+    for source, destination in datas:
+        target = tmp_path / destination / Path(source).name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, target)
+    extracted = tmp_path / str(file)
+    tree = ast.parse(extracted.read_text(), filename=str(extracted))
+    assert any(isinstance(node, ast.FunctionDef) and node.name == "source_index"
+               for node in tree.body)
+    assert extracted.read_bytes() == (ROOT / "src" / str(file)).read_bytes()
 
 
 def test_frozen_spec_includes_project_modules_without_project_exclusions(monkeypatch):
