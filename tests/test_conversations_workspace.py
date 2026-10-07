@@ -39,7 +39,13 @@ def test_shared_sidebar_routes_channels_dms_threads_and_saved_model_chats(chat_b
     assert any(message['body'] == 'Use the held-out dataset.' for message in kit.ws.board.ui_read(kit.owner, '#experiments')['messages'])
     board.get_by_role('button', name='Reply in thread').first.click()
     expect(board.get_by_role('button', name='Back to #experiments')).to_be_visible()
-    sidebar.get_by_role('button', name='research-helper', exact=True).click()
+    from ml_stack.workspace.agent_display import metadata
+
+    worker_label = metadata(kit.ws.registry, worker.name)['display_name']
+    peer = sidebar.get_by_role('button', name=worker_label, exact=True)
+    expect(peer).to_have_attribute('title', worker.name)
+    peer.click()
+    assert board.evaluate('(node) => node.target().to') == worker.name
     expect(board.locator('.msg pre')).to_contain_text('Review the experiment criteria.')
     sidebar.get_by_role('link', name='Experiment plan', exact=True).click()
     expect(page.locator('#conversation-model')).to_be_visible()

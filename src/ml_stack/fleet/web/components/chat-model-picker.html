@@ -202,7 +202,7 @@ chat-view #chat-activity-output { max-height:240px; overflow:auto; white-space:p
     }
     navigation(data) {
       this.navigationData = data;
-      const button = (label, current, view) => M.el('button', {
+      const button = (label, current, view, identity = '') => M.el('button', {title:identity,
         type:'button', 'aria-current':String(this.active && current), onclick:() => {
           M.go('board'); this.board.open(view);
         }}, label);
@@ -222,7 +222,7 @@ chat-view #chat-activity-output { max-height:240px; overflow:auto; white-space:p
       }
       const newMessage = data.me ? M.el('details', {}, M.el('summary', {}, '+ New direct message'), this.board.newDm()) : null;
       this.direct.replaceChildren(newMessage, ...[...peers.values()].map(row => button(row.label,
-        data.view.kind === 'dm' && [data.view.a,data.view.b].includes(row.id), row.view)));
+        data.view.kind === 'dm' && [data.view.a,data.view.b].includes(row.id), row.view, row.id)));
       if (!peers.size) this.direct.append(M.el('p', {class:'hint'}, 'Agents and direct messages appear here.'));
     }
     models(rows) {
