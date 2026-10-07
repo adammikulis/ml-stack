@@ -146,11 +146,14 @@ class TestHook:
 
     def test_a_hook_that_fails_blocks_the_call(self):
         done = _hook("pre", "not json", "--role", "plan-and-go")
-        assert done.returncode == 2 and done.stdout == ""
+        assert done.returncode == 2
+        assert _verdict(done)["permissionDecision"] == "deny"
+        assert "diagnostic=" in done.stdout
 
-    def test_the_post_hook_degrades_to_nothing_without_a_nudge(self, monkeypatch):
+    def test_the_post_hook_warns_without_blocking_when_nudge_is_missing(self, monkeypatch):
         monkeypatch.setenv("PATH", "/nonexistent")
-        assert harnesshook.post("local-test") == {}
+        answer = harnesshook.post("local-test")
+        assert "workspace nudge unavailable" in answer["hookSpecificOutput"]["additionalContext"]
 
 
 class TestSessionFiles:

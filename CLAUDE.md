@@ -413,6 +413,16 @@ preservation checks before removal; an unregistered directory is not proof that 
 - The main session lands each branch it asked for, or the agent does, but one of them does, the
   same day. A branch nobody lands is work nobody has.
 
+After changing or activating a runtime, exercise the installed hook commands for pre, post
+and stop under the owning authenticated session. Check the actual launcher interpreter,
+distribution revision, structured output and exit status; source tests and a daemon health
+response do not establish which hook runtime is active. Preserve any diagnostic ID and the
+redacted local record. Fix a hook regression and repeat these checks before continuing work
+that depends on it. Notification outages must warn without blocking completed local tools;
+independent authorization and unfinished-work completion checks remain enforced. Inspect
+records with `ml-stack-doctor hooks [ID]` or, without workspace imports,
+`python -m ml_stack.hook_diagnostics [ID]`. Record runtime cutover checks in the handoff.
+
 Hooks and agent instructions preserve authenticated claims, named-file changes, independent
 review, and restrictions on destructive commands and `main`. Primary-checkout location alone
 is not a reason to refuse an authorized development change. Editable installs remain forbidden.

@@ -30,7 +30,8 @@ def test_run_reports_authorization_category_without_private_values(monkeypatch, 
     diagnostic = capsys.readouterr().err
     assert expected in diagnostic
     assert "secret-token-value" not in diagnostic
-    assert output.getvalue() == ""
+    assert "diagnostic=" in output.getvalue()
+    assert "secret-token-value" not in output.getvalue()
 
 
 def test_unexpected_errors_do_not_expose_exception_contents(monkeypatch, capsys):

@@ -398,6 +398,10 @@ def look_checkouts(repos: list[Path] | None = None, *, bench_home: Path | None =
 def main(argv: list[str] | None = None) -> int:
     """``ml-stack-doctor`` -- the repositories and the working state, at the start of a
     session. Exit 0 when every finding is good, 1 otherwise."""
+    words = list(sys.argv[1:] if argv is None else argv)
+    if words[:1] == ["hooks"]:
+        from ml_stack.hook_diagnostics import main as hooks_main
+        return hooks_main(words[1:])
     ap = argparse.ArgumentParser(
         prog="ml-stack-doctor",
         description="Check what ml-stack-setup does not: the checkouts (hooks, working "
