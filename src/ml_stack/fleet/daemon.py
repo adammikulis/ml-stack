@@ -10,9 +10,9 @@ import os
 import secrets
 import socket
 import threading
-from functools import partial
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from functools import partial
 from importlib.metadata import entry_points
 from pathlib import Path
 from typing import Any
