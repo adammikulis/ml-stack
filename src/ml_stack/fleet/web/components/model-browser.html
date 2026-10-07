@@ -1,24 +1,25 @@
 <template>
   <section class="model-browser" aria-label="Model library">
     <div class="section-heading"><div><h2>Your model library</h2>
-      <p class="hint">Run a model here, copy it from your cluster, or browse new models.</p></div></div>
+      <p class="hint">Run a model here, copy it from your Pool, or browse new models.</p></div></div>
     <div class="browser-toolbar">
       <div class="segmented" role="group" aria-label="Model source">
-        <button type="button" data-source="network" aria-pressed="true">On network</button>
+        <button type="button" data-source="network" aria-pressed="true">In your Pool</button>
         <button type="button" data-source="hub" aria-pressed="false">Hugging Face</button>
       </div>
       <label class="search-field" for="hunt"><span class="sr-only">Search models</span>
-        <input type="search" id="hunt" placeholder="Search models on your network"></label>
+        <input type="search" id="hunt" placeholder="Search models in your Pool"></label>
     </div>
-    <div class="quant-filters">
+    <details data-advanced class="aside"><summary>Advanced model filters</summary><div class="quant-filters">
       <label for="quant-bits">Quantization bits <select id="quant-bits" aria-label="Quantization bits">
         <option value="">All bits</option><option value="3">All 3-bit</option><option value="4">All 4-bit</option>
         <option value="2">All 2-bit</option><option value="5">All 5-bit</option><option value="6">All 6-bit</option><option value="8">All 8-bit</option>
       </select></label>
-      <label for="quant-family">Quant family <select id="quant-family" aria-label="Quant family">
+      <label for="quant-family">Quantization family <select id="quant-family" aria-label="Quantization family">
         <option value="">All families</option><option value="UD">UD</option><option value="GSQ/RCO">GSQ / RCO</option><option value="Standard">Standard</option>
       </select></label>
     </div>
+    </details>
     <p class="hint" id="browser-source"></p>
     <div id="browser-filters" hidden></div>
     <div id="browser-results" aria-live="polite"></div>
@@ -65,6 +66,14 @@
       this.paintNetwork();
     }
 
+    selectModel(value) {
+      this.chooseSource("network");
+      this.hunt.value = value.name || value.path?.split("/").pop() || "";
+      this.search.typed = this.hunt.value;
+      this.bits.value = this.quantFamily.value = "";
+      this.paintNetwork();
+    }
+
     setInventory(inventory, run) {
       const changed = JSON.stringify([inventory.here, inventory.elsewhere, run.running, run.can_serve]);
       this.inventory = inventory;
@@ -86,7 +95,7 @@
       this.source = source;
       this.querySelectorAll("[data-source]").forEach((b) =>
         b.setAttribute("aria-pressed", String(b.dataset.source === source)));
-      this.hunt.placeholder = source === "network" ? "Search models on your network"
+      this.hunt.placeholder = source === "network" ? "Search models in your Pool"
         : "Search Hugging Face, or paste a model reference";
       this.filters.hidden = source !== "hub";
       if (source === "network") this.paintNetwork();
@@ -101,14 +110,14 @@
       const rows = [...(this.inventory.here || []).map((x) => ({ ...x, local: true })),
         ...(this.inventory.elsewhere || []).filter((x) => !local.has(x.name))]
         .filter((x) => isWeight(x.name) && x.name.toLowerCase().includes(this.search.typed.toLowerCase()));
-      this.description.textContent = "Models already on this machine and authenticated machines in your cluster. No internet search.";
+      this.description.textContent = "Models already on this machine and authenticated machines in your Pool. No internet search.";
       this.filters.hidden = true;
       this.pages.replaceChildren();
       const groups = this.grouped(rows);
       this.results.replaceChildren(...(groups.length ? groups.map((group) => this.variantRow(group, running))
         : [el("div", { class: "empty-state" }, this.search.typed
-          ? "No models on your network match this search."
-          : "No models on your network yet. Choose Hugging Face to find one.")]));
+          ? "No models in your Pool match this search."
+          : "No models in your Pool yet. Choose Hugging Face to find one.")]));
     }
 
     grouped(rows) {
@@ -187,7 +196,14 @@
       const query = new URLSearchParams({ q: this.search.typed, page: this.search.page,
         rude: this.search.rude ? "1" : "0" });
       this.description.textContent = "Searching Hugging Face…";
-      const [response, suggested] = await Promise.all([api(`/ui/models/popular?${query}`), api("/ui/models/startup")]);
+      this.results.replaceChildren(el("p", {role:"status"}, "Loading models…"));
+      let response, suggested;
+      try { [response, suggested] = await Promise.all([api(`/ui/models/popular?${query}`), api("/ui/models/startup")]); } catch (error) {
+        if(request !== this.requestId || this.source !== "hub") return;
+        this.description.textContent = "Could not search Hugging Face: " + error.message;
+        this.results.replaceChildren(el("button", {class:"ghost", onclick:()=>this.loadHub()}, "Retry search"));
+        this.pages.replaceChildren(); return;
+      }
       if (request !== this.requestId || this.source !== "hub" || key !== this.key()) return;
       if (M.refused(response)) return;
       const known = new Set((response.models || []).map((x) => x.file));
