@@ -109,6 +109,7 @@ knowledge-view #stores button[aria-pressed=true] { border-color:var(--accent); }
     async selectStore(path, label = path) {
       this.store = path;
       this.detailRequest++;
+      this.querySelector('#detail').removeAttribute('aria-busy');
       this.offset = 0;
       this.search.value = '';
       this.kind.replaceChildren(E('option', {value:''}, 'All kinds'));

@@ -101,6 +101,34 @@ def test_graph_browser_navigation_search_and_neighbor(daemon, tmp_path, playwrig
         expect(detail.get_by_role('heading', name='Alpha model', exact=True)).to_be_visible()
         page.get_by_label('Node kind').select_option('task')
         expect(page.locator('knowledge-view #nodes')).to_contain_text('No nodes match')
+        race = page.evaluate("""async () => {
+            const view = document.querySelector('knowledge-view');
+            const api = window.workspaceModel.api;
+            let rejectOld;
+            window.workspaceModel.api = (path, options) => path.includes('q=old-request')
+                ? new Promise((_resolve, reject) => { rejectOld = reject; }) : api(path, options);
+            view.search.value = 'old-request';
+            const old = view.loadNodes();
+            await view.selectStore('knowledge.db');
+            rejectOld(new Error('Stale search error'));
+            await old;
+            window.workspaceModel.api = api;
+            return {note:view.note.textContent, busy:view.querySelector('#graph-panel').hasAttribute('aria-busy')};
+        }""")
+        assert race == {'note': '', 'busy': False}
+        folder_race = page.evaluate("""async () => {
+            const view = document.querySelector('knowledge-view');
+            const api = window.workspaceModel.api;
+            let rejectOld;
+            window.workspaceModel.api = path => new Promise((_resolve, reject) => { rejectOld = reject; });
+            const old = view.loadStores();
+            window.workspaceModel.api = api;
+            await view.loadStores();
+            rejectOld(new Error('Stale folder error'));
+            await old;
+            return view.note.textContent;
+        }""")
+        assert folder_race == ''
         assert not errors
 
 

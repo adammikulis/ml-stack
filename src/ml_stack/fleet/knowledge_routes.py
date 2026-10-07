@@ -15,7 +15,7 @@ from .room_routes import _origin_ok
 PAGE_SIZE = 60
 FIELD_CHARS = 32_768
 NODE_FIELDS = (
-    "n.id AS id, n.kind AS kind, substring(n.label, 1, 2000) AS label, "
+    "substring(n.id, 1, 2049) AS id, substring(n.kind, 1, 200) AS kind, substring(n.label, 1, 2000) AS label, "
     "n.mentions AS mentions, substring(n.attrs, 1, 32769) AS attrs, "
     "substring(n.data, 1, 32769) AS data"
 )
@@ -28,6 +28,8 @@ def preview(raw, label):
 
 
 def decoded(row):
+    if len(row["id"]) > 2048:
+        raise ValueError("Node IDs longer than 2048 characters cannot be inspected.")
     return {**{key: value for key, value in row.items() if key not in {"data", "attrs"}},
             "attrs": preview(row["attrs"], "node attributes"),
             "details": preview(row["data"], "node details")}
@@ -136,15 +138,19 @@ class KnowledgeRoutes:
 
     def _node(self, graph):
         node_id = self.asked("id")
+        if len(node_id) > 2048:
+            raise ValueError("Node IDs must be at most 2048 characters.")
         rows = graph.query("MATCH (n:Node {id:$id}) RETURN " + NODE_FIELDS, {"id": node_id})
         if not rows:
             self.send(404, {"error": "This node is no longer in the graph."})
             return True
         relations = graph.query(
             "MATCH (a:Node)-[e:Edge]->(b:Node) WHERE a.id = $id OR b.id = $id "
-            "RETURN a.id AS source, substring(a.label, 1, 200) AS source_label, b.id AS target, "
-            "substring(b.label, 1, 200) AS target_label, e.rel AS rel, e.weight AS weight "
+            "RETURN substring(a.id, 1, 2049) AS source, substring(a.label, 1, 200) AS source_label, substring(b.id, 1, 2049) AS target, "
+            "substring(b.label, 1, 200) AS target_label, substring(e.rel, 1, 200) AS rel, e.weight AS weight "
             "ORDER BY weight DESC, source, target LIMIT 201", {"id": node_id})
+        if any(len(edge[key]) > 2048 for edge in relations for key in ("source", "target")):
+            raise ValueError("Related node IDs longer than 2048 characters cannot be inspected.")
         self.send(200, {"node": decoded(rows[0]), "relations": relations[:200],
                         "truncated": len(relations) > 200})
         return True
