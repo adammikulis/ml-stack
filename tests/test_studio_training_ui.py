@@ -50,3 +50,25 @@ def test_dataset_handoff_opens_model_step_and_keeps_run_summary(joined, open_pag
     page.get_by_role('button', name='Back', exact=True).click()
     assert page.get_by_label('Dataset path (relative to files root)').input_value() == 'datasets/chosen.jsonl'
     assert not errors
+
+
+def test_library_chat_action_selects_server_identity(joined, open_page):
+    page, errors = open_page(joined, cookie=joined.cookie, path='/ui/#models')
+    row = {'id': 'display-id', 'name': 'Friendly model', 'path': '/tmp/exact-model.gguf',
+           'family': 'Qwen', 'format': 'gguf', 'quantization': 'Q4', 'kind': 'text',
+           'status': 'installed', 'servable': True, 'size_bytes': 1000,
+           'shards': 1, 'is_complete': True, 'files': []}
+    page.route('**/ui/models', lambda route: route.fulfill(json={
+        'library': [row], 'here': [], 'elsewhere': [], 'getting': [], 'unfinished': [],
+    }))
+    page.route('**/ui/serving', lambda route: route.fulfill(json={
+        'running': [{'models': ['exact-model.gguf'], 'port': 12345}], 'can_serve': True,
+    }))
+    page.route('**/ui/chat', lambda route: route.fulfill(json={
+        'models': [{'model': 'exact-model.gguf', 'local': True}], 'runtime_ready': True,
+    }))
+    page.evaluate("document.querySelector('models-view').draw()")
+    page.locator('models-library').get_by_role('button', name='Open chat', exact=True).click()
+    expect(page).to_have_url(f'http://127.0.0.1:{joined.port}/ui/#chat')
+    expect(page.locator('chat-view #model')).to_have_value('exact-model.gguf')
+    assert not errors
