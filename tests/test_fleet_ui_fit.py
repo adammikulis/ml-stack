@@ -188,7 +188,7 @@ class TestTheSplitBetweenTheFitComponents:
             assert anchor in html, f"the frame lost {anchor}"
 
     @pytest.mark.slow
-    def test_capacity_navigation_opens_models_panel_and_returns_to_cluster(self, tmp_path, playwright):
+    def test_capacity_navigation_opens_capacity_and_returns_to_devices(self, tmp_path, playwright):
         from playwright.sync_api import expect
         from test_fleet_ui import Serving
 
@@ -200,8 +200,9 @@ class TestTheSplitBetweenTheFitComponents:
             page.goto(f'http://127.0.0.1:{served.port}/ui/')
             nav = page.locator('fleet-nav nav')
             nav.locator('a[href="#fit"]').click()
-            expect(page.locator('#nav-title')).to_have_text('Models')
-            expect(page.locator('#model-capacity')).to_have_attribute('open', '')
+            expect(page.locator('#nav-title')).to_have_text('Capacity')
+            assert page.url.endswith('#fit')
+            expect(page.locator('#models')).to_be_hidden()
             expect(page.locator('#fit-heading')).to_be_visible()
             expect(nav.locator('a[href="#cluster"]')).to_be_visible()
             nav.locator('a[href="#cluster"]').click()

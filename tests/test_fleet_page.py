@@ -142,8 +142,7 @@ def open_page(browser):
 
 
 def open_capacity(page):
-    page.click("nav.tabs a:has-text('Models')")
-    page.locator("#model-capacity > summary").click()
+    page.click('nav.tabs a[href="#fit"]')
     page.locator("#fit").scroll_into_view_if_needed()
 
 

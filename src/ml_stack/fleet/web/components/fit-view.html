@@ -146,17 +146,12 @@
         if (view === "fit" && this.ready) this.draw();
       });
 
-      const capacity = this.closest("#model-capacity");
-      const enter = () => {
-        if (!this.ready && (!capacity || capacity.open)) this.start();
-      };
-      if (capacity) capacity.addEventListener("toggle", () => { if (capacity.open) enter(); });
       M.onRoute((route) => {
-        const on = route === (capacity ? "models" : "fit");
+        const on = route === "fit";
         this.box.hidden = !on;
         if (!on) return;
         if (this.ready) { if (FM.view === "fit") this.draw(); }
-        else enter();
+        else this.start();
       });
     }
 

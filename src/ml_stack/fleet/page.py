@@ -49,6 +49,4 @@ def components(names: Sequence[str | Component] = COMPONENTS) -> list[Component]
 def render(parts: Sequence[str | Component] = COMPONENTS) -> str:
     """The whole page, as one string."""
     shell = (WEB / "shell.html").read_text(encoding="utf-8")
-    if any((part.name if isinstance(part, Component) else part) == "models-view" for part in parts):
-        shell = shell.replace("    <fit-view></fit-view>\n", "")
     return assemble(shell, components(parts))

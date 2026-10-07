@@ -7,11 +7,8 @@
     <section class="panel" id="models-here"><models-library></models-library></section>
     <model-browser></model-browser>
     <section class="panel" id="models-unfinished" hidden></section>
-    <details class="panel capacity-panel" id="model-capacity">
-      <summary><span>Capacity &amp; performance</span><span class="why">Memory, context, measured fit and history</span></summary>
-      <div id="models-room"><wired-memory></wired-memory></div>
-      <fit-view></fit-view>
-    </details>
+    <div class="group" id="models-room"><wired-memory></wired-memory></div>
+    <a href="#fit">Explore capacity &amp; performance →</a>
   </main>
 </template>
 <script>
@@ -28,12 +25,21 @@
       this.browser.owner = this;
       this.progress = new Map();
       this.starting = new Set();
+      this.stopping = new Set();
+      this.downloading = new Set();
+      this.onSelection = (event) => {
+        this.selectedModel = event.detail;
+        this.querySelector("models-library").selectModel?.(event.detail);
+        this.browser.selectModel?.(event.detail);
+      };
+      window.addEventListener("fleet-select-model", this.onSelection);
       M.onRoute((route) => {
         this.box.hidden = route !== "models";
         clearTimeout(this.timer);
         if (!this.box.hidden) this.draw();
       });
     }
+    disconnectedCallback() { clearTimeout(this.timer); window.removeEventListener("fleet-select-model", this.onSelection); }
     async draw() {
       if (this.loading) return;
       this.loading = true;
@@ -102,7 +108,15 @@
         this.note.replaceChildren(r.error
           ? el("div", { class: "err" }, r.error)
           : el("div", { class: "ok" }, `${name} is ready. Open Chat to use it.`));
-        if (!r.error) this.draw();
+        if (!r.error) {
+          this.draw();
+          const selected = this.selectedModel;
+          if (selected?.from === "chat" && [selected.path, selected.name, selected.id].includes(name)) {
+            this.selectedModel = null;
+            window.dispatchEvent(new CustomEvent("fleet-chat-ready", {detail:{model:label}}));
+            M.go("chat");
+          }
+        }
       } catch (error) {
         this.note.replaceChildren(el("div", { class: "err" }, `Could not start ${name}: ${error.message}`));
       } finally {
@@ -112,17 +126,20 @@
     }
 
     async halt(port) {
-      const stopped = await api("/ui/serving", { method: "DELETE", body: JSON.stringify({ port }) });
-      if (!stopped.ok) {
-        this.note.replaceChildren(el("div", { class:"err" }, stopped.error || "Could not stop the model server."));
-        return;
-      }
-      this.note.replaceChildren();
-      this.draw();
+      if (this.stopping.has(port)) return;
+      this.stopping.add(port);
+      try {
+        const stopped = await api("/ui/serving", { method: "DELETE", body: JSON.stringify({ port }) });
+        if (!stopped.ok) throw new Error(stopped.error || "Could not stop the model server.");
+        this.note.replaceChildren(); this.draw();
+      } catch (error) { this.note.replaceChildren(el("div", {class:"err"}, error.message)); }
+      finally { this.stopping.delete(port); }
     }
 
     async get(name, source, recommendMtp = false) {
-      this.note.replaceChildren(el("p", {}, "Checking optional components?"));
+      if (this.downloading.has(name)) return;
+      this.downloading.add(name);
+      this.note.replaceChildren(el("p", {}, "Checking optional components…"));
       try {
         const found = await api("/ui/models/addons?name=" + encodeURIComponent(name) + "&source=" + encodeURIComponent(source || ""));
         if (found.error) throw new Error(found.error);
@@ -141,8 +158,10 @@
           choices.append(el("label", {class: "opt"}, check, title + " ? " + M.fileSize(component.download_bytes) +
             (component.packaging === "integrated" ? " replacement model" : " additional download")));
         }
-        choices.append(el("button", {onclick: async () => {
-          this.note.replaceChildren(el("p", {}, "Getting " + name + "?"));
+        choices.append(el("button", {onclick: async (event) => {
+          if (event.currentTarget.disabled) return;
+          event.currentTarget.disabled = true;
+          this.note.replaceChildren(el("p", {}, "Getting " + name + "…"));
           try {
             const result = await api("/ui/models", {method: "POST", body: JSON.stringify({name, source, ...selected})});
             if (result.error) throw new Error(result.error);
@@ -151,6 +170,7 @@
         }}, "Start download"), el("button", {class: "ghost", onclick: () => this.note.replaceChildren()}, "Cancel"));
         this.note.replaceChildren(choices);
       } catch (error) { this.note.replaceChildren(el("p", {class: "err"}, error.message)); }
+      finally { this.downloading.delete(name); }
     }
 
   }
