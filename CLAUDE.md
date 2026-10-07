@@ -354,6 +354,16 @@ git branch -d <branch>
 git worktree prune
 ```
 
+**Commit, merge and sync continuously.** Every worker commits completed, bounded pieces by named
+files in its claimed branch and promptly sends the coordinator the commits, affected-check
+results and review request. The coordinator reviews and lands ready batches throughout the task,
+then fetches and pushes development immediately after each verified integration. A worker assigned
+integration follows the same review, claims and combined-gate requirements. Keep one coordinator
+for the shared development branch; other workers continue independently in their claimed trees.
+Do not accumulate ready branches or local-only commits until the end of a session, wait for every
+worker to finish, or defer publication behind cleanup, unrelated work or background full suites.
+After publication, promptly complete the merged branch's maintained worktree cleanup.
+
 Agents may fetch and fast-forward the development branch from its upstream, and may push the
 development branch after review, scoped gates, and integration pass. Keep local and upstream
 development branches synchronized as part of completing the task; report the resulting commit
