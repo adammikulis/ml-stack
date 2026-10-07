@@ -28,6 +28,11 @@ def test_scenario_cards_drive_setup_and_preserve_live_control_access(joined, ope
     assert start and start['y'] + start['height'] < page.viewport_size['height']
     assert page.locator('gym-view .gym-stage').is_visible()
     assert page.get_by_role('button', name='Single step', exact=True).is_visible()
+    assert not page.get_by_role('button', name='Apply manual action', exact=True).is_visible()
+    assert not page.get_by_role('button', name='Refresh recordings', exact=True).is_visible()
+    page.locator('gym-view .gym-recordings-panel > summary').click()
+    assert page.get_by_role('button', name='Refresh recordings', exact=True).is_visible()
+    page.locator('gym-view .gym-recordings-panel > summary').click()
     layout = page.evaluate("""() => {
       const g=document.querySelector('gym-view'),setup=g.querySelector('#config').getBoundingClientRect(),
         stage=g.querySelector('.gym-stage').getBoundingClientRect();
