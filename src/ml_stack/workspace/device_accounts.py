@@ -1,5 +1,6 @@
 """Read-only access to person-enrolled device account membership."""
 from ml_stack.graph.store import GraphStore
+from ml_stack.workspace.chain import held
 
 
 def account_in(graph, identity):
@@ -14,5 +15,5 @@ def account_in(graph, identity):
 
 def account_for(ws, identity):
     """Absent persisted person bindings remain absent."""
-    with GraphStore(ws.base / "device-accounts.db") as graph:
+    with held(ws.base / "device-accounts.lock"), GraphStore(ws.base / "device-accounts.db") as graph:
         return account_in(graph, identity)
