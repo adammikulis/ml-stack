@@ -209,6 +209,25 @@ def test_settings_switch_sections_without_losing_unsaved_values(joined, open_pag
     page.keyboard.press('ArrowDown')
     expect(panels).to_have_attribute('data-pane', 'models')
     expect(page.get_by_role('tab', name='Models & providers')).to_be_focused()
+    sizing = page.evaluate("""() => {
+        const root = document.documentElement;
+        const pane = document.querySelector('settings-view [data-pane="models"]');
+        const heading = pane.querySelector('header h2');
+        const before = {padding:parseFloat(getComputedStyle(pane).paddingLeft),
+                        font:parseFloat(getComputedStyle(heading).fontSize),
+                        rootFont:parseFloat(getComputedStyle(root).fontSize)};
+        const originalFont = root.style.fontSize;
+        const originalDensity = root.style.getPropertyValue('--ui-density');
+        root.style.setProperty('--ui-density', '.8'); root.style.fontSize = '20px';
+        const after = {padding:parseFloat(getComputedStyle(pane).paddingLeft),
+                       font:parseFloat(getComputedStyle(heading).fontSize)};
+        root.style.fontSize = originalFont;
+        if(originalDensity) root.style.setProperty('--ui-density', originalDensity);
+        else root.style.removeProperty('--ui-density');
+        return {before, after};
+    }""")
+    assert sizing['after']['padding'] == pytest.approx(sizing['before']['padding'] * .8)
+    assert sizing['after']['font'] == pytest.approx(sizing['before']['font'] * 20 / sizing['before']['rootFont'], abs=.03)
     page.get_by_role('tab', name='Models & providers').click()
     output = page.get_by_label('Default maximum output tokens', exact=True)
     output.fill('4096')
