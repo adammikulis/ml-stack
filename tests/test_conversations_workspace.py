@@ -41,11 +41,12 @@ def test_shared_sidebar_routes_channels_dms_threads_and_saved_model_chats(chat_b
     expect(board.get_by_role('button', name='Back to #experiments')).to_be_visible()
     from ml_stack.workspace.agent_display import metadata
 
-    worker_label = metadata(kit.ws.registry, worker)['display_name']
+    worker_id = kit.ws.auth(worker).id
+    worker_label = metadata(kit.ws.registry, worker_id)['display_name']
     peer = sidebar.get_by_role('button', name=worker_label, exact=True)
-    expect(peer).to_have_attribute('title', worker)
+    expect(peer).to_have_attribute('title', worker_id)
     peer.click()
-    assert board.evaluate('(node) => node.target().to') == worker
+    assert board.evaluate('(node) => node.target().to') == worker_id
     expect(board.locator('.msg pre')).to_contain_text('Review the experiment criteria.')
     sidebar.get_by_role('link', name='Experiment plan', exact=True).click()
     expect(page.locator('#conversation-model')).to_be_visible()
