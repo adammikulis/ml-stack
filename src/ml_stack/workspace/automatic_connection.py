@@ -17,7 +17,7 @@ from ml_stack.fleet.remote import Peer, device_address
 from ml_stack.workspace import device_agent, project_session, tokens
 from ml_stack.workspace.chain import held
 from ml_stack.workspace.harness_seat import Seat
-from ml_stack.workspace.identity import AGENT, Denied
+from ml_stack.workspace.identity import AGENT, CAPS, Denied, valid_name
 from ml_stack.workspace.project_connection import bind, selected
 from ml_stack.workspace.remote import RemoteWorkspace
 
@@ -42,10 +42,59 @@ def settle(member, cluster_key=None, port=None):
         time.sleep(0.1)
 
 
+def _active_dev(connection):
+    cluster = connection.get('cluster')
+    if not cluster:
+        return False
+    path = Path(connection['cluster_key']) if connection.get('cluster_key') else None
+    rows = memberships(path)
+    return bool(rows and rows[0].mode == 'dev' and rows[0].group == cluster)
+
+
+def _other_local_actor(args, connection, local_token, workspace, requested):
+    local = workspace()
+    root = Path(connection['root'])
+    remote = RemoteWorkspace(connection['host'], connection['project_id'],
+                             cluster_key=Path(connection['cluster_key']) if connection.get('cluster_key') else None,
+                             cluster=connection['cluster'])
+    slot = tokens.directory(remote.base) / requested
+    exists = slot.exists() or slot.is_symlink()
+    if requested not in local.registry.ids() and exists:
+        return connection
+    prior = selected(root, local_agent=requested)
+    with device_agent.owned_project_session(local, local_token(args), requested, root) as actor:
+        if not set(CAPS) <= set(actor.can):
+            raise Denied('automatic Dev enrollment requires the saved standard agent capabilities')
+        if prior and prior.get('local_agent') == requested:
+            if (prior['host'], prior['project_id']) != (connection['host'], connection['project_id']):
+                raise Denied('this agent names another canonical Board')
+            remote._safe_storage(tokens.directory(remote.base) / prior['agent'])
+            args.agent = prior['agent']
+            return bind(remote, root, prior['agent'], connection['cluster'], local_agent=requested,
+                        agent_token=tokens.load(remote.base, prior['agent']))
+        if exists:
+            remote._safe_storage(slot)
+            args.agent = requested
+            return bind(remote, root, requested, connection['cluster'], local_agent=requested,
+                        agent_token=tokens.load(remote.base, requested))
+        metadata = local.registry.info(actor.id)
+        choice = discover(root)
+        if choice is None:
+            raise Denied('this Dev cluster does not advertise the shared project Board')
+        if (choice['host'], choice['project_id']) != (connection['host'], connection['project_id']):
+            raise Denied('this project already names another canonical Board')
+        attached = attach(root, actor.id, choice,
+                          claim=(getattr(args, 'model', '') or metadata['model'],
+                                 getattr(args, 'harness', '') or metadata['harness']))
+        args.agent = attached['agent']
+        return attached
+
+
 def cli_connection(args, connection, local_token, workspace):
     """Resolve this command's authenticated local agent on its Dev Board."""
     if getattr(args, "token_file", ""):
         return connection
+    args._canonical_dev = _active_dev(connection)
     requested = args.agent or os.environ.get(tokens.AGENT_ENV, "") or ("codex" if project_session.current() else "")
     if requested and not args.agent and not os.environ.get(tokens.AGENT_ENV):
         args.agent = requested
@@ -81,6 +130,12 @@ def cli_connection(args, connection, local_token, workspace):
                 if actor.id != requested:
                     raise Denied("the local agent does not match this project's saved identity")
                 args.agent = connection["agent"]
+        elif (args._canonical_dev and valid_name(requested)
+              and requested != connection.get("agent")):
+            connection = _other_local_actor(args, connection, local_token, workspace, requested)
+    elif (args._canonical_dev and valid_name(requested)
+          and requested != connection.get("agent")):
+        connection = _other_local_actor(args, connection, local_token, workspace, requested)
     return refresh(connection, args.agent or os.environ.get(tokens.AGENT_ENV, ""))
 
 

@@ -238,3 +238,10 @@ def test_local_registration_refuses_hostile_response(tmp_path, monkeypatch, atta
     with pytest.raises((Denied, ValueError)):
         automatic._register(tmp_path, SimpleNamespace(key=b"fixture-dev-key"), PROJECT)
     assert len(calls) == 1 and calls[0][0] == endpoint
+
+
+def test_secondary_dev_membership_cannot_override_active_prod(monkeypatch):
+    monkeypatch.setattr(automatic, 'memberships', lambda path: [
+        SimpleNamespace(group='production', mode='prod'), SimpleNamespace(group='development', mode='dev')])
+    assert not automatic._active_dev({'cluster': 'development'})
+    assert not automatic._active_dev({'cluster': 'production'})
