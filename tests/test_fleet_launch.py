@@ -127,3 +127,52 @@ def test_a_vcs_install_names_its_commit_on_the_done_screen(monkeypatch):
     running = next(line for line in launch.last_screen("box", port=_free_port())
                    if line.startswith("  running"))
     assert running.endswith("  0ce5bc5"), running
+
+
+def test_new_launcher_replaces_owned_older_idle_daemon_before_start(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(launch, "already_running", lambda _port: {"commit": "old", "launcher_control": "a" * 32})
+    monkeypatch.setattr(launch, "state", lambda: {"commit": "new"})
+    monkeypatch.setattr(launch, "request_replacement", lambda *args: calls.append(("replace", args)))
+    monkeypatch.setattr(launch, "_wait_for_exit", lambda _port: True)
+    monkeypatch.setattr(launch, "_open_when_ready", lambda *_args: None)
+    assert launch.main(["--no-browser", "--root", str(tmp_path)],
+                       daemon_main=lambda argv: calls.append(("start", argv)) or 0) == 0
+    assert [row[0] for row in calls] == ["replace", "start"]
+    assert calls[0][1][0] == tmp_path
+
+
+def test_new_launcher_keeps_busy_or_unowned_daemon_and_reports_retry(monkeypatch, capsys):
+    monkeypatch.setattr(launch, "already_running", lambda _port: {"commit": "old"})
+    monkeypatch.setattr(launch, "state", lambda: {"commit": "new"})
+    def refuse(*_args):
+        raise launch.ControlError("Daemon has active work; retry when it is idle.")
+    monkeypatch.setattr(launch, "request_replacement", refuse)
+    assert launch.main(["--no-browser"], daemon_main=lambda _argv: pytest.fail("started over active daemon")) == 1
+    assert "retry" in capsys.readouterr().err
+
+
+def test_launcher_reuses_exact_running_commit_without_replacement(monkeypatch):
+    monkeypatch.setattr(launch, "already_running", lambda _port: {"name": "box", "commit": "a" * 40})
+    monkeypatch.setattr(launch, "state", lambda: {"commit": "a" * 40})
+    monkeypatch.setattr(launch, "request_replacement", lambda *_args: pytest.fail("replaced identical daemon"))
+    assert launch.main(["--no-browser"], daemon_main=lambda _argv: pytest.fail("started duplicate")) == 0
+
+
+def test_launcher_waits_for_tcp_close_when_health_is_unavailable(monkeypatch):
+    from contextlib import nullcontext
+    clock = iter([0.0, 1.0, 2.0, 3.0])
+    connections = []
+    def connect(*args, **kwargs):
+        connections.append(args)
+        if len(connections) == 1:
+            return nullcontext()
+        if len(connections) == 2:
+            raise TimeoutError("listener is still reachable but busy")
+        raise ConnectionRefusedError("listener is closed")
+    monkeypatch.setattr(launch.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(launch.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(launch.socket, "create_connection", connect)
+    monkeypatch.setattr(launch, "already_running", lambda _port: None)
+    assert launch._wait_for_exit(8770)
+    assert len(connections) == 3

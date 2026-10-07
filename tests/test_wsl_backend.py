@@ -363,3 +363,21 @@ def test_wsl_gpu_is_visible_inside_the_network_denied_namespace(tmp_path):
     assert result.ok, result.stderr
     assert result.stdout.strip()
     assert all(int(value) > 0 for value in result.stdout.splitlines())
+
+
+def test_replacement_control_uses_existing_wsl_runtime_before_install(monkeypatch):
+    from ml_stack.fleet import wsl
+    calls = []
+    def read(*args):
+        calls.append(args)
+        if args[0] == "python3":
+            return "/home/test/runtime/bin/python"
+        return "/mnt/c/preview" if args[0] == "wslpath" else ""
+    monkeypatch.setattr(wsl, "_read", read)
+    monkeypatch.setattr(wsl, "prepare", lambda: pytest.fail("installed over running daemon"))
+    wsl.replace_running(["--root", "C:/preview"], 8770,
+                        {"launcher_control": "a" * 32}, "b" * 40)
+    assert calls[0][0] == "python3"
+    action = next(row for row in calls if row[0] == "env")
+    assert "/home/test/runtime/bin/python" in action
+    assert action[-4:] == ("/mnt/c/preview", "8770", '{"launcher_control": "' + "a" * 32 + '"}', "b" * 40)
