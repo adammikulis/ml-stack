@@ -1,5 +1,5 @@
 <style>
-chat-view .chatmain { display:grid; grid-template-columns:260px minmax(0,1fr); height:calc(100dvh - var(--header-height,88px)); min-height:520px; overflow:hidden; padding:0; }
+chat-view .chatmain { --text:#1b1f3a; --muted:#68687b; --line:#e7e3dd; --bg:#fffaf4; --bg-raised:#fff; --bg-sunken:#f3f0ec; color:var(--text); display:grid; gap:0; grid-template-columns:260px minmax(0,1fr); height:calc(100dvh - var(--header-height,88px)); min-height:520px; overflow:hidden; padding:0; }
 chat-view .chats { display:flex; flex-direction:column; overflow-y:auto; padding:20px 12px; background:#fff0f5; border-right:1px solid var(--line); gap:12px; }
 chat-view .conversation-space { display:flex; align-items:center; gap:10px; padding:0 8px 8px; }
 chat-view .conversation-space strong { display:block; font-size:18px; }
@@ -43,7 +43,7 @@ chat-view .chat-starters button:nth-child(2) { background:#ffd16655; color:#6950
 chat-view .chat-starters button:nth-child(3) { background:#2de2e633; color:#12636a; }
 chat-view .askrow { display:flex; align-items:flex-end; gap:12px; margin:0 28px; padding:12px 14px; border:1px solid #d8cbd1; border-radius:12px; background:white; flex:none; }
 chat-view .askrow:focus-within { border-color:#ff5fa2; box-shadow:0 0 0 3px #ff5fa21a; }
-chat-view .askrow textarea { flex:1; min-height:48px; max-height:170px; border:0; resize:vertical; margin:0; padding:6px; background:transparent; }
+chat-view #ask { color:#1b1f3a; flex:1; min-height:48px; max-height:170px; border:0; resize:vertical; margin:0; padding:6px; background:white; }
 chat-view #chat-send { background:#ff5fa2; color:#1b1f3a; border:0; }
 chat-view .chat-hint { padding:8px 28px 15px; font-size:10px; color:var(--muted); }
 chat-view #chat-options { margin:0; padding:14px 28px; background:#fffaf4; max-height:35vh; overflow-y:auto; border-bottom:1px solid var(--line); }
