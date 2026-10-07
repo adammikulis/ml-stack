@@ -16,6 +16,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable, Sequence
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -112,10 +113,8 @@ def _base_of(recipe_id: str, config: dict[str, Any], data: Path) -> tuple[str, d
     manifest = Path(data).expanduser() / "manifest.json"
     metadata: dict[str, Any] = {}
     if manifest.is_file():
-        try:
+        with suppress(OSError, json.JSONDecodeError):
             metadata = json.loads(manifest.read_text())
-        except (OSError, json.JSONDecodeError):
-            pass
     return resolve_base(spec(recipe_id), config, metadata)
 
 

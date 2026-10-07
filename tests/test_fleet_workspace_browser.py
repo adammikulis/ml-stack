@@ -35,21 +35,7 @@ def test_dataset_upload_preview_and_specialist_help(tmp_path, monkeypatch, playw
         parsed = _parser().parse_args(args['args'])
         assert parsed.recipe == 'text-lm'
         assert parsed.data == 'datasets/demo.jsonl'
-        page.locator('fleet-nav a[href="#training"]').click()
-        page.get_by_label('Recipe', exact=True).select_option('tool-calls')
-        assert page.get_by_label('Base model ID or local directory').count() == 1
-        page.get_by_label('Base model ID or local directory').fill('models/demo-base')
-        pw.expect(page.get_by_role('button', name='Queue 20-step training smoke', exact=True)).to_be_visible()
-        page.get_by_role('button', name='Review command', exact=True).click()
-        pw.expect(page.locator('training-view #config .status')).to_contain_text('trains for 20 steps')
-        page.get_by_label('Fine-tuning strategy').select_option('adapter')
-        specification = page.evaluate("document.querySelector('training-view').spec()")
-        parsed = _parser().parse_args(specification['args'])
-        assert parsed.lora and 'base=models/demo-base' in parsed.set
-        page.get_by_label('Fine-tuning strategy').select_option('full')
-        specification = page.evaluate("document.querySelector('training-view').spec()")
-        parsed = _parser().parse_args(specification['args'])
-        assert not parsed.lora and 'lora=false' in parsed.set
+        check_training_controls(page, pw)
         page.locator('fleet-nav a[href="#gym"]').click()
         page.get_by_label('Controller', exact=True).select_option('ppo')
         page.get_by_label('PPO checkpoint path').fill('/tmp/policy.zip')
@@ -74,3 +60,23 @@ def test_dataset_upload_preview_and_specialist_help(tmp_path, monkeypatch, playw
         browser.close()
     finally:
         served.close()
+
+
+def check_training_controls(page, pw):
+    from ml_stack.train.run import _parser
+
+    page.locator('fleet-nav a[href="#training"]').click()
+    page.get_by_label('Recipe', exact=True).select_option('tool-calls')
+    assert page.get_by_label('Base model ID or local directory').count() == 1
+    page.get_by_label('Base model ID or local directory').fill('models/demo-base')
+    pw.expect(page.get_by_role('button', name='Queue 20-step training smoke', exact=True)).to_be_visible()
+    page.get_by_role('button', name='Review command', exact=True).click()
+    pw.expect(page.locator('training-view #config .status')).to_contain_text('trains for 20 steps')
+    page.get_by_label('Fine-tuning strategy').select_option('adapter')
+    specification = page.evaluate("document.querySelector('training-view').spec()")
+    parsed = _parser().parse_args(specification['args'])
+    assert parsed.lora and 'base=models/demo-base' in parsed.set
+    page.get_by_label('Fine-tuning strategy').select_option('full')
+    specification = page.evaluate("document.querySelector('training-view').spec()")
+    parsed = _parser().parse_args(specification['args'])
+    assert not parsed.lora and 'lora=false' in parsed.set
