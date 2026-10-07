@@ -44,6 +44,7 @@ from .session import parse_cookie
 from .setup_jobs import jobs, libraries, provenance, server
 from .setup_recovery_routes import SetupRecoveryRoutes
 from .startup_models import choices
+from .themes import default_appearance, registry, resolve
 from .workspace_routes import WorkspaceRoutes
 
 ASSETS = Path(__file__).parent / "web"
@@ -384,7 +385,6 @@ class SettingsRoutes:
         if self.method == "GET":
             from . import autostart as auto
             from .updates import current_version
-            from .themes import default_appearance, registry, resolve
             self.send(200, {
                 "settings": ui.settings.public() if ui.settings else {},
                 "theme_registry": registry(),
