@@ -93,6 +93,8 @@ def test_interactive_chat_command_is_given_to_the_person_without_a_job(joined, o
     runner.get_by_role('button',name='Run command',exact=True).click()
     page.wait_for_function("document.querySelector('tools-view #runner pre').textContent.includes('Run this command in your own terminal')")
     assert 'ml-stack-chat' in runner.locator('pre').inner_text()
+    assert runner.locator('#runner-status').is_visible()
+    assert 'human-only' in runner.locator('#runner-status').inner_text()
     assert joined.runner.snapshot() == []
     assert not errors
 
@@ -224,4 +226,40 @@ def test_settings_switch_sections_without_losing_unsaved_values(joined, open_pag
     expect(page.locator('#settings-removal button.danger')).to_be_visible()
     expect(page.locator('#settings-chatting')).not_to_be_visible()
     page.screenshot(path='/private/tmp/poolside-rebuild-settings-maintenance.png', full_page=True)
+    assert not errors
+
+
+def test_tool_library_keyboard_tabs_and_errors_stay_with_the_runner(joined, open_page):
+    from playwright.sync_api import expect
+
+    page, errors = open_page(joined, cookie=joined.cookie, path='/ui/#tools')
+    decision = page.get_by_role('tab', name='Decision lab', exact=True)
+    decision.focus()
+    page.keyboard.press('ArrowRight')
+    library = page.get_by_role('tab', name='Command library', exact=True)
+    expect(library).to_be_focused()
+    expect(library).to_have_attribute('aria-selected', 'true')
+    expect(page.get_by_role('tabpanel', name='Command library', exact=True)).to_be_visible()
+    expect(page.get_by_role('tabpanel', name='Decision lab', exact=True)).not_to_be_visible()
+    runner = page.locator('tools-view #runner')
+    runner.get_by_label('Installed command', exact=True).select_option('ml-stack-doctor')
+    runner.locator('details summary').click()
+    args = runner.get_by_label('Arguments as JSON array', exact=True)
+    args.fill('["--help", 42]')
+    runner.get_by_role('button', name='Review', exact=True).click()
+    expect(runner.locator('#runner-status')).to_contain_text('Arguments must be a JSON array of strings.')
+    expect(runner.locator('#runner-status')).to_be_visible()
+    assert joined.runner.snapshot() == []
+    args.fill('["--help"]')
+    page.route('**/ui/workspace/jobs', lambda route: route.fulfill(status=400, json={'error':'Command admission unavailable'})
+               if route.request.method == 'POST' else route.continue_())
+    runner.get_by_role('button', name='Run command', exact=True).click()
+    expect(runner.locator('#runner-status')).to_contain_text('Command admission unavailable')
+    expect(runner).to_be_visible()
+    expect(library).to_have_attribute('aria-selected', 'true')
+    library.focus()
+    page.keyboard.press('End')
+    expect(page.get_by_role('tab', name='Running jobs', exact=True)).to_be_focused()
+    page.keyboard.press('Home')
+    expect(decision).to_be_focused()
     assert not errors
