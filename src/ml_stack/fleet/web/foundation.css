@@ -1,4 +1,4 @@
- :root {
+:root, :root[data-theme="light"] {
   color-scheme: light;
   --poolside-pink:#ff5fa2; --poolside-orange:#ff8a3d; --poolside-yellow:#ffd166;
   --poolside-cyan:#2de2e6; --poolside-navy:#1b1f3a;
