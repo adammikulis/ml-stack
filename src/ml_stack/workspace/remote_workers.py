@@ -4,8 +4,10 @@ import hashlib
 import json
 import logging
 import os
+import shlex
 import sys
 import time
+from dataclasses import asdict
 from pathlib import Path
 
 from ml_stack import home, jobs
@@ -133,6 +135,10 @@ def _settings(body, admission):
     return la.check_name(body.get('name') or 'local-qwen')
 
 
+def _effective_limits(agent):
+    return {"context": agent.ctx, "max_output_tokens": agent.max_output_tokens, "task_caps": asdict(localloop.caps_of(agent))}
+
+
 def start(projects, project_id, body, *, admission, cluster_key=None):
     """Launch a project-bound local model on an authenticated Dev device."""
     cluster, cluster_id = admission
@@ -161,7 +167,10 @@ def start(projects, project_id, body, *, admission, cluster_key=None):
                            project.authority_machine)
                 _save_connection(connection, {**prior, 'cluster_id': cluster_id, 'cluster': cluster})
                 return 200, {'name': name, 'identity': prior['identity'], 'model': agent.model_name,
-                             'pid': agent.pid, 'project_id': project_id, 'state': 'running', 'already': True}
+                             'pid': agent.pid, 'project_id': project_id, 'state': 'running', 'already': True,
+                             'requested_by': caller['id'],
+                             'requested_context': prior.get('requested_context', 'unknown'),
+                             'effective_limits': _effective_limits(agent)}
             chosen = localmodel.choose(body.get('model') or localmodel.AUTO,
                                        selection=localmodel.Selection(context=body.get('ctx', 0)))
             if not chosen.ok:
@@ -173,7 +182,9 @@ def start(projects, project_id, body, *, admission, cluster_key=None):
             record = {'host': remote.host, 'project_id': project_id, 'cluster': cluster,
                       'cluster_key': str(cluster_key) if cluster_key else '',
                       'identity': canonical_identity, 'requested_by': caller['id'],
-                      'name': name, 'cluster_id': cluster_id, 'authority_machine': remote.authority_machine,
+                      'name': name, 'cluster_id': cluster_id,
+                      'requested_context': body.get('ctx', 0) or 'auto',
+                      'authority_machine': remote.authority_machine,
                       'device_cert': remote.device_cert}
             root = str(Path(project.root).resolve(strict=True))
             ask = localstart.Ask(model=chosen.ref, name=name, project=root,
@@ -188,7 +199,9 @@ def start(projects, project_id, body, *, admission, cluster_key=None):
             ws.audit('remote-worker.start', caller['id'], agent=name, project_id=project_id,
                      canonical_identity=canonical_identity)
             return 200, {'name': got.name, 'identity': canonical_identity, 'pid': got.pid,
-                         'model': got.model, 'project_id': project_id, 'state': 'starting', 'already': got.already}
+                         'model': got.model, 'project_id': project_id, 'state': 'starting', 'already': got.already,
+                         'requested_by': caller['id'], 'requested_context': record['requested_context'],
+                         'effective_limits': _effective_limits(la.load(ws, got.name))}
     except Denied as error:
         return 403, {'error': str(error)}
     except localstart.Unavailable as error:
@@ -335,6 +348,13 @@ def main_cli(args):
     reply = run(args)
     say(json.dumps(reply, indent=1) if args.json else
         f"{reply['identity']} is {reply['state']} on {args.device or 'the discovered remote device'} with {reply['model']}")
+    if not args.json:
+        say(f"Caller: {reply['requested_by']}")
+        say(f"Requested context: {reply['requested_context']}")
+        say("Effective limits: " + json.dumps(reply['effective_limits'], sort_keys=True))
+        if 'task_seq' in reply:
+            project = shlex.quote(str(Path(args.project).resolve()))
+            say(f"Task: {reply['task_seq']}; read with cd {project} && ml-stack-workspace thread {reply['task_seq']} --agent {reply['requested_by']}")
     return 0
 
 
