@@ -1,11 +1,150 @@
-<template><section class="workspace" hidden><h1>Benchmarks</h1><p class="intro">Measure models across your pool and inspect recorded results.</p><div class="workspace-grid"><div class="workspace-card" id="config"></div><div class="workspace-card"><h2>Measurement status</h2><p id="summary" role="status">Loading measurement status…</p><details class="aside"><summary>Measurement details</summary><pre id="status"></pre></details><details class="aside"><summary>Run history</summary><pre id="history"></pre></details><workspace-jobs></workspace-jobs></div></div></section></template>
+<style>
+benchmarks-view .evaluate-head { display:flex; justify-content:space-between; align-items:center; gap:20px; margin-bottom:24px; }
+benchmarks-view .evaluate-head h1 { font-size:32px; letter-spacing:-1px; margin:6px 0; }
+benchmarks-view .evaluate-head .intro { margin:0; }
+benchmarks-view .evaluate-kicker { font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:2px; color:var(--poolside-orange,#ff8a3d); }
+benchmarks-view .evaluate-layout { display:grid; grid-template-columns:minmax(300px,.8fr) minmax(340px,1.4fr); gap:22px; align-items:start; }
+benchmarks-view .evaluate-card { background:white; border:1px solid #e8e2d9; border-radius:18px; padding:22px; min-width:0; }
+benchmarks-view .evaluate-card h2 { margin:0 0 8px; font-size:18px; }
+benchmarks-view .evaluate-card .intro { font-size:13px; line-height:1.6; margin-bottom:16px; }
+benchmarks-view .evaluate-step { display:flex; align-items:center; gap:10px; margin:22px 0 12px; font-weight:700; font-size:13px; }
+benchmarks-view .evaluate-step span { display:grid; place-items:center; width:25px; height:25px; background:var(--poolside-yellow,#ffd166); color:var(--poolside-navy,#1b1f3a); border-radius:8px; font-size:11px; }
+benchmarks-view .evaluate-choice { display:flex; gap:10px; align-items:center; border:1px solid #e8e2d9; padding:12px; border-radius:10px; margin:7px 0; cursor:pointer; background:#fffaf4; }
+benchmarks-view .evaluate-choice:has(input:checked) { border-color:var(--poolside-orange,#ff8a3d); background:#fff0e0; }
+benchmarks-view .evaluate-choice input { flex-shrink:0; margin:0; }
+benchmarks-view .evaluate-choice div { display:grid; gap:4px; min-width:0; }
+benchmarks-view .evaluate-choice b { font-size:12px; overflow-wrap:anywhere; }
+benchmarks-view .evaluate-choice small { color:#747586; font-size:11px; }
+benchmarks-view .evaluate-primary { background:var(--poolside-orange,#ff8a3d); border-color:var(--poolside-orange,#ff8a3d); color:var(--poolside-navy,#1b1f3a); font-weight:750; }
+benchmarks-view .evaluate-secondary { background:white; border:1px solid #e8e2d9; color:var(--poolside-navy,#1b1f3a); }
+benchmarks-view .evaluate-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:20px; }
+benchmarks-view .evaluate-main { display:grid; gap:20px; }
+benchmarks-view .evaluate-state { display:flex; align-items:center; gap:12px; margin-bottom:12px; }
+benchmarks-view .evaluate-state-icon { width:36px; height:36px; display:grid; place-items:center; border-radius:12px; background:var(--poolside-cyan,#2de2e6); color:var(--poolside-navy,#1b1f3a); font-size:18px; }
+benchmarks-view .evaluate-state[data-running=true] .evaluate-state-icon { background:var(--poolside-yellow,#ffd166); }
+benchmarks-view .evaluate-state h2 { margin:0; }
+benchmarks-view #summary { margin:4px 0 0; color:#737486; font-size:12px; }
+benchmarks-view #progress { white-space:pre-wrap; font-size:12px; line-height:1.6; color:#737486; }
+benchmarks-view .evaluate-run { display:flex; align-items:start; gap:12px; padding:15px 0; border-bottom:1px solid #eee8e0; }
+benchmarks-view .evaluate-run:last-child { border:0; }
+benchmarks-view .evaluate-run div { flex:1; min-width:0; }
+benchmarks-view .evaluate-run strong { display:block; font-size:13px; overflow-wrap:anywhere; margin-bottom:5px; }
+benchmarks-view .evaluate-run small { color:#737486; line-height:1.6; }
+benchmarks-view .evaluate-badge { border-radius:20px; padding:4px 9px; font-size:11px; background:#eeeef2; color:var(--poolside-navy,#1b1f3a); white-space:nowrap; }
+benchmarks-view .evaluate-badge[data-state=done] { background:#c9f9f4; }
+benchmarks-view .evaluate-badge[data-state=running] { background:#fff0b9; }
+benchmarks-view .evaluate-badge[data-state=crashed] { background:#ffe0ec; }
+benchmarks-view .evaluate-empty { padding:22px 8px; color:#747586; font-size:13px; line-height:1.6; text-align:center; }
+benchmarks-view .evaluate-table { overflow:auto; }
+benchmarks-view .evaluate-table table { font-size:12px; }
+benchmarks-view .evaluate-table th { font-size:10px; text-transform:uppercase; letter-spacing:.8px; color:#747586; }
+benchmarks-view .evaluate-table td:first-child { font-weight:650; }
+benchmarks-view .evaluate-card input:not([type=checkbox]),benchmarks-view .evaluate-card select { width:100%; box-sizing:border-box; }
+benchmarks-view #model-choices { max-height:310px; overflow:auto; }
+benchmarks-view #device-choices { max-height:180px; overflow:auto; }
+benchmarks-view details { margin-top:16px; font-size:12px; }
+@media(max-width:900px){benchmarks-view .evaluate-layout{grid-template-columns:1fr}benchmarks-view .evaluate-head{align-items:start}}
+</style>
+<template>
+<section class="workspace" hidden>
+<header class="evaluate-head"><div><span class="evaluate-kicker">Studio / Evaluate</span><h1>Find the right model</h1><p class="intro">Compare quality and cost with the same questions across your pool.</p></div><button type="button" id="evaluate-library" class="evaluate-secondary">Model library ↗</button></header>
+<div class="evaluate-layout"><section class="evaluate-card" id="config"><h2>Set up a comparison</h2><p class="intro">Choose models, choose where to run them, then review your measurement.</p><div class="evaluate-step"><span>1</span> Models to compare</div><div id="model-choices">Loading your model library…</div><div class="evaluate-step"><span>2</span> Devices to use</div><div id="device-choices">Loading your pool…</div><div class="evaluate-step"><span>3</span> Measurement</div><div id="measure-fields"></div><div class="evaluate-actions" id="evaluate-actions"></div><p class="status" role="status" aria-live="polite"></p><details id="command-review" hidden><summary>Reviewed command</summary><pre id="command"></pre></details><details class="aside" data-advanced><summary>Advanced options</summary><div id="advanced-fields"></div></details></section>
+<div class="evaluate-main"><section class="evaluate-card"><div class="evaluate-state" id="run-state"><span class="evaluate-state-icon" aria-hidden="true">◷</span><div><h2 id="state-title">Measurement status</h2><p id="summary" role="status" aria-live="polite">Checking your pool…</p></div></div><p id="progress"></p><button type="button" id="stop-sweep" class="evaluate-secondary" hidden>Stop sweep</button><details data-advanced><summary>Runtime details</summary><pre id="status"></pre></details></section>
+<section class="evaluate-card"><h2>Measured quality & cost</h2><p class="intro">Recorded scores only. F1 combines precision and recall; time is per question.</p><div id="results" class="evaluate-table"></div><div class="evaluate-actions"><button type="button" id="evaluate-charts" class="evaluate-secondary">Explore charts ↗</button><button type="button" id="evaluate-capacity" class="evaluate-secondary">Plan capacity ↗</button></div></section>
+<section class="evaluate-card"><h2>Recent comparisons</h2><div id="history"></div><details data-advanced><summary>Recorded run details</summary><pre id="history-json"></pre></details></section>
+<details class="evaluate-card"><summary>Related workspace jobs</summary><workspace-jobs></workspace-jobs></details></div></div>
+</section>
+</template>
 <script>
-(function(){const M=window.fleetModel,W=window.workspaceModel,E=M.el;
-class BenchmarksView extends HTMLElement{
- connectedCallback(){if(this.wired)return;this.wired=true;this.host=this.querySelector('section');const b=this.querySelector('#config');b.append(E('h2',{},'New measurement sweep'));this.models=W.field(b,'Models (one per line)','textarea');this.sample=W.field(b,'Questions per task (0 uses defaults)','input',{type:'number',min:'0',value:'0'});this.label=W.field(b,'Run label','input',{placeholder:'comparison'});const advanced=E('details',{class:'aside','data-advanced':''},E('summary',{},'Advanced options'));b.append(advanced);this.extra=W.field(advanced,'Additional arguments as JSON array','textarea');this.extra.value='[]';this.note=E('p',{class:'status',role:'status'});this.preview=E('pre');this.previewDetails=E('details',{class:'aside'},E('summary',{},'Command preview'),this.preview);b.append(E('div',{class:'workspace-actions'},W.button('Review command',()=>this.start(true)),W.button('Start sweep',()=>this.start(false)),W.button('Stop sweep',()=>this.stop())),this.note,this.previewDetails,E('div',{class:'workspace-actions'},W.button('Accuracy and cost charts',()=>{M.go('fit');window.fitModel?.showView?.('rates');}),W.button('Capacity planner',()=>M.go('fit'))));W.route(this.host,'benchmarks',()=>this.load());this.timer=setInterval(()=>{if(!this.host.hidden)this.load();},4000);}
+(function(){
+const M=window.fleetModel,W=window.workspaceModel,E=M.el;
+class BenchmarksView extends HTMLElement {
+ connectedCallback(){
+  if(this.wired)return;this.wired=true;this.host=this.querySelector('section');this.note=this.querySelector('.status');this.selectedModels=new Set();this.selectedDevices=new Set();
+  const fields=this.querySelector('#measure-fields');this.label=W.field(fields,'Run label','input',{placeholder:'For example: support assistant comparison'});
+  this.questions=W.field(fields,'Question set','select');this.questions.append(E('option',{value:'all'},'All questions (benchmark defaults)'),E('option',{value:'limit'},'A limited sample'));
+  this.sample=W.field(fields,'Questions per task','input',{type:'number',min:'1',step:'1',value:'40'});W.visible(this.sample,false);
+  this.questions.onchange=()=>{W.visible(this.sample,this.questions.value==='limit');this.paintActions();};this.sample.oninput=()=>this.paintActions();
+  this.review=W.button('Review command',()=>this.start(true));this.review.className='evaluate-secondary';this.run=W.button('Start sweep',()=>this.start(false));this.run.className='evaluate-primary';this.querySelector('#evaluate-actions').append(this.review,this.run);
+  const advanced=this.querySelector('#advanced-fields');this.models=W.field(advanced,'Additional model IDs (one per line)','textarea',{placeholder:'Repository IDs or local model paths'});this.models.oninput=()=>this.paintActions();
+  this.extra=W.field(advanced,'Additional arguments as JSON array','textarea');this.extra.value='[]';
+  this.querySelector('#evaluate-library').onclick=()=>M.go('models');this.querySelector('#stop-sweep').onclick=()=>this.stop();
+  this.querySelector('#evaluate-charts').onclick=()=>{M.go('fit');window.fitModel?.showView?.('rates');};this.querySelector('#evaluate-capacity').onclick=()=>M.go('fit');
+  W.route(this.host,'benchmarks',()=>{this.loadInventory();this.load();});this.timer=setInterval(()=>{if(!this.host.hidden)this.load();},4000);this.paintActions();
+ }
  disconnectedCallback(){clearInterval(this.timer);}
- async load(){try{const results=await Promise.allSettled([W.api('/ui/bench/status'),W.api('/ui/bench/history')]);if(results[0].status==='fulfilled'){this.state=results[0].value;this.querySelector('#status').textContent=W.json(this.state);this.querySelector('#summary').textContent=this.state.available===false?this.state.text:this.state.measuring?'A benchmark is running.':'No benchmark is running.';}else this.querySelector('#summary').textContent=results[0].reason.message;if(results[1].status==='fulfilled')this.querySelector('#history').textContent=W.json(results[1].value.history);else this.querySelector('#history').textContent=results[1].reason.message;}catch(e){W.status(this.note,e);}}
- async start(dry_run){try{const r=await W.post('/ui/bench/sweep',{models:this.models.value.split('\n').filter(Boolean),sample:Number(this.sample.value),label:this.label.value,extra:JSON.parse(this.extra.value),dry_run});this.preview.textContent=r.command||W.json(r);this.previewDetails.open=true;this.note.textContent=dry_run?'Command reviewed.':'Sweep started.';this.load();}catch(e){W.status(this.note,e);}}
- async stop(){try{const pid=this.state?.measuring?.pid;if(!pid)throw Error('No running sweep PID is reported.');await W.post('/ui/bench/stop',{pid});this.load();}catch(e){W.status(this.note,e);}}
-}customElements.define('benchmarks-view',BenchmarksView);})();
+ async loadInventory(){
+  if(this.inventoryPending)return;this.inventoryPending=true;
+  try{
+   const fleet=await W.api('/ui/fleet');this.inventory=fleet;
+   const models=(fleet.models||[]).filter(name=>!/(^mtp[-_]|^mmproj|\.draft\.gguf$)/i.test(name));const peers=fleet.peers||[];
+   if(!this.devicesInitialized){peers.forEach(p=>this.selectedDevices.add(p.name));this.devicesInitialized=true;}
+   this.selectedModels=new Set([...this.selectedModels].filter(name=>models.includes(name)));this.selectedDevices=new Set([...this.selectedDevices].filter(name=>peers.some(p=>p.name===name)));
+   this.querySelector('#model-choices').replaceChildren(...models.map(name=>this.choice(this.selectedModels,name,name,peers.filter(p=>(p.models||[]).includes(name)).map(p=>p.name).join(' · ')||'Cached model')));
+   if(!models.length)this.querySelector('#model-choices').append(E('p',{class:'evaluate-empty'},'Add a model in the model library, or enter its ID in advanced options.'));
+   this.querySelector('#device-choices').replaceChildren(...peers.map(p=>this.choice(this.selectedDevices,p.name,p.name,p.is_self?'This device':'Pool device')));
+   if(!peers.length)this.querySelector('#device-choices').append(E('p',{class:'evaluate-empty'},'No pool devices are available. Connect devices in Pool settings.'));
+   this.paintActions();
+  }catch(error){W.status(this.note,error);}finally{this.inventoryPending=false;}
+ }
+ choice(set,key,title,subtitle){
+  const input=E('input',{type:'checkbox','aria-label':title});input.checked=set.has(key);input.onchange=()=>{if(input.checked)set.add(key);else set.delete(key);this.paintActions();};
+  return E('label',{class:'evaluate-choice'},input,E('div',{},E('b',{},title),E('small',{},subtitle)));
+ }
+ selected(){return [...new Set([...this.selectedModels,...this.models.value.split('\n').map(x=>x.trim()).filter(Boolean)])];}
+ paintActions(){
+  const sample=Number(this.sample.value);const valid=this.questions.value==='all'||Number.isInteger(sample)&&sample>0;
+  const disabled=this.pending||!!this.state?.measuring||this.state?.available===false||!this.selected().length||!this.selectedDevices.size||!valid;
+  this.run.disabled=disabled;this.review.disabled=this.pending||!this.selected().length||!valid;
+ }
+ async load(){
+  if(this.loading)return;this.loading=true;
+  try{
+   const responses=await Promise.allSettled([W.api('/ui/bench/status'),W.api('/ui/bench/history'),W.api('/ui/rates.json')]);
+   if(responses[0].status==='fulfilled'){
+    this.state=responses[0].value;const running=!!this.state.measuring;this.querySelector('#run-state').dataset.running=String(running);
+    this.querySelector('#state-title').textContent=this.state.available===false?'Runtime unavailable':running?'Comparison in progress':'Ready for your next comparison';
+    this.querySelector('#summary').textContent=this.state.available===false?this.state.text:running?'Your measurement continues while you explore the workspace.':'Choose models to start a measurement. No benchmark is running.';
+    this.querySelector('#progress').textContent=running?this.state.text||'Waiting for the next measurement update.':'';
+    this.querySelector('#stop-sweep').hidden=!running;this.querySelector('#status').textContent=W.json(this.state);
+   }else this.querySelector('#summary').textContent=responses[0].reason.message;
+   if(responses[1].status==='fulfilled')this.drawHistory(responses[1].value.history||[]);else this.querySelector('#history').replaceChildren(E('p',{class:'evaluate-empty'},responses[1].reason.message));
+   if(responses[2].status==='fulfilled')this.drawResults(responses[2].value);else this.querySelector('#results').replaceChildren(E('p',{class:'evaluate-empty'},responses[2].reason.message));
+   this.paintActions();
+  }finally{this.loading=false;}
+ }
+ drawHistory(rows){
+  const state=exit=>exit==='done'?['Complete','done']:exit==='running'?['Running','running']:exit==='killed'?['Stopped','killed']:String(exit).startsWith('crashed')?['Failed','crashed']:['Unknown outcome','unknown'];
+  this.querySelector('#history-json').textContent=W.json(rows);
+  this.querySelector('#history').replaceChildren(...rows.map(row=>{const [title,key]=state(row.exit);return E('div',{class:'evaluate-run'},E('div',{},E('strong',{},row.name||row.model||'Benchmark run'),E('small',{},[row.started,row.model,Number.isFinite(row.seconds)?Math.round(row.seconds)+'s elapsed':'',row.questions?row.questions+' questions':'',row.kept?.length?row.kept.length+' recorded results':''].filter(Boolean).join(' · '))),E('span',{class:'evaluate-badge','data-state':key},title));}));
+  if(!rows.length)this.querySelector('#history').append(E('p',{class:'evaluate-empty'},'Your comparison history will appear here after the first run.'));
+ }
+ drawResults(response){
+  const rows=response.runs||[];const host=this.querySelector('#results');
+  if(!rows.length){host.replaceChildren(E('p',{class:'evaluate-empty'},response.error||'No recorded scores yet. Run a comparison to measure quality, latency and cost.'));return;}
+  const number=(value,digits=2)=>Number.isFinite(value)?value.toFixed(digits):'—';
+  host.replaceChildren(E('table',{},E('thead',{},E('tr',{},...['Run','Device','F1','Seconds / question','Questions'].map(name=>E('th',{},name)))),E('tbody',{},...rows.map(row=>E('tr',{},E('td',{},row.label||row.from||'Recorded run'),E('td',{},row.host||'—'),E('td',{},Number.isFinite(row.right)?number(row.right*100,1)+'%':'—'),E('td',{},number(row.seconds_per_question)),E('td',{},number(row.questions,0)))))));
+ }
+ async start(dry_run){
+  if(this.pending)return;
+  try{
+   const models=this.selected();if(!models.length)throw Error('Choose at least one model.');
+   const sample=this.questions.value==='all'?0:Number(this.sample.value);if(!Number.isInteger(sample)||sample<0)throw Error('Enter a positive whole number of questions.');
+   if(!dry_run&&!this.selectedDevices.size)throw Error('Choose at least one pool device.');
+   const extra=JSON.parse(this.extra.value);if(!Array.isArray(extra)||extra.some(value=>typeof value!=='string'))throw Error('Additional arguments must be a JSON array of strings.');
+   this.pending=true;this.paintActions();this.note.textContent=dry_run?'Reviewing command…':'Starting comparison…';
+   const response=await W.post('/ui/bench/sweep',{models,peers:[...this.selectedDevices],sample,label:this.label.value.trim(),extra,dry_run});
+   if(response.error||response.ok===false)throw Error(response.error||'Could not start the comparison.');
+   if(dry_run){this.querySelector('#command').textContent=response.command;this.querySelector('#command-review').hidden=false;this.querySelector('#command-review').open=true;}
+   this.note.textContent=dry_run?'Command reviewed. Start the sweep when you are ready.':'Comparison started. Results appear as the benchmark records them.';
+   if(!dry_run){this.state={...this.state,measuring:{pid:response.pid}};await this.load();}
+  }catch(error){W.status(this.note,error);}finally{this.pending=false;this.paintActions();}
+ }
+ async stop(){
+  const button=this.querySelector('#stop-sweep');if(button.disabled)return;
+  try{const pid=this.state?.measuring?.pid;if(!pid)throw Error('No running sweep PID is reported.');button.disabled=true;await W.post('/ui/bench/stop',{pid});this.note.textContent='Stop requested. Checking the measurement status…';await this.load();}catch(error){W.status(this.note,error);}finally{button.disabled=false;}
+ }
+}
+customElements.define('benchmarks-view',BenchmarksView);
+})();
 </script>

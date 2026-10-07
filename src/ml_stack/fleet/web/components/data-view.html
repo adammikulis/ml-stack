@@ -1,16 +1,135 @@
 <style>
-data-view #files .workspace-actions { margin:0; padding:10px 0; border-bottom:1px solid var(--line); }
-data-view #files .workspace-actions > span { margin-left:auto; color:var(--muted); }
-data-view #upload input:not([type=checkbox]) { width:100%; }
-data-view #crumbs { display:flex; gap:8px; flex-wrap:wrap; }
+data-view .data-head { display:flex; justify-content:space-between; gap:20px; align-items:center; margin-bottom:24px; }
+data-view .data-head h1 { margin:6px 0; font-size:32px; letter-spacing:-1px; }
+data-view .data-kicker { font-size:11px; text-transform:uppercase; letter-spacing:2px; color:var(--poolside-orange,#ff8a3d); font-weight:800; }
+data-view .data-head .intro { margin:0; }
+data-view .data-layout { display:grid; grid-template-columns:minmax(280px, .9fr) minmax(340px,1.4fr); gap:20px; align-items:start; }
+data-view .data-panel { background:white; border:1px solid #e8e2d9; border-radius:18px; overflow:hidden; min-width:0; }
+data-view .data-panel-head { padding:20px 22px; border-bottom:1px solid #ede7de; display:flex; gap:12px; align-items:center; justify-content:space-between; }
+data-view .data-panel-head h2 { margin:0; font-size:17px; }
+data-view .data-count { background:var(--poolside-yellow,#ffd166); color:var(--poolside-navy,#1b1f3a); border-radius:30px; padding:4px 10px; font-size:12px; font-weight:700; }
+data-view #crumbs { padding:12px 20px; display:flex; gap:8px; align-items:center; flex-wrap:wrap; background:#fffaf4; }
+data-view #crumbs button { background:transparent; color:var(--poolside-navy,#1b1f3a); border:0; padding:4px; font-size:12px; }
+data-view #files { min-height:280px; }
+data-view .data-file { display:flex; gap:12px; align-items:center; width:100%; padding:16px 20px; border:0; border-bottom:1px solid #f1ece5; background:white; color:var(--poolside-navy,#1b1f3a); text-align:left; border-radius:0; }
+data-view .data-file:hover, data-view .data-file[aria-pressed=true] { background:#fff1e4; }
+data-view .data-file-icon { border-radius:10px; background:#fff1e4; color:#a34909; padding:10px 8px; min-width:38px; text-align:center; font-size:10px; font-weight:800; }
+data-view .data-file.folder .data-file-icon { background:#fff6d9; }
+data-view .data-file-copy { display:grid; gap:4px; min-width:0; flex:1; }
+data-view .data-file-copy strong { overflow-wrap:anywhere; font-size:13px; }
+data-view .data-file-copy small { color:#767686; font-size:11px; }
+data-view .data-empty { padding:38px 24px; text-align:center; color:#777888; line-height:1.6; }
+data-view .data-empty b { display:block; margin-bottom:6px; color:var(--poolside-navy,#1b1f3a); }
+data-view .data-search { margin:16px 20px; width:calc(100% - 40px)!important; box-sizing:border-box; }
+data-view .data-preview-body { padding:20px; overflow:auto; }
+data-view .data-preview-body table { font-size:12px; min-width:100%; }
+data-view .data-preview-body th { background:#fff5e9; font-size:11px; text-transform:uppercase; letter-spacing:.6px; }
+data-view .data-preview-body td { max-width:280px; overflow-wrap:anywhere; vertical-align:top; }
+data-view .data-preview-info { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px; }
+data-view .data-preview-info span { border:1px solid #ece4d9; border-radius:20px; padding:4px 9px; font-size:11px; }
+data-view .data-preview-info span:first-child { background:var(--poolside-cyan,#2de2e6); border-color:transparent; color:var(--poolside-navy,#1b1f3a); }
+data-view #preview { background:#fffaf4; font-size:12px; }
+data-view #upload { margin-bottom:20px; padding:24px; background:white; border:1px solid #e8e2d9; border-top:4px solid var(--poolside-orange,#ff8a3d); border-radius:18px; }
+data-view #upload[hidden] { display:none; }
+data-view #upload h2 { margin:0 0 8px; }
+data-view .data-upload-fields { display:grid; grid-template-columns:1fr 1.6fr; gap:24px; }
+data-view #upload input:not([type=checkbox]) { width:100%; box-sizing:border-box; }
+data-view .data-tabs { display:flex; gap:6px; margin:12px 0; }
+data-view .data-tabs button { background:#fffaf4; border:1px solid #e8e2d9; color:var(--poolside-navy,#1b1f3a); }
+data-view .data-tabs button[aria-pressed=true] { background:var(--poolside-navy,#1b1f3a); color:white; }
+data-view .data-primary { background:var(--poolside-orange,#ff8a3d); border-color:var(--poolside-orange,#ff8a3d); color:var(--poolside-navy,#1b1f3a); font-weight:750; }
+data-view .data-secondary { background:white; color:var(--poolside-navy,#1b1f3a); border:1px solid #e8e2d9; }
+data-view .data-preview-actions { display:flex; gap:12px; align-items:center; }
+@media(max-width:850px){data-view .data-layout,data-view .data-upload-fields{grid-template-columns:1fr}data-view .data-head{align-items:start}data-view .data-preview-actions{flex-wrap:wrap}}
 </style>
-<template><section class="workspace" hidden><h1>Datasets</h1><p class="intro">Prepare training examples, inspect their content, then send a dataset to the Training lab.</p><div class="workspace-grid"><div class="workspace-card" id="upload"></div><div class="workspace-card"><h2>Dataset library</h2><div id="crumbs"></div><p class="status" role="status" aria-live="polite"></p><div id="files"></div><pre id="preview">Select a file to preview it.</pre></div></div></section></template>
+<template>
+<section class="workspace" hidden>
+  <header class="data-head"><div><span class="data-kicker">Studio / Data</span><h1>Your dataset library</h1><p class="intro">Inspect your examples. Pick a dataset. Build something better.</p></div><button type="button" id="add-dataset" class="data-primary">+ Add dataset</button></header>
+  <section id="upload" hidden aria-label="Add dataset"><h2>Add training examples</h2><p class="intro">Upload a text file or paste content. New files stay in your workspace.</p><div class="data-upload-fields"><div id="destination"></div><div><div class="data-tabs" aria-label="Dataset source"><button type="button" id="paste-tab" aria-pressed="true">Paste content</button><button type="button" id="file-tab" aria-pressed="false">Choose a file</button></div><div id="paste-source"></div><div id="file-source" hidden></div></div></div><div id="upload-actions" class="workspace-actions"></div></section>
+  <p class="status" role="status" aria-live="polite"></p>
+  <div class="data-layout"><section class="data-panel"><div class="data-panel-head"><h2>Library</h2><span class="data-count" id="dataset-count">Loading…</span></div><div id="crumbs"></div><input class="data-search" id="dataset-search" type="search" aria-label="Filter files in this folder" placeholder="Filter this folder…"><div id="files"></div></section>
+  <section class="data-panel"><div class="data-panel-head"><h2 id="preview-title">Dataset preview</h2><div class="data-preview-actions"><button type="button" id="use-dataset" class="data-primary" hidden>Use for training</button></div></div><div class="data-preview-body"><div id="structured-preview"><div class="data-empty"><b>Get to know your examples</b>Select a file to see its fields and sample rows before fine-tuning.</div></div><details id="raw-preview" data-advanced hidden><summary>Source text</summary><pre id="preview">Select a file to preview it.</pre></details></div></section></div>
+</section>
+</template>
 <script>
-(function(){const M=window.fleetModel,W=window.workspaceModel,E=M.el;
-class DataView extends HTMLElement{
- connectedCallback(){if(this.wired)return;this.wired=true;this.host=this.querySelector('section');this.note=this.querySelector('.status');this.path='';const box=this.querySelector('#upload');box.append(E('h2',{},'1 · Prepare a dataset'));this.name=W.field(box,'Destination relative to files root','input',{placeholder:'datasets/examples.jsonl'});this.file=W.field(box,'Choose a text / JSONL file','input',{type:'file',accept:'.jsonl,.json,.csv,.txt,.yaml,.yml'});this.text=W.field(box,'Or paste dataset content','textarea',{placeholder:'One JSON object per line'});this.uploadButton=W.button('Upload',()=>this.upload());box.append(E('div',{class:'workspace-actions'},this.uploadButton));box.append(E('p',{class:'intro'},'Uploads create a new file, up to 10 MB. Recipe training shows the required dataset fields before you start. Larger files can be transferred with ml-stack-peers in Tools.'));this.file.addEventListener('change',()=>{if(this.file.files[0]&&!this.name.value)this.name.value='datasets/'+this.file.files[0].name;});W.route(this.host,'data',()=>this.load());}
- async load(){try{const r=await W.api('/ui/workspace/files?path='+encodeURIComponent(this.path));this.note.textContent=r.root;this.querySelector('#crumbs').replaceChildren(W.button('Files root',()=>{this.path='';this.load();}),this.path?W.button('Parent folder',()=>{this.path=this.path.split('/').slice(0,-1).join('/');this.load();}):null);this.querySelector('#files').replaceChildren(...r.files.map(f=>E('div',{class:'workspace-actions'},W.button((f.directory?'Folder · ':'')+f.name,()=>this.open(f)),E('span',{},f.directory?'':M.fileSize(f.bytes)),f.directory?null:W.button('Use for training',()=>{sessionStorage.setItem('ml-stack-dataset',f.path);M.go('training');}))));if(!r.files.length)this.querySelector('#files').append(E('p',{},'This folder is empty. Upload a dataset to get started.'));}catch(e){W.status(this.note,e);}}
- async open(f){if(f.directory){this.path=f.path;return this.load();}try{const r=await W.api('/ui/workspace/file?path='+encodeURIComponent(f.path));this.querySelector('#preview').textContent=r.text+(r.truncated?'\n[Preview truncated]':'');}catch(e){W.status(this.note,e);}}
- async upload(){if(this.pending)return;try{const path=this.name.value.trim(),file=this.file.files[0];if(!path)throw Error('Choose a destination filename before uploading.');if(file&&file.size>10000000)throw Error('File exceeds the 10 MB upload limit.');if(!file&&!this.text.value.trim())throw Error('Choose a file or paste dataset content before uploading.');this.pending=true;this.uploadButton.disabled=true;this.uploadButton.textContent='Uploading…';this.note.textContent='Uploading dataset…';await W.post('/ui/workspace/file',{path,text:file?await file.text():this.text.value});this.path=path.split('/').slice(0,-1).join('/');await this.load();this.note.textContent='Dataset uploaded. Preview it, then choose Use for training.';}catch(e){W.status(this.note,e);}finally{this.pending=false;this.uploadButton.disabled=false;this.uploadButton.textContent='Upload';}}
-}customElements.define('data-view',DataView);})();
+(function(){
+const M=window.fleetModel,W=window.workspaceModel,E=M.el;
+class DataView extends HTMLElement {
+ connectedCallback(){
+  if(this.wired)return;this.wired=true;this.host=this.querySelector('section');this.note=this.querySelector('.status');this.path='';this.files=[];this.source='paste';
+  const box=this.querySelector('#destination');
+  this.name=W.field(box,'Destination relative to files root','input',{placeholder:'datasets/examples.jsonl'});
+  box.append(E('p',{class:'intro'},'JSONL, JSON, CSV and text · up to 10 MB per upload. Existing files are preserved.'));
+  this.file=W.field(this.querySelector('#file-source'),'Choose a text / JSONL file','input',{type:'file',accept:'.jsonl,.json,.csv,.txt,.yaml,.yml'});
+  this.text=W.field(this.querySelector('#paste-source'),'Or paste dataset content','textarea',{placeholder:'{"prompt":"A question", "response":"An answer"}\nOne JSON object per line'});
+  this.uploadButton=W.button('Upload',()=>this.upload());this.uploadButton.className='data-primary';
+  this.querySelector('#upload-actions').append(this.uploadButton,W.button('Cancel',()=>this.showUpload(false)));
+  this.querySelector('#add-dataset').onclick=()=>this.showUpload(true);
+  this.querySelector('#paste-tab').onclick=()=>this.setSource('paste');this.querySelector('#file-tab').onclick=()=>this.setSource('file');
+  this.querySelector('#dataset-search').oninput=()=>this.drawFiles();
+  this.querySelector('#use-dataset').onclick=()=>{if(this.selected){sessionStorage.setItem('ml-stack-dataset',this.selected.path);M.go('training');}};
+  this.file.onchange=()=>{if(this.file.files[0]&&!this.name.value)this.name.value='datasets/'+this.file.files[0].name;};
+  W.route(this.host,'data',()=>this.load());
+ }
+ showUpload(show){this.querySelector('#upload').hidden=!show;if(show)this.name.focus();}
+ setSource(source){this.source=source;['paste','file'].forEach(key=>{this.querySelector('#'+key+'-source').hidden=key!==source;this.querySelector('#'+key+'-tab').setAttribute('aria-pressed',String(key===source));});}
+ async load(){
+  try{
+   const r=await W.api('/ui/workspace/files?path='+encodeURIComponent(this.path));this.files=r.files;
+   const crumbs=[W.button('Library root',()=>this.folder(''))];let current='';
+   this.path.split('/').filter(Boolean).forEach(part=>{current+=(current?'/':'')+part;const path=current;crumbs.push(E('span',{},'/'),W.button(part,()=>this.folder(path)));});
+   this.querySelector('#crumbs').replaceChildren(...crumbs);this.drawFiles();
+  }catch(error){W.status(this.note,error);}
+ }
+ folder(path){this.path=path;this.selected=null;this.querySelector('#dataset-search').value='';this.querySelector('#use-dataset').hidden=true;this.querySelector('#preview-title').textContent='Dataset preview';this.querySelector('#structured-preview').replaceChildren(E('div',{class:'data-empty'},E('b',{},'Choose a file'), 'Open a dataset to inspect its examples.'));this.querySelector('#raw-preview').hidden=true;this.load();}
+ drawFiles(){
+  const term=this.querySelector('#dataset-search').value.toLowerCase();const files=this.files.filter(f=>f.name.toLowerCase().includes(term));
+  this.querySelector('#dataset-count').textContent=this.files.filter(f=>!f.directory).length+' files';
+  this.querySelector('#files').replaceChildren(...files.map(f=>{
+   const ext=f.name.split('.').pop().toUpperCase().slice(0,5);
+   const button=W.button('',()=>this.open(f));button.className='data-file'+(f.directory?' folder':'');button.setAttribute('aria-pressed',String(this.selected?.path===f.path));
+   button.append(E('span',{class:'data-file-icon','aria-hidden':'true'},f.directory?'DIR':ext),E('span',{class:'data-file-copy'},E('strong',{},f.name),E('small',{},f.directory?'Folder':M.fileSize(f.bytes))),E('span',{'aria-hidden':'true'},'›'));return button;
+  }));
+  if(!files.length)this.querySelector('#files').append(E('div',{class:'data-empty'},E('b',{},term?'No matching files':'A fresh start'),term?'Try a different filename.':'Add a dataset to begin preparing your model.'));
+ }
+ async open(f){
+  if(f.directory)return this.folder(f.path);const token=Symbol();this.previewRequest=token;
+  try{
+   const r=await W.api('/ui/workspace/file?path='+encodeURIComponent(f.path));if(this.previewRequest!==token)return;
+   this.selected=f;this.drawFiles();this.querySelector('#preview-title').textContent=f.name;this.querySelector('#use-dataset').hidden=false;
+   this.querySelector('#preview').textContent=r.text+(r.truncated?'\n[Preview truncated]':'');this.querySelector('#raw-preview').hidden=false;
+   this.drawPreview(f,r);
+  }catch(error){W.status(this.note,error);}
+ }
+ drawPreview(f,r){
+  const host=this.querySelector('#structured-preview');let rows=null;
+  try{const parsed=JSON.parse(r.text);rows=Array.isArray(parsed)?parsed:[parsed];}catch{
+   if(f.name.endsWith('.jsonl')){try{rows=r.text.trim().split('\n').filter(Boolean).slice(0,10).map(line=>JSON.parse(line));}catch{rows=null;}}
+  }
+  const info=E('div',{class:'data-preview-info'},E('span',{},f.name.split('.').pop().toUpperCase()),E('span',{},M.fileSize(f.bytes)),E('span',{},r.truncated?'Partial file preview':'File preview'));
+  host.replaceChildren(info);
+  if(rows?.length&&rows.every(row=>row&&typeof row==='object'&&!Array.isArray(row))){
+   const keys=[...new Set(rows.slice(0,10).flatMap(row=>Object.keys(row)))].slice(0,8);
+   const table=E('table',{},E('thead',{},E('tr',{},...keys.map(key=>E('th',{},key)))),E('tbody',{},...rows.slice(0,10).map(row=>E('tr',{},...keys.map(key=>E('td',{},row[key]===undefined?'—':typeof row[key]==='string'?row[key]:JSON.stringify(row[key])))))));
+   host.append(E('p',{class:'intro'},'Sample of up to 10 rows · up to 8 fields'),table);
+  }else{host.append(E('p',{class:'intro'},'Text preview · check the format required by your fine-tuning recipe.'),E('pre',{},r.text.slice(0,12000)));}
+ }
+ async upload(){
+  if(this.pending)return;
+  try{
+   const path=this.name.value.trim(),file=this.source==='file'?this.file.files[0]:null;
+   if(!path)throw Error('Choose a destination filename before uploading.');
+   if(file&&file.size>10000000)throw Error('File exceeds the 10 MB upload limit.');
+   if(this.source==='file'&&!file)throw Error('Choose a file before uploading.');
+   if(this.source==='paste'&&!this.text.value.trim())throw Error('Paste dataset content before uploading.');
+   this.pending=true;this.uploadButton.disabled=true;this.uploadButton.textContent='Uploading…';this.note.textContent='Uploading dataset…';
+   await W.post('/ui/workspace/file',{path,text:file?await file.text():this.text.value});
+   this.path=path.split('/').slice(0,-1).join('/');await this.load();this.showUpload(false);
+   const uploaded=this.files.find(f=>f.path===path);if(uploaded)await this.open(uploaded);
+   this.note.textContent='Dataset uploaded. Inspect its examples, then use it for training.';
+  }catch(error){W.status(this.note,error);}finally{this.pending=false;this.uploadButton.disabled=false;this.uploadButton.textContent='Upload';}
+ }
+}
+customElements.define('data-view',DataView);
+})();
 </script>
