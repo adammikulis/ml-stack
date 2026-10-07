@@ -27,6 +27,7 @@ def test_theme_selector_preview_save_reload_reset_and_delete(joined, open_page):
     mount_editor(page)
     page.get_by_role('button', name='Poolside Light', exact=True).click()
     page.wait_for_function("document.querySelector('theme-editor select').value === 'light'")
+    page.locator('theme-editor summary').click()
     page.get_by_label('Pink accent', exact=True).fill('#aa3377')
     page.get_by_label('Interface font size').fill('17')
     page.get_by_label('Interface density').select_option('compact')

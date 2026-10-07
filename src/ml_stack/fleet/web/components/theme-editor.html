@@ -85,9 +85,13 @@ theme-editor .theme-status { min-height:24px; }
       const actions = el('div',{class:'theme-actions'},save,duplicate,reset,cancel);
       if (!this.registry.some(row => row.id === this.appearance.active_theme)) actions.append(
         el('button',{type:'button',class:'ghost',onclick:() => this.remove()},'Delete custom theme'));
+      const controls = el('details',{'data-advanced':'',class:'theme-customize'},
+        el('summary',{},'Customize colors and layout'),
+        el('div',{class:'theme-fields'},el('label',{},'Theme name',name),el('label',{},'Base',base),
+          el('label',{},'Font size',size),el('label',{},'Density',density)),fields,actions);
+      controls.open = M.preferences.always_show_advanced || this.appearance.active_theme.startsWith('custom-');
       this.replaceChildren(el('h2',{},'Appearance'),el('p',{class:'sub'},'Choose a theme or tune every color. Changes preview immediately; save to keep them.'),
-        presets,el('label',{},'Theme',choice),el('div',{class:'theme-fields'},el('label',{},'Theme name',name),
-        el('label',{},'Base',base),el('label',{},'Font size',size),el('label',{},'Density',density)),fields,actions,this.status);
+        presets,el('label',{},'Theme',choice),controls,this.status);
     }
     async persist(appearance) {
       const result = await api('/ui/settings',{method:'POST',body:JSON.stringify({appearance})});
