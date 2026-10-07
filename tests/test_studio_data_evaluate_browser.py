@@ -131,6 +131,8 @@ def test_studio_surfaces_follow_theme_and_keep_text_contrast(tmp_path, monkeypat
                     for (const [key, value] of Object.entries(values)) root.style.setProperty(key, value);
                 }
             }''', theme)
+            page.locator('data-view .data-file').click()
+            expect(page.locator('data-view #preview-title')).to_have_text('examples.jsonl')
             page.get_by_role('button', name='+ Add dataset').click()
             metrics = page.evaluate('''() => {
                 const rgb = value => value.match(/[\\d.]+/g).slice(0,3).map(Number);
@@ -145,6 +147,7 @@ def test_studio_surfaces_follow_theme_and_keep_text_contrast(tmp_path, monkeypat
                     const a = luminance(style.color), b = luminance(getComputedStyle(surface).backgroundColor);
                     return (Math.max(a,b)+.05)/(Math.min(a,b)+.05);
                 };
+                window.studioThemeContrast = measure;
                 const probe = document.createElement('div');
                 probe.style.backgroundColor = 'var(--bg-raised)';
                 document.body.append(probe);
@@ -156,14 +159,21 @@ def test_studio_surfaces_follow_theme_and_keep_text_contrast(tmp_path, monkeypat
             }''')
             assert metrics['panel'] == metrics['expectedSurface']
             assert min(metrics['contrast']) >= 4.5, metrics
+            page.get_by_label('Filter files in this folder').fill('missing')
+            assert page.evaluate("window.studioThemeContrast('data-view .data-empty')") >= 4.5
             page.evaluate("window.fleetModel.go('benchmarks')")
             expect(page.locator('benchmarks-view .evaluate-choice')).to_have_count(2)
+            page.get_by_label('sample-qwen.gguf', exact=True).check()
+            expect(page.locator('benchmarks-view #summary')).not_to_have_text('Checking your pool…')
             surfaces = page.evaluate('''() => {
                 const probe = document.createElement('div');
                 probe.style.backgroundColor='var(--bg-raised)';document.body.append(probe);
                 const expected=getComputedStyle(probe).backgroundColor;probe.remove();
-                return {expected, card:getComputedStyle(document.querySelector('benchmarks-view .evaluate-card')).backgroundColor};
+                return {expected, card:getComputedStyle(document.querySelector('benchmarks-view .evaluate-card')).backgroundColor,
+                    contrast: ['benchmarks-view .evaluate-choice b','benchmarks-view .evaluate-choice small',
+                        'benchmarks-view #summary'].map(window.studioThemeContrast)};
             }''')
             assert surfaces['card'] == surfaces['expected']
+            assert min(surfaces['contrast']) >= 4.5, surfaces
     finally:
         served.close()
