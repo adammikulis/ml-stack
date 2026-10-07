@@ -43,7 +43,7 @@ def test_cli_without_inherited_environment_uses_current_daemon(descriptor, monke
     assert not path.exists()
 
 
-@pytest.mark.parametrize('changed', ['started', 'uid', 'command', 'running'])
+@pytest.mark.parametrize('changed', ['started', 'uid', 'command', 'module_tail', 'running'])
 def test_reused_or_foreign_daemon_is_refused(descriptor, monkeypatch, changed):
     _, process, config = descriptor
     monkeypatch.setenv(registration.ENV, json.dumps(config))
@@ -55,6 +55,8 @@ def test_reused_or_foreign_daemon_is_refused(descriptor, monkeypatch, changed):
             process.uids.return_value = SimpleNamespace(effective=999)
         elif changed == 'command':
             process.cmdline.return_value = ['different-worker']
+        elif changed == 'module_tail':
+            process.cmdline.return_value = ['python', '-c', 'sleep', 'ml_stack.cli.wsl_daemon']
         else:
             process.is_running.return_value = False
         with pytest.raises(OSError, match='stale or invalid'):

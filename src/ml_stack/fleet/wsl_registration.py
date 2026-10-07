@@ -82,7 +82,7 @@ def configuration():
             raise ValueError('stale daemon')
         if process.uids().effective != os.geteuid():
             raise ValueError('foreign daemon')
-        if 'ml_stack.cli.wsl_daemon' not in process.cmdline():
+        if process.cmdline()[1:3] != ['-m', 'ml_stack.cli.wsl_daemon']:
             raise ValueError('different daemon')
         return _validate(record['config'])
     except (KeyError, TypeError, ValueError, psutil.Error) as exc:
