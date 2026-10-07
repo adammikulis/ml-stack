@@ -7,6 +7,8 @@ import signal
 import sys
 import threading
 
+from ml_stack.fleet.wsl_registration import registered
+
 from .daemon import main
 
 
@@ -17,4 +19,5 @@ def _watch() -> None:
 
 if __name__ == "__main__":
     threading.Thread(target=_watch, daemon=True).start()
-    raise SystemExit(main())
+    with registered():
+        raise SystemExit(main())
