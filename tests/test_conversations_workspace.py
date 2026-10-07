@@ -125,7 +125,8 @@ def test_conversation_surfaces_consume_resolved_theme_tokens(chat_browser, monke
       for (const [key,value] of Object.entries(settings.tokens)) root.style.setProperty(key,value);
     }''', {'theme': theme, 'tokens': {
         '--ml-bg': surface, '--ml-surface': surface, '--ml-sunken': surface,
-        '--ml-text': ink, '--ml-muted': ink, '--poolside-pink': pink,
+        '--ml-text': ink, '--ml-muted': ink, '--ml-accent': pink, '--ml-accent-ink': ink,
+        '--ml-on-accent': pink_ink, '--poolside-pink': pink, '--poolside-cyan': '#2de2e6',
         '--poolside-pink-ink': pink_ink, '--ui-density': str(density), '--ml-font': 'Georgia, serif',
     }})
     expected = page.evaluate('''values => {
