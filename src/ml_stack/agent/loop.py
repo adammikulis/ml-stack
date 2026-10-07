@@ -1,4 +1,4 @@
-"""A bounded Agents SDK runner with local tools, interventions, and streamed events."""
+"""An Agents SDK runner with local tools, interventions, and streamed events."""
 
 from __future__ import annotations
 
@@ -43,17 +43,14 @@ class Cancelled(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class Budget:
-    """What stops a run: steps (model turns), tool calls, completion tokens, and how many
-    consecutive turns of nothing but rejected calls are tolerated. ``profile`` is how far the
-    tool schemas are trimmed (`ml_stack.agent.schema.PROFILES`); ``summarise`` rewrites a
-    tool result before the model sees it."""
+    """Optional run limits, tool-result formatting, and tool concurrency."""
 
-    max_steps: int = 8
-    max_tool_calls: int = 64
+    max_steps: int | None = None
+    max_tool_calls: int | None = None
     max_tokens: int | None = None
-    max_repairs: int = 2
+    max_repairs: int | None = None
     parallel: int = 4
-    max_result_chars: int = 4000
+    max_result_chars: int | None = None
     profile: str = "full"
     summarise: Summarise | None = None
 
@@ -251,7 +248,7 @@ class Agent:
     def _shown(self, name: str, output: ToolOutput) -> str:
         text = self.budget.summarise(name, output) if self.budget.summarise else output.text
         limit = self.budget.max_result_chars
-        if len(text) > limit:
+        if limit is not None and len(text) > limit:
             return f"{text[:limit]}... [{len(text) - limit} more characters cut]"
         return text
 

@@ -34,7 +34,7 @@ CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 class Limits:
     """Ceilings a run holds to. A call over any of them is denied."""
 
-    calls: int = 200
+    calls: int | None = None
     per_minute: int = 120
     repeats: int = 10
     string: int = 8192
@@ -84,7 +84,7 @@ class ToolPolicyRail(Base):
 
     def _limits(self, call: Call) -> str:
         lim = self.limits
-        if self.count >= lim.calls:
+        if lim.calls is not None and self.count >= lim.calls:
             return f"more than {lim.calls} tool calls in one run"
         now = self.clock()
         while self.recent and now - self.recent[0] > 60:

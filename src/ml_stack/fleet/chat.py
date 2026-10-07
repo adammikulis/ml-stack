@@ -81,7 +81,7 @@ def find(available: list[Target], model: str) -> Target | None:
 
 
 def stream(target: Target, payload: dict[str, Any], *,
-           timeout: float = 600.0, control: Any = None) -> Iterator[bytes]:
+           timeout: float | None = None, control: Any = None) -> Iterator[bytes]:
     """The model server's reply, in the pieces it arrives in."""
     data = json.dumps(payload).encode()
     try:

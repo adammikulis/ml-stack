@@ -135,7 +135,7 @@ def test_old_saved_messages_acquire_default_settings_and_version_on_update(store
     old = store.get("legacy")
     assert old.model == "old-model"
     assert old.settings["mode"] == "chat"
-    assert old.settings["max_output_tokens"] == 8192
+    assert old.settings["max_output_tokens"] is None
     store.update("legacy", settings={"temperature": .7})
     saved = store.get("legacy").public()
     assert saved["version"] == 1

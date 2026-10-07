@@ -54,11 +54,11 @@ __all__ = ["COMMAND", "Chat", "Outcome", "Session", "default_model", "main", "ru
            "tools_for_chat"]
 
 SCHEMA_VERSION = 1
-ROUNDS = 12
+ROUNDS = None
 """Tool-calling rounds one message may spend."""
-TASK_ROUNDS = 40
+TASK_ROUNDS = None
 """Tool-calling rounds one task may spend."""
-CUT = 6000
+CUT = None
 """Characters of one tool result the model is shown."""
 
 SYSTEM = (
@@ -450,7 +450,7 @@ def _outcome(gate: Any, tool: Any, result: Any) -> tuple[str, dict[str, str]]:
 
 def run_task(task: str, client: Any, *,  # noqa: PLR0913
              tools: Sequence[tuple[dict[str, Any], Callable[..., Any]]] | None = None,
-             person: do.Person | None = None, rounds: int = TASK_ROUNDS,
+             person: do.Person | None = None, rounds: int | None = TASK_ROUNDS,
              guard: Sequence[Any] | None = None, role: str = roles.TASK_DEFAULT) -> Outcome:
     """One task through the loop. ``tools`` (default: all of them) are offered with the
     person's own three; ``guard`` replaces the rails and the role, and without it the role's
@@ -462,6 +462,8 @@ def run_task(task: str, client: Any, *,  # noqa: PLR0913
         chat = Chat(client, person, tools=offered, screen=screen, role=role, task=True)
         chat.guard = guard
         chat.begin()
+        if rounds is None:
+            person.say("Task limits: none. Tasks could run indefinitely until cancelled.")
         chat.rounds = rounds
         return chat.turn(task)
     finally:
@@ -592,13 +594,13 @@ OPTIONS = (
     option("port", default=8080, help="where --model is served"),
     flag("--draft", default="auto", metavar="HEAD",
          help="the draft head: 'auto', 'none' or a named head (default: %(default)s)"),
-    flag("--rounds", type=int, default=0,
+    flag("--rounds", type=int, default=None,
          help=f"tool-calling rounds one message may spend (default: {ROUNDS}, a task {TASK_ROUNDS})"),
     flag("--project", default="", metavar="PATH",
          help="the project whose memory is used with yours (default: the git repository or "
               "directory the chat was started in)"),
-    flag("--n-predict", type=int, default=do.N_PREDICT),
-    option("timeout", default=900.0, help="seconds to wait for one reply (default: %(default)s)"),
+    flag("--n-predict", type=int, default=None),
+    flag("--timeout", type=float, default=None, help="seconds to wait for one reply (default: %(default)s)"),
     flag("--context-size", type=int, default=0, metavar="TOKENS",
          help="the context the history is compacted against (default: ask the server)"),
     flag("--no-compact", action="store_true", help="never summarise the history"),
@@ -684,7 +686,9 @@ def serve(args: argparse.Namespace, stdin: TextIO, stdout: TextIO) -> int:
     screen = native_screen()
     chat = Chat(client, person, session=session, screen=screen, role=role, task=bool(task),
                 extension=extensions(person, mem))
-    chat.rounds = args.rounds or chat.rounds
+    chat.rounds = args.rounds
+    if args.rounds is None or args.timeout is None or args.n_predict is None:
+        stdout.write("Task limits include none. Tasks could run indefinitely until cancelled.\n")
     if session.messages:
         stdout.write(f"resumed {len(session.messages)} messages\n")
     try:

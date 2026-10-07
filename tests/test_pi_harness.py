@@ -196,3 +196,28 @@ def test_guarded_output_cap_reaches_real_client_body():
         assert guarded.chat([], max_tokens=17000)[key] == 17000
         assert guarded.chat([], max_completion_tokens=19000)[key] == 19000
         assert guarded.chat([])[key] == 8192
+
+
+def test_pi_unlimited_payload_and_turns(tmp_path):
+    import json
+    import shutil
+    import subprocess
+
+    import pytest
+
+    node = shutil.which('node')
+    if not node:
+        pytest.skip('Node is required by Pi')
+    (tmp_path / 'budget.mjs').write_text(pi.extension({'maxOutputTokens': None, 'maxTurns': None}))
+    driver = tmp_path / 'driver.mjs'
+    driver.write_text(
+        'import extension from "./budget.mjs";\n'
+        'const handlers={};extension({on:(name,fn)=>handlers[name]=fn});\n'
+        'const ctx={abort:()=>{throw Error("cutoff")},shutdown:()=>{throw Error("cutoff")}};\n'
+        'for(let n=0;n<201;n++)handlers.turn_start({},ctx);\n'
+        'console.log(JSON.stringify(handlers.before_provider_request({payload:{max_tokens:8192,max_completion_tokens:8192}})));\n')
+    result = subprocess.run([node, str(driver)], capture_output=True, text=True, timeout=30, check=True)
+    payload = json.loads(result.stdout)
+    assert 'max_tokens' not in payload and 'max_completion_tokens' not in payload
+    assert pi.parser().parse_args([]).max_turns is None
+    assert pi.parser().parse_args([]).max_output_tokens is None

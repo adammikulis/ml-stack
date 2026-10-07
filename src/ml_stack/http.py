@@ -19,7 +19,7 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-from ml_stack import gate, macauth, sealing, serverkeys
+from ml_stack import gate, http_cancel, macauth, sealing, serverkeys
 from ml_stack.httpguard import Limits, Refused, resolve, split
 
 USER_AGENT = "ml-stack"
@@ -211,9 +211,14 @@ class _Guarded(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, *rest)
 
 
-def _open(request: urllib.request.Request, timeout: float, guard: Callable[[str], str] | None
+def _open(request: urllib.request.Request, timeout: float | None, guard: Callable[[str], str] | None
           ) -> Any:
     context = _https_context(request.full_url)
+    if control := http_cancel.active():
+        handlers = [*http_cancel.handlers(control, context)]
+        if guard is not None:
+            handlers.append(_Guarded(guard))
+        return urllib.request.build_opener(*handlers).open(request, timeout=timeout)
     if guard is None:
         return urllib.request.urlopen(request, timeout=timeout, context=context)  # noqa: S310
     opener = urllib.request.build_opener(_Guarded(guard), urllib.request.HTTPSHandler(
@@ -223,7 +228,7 @@ def _open(request: urllib.request.Request, timeout: float, guard: Callable[[str]
 
 def open_stream(url: str, *, data: bytes | None = None, method: str | None = None,
                 headers: dict[str, str] | None = None, token: str = "",
-                timeout: float = 180.0, retry: Retry = ONCE,
+                timeout: float | None = 180.0, retry: Retry = ONCE,
                 guard: Callable[[str], str] | None = None) -> Any:
     """The open response for ``url``, for a caller that reads the body itself; only http(s).
 
@@ -305,7 +310,7 @@ def head_once(url: str, *, headers: dict[str, str] | None = None, token: str = "
 
 def request_bytes(url: str, *, data: bytes | None = None, method: str | None = None,
                   headers: dict[str, str] | None = None, token: str = "",
-                  timeout: float = 180.0, retry: Retry = ONCE,
+                  timeout: float | None = 180.0, retry: Retry = ONCE,
                   guard: Callable[[str], str] | None = None) -> Reply:
     """Send a request and read the whole answer, opened when the server sealed it."""
     asking = {**(headers or {}), sealing.HEADER: "2"}
@@ -317,7 +322,7 @@ def request_bytes(url: str, *, data: bytes | None = None, method: str | None = N
 
 
 def request_json(url: str, *, payload: dict[str, Any] | None = None,
-                 method: str | None = None, timeout: float = 180.0, tries: int = 1,
+                 method: str | None = None, timeout: float | None = 180.0, tries: int = 1,
                  backoff: float = 0.5, headers: dict[str, str] | None = None,
                  token: str = "", guard: Callable[[str], str] | None = None) -> Any:
     """Send a JSON request and parse the JSON response."""
@@ -334,7 +339,7 @@ def request_json(url: str, *, payload: dict[str, Any] | None = None,
         raise ServerError(f"{shown(url)} returned non-JSON: {exc}") from exc
 
 
-def request_stream(url: str, *, payload: dict[str, Any], timeout: float = 180.0,
+def request_stream(url: str, *, payload: dict[str, Any], timeout: float | None = 180.0,
                    headers: dict[str, str] | None = None, token: str = ""):
     """POST a JSON request and yield each SSE ``data:`` payload, parsed, until ``[DONE]``."""
     sent = {"Content-Type": "application/json", "Accept": "text/event-stream"}

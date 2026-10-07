@@ -208,7 +208,7 @@ class Profile:
         return Asking(**{flag: bool(getattr(self, flag)) for flag in FLAGS},
                       reach=self.reach, rounds=self.rounds)
 
-    def talking(self, *, n_predict: int = 16384, timeout: float = 300.0) -> Any:
+    def talking(self, *, n_predict: int | None = None, timeout: float | None = None) -> Any:
         """The client this record measured with, as a :class:`~ml_stack.serve.Talking`.
 
         The sampling and the speculative depth are the record's, and both go out with each
@@ -221,7 +221,7 @@ class Profile:
                        spec_draft_max=self.spec_draft_max)
 
     def alone(self, *, port: int = 8080, model: str = "", resolve: bool = True,
-              n_predict: int = 16384, timeout: float = 300.0) -> Any:
+              n_predict: int | None = None, timeout: float | None = None) -> Any:
         """This record as one conversation: one slot holding the whole cache the record
         measured across its ``parallel`` slots. The same as :meth:`config` with no ``slots``.
         """
@@ -229,7 +229,7 @@ class Profile:
                         n_predict=n_predict, timeout=timeout)
 
     def config(self, *, port: int = 8080, slots: int | None = None, model: str = "",
-            resolve: bool = True, n_predict: int = 16384, timeout: float = 300.0) -> Any:
+            resolve: bool = True, n_predict: int | None = None, timeout: float | None = None) -> Any:
         """This record whole, as a :class:`~ml_stack.serve.Config`: how to serve it,
         the asking to ask it with, and the client.
 

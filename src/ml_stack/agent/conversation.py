@@ -86,11 +86,11 @@ async def _execute(chat: Any, schemas: list, run_by: dict, out: Any, nudge: str)
         await Runner.run(model.agent, input_items(chat.messages), max_turns=chat.rounds,
                          run_config=RunConfig(tracing_disabled=True))
         if chat.task and not (chat.person.finished or chat.person.left):
-            if model.steps >= chat.rounds:
+            if chat.rounds is not None and model.steps >= chat.rounds:
                 return True
             chat.messages.append({'role': 'user', 'content': nudge})
             await Runner.run(model.agent, input_items(chat.messages),
-                             max_turns=chat.rounds - model.steps,
+                             max_turns=None if chat.rounds is None else chat.rounds - model.steps,
                              run_config=RunConfig(tracing_disabled=True))
         return False
     except MaxTurnsExceeded:

@@ -20,11 +20,11 @@ from ml_stack.serve import provenance
 __all__ = ["extension", "launch", "models"]
 
 
-def models(base_url: str, alias: str, window: int, max_output_tokens: int = 8192) -> str:
+def models(base_url: str, alias: str, window: int, max_output_tokens: int | None = None) -> str:
     """Pi provider configuration for the model already served by ml-stack."""
     model = {"id": alias, "name": alias, "reasoning": True, "input": ["text"],
              "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
-             "contextWindow": window, "maxTokens": max_output_tokens}
+             "contextWindow": window, "maxTokens": max_output_tokens if max_output_tokens is not None else window}
     return json.dumps({"providers": {"mlstack": {"baseUrl": base_url.rstrip("/"),
         "api": "openai-completions", "apiKey": "local", "models": [model]}}}, sort_keys=True)
 
@@ -45,12 +45,13 @@ export default function (pi) {{
   pi.on("before_provider_request", (event) => {{
     const payload = {{...event.payload}};
     delete payload.max_completion_tokens;
-    payload.max_tokens = cfg.maxOutputTokens;
+    delete payload.max_tokens;
+    if (cfg.maxOutputTokens != null) payload.max_tokens = cfg.maxOutputTokens;
     if (cfg.thinking) payload.chat_template_kwargs = {{...payload.chat_template_kwargs, ...cfg.thinking}};
     return payload;
   }});
   pi.on("turn_start", (_event, ctx) => {{
-    if (++turns > cfg.maxTurns) {{
+    if (cfg.maxTurns != null && ++turns > cfg.maxTurns) {{
       console.log(JSON.stringify({{type:"error",message:"Pi turn budget exhausted"}}));
       ctx.abort(); ctx.shutdown();
     }}
@@ -81,8 +82,8 @@ export default function (pi) {{
 
 def parser() -> argparse.ArgumentParser:
     ap = harnessing.parser("pi", "Pi", DEFAULT_PORT, DEFAULT_SLOTS)
-    ap.add_argument("--max-turns", type=int, default=60)
-    ap.add_argument("--max-output-tokens", type=int, default=8192)
+    ap.add_argument("--max-turns", type=int, default=None)
+    ap.add_argument("--max-output-tokens", type=int, default=None)
     ap.add_argument("--effort", choices=("off", "low", "medium", "high"), default="off")
     return ap
 
@@ -102,10 +103,10 @@ def launch(argv: Sequence[str] | None = None, *, say: Callable[[str], None] = sa
     if args.on and args.model:
         say("error: --on names a server already running; do not name a model as well")
         return 2
-    if args.max_output_tokens <= 0:
+    if args.max_output_tokens is not None and args.max_output_tokens <= 0:
         say("error: --max-output-tokens must be positive")
         return 2
-    if args.max_turns <= 0:
+    if args.max_turns is not None and args.max_turns <= 0:
         say("error: --max-turns must be positive")
         return 2
     try:
@@ -113,6 +114,8 @@ def launch(argv: Sequence[str] | None = None, *, say: Callable[[str], None] = sa
     except ValueError as why:
         say(f"error: {why}")
         return 2
+    if args.max_turns is None or args.max_output_tokens is None:
+        say("Task limits include none. Tasks could run indefinitely until cancelled.")
     runner = run_pi or (lambda command, env: subprocess.call(command, env=env, cwd=args.project or None))
     if args.on:
         base_url = args.on.rstrip("/")

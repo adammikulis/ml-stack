@@ -293,7 +293,7 @@ def _ask_way(load: _Load, way: Mapping[str, Any],
                        embed_url=loading.embed_url, embed_model=loading.embed_model)
     got = bench.measure(ask, questions, label=here, client=client, trace=loading.trace,
                         log=print, baseline=load.baseline, graph=load.graph,
-                        per_question=float(load.config.talking.timeout))
+                        per_question=load.config.talking.timeout)
     for row in got:
         row.steps = f"{row.steps}; server up in {load.loaded:.0f}s".strip("; ")
     record = {**bench.footprint(load.server.base_url), "graph": _which(load.graph),

@@ -40,7 +40,9 @@ def launch_coding_agent(model: str, role: str, project: str | Path, harness: str
     if harness == "pi":
         for key, flag in (("max_output_tokens", "--max-output-tokens"), ("effort", "--effort")):
             if key in options:
-                argv += [flag, str(options.pop(key))]
+                value = options.pop(key)
+                if value is not None:
+                    argv += [flag, str(value)]
     if draft := options.pop("draft", ""):
         argv += ["--draft", draft]
     if options.get("name"):

@@ -254,7 +254,7 @@ def test_a_knob_goes_to_the_section_that_owns_it_and_an_unknown_one_is_refused()
     # what the client is built with; `think` is taken per call and is in neither
     thinking = laid.over(think=False).talking
     assert thinking.request() == Request(n_predict=4096, temperature=0.7, top_k=20)
-    assert thinking.transport() == Transport(timeout=300.0)
+    assert thinking.transport() == Transport(timeout=None)
     with pytest.raises(TypeError, match="tightt"):
         config.over(tightt=True)
 

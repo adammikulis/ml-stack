@@ -82,12 +82,14 @@ class TestBuildBody:
                       request=Request(n_predict=512)).build_body([], top_k=40)
         assert body["top_k"] == 40 and body["n_predict"] == 512
 
-    def test_the_token_ceiling_defaults_high(self):
-        """A ceiling is not a budget: nothing is spent that is not generated, so a high one
-        costs nothing and a low one truncates -- and what it truncates is the answer, never
-        the thinking. Measured, gemma-4 filled a 220-token ceiling with reasoning and
-        returned empty content."""
-        assert Client("http://x").build_body([])["n_predict"] >= 8192
+    def test_output_limits_default_to_none(self):
+        from ml_stack.client import Transport
+        assert Request().n_predict is None
+        assert Transport().timeout is None
+        assert Client("http://x").build_body([])["n_predict"] == -1
+        hosted = Client("http://x", transport=Transport(api="openai"))
+        assert "max_tokens" not in hosted.build_body([])
+        assert hosted.build_body([], n_predict=257)["max_tokens"] == 257
 
     def test_tools_only_appear_when_supplied(self):
         tool = {"type": "function", "function": {"name": "ping", "parameters": {}}}
