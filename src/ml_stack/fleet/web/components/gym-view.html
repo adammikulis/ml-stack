@@ -2,7 +2,8 @@
 gym-view [hidden] { display:none!important; }
 gym-view .workspace { max-width:1600px; color:var(--text,#1b1f3a); }
 gym-view .gym-header { display:flex; justify-content:space-between; align-items:flex-start; gap:24px; margin-bottom:24px; }
-gym-view .gym-eyebrow { font-size:11px; font-weight:800; letter-spacing:.12em; text-transform:uppercase; color:var(--poolside-orange,#ff8a3d); margin:0 0 8px; }
+gym-view .gym-eyebrow { font-size:11px; font-weight:800; letter-spacing:.12em; text-transform:uppercase; color:var(--text,#1b1f3a); margin:0 0 8px; }
+gym-view .gym-eyebrow::before { content:""; display:inline-block; width:7px; height:7px; margin-right:8px; border-radius:2px; background:var(--poolside-orange,#ff8a3d); }
 gym-view .gym-header h1 { font-size:32px; letter-spacing:-.04em; margin-bottom:8px; }
 gym-view .gym-header .intro { max-width:620px; margin:0; }
 gym-view .gym-header a { padding:10px 14px; border:1px solid var(--line,#e5ddd4); border-radius:10px; color:inherit; text-decoration:none; white-space:nowrap; }
@@ -17,7 +18,7 @@ gym-view .gym-scenario-icon { display:flex; align-items:center; justify-content:
 gym-view .gym-scenario h3 { font-size:14px; margin:0 0 6px; }
 gym-view .gym-scenario p:not(.gym-ready) { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; min-height:36px; }
 gym-view .gym-scenario p { font-size:12px; color:var(--muted,#757381); line-height:1.5; margin:0 0 12px; }
-gym-view .gym-scenario .gym-ready { color:var(--poolside-navy,#1b1f3a); font-size:11px; font-weight:700; }
+gym-view .gym-scenario .gym-ready { color:var(--text,#1b1f3a); font-size:11px; font-weight:700; }
 gym-view .gym-scenario button { padding:6px 10px; min-height:30px; width:100%; background:var(--bg-sunken,#f6f1ea); border:0; font-size:12px; color:inherit; }
 gym-view .gym-scenario[data-selected=true] button { background:var(--poolside-orange,#ff8a3d); color:var(--poolside-navy,#1b1f3a); }
 gym-view .gym-layout { display:grid; grid-template-columns:280px minmax(0,1fr); align-items:start; gap:20px; }
@@ -116,11 +117,12 @@ class GymView extends HTMLElement{
  shortcut(event){if(this.host.hidden||event.defaultPrevented||event.ctrlKey||event.metaKey||event.altKey||event.target.closest('input,textarea,select,button,a,[contenteditable]'))return;if(event.code==='Space'){event.preventDefault();this.control(this.lastSnapshot?.status==='running'?'pause':'play');}else if(event.code==='Period'){event.preventDefault();this.control('step');}else if(event.code==='KeyV'){event.preventDefault();this.sensorView.value=this.sensorView.value==='sensors'?'native':'sensors';if(this.lastSnapshot)this.draw(this.lastSnapshot,false);}}
  async load(){this.loading=true;this.paintActions();this.note.textContent='Loading environments…';try{const r=await W.api('/ui/gym/catalogue');this.catalogue=r.environments;this.modelOptions.choices(r.models);const selected=this.environment.value;this.environment.replaceChildren(...r.environments.map(env=>E('option',{value:env.id},env.title)));if(selected)this.environment.value=selected;this.drawScenarios();this.describe();await this.loadSessions();if(!this.session)this.note.textContent='Choose a world and controller, then start a paused session.';}catch(e){W.status(this.note,e);}finally{this.loading=false;this.paintActions();}}
  drawScenarios(){
-  const colors=['orange','cyan','pink','yellow'],icons={car:'↗',drone:'✧',warehouse:'▦','traffic-driving':'⇄','traffic-junction':'✚'};
+  const colors=[['orange','#ff8a3d'],['cyan','#2de2e6'],['pink','#ff5fa2'],['yellow','#ffd166']],icons={car:'↗',drone:'✧',warehouse:'▦','traffic-driving':'⇄','traffic-junction':'✚'};
   this.querySelector('#environments').replaceChildren(...this.catalogue.map((env,index)=>{
+   const [color,fallback]=colors[index%colors.length];
    const button=W.button('Choose world',()=>{this.environment.value=env.id;this.controllerTouched=false;this.describe();});
    button.setAttribute('aria-label','Choose '+env.title);
-   const card=E('article',{class:'gym-scenario','data-environment':env.id,style:`--scenario-color:var(--poolside-${colors[index%colors.length]})`},
+   const card=E('article',{class:'gym-scenario','data-environment':env.id,style:`--scenario-color:var(--poolside-${color},${fallback})`},
     E('div',{class:'gym-scenario-icon','aria-hidden':'true'},icons[env.id]||'◇'),E('h3',{},env.title),E('p',{},env.description),
     E('p',{class:'gym-ready'},env.available?'Ready to explore':'Environment setup required'),button);
    if(!env.available)card.append(E('details',{},E('summary',{},'Set up environment'),W.button('Install environment',()=>this.install(env))));
