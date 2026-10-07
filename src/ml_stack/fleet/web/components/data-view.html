@@ -81,7 +81,7 @@ class DataView extends HTMLElement {
    this.querySelector('#crumbs').replaceChildren(...crumbs);this.drawFiles();
   }catch(error){W.status(this.note,error);}
  }
- folder(path){this.path=path;this.selected=null;this.querySelector('#dataset-search').value='';this.querySelector('#use-dataset').hidden=true;this.querySelector('#preview-title').textContent='Dataset preview';this.querySelector('#structured-preview').replaceChildren(E('div',{class:'data-empty'},E('b',{},'Choose a file'), 'Open a dataset to inspect its examples.'));this.querySelector('#raw-preview').hidden=true;this.load();}
+ folder(path){this.previewRequest=Symbol();this.path=path;this.selected=null;this.querySelector('#dataset-search').value='';this.querySelector('#use-dataset').hidden=true;this.querySelector('#preview-title').textContent='Dataset preview';this.querySelector('#structured-preview').replaceChildren(E('div',{class:'data-empty'},E('b',{},'Choose a file'), 'Open a dataset to inspect its examples.'));this.querySelector('#raw-preview').hidden=true;this.load();}
  drawFiles(){
   const term=this.querySelector('#dataset-search').value.toLowerCase();const files=this.files.filter(f=>f.name.toLowerCase().includes(term));
   this.querySelector('#dataset-count').textContent=this.files.filter(f=>!f.directory).length+' files';
