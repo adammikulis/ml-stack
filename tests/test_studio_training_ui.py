@@ -155,3 +155,40 @@ def test_running_model_badge_preserves_theme_contrast(joined, open_page, theme):
     }""")
     assert contrast >= 4.5
     assert not errors
+
+
+def test_changing_workflow_invalidates_review_and_explains_missing_runtime(joined, open_page):
+    page, errors = open_page(joined, cookie=joined.cookie, path='/ui/#training')
+    page.get_by_label('Dataset path (relative to files root)').fill('datasets/examples.jsonl')
+    page.get_by_role('button', name='Continue to model & recipe').click()
+    page.get_by_role('button', name='Review this run').click()
+    page.get_by_role('button', name='Review command', exact=True).click()
+    expect(page.locator('training-view .review-placeholder')).to_have_count(0)
+    expect(page.locator('training-view #config > .status')).to_contain_text('Command preview ready')
+    page.evaluate("document.querySelector('training-view').environments.forEach(environment=>{environment.available=false;environment.missing=['test-runtime'];})")
+    page.get_by_label('Workflow', exact=True).select_option('rl')
+    expect(page.locator('training-view #config > .status')).to_be_empty()
+    assert page.locator('training-view').get_by_text('Command preview', exact=True).locator('..').get_attribute('open') is None
+    page.get_by_role('button', name='Review this run').click()
+    expect(page.get_by_role('button', name='Review command', exact=True)).to_be_disabled()
+    expect(page.locator('#training-runtime')).to_be_visible()
+    expect(page.locator('#training-runtime')).to_contain_text('test-runtime')
+    assert not errors
+
+
+def test_review_response_does_not_restore_command_after_options_change(joined, open_page):
+    page, errors = open_page(joined, cookie=joined.cookie, path='/ui/#training')
+    page.get_by_label('Dataset path (relative to files root)').fill('datasets/examples.jsonl')
+    page.get_by_role('button', name='Continue to model & recipe').click()
+    page.get_by_role('button', name='Review this run').click()
+    deferred = []
+    page.route('**/ui/workspace/jobs', lambda route: deferred.append(route)
+               if route.request.method == 'POST' else route.continue_())
+    page.get_by_role('button', name='Review command', exact=True).click()
+    page.wait_for_timeout(100)
+    assert len(deferred) == 1
+    page.get_by_label('Run name', exact=True).fill('changed-run')
+    deferred[0].fulfill(json={'command': 'obsolete preview'})
+    expect(page.locator('training-view #config > .status')).to_contain_text('Options changed')
+    assert not page.locator('training-view').get_by_text('obsolete preview', exact=True).count()
+    assert not errors
