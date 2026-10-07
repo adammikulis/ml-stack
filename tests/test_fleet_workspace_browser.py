@@ -80,3 +80,21 @@ def check_training_controls(page, pw):
     specification = page.evaluate("document.querySelector('training-view').spec()")
     parsed = _parser().parse_args(specification['args'])
     assert not parsed.lora and 'lora=false' in parsed.set
+
+
+def test_short_views_start_below_workspace_header(tmp_path, playwright):
+    served = Serving(tmp_path)
+    served.ui.settings.setup_done = True
+    try:
+        browser = playwright.chromium.launch(headless=True)
+        page = browser.new_page(viewport={"width": 1440, "height": 1200})
+        page.goto(f'http://127.0.0.1:{served.port}/ui')
+        for route in ('fit', 'knowledge', 'tools'):
+            page.locator(f'fleet-nav a[href="#{route}"]').click()
+            header = page.locator('.workspace-header').bounding_box()
+            workspace = page.locator('#workspace').bounding_box()
+            assert header and workspace
+            assert abs(workspace['y'] - header['y'] - header['height']) < 2
+        browser.close()
+    finally:
+        served.close()
