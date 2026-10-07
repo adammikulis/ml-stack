@@ -34,6 +34,7 @@ training-view .run-monitor{margin-top:24px;padding:24px;border-radius:20px;borde
 training-view .run-monitor .job-list{grid-template-columns:repeat(auto-fit,minmax(240px,1fr));max-height:220px;overflow:auto}
 training-view .training-form .status{margin:0;padding:0 28px 16px;min-height:0}
 training-view .training-form .status:empty{display:none}
+training-view .training-runtime{background:var(--bg-sunken);color:var(--text);border-left:4px solid var(--poolside-yellow,#ffd166);padding:12px 16px;border-radius:8px;line-height:1.6}
 training-view .training-review-actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:24px}
 @media(max-width:1050px){training-view .training-layout{grid-template-columns:1fr}training-view .training-aside{display:none}}
 @media(max-width:650px){training-view .workspace{padding:20px}training-view .training-heading{gap:12px}training-view .training-mark{display:none}training-view .training-pane{padding:20px}training-view .training-steps button{font-size:12px;padding:8px}}
@@ -48,7 +49,7 @@ training-view .eyebrow::before{content:"";display:inline-block;width:7px;height:
         <nav class="training-steps" aria-label="Fine-tuning steps"><button type="button" data-step="0"><span>1</span>Dataset</button><button type="button" data-step="1"><span>2</span>Model &amp; recipe</button><button type="button" data-step="2"><span>3</span>Review &amp; run</button></nav>
         <div class="training-pane" id="training-dataset"><h2>Give your model examples</h2><p class="intro">Choose a dataset already in your files, or prepare one in Data.</p><button type="button" id="browse-data">Open dataset library</button></div>
         <div class="training-pane" id="training-recipe" hidden><h2>Choose what it will learn</h2><p class="intro">A recipe supplies sensible defaults. Tune the essentials here and explore advanced controls when you need them.</p></div>
-        <div class="training-pane" id="training-review" hidden><h2>Ready to train?</h2><p class="intro">Try a short validation run first, or train a checkpoint. Work enters the same managed queue as your other jobs.</p></div>
+        <div class="training-pane" id="training-review" hidden><h2>Ready to train?</h2><p class="intro">Try a short validation run first, or train a checkpoint. Work enters the same managed queue as your other jobs.</p><p id="training-runtime" class="training-runtime" role="status" hidden></p></div>
         <div class="training-footer"><button type="button" id="training-back">Back</button><button type="button" id="training-next">Continue to model &amp; recipe →</button></div>
       </div>
       <aside class="training-aside"><h2>Your run</h2><dl class="run-summary" id="run-summary"></dl><p class="training-help">A short training smoke runs 20 steps without saving a checkpoint. Full training saves to your chosen output directory.</p><button type="button" id="open-gym">Explore RL worlds →</button></aside>
@@ -65,6 +66,7 @@ training-view .eyebrow::before{content:"";display:inline-block;width:7px;height:
       this.wired = true;
       this.host = this.querySelector('section');
       this.form = this.querySelector('#config');
+      this.runtimeNote = this.querySelector('#training-runtime');
       this.querySelector('#browse-data').onclick = () => M.go('data');
       this.querySelector('#open-gym').onclick = () => M.go('gym');
       const b = this.querySelector('#training-recipe');
@@ -104,8 +106,8 @@ training-view .eyebrow::before{content:"";display:inline-block;width:7px;height:
       this.querySelectorAll('[data-step]').forEach(button => button.onclick = () => this.showStep(Number(button.dataset.step)));
       this.querySelector('#training-back').onclick = () => this.showStep(this.step - 1);
       this.querySelector('#training-next').onclick = () => this.showStep(this.step + 1);
-      this.form.addEventListener('input', () => this.updateSummary());
-      this.form.addEventListener('change', () => this.updateSummary());
+      this.form.addEventListener('input', () => { this.invalidateReview(); this.updateSummary(); });
+      this.form.addEventListener('change', () => { this.invalidateReview(); this.updateSummary(); });
       this.showStep(0);
       this.mode.onchange = () => { this.buildOptions(); this.showStep(this.mode.value === 'rl' ? 1 : this.data.value.trim() ? this.step : 0); };
       this.recipe.onchange = () => this.buildFields();
@@ -122,6 +124,7 @@ training-view .eyebrow::before{content:"";display:inline-block;width:7px;height:
     openRun({workflow = 'recipe', dataset = ''} = {}) {
       if (![...this.mode.options].some(option => option.value === workflow)) throw Error('Choose a supported training workflow.');
       M.go('training');
+      this.invalidateReview();
       this.mode.value = workflow;
       if (dataset) this.data.value = dataset;
       this.buildOptions();
@@ -149,6 +152,13 @@ training-view .eyebrow::before{content:"";display:inline-block;width:7px;height:
       this.querySelector('#training-next').hidden = step === 2;
       this.querySelector('#training-next').textContent = step === 0 ? 'Continue to model & recipe →' : 'Review this run →';
       this.updateSummary();
+    }
+
+    invalidateReview() {
+      this.reviewVersion = (this.reviewVersion || 0) + 1;
+      this.reviewDetails.open = false;
+      this.preview.textContent = 'Review the command before starting.';
+      if (!this.pending) { this.note.textContent = ''; this.note.classList.remove('error'); }
     }
 
     updateSummary() {
@@ -259,6 +269,8 @@ training-view .eyebrow::before{content:"";display:inline-block;width:7px;height:
       this.dry.options[0].textContent = recipe ? '20-step training smoke' : 'Check configuration';
       const available = !rl || (this.environments || []).some(item => item.id === this.recipe.value && item.available);
       this.reviewButton.disabled = this.startButton.disabled = !!this.pending || !this.recipe.value || !available;
+      this.runtimeNote.hidden = available;
+      this.runtimeNote.textContent = available ? '' : this.requirements.textContent;
       this.form.setAttribute('aria-busy', String(!!this.pending));
       this.updateSummary();
       this.startButton.textContent = this.pending ? 'Working…'
@@ -315,10 +327,12 @@ training-view .eyebrow::before{content:"";display:inline-block;width:7px;height:
       if (this.pending) return;
       try {
         const spec = this.spec();
+        const revision = this.reviewVersion;
         this.pending = true; this.paintActions(); this.note.classList.remove('error');
         this.note.textContent = preview ? 'Preparing command preview…' : 'Submitting to the training queue…';
         const result = await W.post('/ui/workspace/jobs', {...spec, ...(preview ? {preview:true} : {})});
         if (preview) {
+          if (revision !== this.reviewVersion) { this.note.textContent = 'Options changed. Review the updated run before starting.'; return; }
           this.preview.textContent = result.command; this.reviewDetails.open = true;
           this.note.textContent = this.mode.value === 'recipe' && this.dry.value === 'true'
             ? 'Command preview ready. The smoke run trains for 20 steps and saves no checkpoint.'
