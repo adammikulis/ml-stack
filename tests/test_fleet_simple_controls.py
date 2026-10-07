@@ -112,3 +112,58 @@ def test_apple_memory_is_one_physical_pool(joined, open_page):
     assert page.locator('.loaded-models').get_by_text('262,144 tokens · MTP active · 1 slot(s)', exact=True).is_visible()
     assert page.get_by_text('112.0 GB free of 112.0 GB', exact=False).count() == 0
     assert not errors
+
+
+def test_central_advanced_preference_expands_pages_and_survives_reload(joined, open_page):
+    from playwright.sync_api import expect
+
+    page, errors = open_page(joined, cookie=joined.cookie, path='/ui/#settings')
+    preference = page.get_by_label('Always show advanced options', exact=True)
+    expect(preference).not_to_be_checked()
+    preference.check()
+    page.click('#settings-save')
+    expect(page.locator('#settings-note .ok')).to_contain_text('Preferences saved')
+    expect(page.locator('#settings-advanced')).to_have_attribute('open', '')
+    _, saved, _ = joined.call('/ui/settings', cookie=joined.cookie)
+    assert saved['settings']['always_show_advanced'] is True
+    page.evaluate("window.fleetModel.go('training')")
+    page.get_by_label('Workflow', exact=True).select_option('decider')
+    expect(page.get_by_label('Learning rate', exact=True)).to_be_visible()
+    page.reload()
+    expect(page.locator('training-view #config details[data-advanced]')).to_have_attribute('open', '')
+    page.evaluate("""() => {
+      const panel = window.fleetModel.el('details', {}, window.fleetModel.el('summary', {}, 'Advanced options'));
+      panel.id = 'dynamic-advanced'; document.body.append(panel);
+    }""")
+    expect(page.locator('#dynamic-advanced')).to_have_attribute('open', '')
+    page.evaluate("window.fleetModel.go('settings')")
+    expect(preference).to_be_checked()
+    preference.uncheck()
+    page.click('#settings-save')
+    expect(page.locator('#settings-note .ok')).to_contain_text('Preferences saved')
+    expect(page.locator('#settings-advanced')).not_to_have_attribute('open', '')
+    assert not errors
+
+
+def test_sign_in_loads_advanced_preference_from_backend(joined, open_page):
+    from playwright.sync_api import expect
+
+    joined.ui.settings.always_show_advanced = True
+    joined.ui.settings.save(joined.ui.settings_path)
+    page, errors = open_page(joined, path='/ui/#training')
+    page.locator('sign-in input[type="password"]').fill(fleet_page.WORDS)
+    page.locator('sign-in button').click()
+    expect(page.locator('training-view #config details[data-advanced]')).to_have_attribute('open', '')
+    assert not errors
+
+
+def test_settings_backend_validation_error_stays_visible(joined, open_page):
+    from playwright.sync_api import expect
+
+    page, errors = open_page(joined, cookie=joined.cookie, path='/ui/#settings')
+    expect(page.locator('#settings-save')).to_be_enabled()
+    page.route('**/ui/settings', lambda route: route.fulfill(json={'error': 'Choose a download source'})
+               if route.request.method == 'POST' else route.continue_())
+    page.locator('#settings-save').click()
+    expect(page.locator('#settings-note .err')).to_contain_text('Choose a download source')
+    assert not errors

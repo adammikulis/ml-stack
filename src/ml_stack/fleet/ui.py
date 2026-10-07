@@ -277,6 +277,8 @@ class UI:
         settings = self.settings
         if settings is None:
             return out
+        if "always_show_advanced" in req and not isinstance(req["always_show_advanced"], bool):
+            return {"error": "Always show advanced options must be a boolean."}
         if "download_sources" in req and req["download_sources"] not in ("internet", "lan", "both"):
             return {"error": "Choose Internet only, LAN only, or Both."}
 
@@ -301,6 +303,8 @@ class UI:
             settings.autodownload_models = bool(req["autodownload_models"])
         if "download_sources" in req:
             settings.download_sources = str(req["download_sources"])
+        if "always_show_advanced" in req:
+            settings.always_show_advanced = req["always_show_advanced"]
         if "context" in req:
             settings.context = max(512, min(1 << 20, int(req["context"])))
 
