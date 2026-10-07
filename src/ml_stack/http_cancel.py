@@ -2,14 +2,76 @@
 from __future__ import annotations
 
 import http.client
+import ipaddress
+import queue
 import socket
 import threading
 import urllib.request
+from collections.abc import Callable
 from contextlib import contextmanager, suppress
 from contextvars import ContextVar
+from dataclasses import dataclass, field
 from typing import Any
 
 _CURRENT: ContextVar[Cancellation | None] = ContextVar('http_cancellation', default=None)
+
+_DNS_WORKERS = 2
+_DNS_JOBS: queue.Queue[_Resolution] = queue.Queue(maxsize=2)
+_DNS_START = threading.Lock()
+_DNS_STARTED = False
+
+
+@dataclass
+class _Resolution:
+    address: tuple[str, int]
+    resolver: Callable[..., Any]
+    cancelled: Callable[[], bool]
+    ready: threading.Event = field(default_factory=threading.Event)
+    result: Any = None
+    error: Exception | None = None
+
+
+def _resolve_worker() -> None:
+    while True:
+        job = _DNS_JOBS.get()
+        try:
+            if not job.cancelled():
+                job.result = job.resolver(*job.address, 0, socket.SOCK_STREAM)
+        except (OSError, UnicodeError, ValueError, TypeError) as error:
+            job.error = error
+        finally:
+            job.ready.set()
+            _DNS_JOBS.task_done()
+
+
+def _resolve(control: Cancellation, address: tuple[str, int]) -> Any:
+    global _DNS_STARTED
+    if control.is_set():
+        raise OSError('HTTP request cancelled')
+    try:
+        ipaddress.ip_address(address[0].split('%', 1)[0])
+    except ValueError:
+        pass
+    else:
+        return socket.getaddrinfo(*address, 0, socket.SOCK_STREAM, 0, socket.AI_NUMERICHOST)
+    with _DNS_START:
+        if not _DNS_STARTED:
+            for index in range(_DNS_WORKERS):
+                threading.Thread(target=_resolve_worker, name=f'ml-stack-dns-{index}', daemon=True).start()
+            _DNS_STARTED = True
+    job = _Resolution(address, socket.getaddrinfo, control.is_set)
+    while not control.is_set():
+        try:
+            _DNS_JOBS.put(job, timeout=0.05)
+            break
+        except queue.Full:
+            continue
+    while not control.is_set():
+        if job.ready.wait(0.05):
+            if job.error is not None:
+                raise job.error
+            return job.result
+    raise OSError('HTTP request cancelled')
 
 
 class Cancellation:
@@ -46,8 +108,7 @@ class Cancellation:
 
     def connect(self, address: tuple[str, int], timeout: Any = socket._GLOBAL_DEFAULT_TIMEOUT,
                 source_address: Any = None) -> socket.socket:
-        for family, kind, protocol, _, target in socket.getaddrinfo(
-                address[0], address[1], 0, socket.SOCK_STREAM):
+        for family, kind, protocol, _, target in _resolve(self, address):
             if self.is_set():
                 raise OSError('HTTP request cancelled')
             sock = socket.socket(family, kind, protocol)
