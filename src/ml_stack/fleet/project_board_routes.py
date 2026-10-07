@@ -3,7 +3,6 @@
 import re
 import shlex
 
-from ml_stack.workspace import task_routes
 
 from .discovery import memberships
 from .projects import lan_host
@@ -35,7 +34,7 @@ class ProjectBoardRoutes:
                     self.send(409, {"error": "Open Tasks on this project's authoritative device.",
                                     "authority_machine": project.authority_machine})
                     return True
-                return task_routes.route(self, workspace=host.workspace(match[1]), prefix=self.path,
+                return host.person_tasks(self, match[1],
                                          project={"key": match[1], "name": project.name})
             if match[2].startswith("board/"):
                 project = projects.get(match[1])
