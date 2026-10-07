@@ -76,3 +76,79 @@ def test_offline_app_install_preserves_quarantine_and_opens_poolside(tmp_path):
     assert (destination / "Poolside.app/Contents/MacOS/app").read_text() == "native"
     assert log.read_text() == str(destination / "Poolside.app")
     assert "xattr" not in (ROOT / "packaging/install.sh").read_text()
+
+
+@pytest.fixture
+def frozen_collector():
+    spec = importlib.util.spec_from_file_location("desktop_frozen", ROOT / "packaging/frozen.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_frozen_collects_wheel_modules_and_dynamic_entrypoints(frozen_collector, monkeypatch):
+    from pathlib import PurePosixPath
+    from types import SimpleNamespace
+
+    hooks = type(sys)("PyInstaller.utils.hooks")
+    calls = []
+
+    def collect_entry_point(group):
+        calls.append(group)
+        return [("plugin-metadata", group)], ["plugin_provider.routes"]
+
+    hooks.collect_entry_point = collect_entry_point
+    monkeypatch.setitem(sys.modules, "PyInstaller.utils.hooks", hooks)
+    entries = [
+        SimpleNamespace(group="console_scripts", module="ml_stack.fleet.daemon"),
+        SimpleNamespace(group="ml_stack.workspace_hosts", module="ml_stack.workspace.remote_host"),
+        SimpleNamespace(group="ml_stack.ui_routes", module="ml_stack.workspace.agent_routes"),
+        SimpleNamespace(group="ml_stack.ui_routes", module="ml_stack.workspace.task_routes"),
+    ]
+    installed = SimpleNamespace(files=[PurePosixPath(path) for path in [
+        "ml_stack/__init__.py", "ml_stack/world/__init__.py", "ml_stack/bench/cli.py",
+        "ml_stack/ingest/cli.py", "ml_stack/workspace/remote_host.py",
+        "ml_stack/ui/assets/index.html", "ml_stack-1.0.dist-info/METADATA",
+        "../bin/ml-stack", "ml_stack/non-module.py",
+    ]], entry_points=entries)
+    monkeypatch.setattr(frozen_collector, "distribution", lambda name: installed)
+    datas, modules = frozen_collector.collect_project()
+    assert calls == ["ml_stack.ui_routes", "ml_stack.workspace_hosts"]
+    assert datas == [("plugin-metadata", group) for group in calls]
+    assert modules == [
+        "ml_stack", "ml_stack.bench.cli", "ml_stack.fleet.daemon", "ml_stack.ingest.cli",
+        "ml_stack.workspace.agent_routes", "ml_stack.workspace.remote_host",
+        "ml_stack.workspace.task_routes", "ml_stack.world", "plugin_provider.routes",
+    ]
+
+
+def test_frozen_spec_includes_project_modules_without_project_exclusions(monkeypatch):
+    import runpy
+    from types import SimpleNamespace
+
+    hooks = type(sys)("PyInstaller.utils.hooks")
+    hooks.collect_dynamic_libs = lambda name: []
+    hooks.collect_submodules = lambda name: []
+    hooks.copy_metadata = lambda name: []
+    monkeypatch.setitem(sys.modules, "PyInstaller.utils.hooks", hooks)
+    native_modules = [
+        "ml_stack.workspace.remote_host", "ml_stack.world", "ml_stack.bench", "ml_stack.ingest",
+    ]
+    execute = runpy.run_path
+    monkeypatch.setattr(runpy, "run_path", lambda path: {
+        "collect_project": lambda: ([], native_modules),
+    })
+    captured = {}
+
+    def analysis(scripts, **kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(pure=[], scripts=[], binaries=[], datas=[])
+
+    execute(str(ROOT / "packaging/ml-stack.spec"), init_globals={
+        "SPECPATH": str(ROOT / "packaging"),
+        "Analysis": analysis,
+        "PYZ": lambda pure: None,
+        "EXE": lambda *args, **kwargs: None,
+    })
+    assert set(native_modules) <= set(captured["hiddenimports"])
+    assert not any(name.startswith("ml_stack") for name in captured["excludes"])
