@@ -184,7 +184,7 @@ def _text(value: Any) -> str:
         return _block([_row(v) for v in value], "subscriptions")
     if isinstance(value, list) and value and all(
             isinstance(v, dict) and {"id", "role", "model_state", "last_acted"} <= v.keys() for v in value):
-        return _block([f"{v.get('display_name', v['id'])}  {v['role']}{'  child of ' + v['parent'] if v['parent'] else ''}  {describe(v['model'], v['model_state'])}"
+        return _block([f"{v.get('display_name', v['id'])}  {v['role']}  {describe(v['model'], v['model_state'])}"
                        f"{'  ' + v['harness'] if v['harness'] else ''}" for v in value], "agents")
     if isinstance(value, dict) and {"kind", "key", "owner", "expires_in_s"} <= value.keys():
         soon = ", expiring soon" if value.get("expiring_soon") else ""
