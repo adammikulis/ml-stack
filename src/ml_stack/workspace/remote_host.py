@@ -12,6 +12,7 @@ from ml_stack.files import read_json
 from ml_stack.workspace import (
     device_metadata,
     device_sessions,
+    fleet_routes,
     onboard,
     remote_tasks,
     remote_workers,
@@ -63,6 +64,11 @@ class WorkspaceHost:
 
     def workspace(self, project_id: str) -> Workspace:
         return Workspace(self.projects.workspace_base(project_id))
+
+    def person_board(self, request, project_id: str) -> bool:
+        """Dispatch the authenticated person's selected project Board request."""
+        return fleet_routes.route(request, workspace=self.workspace(project_id),
+                                  prefix=f"/ui/projects/{project_id}/board/")
 
     def prepare(self, project_id: str) -> dict:
         if hasattr(self.projects, "claim_authority"):

@@ -3,8 +3,6 @@
 import re
 import shlex
 
-from ml_stack.workspace import fleet_routes
-
 from .discovery import memberships
 from .projects import lan_host
 
@@ -34,8 +32,7 @@ class ProjectBoardRoutes:
                 if project.authority_machine != projects.machine or not project.board_host:
                     self.send(409, {"error": "open the Board on this project's authoritative device"})
                     return True
-                return fleet_routes.route(self, workspace=host.workspace(match[1]),
-                                          prefix=f"/ui/projects/{match[1]}/board/")
+                return host.person_board(self, match[1])
             if match[2] == "board" and self.method == "GET":
                 self.send(200, host.status(match[1]))
             elif match[2] == "invite" and self.method == "POST":

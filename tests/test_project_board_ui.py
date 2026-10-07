@@ -9,6 +9,7 @@ import pytest
 from ml_stack.fleet.project_board_routes import ProjectBoardRoutes
 from ml_stack.fleet.routes import Base
 from ml_stack.workspace import tokens
+from ml_stack.workspace.remote_host import WorkspaceHost
 from ml_stack.workspace.service import Workspace
 
 PROJECT = "a" * 32
@@ -37,8 +38,10 @@ def canonical(tmp_path):
         if ident not in projects:
             raise ValueError("Project is not registered here")
         return projects[ident]
-    ui = SimpleNamespace(projects=SimpleNamespace(machine="local", get=get),
-                         workspaces=SimpleNamespace(workspace=lambda ident: workspaces[ident]),
+    registry = SimpleNamespace(machine="local", get=get,
+                               workspace_base=lambda ident: workspaces[ident].base)
+    ui = SimpleNamespace(projects=registry,
+                         workspaces=WorkspaceHost(registry),
                          authed=lambda cookie: cookie == "signed-in", host_ok=lambda host: host == "127.0.0.1:8770")
     def call(suffix, *, project=PROJECT, method="GET", body=None, **options):
         cookie = options.get("cookie", "signed-in")
