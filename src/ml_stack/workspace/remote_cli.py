@@ -4,13 +4,13 @@ from argparse import Namespace
 from pathlib import Path
 
 from ml_stack.command import flag, option
-from ml_stack.workspace import harness_remote
+from ml_stack.workspace import connection_details, harness_remote
 from ml_stack.workspace.automatic_connection import connect
 from ml_stack.workspace.identity import Denied
 from ml_stack.workspace.project_connection import bind
 from ml_stack.workspace.remote import RemoteWorkspace
 
-OPTIONS = [option("json"), flag("action", choices=("connect", "join", "whoami", "agents", "boards",
+OPTIONS = [option("json"), flag("action", choices=("connect", "connection", "join", "whoami", "agents", "boards",
             "read", "post", "send", "inbox", "announce", "claims", "claim", "release", "heartbeat", "history", "use")),
            flag("arguments", nargs="*"), flag("--host", default=""),
            flag("--project-id", default=""), flag("--cluster-key", default=""),
@@ -43,6 +43,10 @@ def run(args):
     if (action in {'claim', 'release', 'heartbeat'} or completion) and not args.agent:
         raise Denied('direct canonical claims and completion require an explicit agent identity')
     token = remote.token(agent=args.agent, token_file=args.token_file)
+    if action == "connection":
+        if values:
+            raise ValueError("connection takes no positional arguments")
+        return connection_details.details(remote, token)
     if action == "use":
         return bind(remote, Path(args.project_root), args.agent, args.cluster)
     if action in {"claim", "release", "heartbeat"}:

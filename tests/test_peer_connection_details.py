@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from ml_stack.fleet import project_board_routes, projects
-from ml_stack.workspace import connection_details
+from ml_stack.workspace import connection_details, remote_cli
 from ml_stack.workspace.identity import Denied
 
 
@@ -76,6 +76,19 @@ def test_project_identity_mismatch_refuses_export(connection):
     with pytest.raises(Denied, match="selected project"):
         connection_details.details(remote, "private-fixture")
     assert calls == []
+
+
+def test_remote_connection_command_is_wired(connection, monkeypatch):
+    remote, _ = connection
+    remote.token = lambda **kwargs: "private-fixture"
+    monkeypatch.setattr(remote_cli, "RemoteWorkspace", lambda *args, **kwargs: remote)
+    args = SimpleNamespace(action="connection", arguments=[], host=remote.host,
+                           project_id=remote.project_id, cluster_key="", cluster="dev",
+                           agent="worker", token_file="")
+    assert remote_cli.run(args)["host"] == "https://192.168.40.2:8770"
+    args.arguments = ["extra"]
+    with pytest.raises(ValueError, match="no positional arguments"):
+        remote_cli.run(args)
 
 
 @pytest.mark.parametrize("network_host, status", [("https://192.168.40.2:8770", 201), ("", 409)])
