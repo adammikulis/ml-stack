@@ -27,7 +27,6 @@ fleet-nav { display:contents; }
 .connection-dot[data-state="local"] {background:#a2a9c3;box-shadow:none;}
 .workspace-header { grid-column:2; grid-row:1; min-width:0; display:grid; grid-template-columns:minmax(0,1fr) auto; grid-template-rows:52px 36px; padding:0 28px; background:var(--bg-raised); border-bottom:1px solid var(--line); position:sticky; top:0; z-index:10; box-shadow:inset 4px 0 var(--accent); }
 .workspace-heading { display:flex; align-items:center; gap:22px; min-width:0; }
-.workspace-breadcrumb { display:flex; align-items:center; gap:9px; color:var(--muted); font-size:11px; white-space:nowrap; }
 .wordmark { color:var(--text); font-weight:800; font-size:17px; letter-spacing:-.045em; }
 .workspace-title { display:flex; align-items:baseline; gap:10px; min-width:0; }
 .workspace-title strong { font-size:14px; font-weight:750; }
@@ -42,6 +41,8 @@ fleet-nav { display:contents; }
 .context-link:hover { color:var(--text); }
 .context-link.on { border-color:var(--accent); color:var(--text); font-weight:750; }
 .workspace { grid-column:2; grid-row:2; min-width:0; outline:none; align-self:start; }
+.app[data-workspace="conversations"] {--header-height:56px;}
+.app[data-workspace="conversations"] .workspace-header {grid-template-rows:56px;}
 .app[data-workspace="conversations"] #workspace { padding:0; margin:0; max-width:none; }
 .app:not(:has(fleet-nav)) { display:flex; flex-direction:column; }
 .app:not(:has(fleet-nav)) .skip-link { display:none; }
@@ -61,7 +62,7 @@ fleet-nav { display:contents; }
 .demo-slice strong { font-size:14px; }
 .demo-description { color:var(--muted); font-size:12px; line-height:1.6; }
 :root[data-theme="dark"] .app[data-color] { --accent-ink:var(--accent); --accent-dim:color-mix(in srgb,var(--accent) 15%,var(--bg-sunken)); }
-@media(max-width:1100px) { .workspace-breadcrumb #nav-group,.workspace-breadcrumb > span:nth-child(2) { display:none; } .workspace-heading { gap:18px; } }
+@media(max-width:1100px) { .workspace-heading {gap:18px;} }
 @media(max-width:720px) { .workspace-header { padding:0 18px; } #nav-title,.workspace-jobs-indicator { display:none; } .header-actions {gap:8px;} .workspace-title strong {font-size:12px;} .workspace-guide {padding:7px 9px;font-size:10px;} }
 @media(max-width:540px) {
   :root {--rail-width:60px;}
@@ -71,7 +72,7 @@ fleet-nav { display:contents; }
   .primary-navigation {gap:12px;}
   .poolside-mark {width:42px;height:42px;}
   .workspace-header {padding:0 14px;}
-  .workspace-breadcrumb {display:none;}
+  .workspace-heading .wordmark {display:none;}
   .context-navigation {gap:18px;}
   .context-link {font-size:11px;}
   .demo-grid {grid-template-columns:1fr;}
