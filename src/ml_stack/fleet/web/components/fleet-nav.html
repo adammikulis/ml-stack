@@ -7,7 +7,7 @@
     <div class="rail-utilities">
       <a class="rail-link" id="nav-settings" href="#settings" aria-label="Settings" title="Settings"></a>
       <button class="rail-link" id="nav-signout" type="button" aria-label="Sign out" title="Sign out"></button>
-      <span class="connection-dot" title="Connected to your workspace" aria-label="Connected"></span>
+      <span class="connection-dot" title="Local workspace" aria-label="Local workspace"></span>
     </div>
   </aside>
   <header class="workspace-header">
@@ -111,6 +111,10 @@
       const app=document.getElementById("app");
       if(app){app.dataset.workspace=active?.id||"settings";app.dataset.color=active?.color||"pink";}
       this.group.textContent=M.group||"Local workspace";
+      const connection=this.querySelector(".connection-dot");
+      const status=M.inCluster ? `Joined pool: ${M.group || "your pool"}` : "Working locally";
+      connection.dataset.state=M.inCluster ? "pool" : "local";
+      connection.title=status; connection.setAttribute("aria-label",status);
       this.section.textContent=active?.title||"Settings";
       this.heading.textContent=active?.pages.find(([,key])=>key===route)?.[0]||"Preferences";
       this.tabs.replaceChildren(...groups.map(g=>{

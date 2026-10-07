@@ -75,13 +75,24 @@ cluster-view, chat-view, models-view, settings-view, fit-view, data-view, traini
       if (M.preferences.always_show_advanced) node.open = true;
     }
   };
-  const systemTheme = window.matchMedia("(prefers-color-scheme: dark)");
   M.applyTheme = function () {
-    const selected = M.preferences.theme || "light";
-    document.documentElement.dataset.theme = selected === "system"
-      ? (systemTheme.matches ? "dark" : "light") : selected;
+    const theme = M.preferences.resolved_theme;
+    const root = document.documentElement;
+    root.dataset.theme = theme?.base === "dark" ? "dark" : "light";
+    root.dataset.density = theme?.density || "comfortable";
+    const colors = {
+      pink:"--poolside-pink", orange:"--poolside-orange", yellow:"--poolside-yellow",
+      cyan:"--poolside-cyan", navy:"--poolside-navy", background:"--ml-bg",
+      panel:"--ml-surface", sunken:"--ml-sunken", text:"--ml-text", muted:"--ml-muted", border:"--ml-line"
+    };
+    for (const [key, variable] of Object.entries(colors)) {
+      if (theme?.colors?.[key]) root.style.setProperty(variable, theme.colors[key]);
+      else root.style.removeProperty(variable);
+    }
+    if (theme?.colors?.pink) root.style.setProperty("--ml-accent", theme.colors.pink);
+    else root.style.removeProperty("--ml-accent");
+    root.style.setProperty("--ui-font-size", `${theme?.font_size || 14}px`);
   };
-  systemTheme.addEventListener("change", () => { if (M.preferences.theme === "system") M.applyTheme(); });
   M.setPreferences = function (settings) {
     const previous = M.preferences.always_show_advanced;
     M.preferences = {...settings, always_show_advanced:settings.always_show_advanced === true};
@@ -102,7 +113,7 @@ cluster-view, chat-view, models-view, settings-view, fit-view, data-view, traini
   }, true);
   M.loadPreferences = async function () {
     const result = await request("/ui/settings");
-    if (result.ok && !result.error) M.setPreferences(result.settings || {});
+    if (result.ok && !result.error) M.setPreferences({...result.settings, resolved_theme:result.resolved_theme});
   };
 
   /** An ml-ui element with its properties set; a property set before the element is defined

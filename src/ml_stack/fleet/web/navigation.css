@@ -24,6 +24,7 @@ fleet-nav { display:contents; }
 .rail-utilities #nav-signout { min-height:32px; }
 .rail-utilities #nav-signout svg { width:18px; height:18px; stroke:#a2a9c3; }
 .connection-dot { width:7px; height:7px; margin-top:8px; border-radius:50%; background:var(--poolside-cyan); box-shadow:0 0 0 4px #2de2e615; }
+.connection-dot[data-state="local"] {background:#a2a9c3;box-shadow:none;}
 .workspace-header { grid-column:2; grid-row:1; min-width:0; display:grid; grid-template-columns:minmax(0,1fr) auto; grid-template-rows:52px 36px; padding:0 28px; background:var(--bg-raised); border-bottom:1px solid var(--line); position:sticky; top:0; z-index:10; box-shadow:inset 4px 0 var(--accent); }
 .workspace-heading { display:flex; align-items:center; gap:22px; min-width:0; }
 .workspace-breadcrumb { display:flex; align-items:center; gap:9px; color:var(--muted); font-size:11px; white-space:nowrap; }

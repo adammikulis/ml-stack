@@ -127,7 +127,7 @@ def test_four_workspaces_context_pages_and_theme_navigation(usability_page):
     expect(page.locator('#nav-section')).to_have_text('Settings')
     primary.get_by_role('link', name='Conversations', exact=True).click()
     for theme in ('light', 'dark'):
-        page.evaluate('(theme)=>window.fleetModel.setPreferences({...window.fleetModel.preferences,theme})', theme)
+        page.evaluate('(theme)=>window.fleetModel.setPreferences({...window.fleetModel.preferences,resolved_theme:{base:theme}})', theme)
         expect(page.locator('html')).to_have_attribute('data-theme', theme)
         assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--poolside-pink').trim()") == '#ff5fa2'
         page.screenshot(path=f'/private/tmp/poolside-rebuild-shell-{theme}.png', full_page=True)

@@ -16,17 +16,19 @@
   --accent:var(--ml-accent); --accent-ink:var(--ml-accent-ink); --accent-dim:var(--ml-accent-dim);
   --warn:#9b5a00; --busy:#bc7200; --bad:var(--ml-red); --good:var(--ml-green);
   --nvidia:#527f00; --amd:#c02635; --apple:#555c70; --cpu:#3068b0;
-  --radius:14px; --gap:20px; --mono:var(--ml-mono); --sans:var(--ml-font); --shadow:var(--ml-shadow);
-  --rail-width:76px; --header-height:88px;
+  --radius:14px; --gap:calc(20px * var(--ui-density)); --mono:var(--ml-mono); --sans:var(--ml-font); --shadow:var(--ml-shadow);
+  --ui-font-size:14px; --ui-density:1; --rail-width:76px; --header-height:88px;
 }
 * { box-sizing:border-box; }
 [hidden] { display:none !important; }
 html, body { height:100%; }
-body { margin:0; background:var(--bg); color:var(--text); font:14px/1.55 var(--sans); -webkit-font-smoothing:antialiased; }
+html {font-size:var(--ui-font-size);}
+:root[data-density="compact"] {--ui-density:.8;}
+body { margin:0; background:var(--bg); color:var(--text); font:1rem/1.55 var(--sans); -webkit-font-smoothing:antialiased; }
 a { color:var(--accent-ink); text-underline-offset:3px; }
 code, .mono, kbd { font-family:var(--mono); font-size:.9em; }
 main { padding:28px 32px 48px; max-width:1440px; width:100%; margin:0 auto; }
-h1 { font-size:28px; font-weight:750; margin:0 0 8px; letter-spacing:-.035em; line-height:1.2; }
+h1 { font-size:2rem; font-weight:750; margin:0 0 8px; letter-spacing:-.035em; line-height:1.2; }
 h2 { font-size:17px; margin:0 0 16px; color:var(--text); font-weight:700; letter-spacing:-.02em; }
 h3 { font-weight:650; letter-spacing:-.015em; }
 .sub { color:var(--muted); margin:0 0 24px; }
@@ -114,10 +116,10 @@ a:focus-visible, button:focus-visible, summary:focus-visible { outline:3px solid
 }
 .card h1 { font-size: 21px; margin-bottom: 8px; }
 .card .sub { margin-bottom: 22px; font-size: 14px; }
-label { display: block; font-size: 12.5px; color: var(--muted); margin: 16px 0 6px;
+label { display: block; font-size:.9rem; color:var(--muted); margin: 16px 0 6px;
         font-weight: 550; }
 input:not([type=checkbox]):not([type=radio]):not([type=range]), select, textarea {
-  width: 100%; padding: 10px 12px; border-radius: 8px; font-size: 14px;
+  width: 100%; padding:calc(10px * var(--ui-density)) 12px; border-radius:10px; font-size:1rem;
   background: var(--bg-sunken); border: 1px solid var(--line); color: var(--text);
   font-family: inherit; transition: border-color .15s, box-shadow .15s;
 }

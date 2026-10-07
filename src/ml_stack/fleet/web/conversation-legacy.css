@@ -117,4 +117,3 @@ input[type="range"] {
 .chat-model-choice { display:flex; justify-content:space-between; gap:12px; width:100%; text-align:left; margin:4px 0; }
 .chat-model-choice small { color:var(--muted); white-space:nowrap; }
 .chat-model-choice[aria-pressed="true"] { border-color:var(--accent); }
-
