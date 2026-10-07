@@ -1,6 +1,8 @@
 """Pool overview and benchmark controls driven in Chromium."""
+
 import pytest
-from test_fleet_usability_browser import usability_page  # noqa: F401
+
+pytest_plugins = ("test_fleet_usability_browser",)
 
 pytestmark = pytest.mark.slow
 
