@@ -46,3 +46,25 @@ def test_shared_sidebar_routes_channels_dms_threads_and_saved_model_chats(chat_b
     expect(page.locator('#chat-messages')).to_contain_text('Compare the two evaluation runs.')
     expect(sidebar).to_be_visible()
     page.screenshot(path='/private/tmp/poolside-unified-conversations.png', full_page=True)
+
+
+def test_canonical_project_selection_never_falls_back_to_local_board(chat_browser):
+    from playwright.sync_api import expect
+
+    served, page = chat_browser
+    project = '7' * 32
+    seen = []
+    page.route('**/ui/projects', lambda route: route.fulfill(json={'projects': [
+        {'id': project, 'name': 'Experiment workspace', 'is_self': True}]}))
+
+    def unavailable(route):
+        seen.append(route.request.url)
+        route.fulfill(status=503, json={'error': 'Project Board identity is unavailable.'})
+
+    page.route(f'**/ui/projects/{project}/board/**', unavailable)
+    page.goto(f'http://127.0.0.1:{served.port}/ui#chat')
+    expect(page.get_by_label('Workspace', exact=True)).to_have_value(project)
+    expect(page.locator('#conversation-channels')).to_contain_text('Project Board identity is unavailable')
+    assert seen and all(f'/ui/projects/{project}/board/' in url for url in seen)
+    assert page.locator('chat-view ml-board').get_attribute('endpoint') == f'/ui/projects/{project}/board'
+    assert page.get_by_label('Workspace', exact=True).input_value() != 'local'

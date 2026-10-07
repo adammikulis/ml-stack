@@ -170,12 +170,15 @@ chat-view #chat-activity-output { max-height:240px; overflow:auto; white-space:p
       if (['chat','board'].includes(route) && !this.projectsLoaded) { this.projectsLoaded = true; this.projects(); }
     }
     async projects() {
-      const result = await M.api('/ui/projects');
-      const projects = result.ok ? result.projects || [] : [];
+      let result;
+      try { result = await M.api('/ui/projects'); }
+      catch { result = {ok:false, error:'Could not connect to the workspace. Reload to try again.'}; }
+      if (M.refused(result)) return;
+      const projects = (result.ok ? result.projects || [] : []).filter(row => /^[a-f0-9]{32}$/.test(row.id));
       let saved = '';
       try { saved = localStorage.getItem('poolside.conversations.project') || ''; } catch {}
       this.project.replaceChildren(M.el('option', {value:''}, 'Choose a workspace'),
-        ...projects.filter(row => /^[a-f0-9]{32}$/.test(row.id)).map(row => M.el('option', {value:row.id}, row.name)),
+        ...projects.map(row => M.el('option', {value:row.id}, row.name)),
         M.el('option', {value:'local'}, 'Device-local Board'));
       const valid = projects.find(row => row.id === saved) || projects.find(row => row.is_self) || projects[0];
       if (valid) { this.project.value = valid.id; this.selectProject(); }
