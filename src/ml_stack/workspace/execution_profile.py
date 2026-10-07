@@ -1,22 +1,24 @@
 """Bounded execution-profile observations under an authenticated agent identity."""
 from __future__ import annotations
 
-import hashlib
 import math
 import os
 import re
 import uuid
 
+from ml_stack.graph.columns import column
 from ml_stack.graph.store import GraphStore
 from ml_stack.platform import private_file
 from ml_stack.windows_private import restrict
 from ml_stack.workspace import tokens
 from ml_stack.workspace.chain import held
+from ml_stack.workspace.coordination import workspace_id
 from ml_stack.workspace.identity import AGENT, Denied
 
 TEXT = frozenset({'model', 'model_version', 'harness', 'harness_version', 'runtime_commit',
                   'runtime_version', 'python_version', 'requested_model', 'requested_effort',
-                  'effective_effort', 'requested_service_tier', 'effective_service_tier'})
+                  'effective_effort', 'requested_service_tier', 'effective_service_tier',
+                  'harness_agent_id', 'harness_agent_type'})
 LIMITS = frozenset({'requested_context', 'effective_context', 'requested_output_tokens',
                     'effective_output_tokens', 'requested_turns', 'effective_turns',
                     'requested_tool_calls', 'effective_tool_calls', 'requested_model_calls',
@@ -50,24 +52,35 @@ def _document(document):
     return document
 
 
-def _path(ws, actor):
-    key = hashlib.sha256(actor.encode()).hexdigest()
-    path = ws.base / 'execution-profiles' / f'{key}.db'
-    for candidate in (path, path.with_suffix('.lock'), path.parent, ws.base):
+def _path(ws):
+    path = ws.base / 'coordination.db'
+    for candidate in (path, ws.base / 'coordination.lock', ws.base):
         why = tokens.problem(candidate)
-        if why not in ('', 'missing'):
+        if why.startswith('mode ') and candidate != ws.base:
+            private_file(candidate)
+        elif why not in ('', 'missing'):
             raise Denied(f'execution profile storage is not private: {why}')
     return path
 
 
+def _rows(graph, actor, project):
+    records = graph.query('MATCH (n:Node)-[e:Edge]->(a:Node) '
+                          'WHERE n.kind=$kind AND e.rel=$rel AND a.id=$actor RETURN n.attrs AS attrs',
+                          {'kind': 'execution-observation', 'rel': 'observed-for', 'actor': f'agent:{actor}'})
+    rows = [column(record['attrs'], 'execution observation') for record in records]
+    return [row for row in rows if row['actor'] == actor and row['project'] == project]
+
+
 def _write(ws, who, document, sources):
-    path = _path(ws, who.id)
+    path = _path(ws)
+    info = ws.registry.info(who.id)
+    project = info.get('project', {}).get('key') or workspace_id(ws)
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     if os.name == 'nt':
         restrict(path.parent)
-    with held(path.with_suffix('.lock')), GraphStore(path) as graph:
+    with held(ws.base / 'coordination.lock'), GraphStore(path) as graph:
         restrict(path) if os.name == 'nt' else private_file(path)
-        rows = [node['attrs'] for node in graph.nodes('execution-observation')]
+        rows = _rows(graph, who.id, project)
         previous = next((row for row in rows if row['event_id'] == document['event_id']), None)
         if previous:
             if previous['document'] != document:
@@ -79,20 +92,23 @@ def _write(ws, who, document, sources):
         fields = dict(latest['fields']) if latest else {key: {'value': None, 'source': 'unknown'} for key in sorted(FIELDS)}
         for key, value in document['fields'].items():
             fields[key] = {'value': value, 'source': sources[key] if value is not None else 'unknown'}
-        info = ws.registry.info(who.id)
         row = {'id': f'observation:{uuid.uuid4().hex}', 'actor': who.id, 'parent': who.parent or None,
-               'device': info.get('device') or None, 'session': session, 'event_id': document['event_id'],
+               'project': project, 'device': info.get('device') or None, 'session': session, 'event_id': document['event_id'],
                'event': document['event'], 'observed_at': ws.clock(), 'fields': fields,
                'sequence': max((item['sequence'] for item in rows), default=0) + 1, 'document': document}
         graph.upsert_node({'id': row['id'], 'kind': 'execution-observation', 'label': document['event'], 'attrs': row})
-        graph.upsert_node({'id': f'agent:{who.id}', 'kind': 'agent', 'label': who.id})
+        if not graph.has(f'agent:{who.id}'):
+            graph.upsert_node({'id': f'agent:{who.id}', 'kind': 'agent', 'label': who.id})
         graph.upsert_edge({'source': row['id'], 'target': f'agent:{who.id}', 'rel': 'observed-for'})
         if who.parent:
-            graph.upsert_node({'id': f'agent:{who.parent}', 'kind': 'agent', 'label': who.parent})
+            if not graph.has(f'agent:{who.parent}'):
+                graph.upsert_node({'id': f'agent:{who.parent}', 'kind': 'agent', 'label': who.parent})
             graph.upsert_edge({'source': f'agent:{who.id}', 'target': f'agent:{who.parent}', 'rel': 'delegated-by'})
         if len(rows) >= HISTORY:
             graph.drop([min(rows, key=lambda item: item['sequence'])['id']])
-        return row
+    ws.audit('execution.observe', who.id, observation=row['id'], project=project, session=session,
+             event_name=document['event'])
+    return row
 
 
 def record(ws, token, document):
@@ -109,8 +125,9 @@ def read(ws, token):
     """Return this authenticated actor's bounded execution observation history."""
     who = ws.auth(token)
     ws._may(who, 'read')
-    path = _path(ws, who.id)
+    path = _path(ws)
     if not path.exists():
         return []
-    with held(path.with_suffix('.lock')), GraphStore(path) as graph:
-        return sorted((node['attrs'] for node in graph.nodes('execution-observation')), key=lambda row: row['sequence'])
+    project = ws.registry.info(who.id).get('project', {}).get('key') or workspace_id(ws)
+    with held(ws.base / 'coordination.lock'), GraphStore(path) as graph:
+        return sorted(_rows(graph, who.id, project), key=lambda row: row['sequence'])

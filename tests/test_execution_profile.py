@@ -81,13 +81,13 @@ def test_revoked_agent_and_redirected_graph_are_refused(kit, tmp_path):
     alice = kit.agent('alice')
     target = tmp_path / 'outside'
     target.mkdir()
-    (kit.ws.base / 'execution-profiles').symlink_to(target, target_is_directory=True)
+    (kit.ws.base / 'coordination.db').symlink_to(target, target_is_directory=True)
     with pytest.raises(Denied):
         kit.ws.record_execution_profile(alice, document(model='qwen'))
     assert list(target.iterdir()) == []
     with pytest.raises(Denied):
         kit.ws.record_execution_profile('', document(model='qwen'))
-    (kit.ws.base / 'execution-profiles').unlink()
+    (kit.ws.base / 'coordination.db').unlink()
     kit.ws.revoke(kit.owner, 'alice')
     with pytest.raises(Denied):
         kit.ws.record_execution_profile(alice, document(model='qwen'))
@@ -109,4 +109,25 @@ def test_expired_child_cannot_record_observations(kit, monkeypatch):
     monkeypatch.setattr(kit.ws.registry, 'clock', lambda: child['expires'] + 1)
     with pytest.raises(Denied):
         kit.ws.record_execution_profile(token, document(model='qwen'))
+    assert not (kit.ws.base / 'coordination.db').exists()
+
+
+def test_observations_share_canonical_graph_without_replacing_agent_or_work_records(kit):
+    from ml_stack.graph.store import GraphStore
+    from ml_stack.workspace.coordination import workspace_id
+
+    alice = kit.agent('alice')
+    stable = workspace_id(kit.ws)
+    with GraphStore(kit.ws.base / 'coordination.db') as graph:
+        graph.upsert_node({'id': 'agent:alice', 'kind': 'agent', 'label': 'Existing actor',
+                           'attrs': {'approved_model': 'preserved'}})
+        graph.upsert_node({'id': 'work:existing', 'kind': 'work', 'label': 'Existing evidence',
+                           'attrs': {'credits': 7}})
+    observation = kit.ws.record_execution_profile(alice, document(model='qwen'))
+    assert observation['project'] == stable
     assert not (kit.ws.base / 'execution-profiles').exists()
+    with GraphStore(kit.ws.base / 'coordination.db') as graph:
+        assert graph.has(observation['id'])
+        assert graph.nodes('agent')[0]['attrs'] == {'approved_model': 'preserved'}
+        assert graph.nodes('work')[0]['attrs'] == {'credits': 7}
+    assert kit.reopen().execution_profiles(alice) == [observation]

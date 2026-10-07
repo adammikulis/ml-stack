@@ -54,7 +54,7 @@ def environment(base_url: str, alias: str, *, offline: bool = True, context: int
     return env
 
 
-def settings(pre: str = "", post: str = "", wait: float = 0.0, stop: str = "") -> str:
+def settings(pre: str = "", post: str = "", wait: float = 0.0, stop: str = "", observe: str = "") -> str:
     """The ``--settings`` JSON: no web-fetch preflight (a call to the real API), no always-on
     thinking, and the PreToolUse and PostToolUse command hooks when given."""
     out: dict[str, object] = {"skipWebFetchPreflight": True, "alwaysThinkingEnabled": False}
@@ -66,6 +66,10 @@ def settings(pre: str = "", post: str = "", wait: float = 0.0, stop: str = "") -
     if stop:
         completion = [{"hooks": [{"type": "command", "command": stop, "timeout": 30}]}]
         out.setdefault("hooks", {}).update(Stop=completion, SubagentStop=completion)
+    if observe:
+        for event in ('SessionStart', 'PostModelSwitch', 'PreToolUse', 'PostToolUse', 'Stop', 'SubagentStop'):
+            out.setdefault('hooks', {}).setdefault(event, []).append({'hooks': [
+                {'type': 'command', 'command': observe, 'timeout': 2, 'async': True}]})
     return json.dumps(out, sort_keys=True)
 
 
@@ -139,7 +143,7 @@ def _run(args: argparse.Namespace, command: Sequence[str], served: tuple[str, st
     binary, *extra = command
     try:
         with harnessing.opened(args, "claude-code", served, say) as run:
-            path = run.files.write("settings.json", settings(run.pre, run.post, harnessing.WAIT_S, run.stop))
+            path = run.files.write("settings.json", settings(run.pre, run.post, harnessing.WAIT_S, run.stop, run.observe))
             brief = run.files.write("brief.md", run.brief)
             run.files.lock()
             env = environment(base_url, alias, offline=not args.online, context=window)

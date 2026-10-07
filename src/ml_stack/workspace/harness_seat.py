@@ -1,10 +1,12 @@
 """A coding harness's workspace agent identity and its lifecycle."""
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from http.client import HTTPException
 from pathlib import Path
+from types import SimpleNamespace
 
 from ml_stack.client.health import reported_models
 from ml_stack.workspace import harness_remote, onboard, tokens, worktree_lifecycle
@@ -12,6 +14,7 @@ from ml_stack.workspace.identity import AGENT, Denied, Identity
 from ml_stack.workspace.remote import RemoteWorkspace
 from ml_stack.workspace.service import Workspace
 
+PROFILE_TIMEOUT = 2.0
 
 @dataclass(slots=True)
 class Seat:
@@ -61,6 +64,48 @@ class Seat:
             else:
                 ws.claim_model(tokens.load(ws.base, self.name), alias, harness)
         except (Denied, ValueError, OSError, HTTPException):
+            return False
+        return True
+
+    def record_execution(self, args, harness: str, served: tuple, root: Path) -> bool:
+        """Start a bounded best-effort observation through the authenticated seat."""
+        if not self.minted and not self.persistent:
+            return False
+        snapshot = SimpleNamespace(**{key: getattr(args, key, None) for key in
+                                      ('model', 'ctx', 'effort', 'max_output_tokens', 'max_turns')})
+        completed = threading.Event()
+        result = []
+
+        def observe():
+            try:
+                from ml_stack.profilehook import launched
+                document = launched(snapshot, harness, served)
+                result.append(self._record_execution(document, root))
+            except (OSError, ValueError, TypeError, RuntimeError):
+                result.append(False)
+            finally:
+                completed.set()
+
+        threading.Thread(target=observe, name='execution-profile-observer', daemon=True).start()
+        return completed.wait(PROFILE_TIMEOUT) and bool(result and result[0])
+
+    def _record_execution(self, document, root):
+        try:
+            if self.remote is not None:
+                token = self.remote.token(agent=self.name)
+                if self.remote.call('whoami', token).get('id') != self.name:
+                    return False
+                self.remote.call('record_execution_profile', token, document)
+            elif self.base is not None and self.record_claim is None:
+                ws = Workspace(self.base)
+                token = tokens.load(ws.base, self.name)
+                if ws.auth(token).id != self.name:
+                    return False
+                ws.record_execution_profile(token, document)
+            else:
+                from ml_stack.profilehook import send
+                send(document, self.name, root, self.base)
+        except (Denied, ValueError, OSError, HTTPException, RuntimeError, TypeError):
             return False
         return True
 
