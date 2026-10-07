@@ -1,5 +1,6 @@
 # Headless bundle: the daemon, and your browser for the interface.
 import importlib.util
+import runpy
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_dynamic_libs, collect_submodules, copy_metadata
@@ -46,13 +47,14 @@ hidden = [
 ]
 
 hidden += collect_submodules("agents")
+project_data, project_modules = runpy.run_path(str(Path(SPECPATH) / "frozen.py"))["collect_project"]()
+datas += project_data
+hidden += project_modules
 
 a = Analysis(["launcher-headless.py"], datas=datas, hiddenimports=hidden,
              binaries=collect_dynamic_libs("ladybug"),
              excludes=["tkinter", "test", "unittest", "pydoc_data", "webview",
-                       "numpy", "torch", "torch_geometric", "pandas", "polars", "pyarrow",
-                       "ml_stack.world", "ml_stack.bench",
-                       "ml_stack.ingest"])
+                       "numpy", "torch", "torch_geometric", "pandas", "polars", "pyarrow"])
 pyz = PYZ(a.pure)
 exe = EXE(pyz, a.scripts, a.binaries, a.datas, [], name="ml-stack-headless",
           console=True, strip=False, upx=False)
