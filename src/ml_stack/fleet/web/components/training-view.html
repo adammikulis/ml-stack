@@ -114,6 +114,15 @@ training-view .training-review-actions{display:flex;gap:12px;flex-wrap:wrap;marg
       });
     }
 
+    openRun({workflow = 'recipe', dataset = ''} = {}) {
+      if (![...this.mode.options].some(option => option.value === workflow)) throw Error('Choose a supported training workflow.');
+      M.go('training');
+      this.mode.value = workflow;
+      if (dataset) this.data.value = dataset;
+      this.buildOptions();
+      this.showStep(this.data.value.trim() || workflow === 'rl' ? 1 : 0);
+    }
+
     showStep(step) {
       step = Math.max(0, Math.min(2, step));
       if (step > 0 && this.mode.value !== 'rl' && !this.data.value.trim()) {
