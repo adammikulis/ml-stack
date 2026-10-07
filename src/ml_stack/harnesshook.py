@@ -171,6 +171,37 @@ def _options(words: Sequence[str]) -> tuple[str, dict[str, list[str]]]:
     return words[0], found
 
 
+def _failure_reason(error: BaseException) -> str:
+    if not isinstance(error, Denied):
+        return type(error).__name__
+    message = str(error)
+    public = {
+        "the token is not recognised", "the token was revoked", "the token expired",
+        "the token's parent was revoked or expired",
+        "native roots must belong to the selected canonical project",
+        "native ownership requires the launcher-bound canonical agent identity",
+        "canonical agent capability has no mutation claim permission",
+        "canonical board connection record is unreadable; local fallback is disabled",
+        "shared checkout metadata is invalid; local fallback is disabled",
+        "checkout and saved board connection disagree",
+        "this shared checkout has no canonical board connection; attach it before using workspace commands",
+        "project board response was not authenticated and sealed",
+        "delegated project identities need a live parent-authorized credential",
+    }
+    if message in public:
+        return f"Denied: {message}"
+    for prefix, reason in (
+        ("token file ", "workspace credential file could not be loaded"),
+        ("token directory ", "workspace credential directory could not be loaded"),
+        ("project session storage ", "project session storage could not be loaded"),
+        ("project session records ", "project session records could not be loaded"),
+        ("project board unavailable:", "project board is unavailable"),
+    ):
+        if message.startswith(prefix):
+            return f"Denied: {reason}"
+    return "Denied: workspace authorization refused; check the launcher's project connection and identity"
+
+
 def run(argv: Sequence[str] | None = None, stdin: IO[str] | None = None,
         stdout: IO[str] | None = None) -> int:
     """Read one hook event and write the answer; a failure exits 2, which blocks the call."""
@@ -184,7 +215,7 @@ def run(argv: Sequence[str] | None = None, stdin: IO[str] | None = None,
                     opts.get("protect", []), float(opts.get("wait", [WAIT_S])[-1]))
         out = pre(payload, rail) if event == "pre" else stop(rail) if event == "stop" else post(label, rail)
     except FAILURES as exc:
-        sys.stderr.write(f"ml-stack hook failed, call blocked: {type(exc).__name__}\n")
+        sys.stderr.write(f"ml-stack hook failed, call blocked: {_failure_reason(exc)}\n")
         return 2
     if out:
         (stdout or sys.stdout).write(json.dumps(out, sort_keys=True) + "\n")
@@ -192,7 +223,7 @@ def run(argv: Sequence[str] | None = None, stdin: IO[str] | None = None,
 
 
 def _block(kind: type[BaseException], value: BaseException, _trace: object) -> None:
-    sys.stderr.write(f"ml-stack hook failed, call blocked: {kind.__name__}\n")
+    sys.stderr.write(f"ml-stack hook failed, call blocked: {_failure_reason(value)}\n")
     os._exit(2)
 
 
