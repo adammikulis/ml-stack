@@ -108,6 +108,8 @@ def respond(ws: Workspace, req: Request) -> Reply:
     except (Denied, OSError):
         return _json(503, {"error": "the person's identity is not set up: run `ml-stack-workspace setup`"})
     try:
+        if ws.auth(token).role != HUMAN:
+            raise Denied("only the person reads or posts from the page")
         query = parse_qs(parts.query, max_num_fields=8)
         route = parts.path[len(PREFIX):]
         if req.method == "POST":

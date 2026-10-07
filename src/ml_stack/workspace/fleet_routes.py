@@ -4,8 +4,8 @@ from ml_stack.workspace import boardroute
 from ml_stack.workspace.service import Workspace
 
 
-def route(request) -> bool:
-    if not request.path.startswith("/ui/board/"):
+def route(request, *, workspace=None, prefix="/ui/board/") -> bool:
+    if not request.path.startswith(prefix):
         return False
     headers = {key.lower(): value for key, value in request.handler.headers.items()}
     raw = b""
@@ -19,9 +19,9 @@ def route(request) -> bool:
             return True
         raw = request.handler.rfile.read(int(size))
     call = boardroute.Request(
-        request.method, request.handler.path.replace("/ui/board/", "/board/", 1),
+        request.method, request.handler.path.replace(prefix, "/board/", 1),
         headers, request.handler.server.server_address[1], True, raw)
-    status, extra, body = boardroute.respond(Workspace(), call)
+    status, extra, body = boardroute.respond(Workspace() if workspace is None else workspace, call)
     request.handler.send_response(status)
     for key, value in extra.items():
         request.handler.send_header(key, value)
