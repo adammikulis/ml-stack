@@ -16,11 +16,13 @@ def family(model: str) -> str:
 
 def metadata(registry, name, label=''):
     """Derive parentage from the registry, never from arbitrary activity text."""
-    registry.ensure_presentation(name)
     info = registry.info(name)
     if info['role'] != AGENT:
         return {'display_name': name, 'session_kind': 'person' if info['role'] == 'human' else 'unknown',
                 'coordinator_eligible': False}
+    if not info['parent'] and not info.get('presentation', {}).get('ordinal'):
+        registry.ensure_presentation(name)
+        info = registry.info(name)
     parent = info['parent']
     if parent:
         parent_name = metadata(registry, parent)['display_name']
