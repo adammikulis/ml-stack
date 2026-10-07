@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from playwright.sync_api import expect
 from test_fleet_ui import Serving
 
 from ml_stack.scrape.browser import Window, browser
@@ -11,8 +12,6 @@ pytestmark = pytest.mark.slow
 
 
 def test_data_library_upload_preview_and_fine_tune(tmp_path):
-    from playwright.sync_api import expect
-
     served = Serving(tmp_path)
     served.ui.settings.setup_done = True
     try:
@@ -42,8 +41,6 @@ def test_data_library_upload_preview_and_fine_tune(tmp_path):
 
 
 def test_data_file_source_and_filter(tmp_path):
-    from playwright.sync_api import expect
-
     served = Serving(tmp_path)
     served.ui.settings.setup_done = True
     try:
@@ -69,8 +66,6 @@ def test_data_file_source_and_filter(tmp_path):
 
 
 def test_evaluate_selection_review_status_and_recorded_results(tmp_path, monkeypatch):
-    from playwright.sync_api import expect
-
     served = Serving(tmp_path)
     served.ui.settings.setup_done = True
     fleet = {
