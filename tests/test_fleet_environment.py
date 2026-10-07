@@ -306,6 +306,7 @@ def test_installed_pyenv_python_is_reused_when_current_shim_cannot_run(tmp_path,
 @pytest.mark.parametrize("actual", ["", "b" * 40, "a" * 40])
 def test_frozen_runtime_requires_exact_bundled_commit_before_work(tmp_path, monkeypatch, actual):
     import subprocess
+
     from ml_stack.fleet import environment
 
     managed = Environment(tmp_path)
