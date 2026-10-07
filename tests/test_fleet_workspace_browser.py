@@ -27,6 +27,7 @@ def test_dataset_upload_preview_and_specialist_help(tmp_path, monkeypatch, playw
         page.get_by_role('button', name='Use for training', exact=True).click()
         assert page.get_by_label('Dataset path (relative to files root)').input_value() == 'datasets/demo.jsonl'
         page.locator('fleet-nav a[href="#tools"]').click()
+        page.get_by_role('tab', name='Command library', exact=True).click()
         page.get_by_label('Installed command').select_option('ml-stack-doctor')
         page.get_by_role('button', name='Review', exact=True).click()
         pw.expect(page.locator('tools-view #runner pre')).to_contain_text('ml-stack-doctor --help')

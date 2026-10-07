@@ -1,5 +1,14 @@
 <style>
 history-view { display:contents; }
+history-view .workspace { padding:28px 32px; }
+history-view .activity-heading { display:flex; justify-content:space-between; align-items:center; margin-bottom:22px; }
+history-view .activity-heading h1 { margin:0 0 8px; } history-view .activity-heading p { margin:0; }
+history-view .activity-heading > span { background:var(--poolside-yellow); color:var(--poolside-navy); padding:14px 18px; border-radius:12px; font-weight:600; }
+history-view .history-controls { background:var(--bg-raised); border:1px solid var(--line); border-radius:14px; padding:18px; }
+history-view .activity-reputation { margin:24px 0; padding:18px; background:var(--bg-raised); border:1px solid var(--line); border-radius:12px; }
+history-view .activity-reputation > summary { font-weight:600; }
+history-view .history-agent { border:1px solid var(--line); background:var(--bg-raised); border-radius:14px; padding:20px; }
+
 history-view .history-controls { display:flex; flex-wrap:wrap; gap:12px; align-items:end; margin-bottom:16px; }
 history-view .history-controls label { margin:0; flex:1 1 180px; }
 history-view .history-controls input,history-view .history-controls select { display:block; width:100%; margin-top:6px; }
@@ -23,8 +32,7 @@ history-view .history-links { display:flex; flex-wrap:wrap; gap:12px; margin-top
 </style>
 <template>
 <section class="workspace" hidden>
-  <h1>History</h1>
-  <p class="intro">Actions grouped by agent. Open an action to see its recorded details.</p>
+  <header class="activity-heading"><div><h1>What’s happening</h1><p class="intro">Follow your team’s activity. Open an action to inspect its recorded evidence.</p></div><span>Activity</span></header>
   <p class="intro"><strong>Runs are free.</strong> Credits record earned work; running an agent does not spend them. Credits and ratings do not restrict access.</p>
   <div class="history-controls">
     <label>Agent<select id="history-agent"><option value="">All agents</option></select></label>
@@ -32,7 +40,7 @@ history-view .history-links { display:flex; flex-wrap:wrap; gap:12px; margin-top
     <button id="history-refresh" type="button">Refresh</button>
   </div>
   <p class="status" id="history-status" role="status">Loading activity…</p>
-  <section aria-label="Agent credits and work reputation"><h2>Credits and work reputation</h2><div id="history-credits"></div></section>
+  <details class="activity-reputation"><summary>Credits &amp; work reputation</summary><section aria-label="Agent credits and work reputation"><div id="history-credits"></div></section></details>
   <h2>Recent actions</h2>
   <div id="history-list"></div>
   <p class="intro">Shows up to 500 recent recorded actions. Prompts, tool arguments, outputs, and message bodies are omitted from the activity log.</p>

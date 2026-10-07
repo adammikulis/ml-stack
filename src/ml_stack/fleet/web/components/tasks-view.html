@@ -4,7 +4,7 @@ tasks-view .workspace { padding:28px 32px; }
 tasks-view .work-heading { display:flex; justify-content:space-between; gap:24px; align-items:center; margin-bottom:24px; }
 tasks-view .work-heading h1 { margin:0 0 8px; }
 tasks-view .work-heading p { margin:0; max-width:650px; }
-tasks-view .work-mark { border-radius:16px; padding:14px 18px; background:var(--poolside-yellow,#ffd166); color:var(--poolside-navy,#1b1f3a); font-weight:700; white-space:nowrap; }
+tasks-view .work-mark { border-radius:16px; padding:14px 18px; background:var(--poolside-yellow); color:var(--poolside-navy); font-weight:700; white-space:nowrap; }
 tasks-view .task-controls { display:flex; gap:12px; align-items:center; margin:20px 0; }
 tasks-view .task-controls input { flex:1; min-width:100px; }
 tasks-view .task-layout { display:grid; grid-template-columns:minmax(0,1.5fr) minmax(300px,1fr); gap:22px; align-items:start; }
@@ -13,9 +13,9 @@ tasks-view .task-column { background:var(--bg-sunken,#f3f0ec); border-radius:14p
 tasks-view .task-column h2 { display:flex; justify-content:space-between; font-size:13px; margin:3px 0 14px; }
 tasks-view .task-column h2 span { color:var(--muted); }
 tasks-view .task-row { display:block; width:100%; text-align:left; margin:0 0 10px; padding:16px 12px; background:var(--bg-raised,#fff); color:var(--text); border:1px solid var(--line); border-radius:10px; box-shadow:0 2px 5px #1b1f3a05; }
-tasks-view .task-row[aria-pressed=true] { border-color:var(--poolside-navy,#1b1f3a); box-shadow:0 0 0 1px var(--poolside-navy,#1b1f3a); }
+tasks-view .task-row[aria-pressed=true] { border-color:var(--poolside-navy); box-shadow:0 0 0 1px var(--poolside-navy); }
 tasks-view .task-row small { display:block; color:var(--muted); margin-top:10px; font-size:11px; overflow-wrap:anywhere; }
-tasks-view .task-row .task-state { display:inline-block; margin-top:12px; font-size:10px; background:var(--poolside-yellow,#ffd166); color:var(--poolside-navy,#1b1f3a); padding:3px 7px; border-radius:5px; }
+tasks-view .task-row .task-state { display:inline-block; margin-top:12px; font-size:10px; background:var(--poolside-yellow); color:var(--poolside-navy); padding:3px 7px; border-radius:5px; }
 tasks-view .task-detail { background:var(--bg-raised,#fff); border:1px solid var(--line); border-radius:16px; padding:24px; min-height:300px; }
 tasks-view .task-detail h2 { margin-top:0; }
 tasks-view dl { display:grid; grid-template-columns:110px minmax(0,1fr); gap:8px; font-size:12px; }
@@ -61,6 +61,7 @@ class TasksView extends HTMLElement{
   if(!matching.length)lane.append(E('p',{class:'hint'},'No tasks here.'));
   return lane;
  }));
+ if(!rows.length)this.querySelector('.task-list').prepend(E('p',{class:'hint'},'No matching tasks.'));
  const row=this.rows.find(row=>row.id===this.selected);if(row)this.details(row);else{this.detailKey='';this.querySelector('.task-detail').replaceChildren(E('p',{},'Select a task to inspect its evidence.'));}}
  field(list,label,value){if(value!==undefined&&value!==null&&value!=='')list.append(E('dt',{},label),E('dd',{},value instanceof Node?value:String(value)));}
  evidence(title,value){return E('details',{'data-advanced':''},E('summary',{},title),E('pre',{},W.json(value)));}

@@ -1,26 +1,44 @@
 <style>
-knowledge-view .knowledge-grid { display:grid; grid-template-columns:260px minmax(0,1fr); gap:20px; }
-knowledge-view .knowledge-toolbar { display:flex; gap:12px; align-items:end; flex-wrap:wrap; }
-knowledge-view .knowledge-toolbar label { margin:0; }
-knowledge-view .knowledge-toolbar input { width:240px; }
-knowledge-view .node-list { display:grid; gap:8px; margin-top:18px; }
-knowledge-view .node-list button { text-align:left; width:100%; }
-knowledge-view .graph-map { width:100%; height:300px; background:var(--bg); border-radius:12px; margin:16px 0; }
-knowledge-view .graph-map text { fill:var(--text,#eee); font:12px system-ui; pointer-events:none; }
-knowledge-view .graph-map line { stroke:var(--line,#454958); stroke-width:2; }
-knowledge-view .graph-map circle { fill:var(--bg-raised,#202330); stroke:var(--accent,#8b7cf8); stroke-width:2; }
+knowledge-view { display:contents; }
+knowledge-view .workspace { padding:28px 32px; }
+knowledge-view .knowledge-heading { display:flex; align-items:center; justify-content:space-between; margin-bottom:22px; }
+knowledge-view .knowledge-heading h1 { margin:0 0 8px; }
+knowledge-view .knowledge-heading p { margin:0; }
+knowledge-view .graph-label { background:var(--poolside-yellow); color:var(--poolside-navy); padding:13px 16px; border-radius:12px; font-weight:600; }
+knowledge-view .knowledge-grid { display:grid; grid-template-columns:220px minmax(0,1fr); gap:20px; align-items:start; }
+knowledge-view .workspace-card { background:var(--bg-raised); border:1px solid var(--line); border-radius:16px; padding:20px; }
+knowledge-view .workspace-card h2 { margin-top:0; font-size:17px; }
+knowledge-view #graph-panel { padding:0; overflow:hidden; }
+knowledge-view .graph-browser-heading { padding:22px; border-bottom:1px solid var(--line); }
+knowledge-view .graph-browser-heading h2 { margin:0 0 14px; }
+knowledge-view .knowledge-toolbar { display:flex; gap:10px; align-items:end; flex-wrap:wrap; }
+knowledge-view .knowledge-toolbar label { margin:0; font-size:12px; }
+knowledge-view .knowledge-toolbar input { width:220px; }
+knowledge-view .knowledge-toolbar button { margin:0; }
+knowledge-view .graph-browser { display:grid; grid-template-columns:230px minmax(0,1fr); min-height:500px; }
+knowledge-view .graph-node-browser { padding:16px; background:var(--bg-sunken); border-right:1px solid var(--line); }
+knowledge-view .node-list { display:grid; gap:6px; max-height:560px; overflow:auto; }
+knowledge-view .node-list button { text-align:left; width:100%; font-size:12px; background:var(--bg-raised); color:var(--text); border:1px solid var(--line); padding:12px; border-radius:8px; margin:0; overflow-wrap:anywhere; }
+knowledge-view #detail { padding:24px; min-width:0; }
+knowledge-view #detail > h2 { font-size:22px; }
+knowledge-view #detail pre { max-height:240px; overflow:auto; }
+knowledge-view .graph-map { width:100%; height:300px; background:var(--bg-sunken); border-radius:12px; margin:16px 0; }
+knowledge-view .graph-map text { fill:var(--text); font:12px system-ui; pointer-events:none; }
+knowledge-view .graph-map line { stroke:var(--muted); stroke-width:2; }
+knowledge-view .graph-map circle { fill:var(--poolside-yellow); stroke:var(--poolside-navy); stroke-width:2; }
 knowledge-view .graph-map g { cursor:pointer; }
 knowledge-view .graph-map g:focus circle { stroke-width:5; }
-knowledge-view .relation-row { display:flex; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid var(--line); flex-wrap:wrap; }
-knowledge-view #stores { display:grid; gap:8px; margin-top:16px; }
-knowledge-view #stores button { text-align:left; }
+knowledge-view .relation-row { display:flex; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid var(--line); flex-wrap:wrap; font-size:12px; }
+knowledge-view #sources,knowledge-view #stores { display:grid; gap:6px; }
+knowledge-view #sources button,knowledge-view #stores button,knowledge-view #folders button { text-align:left; width:100%; margin:0 0 6px; background:var(--bg-sunken); color:var(--text); border:1px solid var(--line); padding:10px; border-radius:8px; font-size:12px; }
 knowledge-view #stores button[aria-pressed=true] { border-color:var(--accent); }
-@media(max-width:850px) { knowledge-view .knowledge-grid { grid-template-columns:1fr; } }
+knowledge-view #counts { font-size:12px; margin:12px 0 0; }
+@media(max-width:1100px) { knowledge-view .graph-browser { grid-template-columns:190px minmax(0,1fr); } }
+@media(max-width:850px) { knowledge-view .knowledge-grid,knowledge-view .graph-browser { grid-template-columns:1fr; } knowledge-view .workspace { padding:20px; } knowledge-view .graph-node-browser { border-right:0; border-bottom:1px solid var(--line); } knowledge-view .node-list { max-height:200px; } }
 </style>
 <template>
 <section class="workspace" hidden>
-  <h1>Knowledge</h1>
-  <p class="intro">Explore stored knowledge, inspect evidence, and follow relationships between models, tasks, and documents.</p>
+  <header class="knowledge-heading"><div><h1>Connect the dots</h1><p class="intro">Explore the knowledge behind your models, tasks, and documents.</p></div><span class="graph-label">Graph inspector</span></header>
   <p class="status" role="status" aria-live="polite"></p>
   <div class="knowledge-grid">
     <aside class="workspace-card">
@@ -31,16 +49,16 @@ knowledge-view #stores button[aria-pressed=true] { border-color:var(--accent); }
       <div id="stores"></div>
     </aside>
     <div class="workspace-card" id="graph-panel">
-      <h2 id="graph-title">Choose a graph store</h2>
+      <header class="graph-browser-heading"><h2 id="graph-title">Choose a graph store</h2>
       <form class="knowledge-toolbar">
         <div><label for="knowledge-search">Search nodes</label><input id="knowledge-search" placeholder="Search label or ID" maxlength="200"></div>
         <div><label for="knowledge-kind">Node kind</label><select id="knowledge-kind"><option value="">All kinds</option></select></div>
         <button type="submit">Search</button>
       </form>
-      <p id="counts" class="intro"></p>
+      <p id="counts" class="intro"></p></header><div class="graph-browser"><div class="graph-node-browser">
       <div class="node-list" id="nodes"></div>
       <div class="workspace-actions" id="pages"></div>
-      <article id="detail" aria-live="polite"><p class="intro">Choose a node to inspect its attributes and connected nodes.</p></article>
+      </div><article id="detail" aria-live="polite"><p class="intro">Choose a node to inspect its attributes and connected nodes.</p></article></div>
     </div>
   </div>
 </section>

@@ -4,10 +4,10 @@
 
   fit-view header.fit-top {
     display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap;
-    padding: 14px 20px; border-bottom: 1px solid var(--line);
-    background: var(--bg-raised);
+    padding: 22px 26px; border: 1px solid var(--line); border-radius:16px;
+    background: var(--bg-raised); margin-bottom:20px;
   }
-  fit-view header.fit-top h1 { font-size: 17px; margin: 0; letter-spacing: -.01em; }
+  fit-view header.fit-top h1 { font-size: 22px; margin: 0; letter-spacing: -.01em; }
   fit-view header.fit-top .machine { color: var(--muted); font-family: var(--mono); font-size: 12px; }
   fit-view header.fit-top .spacer { flex: 1; }
   fit-view nav.views { display: flex; gap: 2px; }
@@ -16,7 +16,16 @@
     color: var(--muted); font: inherit; font-size: 13px; padding: 3px 10px 5px;
   }
   fit-view nav.views button.on { color: var(--text); border-bottom-color: var(--accent); }
-  fit-view .wrap { max-width: 1500px; margin: 0 auto; padding: 0 20px 60px; width: 100%; }
+  fit-view { display:contents; }
+  fit-view #fit { padding:28px 32px; width:100%; }
+  fit-view .capacity-heading { display:flex; align-items:center; justify-content:space-between; gap:24px; margin-bottom:24px; }
+  fit-view .capacity-heading h1 { font-size:30px; margin:0 0 8px; }
+  fit-view .capacity-heading p { margin:0; }
+  fit-view .capacity-heading > span { padding:14px 18px; border-radius:12px; background:var(--poolside-cyan); color:var(--poolside-navy); font-weight:600; }
+  fit-view .wrap { max-width:1500px; margin:0; padding:0 0 40px; width:100%; }
+  fit-view #fit-body { background:var(--bg-raised); border:1px solid var(--line); border-radius:16px; margin-top:20px; padding:24px; overflow:auto; }
+  @media(max-width:700px) { fit-view #fit { padding:20px; } fit-view .capacity-heading > span { display:none; } }
+
   fit-view svg .point { stroke: var(--bg-raised); stroke-width: 1.2; }
   fit-view svg .front { fill: none; stroke: var(--good); stroke-width: 1.4; stroke-dasharray: 4 3; }
   fit-view table.fit td.mark { color: var(--good); }
@@ -24,7 +33,7 @@
   fit-view .controls {
     display: grid; gap: 18px 26px; padding: 16px 0 18px;
     grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
-    border-bottom: 1px solid var(--line);
+    border:1px solid var(--line); border-radius:16px; background:var(--bg-raised); padding:24px;
   }
   fit-view .ctl { min-width: 0; }
   fit-view .ctl > label.cap, fit-view .ctl > div.cap {
@@ -95,6 +104,7 @@
   <div id="fit" hidden>
     <fit-model></fit-model>
     <fit-charts></fit-charts>
+    <header class="capacity-heading"><div><h1>Plan what your pool can run</h1><p class="hint">Compare measured model capacity, quality, and live usage before committing compute.</p></div><span>Capacity planner</span></header>
     <header class="fit-top">
       <h1 id="fit-heading">What fits</h1>
       <nav class="views" id="fit-views"></nav>

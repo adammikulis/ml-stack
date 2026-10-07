@@ -5,11 +5,11 @@ settings-view #settings { padding:28px 32px; max-width:1320px; width:100%; }
 settings-view .settings-heading { display:flex; align-items:center; gap:16px; margin-bottom:24px; }
 settings-view .settings-heading h1 { margin:0; }
 settings-view .settings-heading p { margin:6px 0 0; }
-settings-view .settings-icon { display:grid; place-items:center; width:52px; height:52px; background:var(--poolside-pink,#ff5fa2); color:var(--poolside-navy,#1b1f3a); border-radius:16px; font-size:28px; }
+settings-view .settings-icon { display:grid; place-items:center; width:52px; height:52px; background:var(--poolside-pink); color:var(--poolside-navy); border-radius:16px; font-size:28px; }
 settings-view .settings-layout { display:grid; grid-template-columns:220px minmax(0,1fr); gap:32px; }
 settings-view .settings-sections { display:flex; flex-direction:column; gap:5px; align-self:start; }
 settings-view .settings-sections button { margin:0; text-align:left; background:transparent; color:var(--text); border:0; padding:13px 15px; border-radius:10px; font-weight:500; }
-settings-view .settings-sections button[aria-selected="true"] { background:var(--poolside-navy,#1b1f3a); color:white; }
+settings-view .settings-sections button[aria-selected="true"] { background:var(--poolside-navy); color:white; }
 settings-view .settings-content { min-width:0; }
 settings-view .settings-pane { border:1px solid var(--line); background:var(--bg-raised,#fff); border-radius:18px; padding:26px; }
 settings-view .settings-pane[hidden] { display:none; }
@@ -22,7 +22,7 @@ settings-view .settings-pane .opt { padding:12px; border:1px solid var(--line); 
 settings-view .settings-toolbar { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin:16px 0; }
 settings-view .settings-toolbar button { width:auto; margin:0; }
 settings-view .settings-footer { display:flex; align-items:center; gap:18px; margin-top:20px; }
-settings-view #settings-save { width:auto; min-width:150px; margin:0; background:var(--poolside-pink,#ff5fa2); color:var(--poolside-navy,#1b1f3a); }
+settings-view #settings-save { width:auto; min-width:150px; margin:0; background:var(--poolside-pink); color:var(--poolside-navy); }
 settings-view #settings-note { min-height:24px; }
 settings-view .library-kind { display:inline-block; font-size:11px; border:1px solid var(--line); border-radius:20px; padding:2px 8px; margin:4px 8px; }
 settings-view [aria-busy="true"] { opacity:.8; }
@@ -42,7 +42,7 @@ settings-view #settings-removal { border-top:1px solid var(--line); padding-top:
         <button type="button" role="tab" data-section="maintenance" aria-selected="false">Maintenance</button>
       </nav>
       <div class="settings-content">
-        <section class="settings-pane" data-pane="appearance" role="tabpanel"><header><h2>Make room for your workflow</h2><p class="hint">Choose how much detail you see as you learn Poolside.</p></header><div class="group" id="settings-interface"></div></section>
+        <section class="settings-pane" data-pane="appearance" role="tabpanel"><header><h2>Make room for your workflow</h2><p class="hint">Choose how much detail you see as you learn Poolside.</p></header><theme-editor></theme-editor><div class="group" id="settings-interface"></div></section>
         <section class="settings-pane" data-pane="models" role="tabpanel" hidden><header><h2>Models &amp; providers</h2><p class="hint">Set defaults for new conversations and choose where models come from.</p></header><div class="group" id="settings-chatting"></div></section>
         <section class="settings-pane" data-pane="compute" role="tabpanel" hidden><header><h2>Your device in the pool</h2><p class="hint">Decide when this device contributes and what happens when you need it.</p></header><div id="settings-left"></div><div id="settings-when"></div><div class="group" id="settings-wired"><h2>GPU memory</h2><wired-memory></wired-memory></div></section>
         <section class="settings-pane" data-pane="libraries" role="tabpanel" hidden><header><h2>Libraries &amp; simulators</h2><p class="hint">Add training and simulation capabilities to managed environments.</p></header><div class="group" id="settings-libs"></div></section>
@@ -128,7 +128,7 @@ settings-view #settings-removal { border-top:1px solid var(--line); padding-top:
         always_show_advanced: cur.always_show_advanced === true,
         chat_max_output_tokens: cur.chat_max_output_tokens,
       };
-      M.setPreferences(cur);
+      M.setPreferences({...cur, resolved_theme:s.resolved_theme});
       this.querySelector("#settings-interface").replaceChildren(
         el("h2", {}, "Interface"),
         this.check("always_show_advanced", "Always show advanced options",
