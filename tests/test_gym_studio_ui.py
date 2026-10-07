@@ -49,7 +49,7 @@ def test_rl_text_and_brand_surfaces_remain_readable_across_themes(joined, open_p
     page, errors = open_page(joined, cookie=joined.cookie, path='/ui/#gym')
     page.wait_for_function("document.querySelector('gym-view')?.catalogue.length > 0")
     page.locator('gym-view .gym-scenario[data-environment="car"] button').first.click()
-    result = page.evaluate("""theme => {
+    result = page.evaluate(r"""theme => {
       const root=document.documentElement;
       root.dataset.theme=theme==='custom'?'dark':theme;
       if(theme==='custom')for(const [key,value]of Object.entries({
