@@ -6,6 +6,7 @@ from http.server import BaseHTTPRequestHandler
 
 import pytest
 
+from ml_stack import macauth, sealing
 from ml_stack.fleet.daemon_control import (
     ROUTE,
     Control,
@@ -40,9 +41,17 @@ def device(tmp_path):
                 return None
             return self.rfile.read(length)
 
-        def _send(self, status, payload):
-            body = json.dumps(payload).encode()
+        def _send(self, status, payload, *, raw=None):
+            body = raw if raw is not None else json.dumps(payload).encode()
+            opening = getattr(self, '_opening', None)
+            if opening is not None:
+                key, verdict, requested, headers = opening
+                assert headers is self.headers and requested
+                body = sealing.seal(key, body, sealing.response_data(verdict.nonce, status))
             self.send_response(status)
+            self.send_header('Content-Type', 'application/json')
+            if opening is not None:
+                self.send_header(sealing.HEADER, '1')
             self.send_header('Content-Length', str(len(body)))
             self.end_headers()
             self.wfile.write(body)
@@ -278,12 +287,9 @@ def test_launcher_replacement_refuses_redirect_before_second_endpoint(device, mo
 def test_launcher_replacement_refuses_forged_acknowledgment(device, monkeypatch, attack):
     root, port, control, _busy, stopped, _active, _release = device
     def forged(handler):
+        _authenticate_hostile_control_response(handler, control)
         if attack == 'malformed':
-            body = b'{invalid'
-            handler.send_response(200)
-            handler.send_header('Content-Length', str(len(body)))
-            handler.end_headers()
-            handler.wfile.write(body)
+            handler._send(200, None, raw=b'{invalid')
         else:
             answer = {'instance': '0' * 32, 'stopping': True}
             if attack == 'shape':
@@ -296,5 +302,35 @@ def test_launcher_replacement_refuses_forged_acknowledgment(device, monkeypatch,
         return True
     monkeypatch.setattr(control, 'route', forged)
     with pytest.raises(ControlError):
+        request_replacement(root, port, {'launcher_control': control.instance}, 'a' * 40)
+    assert not stopped.is_set()
+
+
+def _authenticate_hostile_control_response(handler, control):
+    wire = handler._body(1024)
+    verdict = control.auth.check('POST', handler.path, handler.headers, wire)
+    assert verdict.ok and handler.headers.get(sealing.HEADER) == '2'
+    key = sealing.box_key(verdict.secret)
+    host, target = macauth.parts(f"//{handler.headers.get('Host', '')}{handler.path}")
+    body = sealing.open_(key, wire, sealing.request_data('POST', target, host, verdict.at, verdict.nonce))
+    assert json.loads(body)['instance'] == control.instance
+    handler._opening = (key, verdict, True, handler.headers)
+
+
+@pytest.mark.redteam
+@pytest.mark.parametrize('content_type', ['text/plain', 'application/json'])
+def test_launcher_replacement_refuses_matching_plaintext_acknowledgment(device, monkeypatch, content_type):
+    root, port, control, _busy, stopped, _active, _release = device
+    def downgrade(handler):
+        _authenticate_hostile_control_response(handler, control)
+        body = json.dumps({'instance': control.instance, 'stopping': True}).encode()
+        handler.send_response(200)
+        handler.send_header('Content-Type', content_type)
+        handler.send_header('Content-Length', str(len(body)))
+        handler.end_headers()
+        handler.wfile.write(body)
+        return True
+    monkeypatch.setattr(control, 'route', downgrade)
+    with pytest.raises(ControlError, match='authenticate with sealing'):
         request_replacement(root, port, {'launcher_control': control.instance}, 'a' * 40)
     assert not stopped.is_set()

@@ -90,3 +90,11 @@ def test_unhandled_post_failure_is_nonblocking(monkeypatch, capsys):
     harnesshook._block(Denied, Denied('daemon unavailable'), None)
     assert exits == [0]
     assert 'notification unavailable: Denied: daemon unavailable' in capsys.readouterr().err
+
+
+def test_post_checkpoint_outage_does_not_start_a_nudge_subprocess(monkeypatch):
+    monkeypatch.setattr(harnesshook.harness_remote, 'context', unavailable)
+    monkeypatch.setattr(harnesshook, 'nudge', lambda _label: pytest.fail('retried unavailable workspace'))
+    out = io.StringIO()
+    assert harnesshook.run(['post', '--label', 'worker', '--root', '/project'], io.StringIO('{}'), out) == 0
+    assert 'connection refused' in out.getvalue()

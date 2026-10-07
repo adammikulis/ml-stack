@@ -91,6 +91,10 @@ def request_replacement(root: Path, port: int, running: dict, expected: str) -> 
     body = json.dumps({'version': 1, 'instance': instance, 'expected': expected}).encode()
     with open_stream(endpoint, method='POST', data=body, token=capability, timeout=10,
                      headers={'Content-Type': 'application/json', sealing.HEADER: '2'}, guard=guard) as response:
+        if response.headers.get(sealing.HEADER) != '1':
+            raise ControlError('Daemon replacement acknowledgment must authenticate with sealing.')
+        if response.headers.get('Content-Type', '').split(';', 1)[0].strip().lower() != 'application/json':
+            raise ControlError('Daemon replacement acknowledgment must be JSON.')
         limit = MAX_RECORD + sealing.NONCE_BYTES + 16
         wire = response.read(limit + 1)
         if len(wire) > limit:
