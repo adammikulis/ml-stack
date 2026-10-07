@@ -106,3 +106,32 @@ def test_local_ui_rejects_connections_over_admission_limit(monkeypatch):
         relay.close()
         for _ in range(32):
             relay.slots.release()
+
+
+def test_local_ui_transport_keeps_silent_connections_unbounded(monkeypatch):
+    import io
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    monkeypatch.setattr(wsl_ui.threading, "Thread", lambda target, args=(), **_kwargs:
+                        SimpleNamespace(start=lambda: target(*args), join=lambda _timeout: None))
+    upstream = MagicMock()
+    upstream.__enter__.return_value = upstream
+    upstream.recv.side_effect = [b"delayed response", b""]
+    monkeypatch.setattr(wsl_ui.socket, "create_connection", lambda *_args, **_kwargs: upstream)
+    output = io.BytesIO()
+    monkeypatch.setattr(wsl_ui.sys, "stdin", SimpleNamespace(buffer=io.BytesIO(b"request")))
+    monkeypatch.setattr(wsl_ui.sys, "stdout", SimpleNamespace(buffer=output))
+    wsl_ui.stdio(12345)
+    upstream.settimeout.assert_called_once_with(None)
+    assert output.getvalue() == b"delayed response"
+
+    client = MagicMock()
+    client.recv.return_value = b""
+    child = MagicMock(stdin=io.BytesIO(), stdout=io.BytesIO(b"delayed response"))
+    child.wait.return_value = 0
+    monkeypatch.setattr(wsl_ui, "start_process", lambda *_args, **_kwargs: child)
+    relay = wsl_ui.LocalUIBridge(["owned-helper"], 0)
+    relay._relay(client)
+    client.settimeout.assert_called_once_with(None)
+    client.sendall.assert_called_once_with(b"delayed response")

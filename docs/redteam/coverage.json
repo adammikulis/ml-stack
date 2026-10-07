@@ -1,7 +1,7 @@
 {
- "surfaces": 777,
+ "surfaces": 778,
  "by_status": {
-  "covered": 454,
+  "covered": 455,
   "partial": 199,
   "uncovered": 53,
   "n/a": 71,
@@ -37,7 +37,7 @@
    "unmapped": 0
   },
   "egress": {
-   "covered": 41,
+   "covered": 42,
    "partial": 48,
    "uncovered": 0,
    "n/a": 0,
@@ -2084,6 +2084,20 @@
     "tests/test_wsl_network.py::test_lan_relay_preserves_stream_half_close_and_releases_ports"
    ],
    "note": "launcher-selected control and fixed daemon destinations cannot be redirected by relay bytes; control frames and discovery datagrams have bounded reads and deadlines"
+  },
+  {
+   "id": "egress:fleet/wsl_ui.py:stdio",
+   "kind": "egress",
+   "source": "fleet/wsl_ui.py:stdio",
+   "trust": "addresses and redirects named by pages, repositories and peers",
+   "attacker": "a redirect or address sends the request somewhere the person did not choose",
+   "status": "covered",
+   "tests": [
+    "tests/test_wsl_ui.py::test_local_ui_relay_preserves_bytes_and_actual_loopback_peer",
+    "tests/test_wsl_ui.py::test_local_ui_transport_keeps_silent_connections_unbounded",
+    "tests/test_wsl_ui.py::test_local_ui_close_terminates_idle_helper_and_releases_slot"
+   ],
+   "note": "the helper connects only to Linux loopback with a launcher-selected port, preserves opaque bytes and releases owned sockets and processes on cancellation"
   },
   {
    "id": "egress:graph/serve.py:bind",
@@ -4789,7 +4803,10 @@
    "tests": [
     "tests/test_wsl_network.py::test_bridge_refuses_authentication_and_socket_scope",
     "tests/test_wsl_network.py::test_bridge_caps_messages_and_datagrams",
-    "tests/test_wsl_network.py::test_lan_relay_preserves_stream_half_close_and_releases_ports"
+    "tests/test_wsl_network.py::test_lan_relay_preserves_stream_half_close_and_releases_ports",
+    "tests/test_wsl_ui.py::test_local_ui_relay_preserves_bytes_and_actual_loopback_peer",
+    "tests/test_wsl_ui.py::test_local_ui_rejects_connections_over_admission_limit",
+    "tests/test_wsl_ui.py::test_local_ui_close_terminates_idle_helper_and_releases_slot"
    ],
    "note": "the discovery control listener rejects bad capabilities, destinations and oversized frames; the TCP listener relays opaque bytes to the fixed daemon target"
   },

@@ -13,7 +13,7 @@ from ml_stack.platform import start_process
 
 from .wsl_network import NetworkBridge
 
-IDLE_SECONDS = 300
+IDLE_SECONDS = None
 
 
 class LocalUIBridge(NetworkBridge):
@@ -34,16 +34,15 @@ class LocalUIBridge(NetworkBridge):
 
     def _relay(self, client: socket.socket) -> None:
         client.settimeout(IDLE_SECONDS)
-        child = start_process(self.argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                 stderr=subprocess.DEVNULL)
         with self.lock:
+            if self.stop.is_set():
+                return
+            child = start_process(self.argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                  stderr=subprocess.DEVNULL)
             self.processes.add(child)
-            stopped = self.stop.is_set()
         uplink = threading.Thread(target=self._upload, args=(client, child), daemon=True)
         uplink.start()
         try:
-            if stopped:
-                child.terminate()
             while not self.stop.is_set() and (data := child.stdout.read1(65536)):
                 client.sendall(data)
         except OSError:
