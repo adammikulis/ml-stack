@@ -14,7 +14,7 @@ fleet-nav { display: contents; }
 </style>
 <template>
   <aside class="sidebar" aria-label="Workspace navigation">
-    <a class="brand" href="#chat"><span class="dot"></span>ml-stack</a>
+    <a class="brand" href="#chat"><span class="dot"></span>Poolside</a>
     <div class="sidebar-caption">Intelligence workspace</div>
     <input class="nav-search" id="nav-search" type="search" aria-label="Find a page"
       placeholder="Find a page…" aria-keyshortcuts="Control+k Meta+k">
@@ -48,7 +48,7 @@ fleet-nav { display: contents; }
       ["Training", "training", "Fine-tuning recipes & runs"], ["Gym", "gym", "RL scenarios & policies"],
       ["Benchmarks", "benchmarks", "Measure & compare"], ["History", "history", "Activity & evidence"]]],
     ["Knowledge", [["Graph inspector", "knowledge", "Explore facts & relationships"], ["Data", "data", "Files & datasets"]]],
-    ["Fleet", [["Cluster", "cluster", "Machines & live resources"], ["Capacity", "fit", "Model fit & throughput"],
+    ["Pool", [["Devices", "cluster", "Machines & live resources"], ["Capacity", "fit", "Model fit & throughput"],
       ["Settings", "settings", "Workspace preferences & setup"]]],
   ];
   const DEMOS = [
@@ -60,7 +60,7 @@ fleet-nav { display: contents; }
     ["Fine-tune a model", "training", "Choose a recipe and dataset, then follow a training run."],
     ["Train in a simulated world", "gym", "Explore an RL scenario, policy controls and recordings."],
     ["Measure model quality", "benchmarks", "Run a benchmark and compare measured results."],
-    ["Explore your fleet", "cluster", "Inspect connected machines and their available resources."],
+    ["Explore your pool", "cluster", "Inspect connected machines and their available resources."],
     ["Prepare your workspace", "settings", "Configure preferences, libraries and advanced options."],
   ];
   const here = ([, name]) => !!document.querySelector(`${name}-view`);
