@@ -9,6 +9,7 @@ import subprocess
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
+from ml_stack.briefing import REQUIRED_BRIEFING
 from ml_stack.workspace import (
     Denied,
     Workspace,
@@ -52,7 +53,7 @@ def agent_name(alias: str, harness: str, wanted: str = "") -> str:
 def brief(name: str, alias: str, harness: str, parent: str, orders_from: Sequence[str] = ()) -> str:
     """The workspace brief placed in the session's instructions."""
     obey = ", ".join(dict.fromkeys([f"the lead ({parent})", *orders_from]))
-    return BRIEF.format(name=name, alias=alias, harness=harness, orders=obey)
+    return REQUIRED_BRIEFING.format(owner=parent) + BRIEF.format(name=name, alias=alias, harness=harness, orders=obey)
 
 
 def invite(name: str, project_dir: Path, parent: str, say: Callable[[str], None],

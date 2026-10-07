@@ -131,12 +131,16 @@ def _call(hook, tool, args):
     return asyncio.run(hook({"tool_name": tool, "tool_input": args, "tool_response": args}, None, None))
 
 
-def test_the_default_options_carry_the_hooks_and_a_turn_ceiling():
+def test_default_options_preserve_unlimited_turns_and_guard_hooks():
     pytest.importorskip("claude_agent_sdk")
     agent = harness.Harness("http://127.0.0.1:8899", "kestrel-8B")
     options = agent.configured()
-    assert options.max_turns == 50 and set(options.hooks) == {"PreToolUse", "PostToolUse"}
+    assert options.max_turns is None and set(options.hooks) == {"PreToolUse", "PostToolUse"}
     assert agent.configured(max_turns=7).max_turns == 7
+    bounded = harness.Harness("http://127.0.0.1:8899", "kestrel-8B", options={"max_turns": 3})
+    assert bounded.configured().max_turns == 3
+    assert bounded.configured(max_turns=None).max_turns is None
+    assert bounded.configured(max_turns=73).max_turns == 73
     mine = [lambda *_: {}]
     both = harness.Harness("http://x", "k", options={"hooks": {"PreToolUse": mine}}).configured()
     assert len(both.hooks["PreToolUse"]) == 2

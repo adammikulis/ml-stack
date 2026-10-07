@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ml_stack.briefing import REQUIRED_BRIEFING
 from ml_stack.sentinel import human
 from ml_stack.workspace import agent_invites, device_metadata, tokens
 from ml_stack.workspace.identity import AGENT, HUMAN, LEAD, Denied, Identity, valid_name
@@ -87,6 +88,7 @@ TOKEN_S = 30 * 86_400.0
 HELLO = ("workspace ready. Read this with `ml-stack-workspace inbox --ack`, then announce with "
          "`ml-stack-workspace announce joined 'connected'`.")
 
+
 SNIPPET = """\
 You can message the other coding agents on this machine through ml-stack's workspace.
 Your name there is {name}.{join}
@@ -155,7 +157,7 @@ def snippet(name: str = "", code: str = "", hint: str = "", project: str = "",
               else f"The code works one time, for {minutes} minutes.")
     join = JOIN.format(code=code, ident=hint or "ID", window=window) if code else ""
     note = f"\nYou are being connected for project {project}." if project else ""
-    return SNIPPET.format(name=name or "NAME", join=join + note)
+    return REQUIRED_BRIEFING.format(owner="you until an explicit receiving owner acknowledges the handoff") + SNIPPET.format(name=name or "NAME", join=join + note)
 
 
 def _role(name: str) -> str:
@@ -173,7 +175,7 @@ def brief(name: str, me: str) -> str:
     """The sub-brief a parent pastes into the prompt of a subagent called ``name``."""
     check_names([name, me])
     device = device_metadata.current()
-    return BRIEF.format(me=me, name=name) + f"Local runtime device: {device['label']} ({device['verification']}); provenance grants no permissions.\n"
+    return REQUIRED_BRIEFING.format(owner=me) + BRIEF.format(me=me, name=name) + f"Local runtime device: {device['label']} ({device['verification']}); provenance grants no permissions.\n"
 
 
 def pick_name(ws: Workspace, wanted: str) -> str:

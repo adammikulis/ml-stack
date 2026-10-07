@@ -62,6 +62,25 @@ def test_revoked_main_is_ineligible(kit):
         kit.ws.registry.register_session(token)
 
 
+def test_presented_agents_children_and_internal_senders_are_read_only(kit, monkeypatch):
+    from ml_stack.workspace.service import GREETER
+
+    token = kit.agent('main-worker')
+    kit.ws.register_session(token)
+    kit.ws.registry.delegate(kit.ws.auth(token), 'helper', 600, ('read',), 10)
+
+    def refuse_presentation(name):
+        raise AssertionError(f'unexpected presentation mutation for {name}')
+
+    monkeypatch.setattr(kit.ws.registry, 'ensure_presentation', refuse_presentation)
+    assert metadata(kit.ws.registry, GREETER.id)['session_kind'] == 'unknown'
+    assert metadata(kit.ws.registry, 'owner')['session_kind'] == 'person'
+    assert metadata(kit.ws.registry, 'main-worker')['coordinator_eligible']
+    child = metadata(kit.ws.registry, 'main-worker/helper')
+    assert child['session_kind'] == 'subagent'
+    assert not child['coordinator_eligible']
+
+
 def test_canonical_registration_preserves_model_and_rights_and_refuses_child(host):
     from test_workspace_remote import call, joined
 

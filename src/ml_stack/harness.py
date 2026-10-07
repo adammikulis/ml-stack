@@ -31,7 +31,7 @@ from typing import Any
 from ml_stack import harnessing, hub
 from ml_stack.claude import DEFAULT_PORT, DEFAULT_SLOTS, alias_of, environment
 from ml_stack.guard import start
-from ml_stack.guard.hooks import MAX_TURNS, sdk_guard, sdk_hooks
+from ml_stack.guard.hooks import sdk_guard, sdk_hooks
 from ml_stack.log import say
 from ml_stack.workspace.localprofile import parse_ctx
 
@@ -84,9 +84,7 @@ class Answer:
 
 
 class Harness:
-    """One served model, one SDK configuration, any number of tasks. Every tool the SDK runs
-    passes ``guard`` (the built-in rails unless another is given) and a task is bounded to
-    ``MAX_TURNS`` turns unless ``max_turns`` says otherwise."""
+    """One served model with SDK options and guarded tools for any number of tasks."""
 
     def __init__(self, base_url: str, alias: str, *, offline: bool = True,
                  options: Mapping[str, Any] | None = None, guard: Sequence[Any] | None = None) -> None:
@@ -105,7 +103,7 @@ class Harness:
         hooks = {event: [*ours.get(event, []), *theirs.get(event, [])]
                  for event in {*ours, *theirs}}
         return sdk().ClaudeAgentOptions(model=self.alias, **{
-            **merged, "max_turns": merged.get("max_turns") or MAX_TURNS, "hooks": hooks,
+            **merged, "hooks": hooks,
             "sandbox": merged.get("sandbox") or confined_bash(),
             "env": {**self.env, **dict(over.get("env") or {})}})
 

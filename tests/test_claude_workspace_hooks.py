@@ -114,7 +114,7 @@ def test_subagent_event_includes_brief_and_actual_primary_branch_rules(commands,
     assert 'Acquire authenticated claims before mutation' in context and 'separate sibling worktrees' in context
     records = json.loads(commands[1].read_text())
     assert len(records) == 1
-    assert records[0] == {'argv': ['brief', 'Explore-abcdef', '--agent', 'claude-code'],
+    assert records[0] == {'argv': ['brief', 'explore-abcdef', '--agent', 'claude-code'],
                           'session': 'native-parent', 'harness': 'claude-code'}
 
 

@@ -10,10 +10,9 @@ from ml_stack.guard.untrusted import NOTICE, UntrustedRail
 from ml_stack.interventions import Call, Confirm, Deny, Run
 from ml_stack.taint import TaintRail, claude_code
 
-__all__ = ["MAX_TURNS", "sdk_guard", "sdk_hooks"]
+__all__ = ["sdk_guard", "sdk_hooks"]
 
 READS_OUTSIDE = frozenset({"WebFetch", "WebSearch", "Read", "Grep", "Glob", "BashOutput"})
-MAX_TURNS = 50
 
 
 def sdk_guard() -> list[Any]:
