@@ -37,6 +37,8 @@ def test_frozen_daemon_keeps_graph_conversations_after_restart(tmp_path):
                    "ML_STACK_WORKSPACE_HOME": str(workspace_root), "PYTHONPATH": "",
                    "PYTHON_KEYRING_BACKEND": "keyring.backends.null.Keyring"}
     with running(Path(binary), root, port, environment, tmp_path / "first.log"):
+        readiness = call(port, "GET", "/ui/chat")
+        assert readiness["runtime_ready"], readiness.get("runtime_error")
         assert call(port, "GET", "/ui/board/agents") == {"owner_id": "person", "agents": []}
         assert call(port, "GET", "/ui/conversations/saved")["messages"] == legacy["messages"]
         made = call(port, "POST", "/ui/conversations", {"model": "chosen-model", "title": "Packaged chat",

@@ -14,8 +14,7 @@ datas = [
     (str(package_dir("ml_stack.ui") / "assets"), "ml_stack/ui/assets"),
     (str(package_dir("ml_stack.contracts") / "_data"), "ml_stack/contracts/_data"),
     *copy_metadata("ml-stack"),
-    *copy_metadata("openai-agents"),
-    *copy_metadata("openai"),
+    *copy_metadata("openai-agents", recursive=True),
 ]
 
 # The commit this was built from, beside ml_stack.fleet.measuring, which answers it.

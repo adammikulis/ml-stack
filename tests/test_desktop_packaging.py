@@ -166,7 +166,11 @@ def test_frozen_spec_includes_project_modules_without_project_exclusions(monkeyp
     hooks = type(sys)("PyInstaller.utils.hooks")
     hooks.collect_dynamic_libs = lambda name: []
     hooks.collect_submodules = lambda name: []
-    hooks.copy_metadata = lambda name: []
+    metadata_calls = []
+    def copy_metadata(name, *, recursive=False):
+        metadata_calls.append((name, recursive))
+        return []
+    hooks.copy_metadata = copy_metadata
     monkeypatch.setitem(sys.modules, "PyInstaller.utils.hooks", hooks)
     native_modules = [
         "ml_stack.workspace.remote_host", "ml_stack.world", "ml_stack.bench", "ml_stack.ingest",
@@ -189,3 +193,4 @@ def test_frozen_spec_includes_project_modules_without_project_exclusions(monkeyp
     })
     assert set(native_modules) <= set(captured["hiddenimports"])
     assert not any(name.startswith("ml_stack") for name in captured["excludes"])
+    assert ("openai-agents", True) in metadata_calls
