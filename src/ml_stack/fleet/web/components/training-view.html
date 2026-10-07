@@ -1,22 +1,54 @@
 <style>
-training-view .training-form input, training-view .training-form select { width:100%; }
-training-view .training-form details { margin-top:20px; }
-training-view .training-form summary { cursor:pointer; }
-training-view .training-form .intro { margin:12px 0; font-size:13px; line-height:1.6; }
-training-view .training-form .status:empty { display:none; }
-training-view .training-form [aria-busy="true"] { opacity:.75; }
-training-view .training-form .error { color:var(--bad); }
-training-view .training-form textarea { min-height:90px; }
+training-view .workspace{max-width:none;padding:28px 32px}
+training-view .training-heading{display:flex;justify-content:space-between;gap:24px;align-items:center;margin-bottom:28px}
+training-view .training-heading h1{font-size:34px;letter-spacing:-1px;margin:8px 0}
+training-view .eyebrow{font-size:12px;font-weight:750;text-transform:uppercase;letter-spacing:1.5px;color:var(--accent-ink,#994c16)}
+training-view .training-heading .intro{margin:0;max-width:620px}
+training-view .training-mark{font-size:36px;padding:18px 24px;border-radius:24px;background:var(--poolside-orange,#ff8a3d);color:var(--poolside-navy,#1b1f3a)}
+training-view .training-layout{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:24px;align-items:start}
+training-view .training-form{padding:0;border:1px solid var(--line);border-radius:20px;background:var(--bg-raised,#fff);overflow:hidden}
+training-view .training-steps{display:flex;gap:4px;padding:16px;background:var(--bg-sunken);border-bottom:1px solid var(--line)}
+training-view .training-steps button{flex:1;border:0;background:transparent;color:var(--muted);text-align:left;padding:12px;border-radius:12px}
+training-view .training-steps button[aria-current=step]{background:var(--poolside-orange,#ff8a3d);color:var(--poolside-navy,#1b1f3a);font-weight:750}
+training-view .training-steps span{display:inline-grid;place-items:center;background:#ffffff80;border-radius:50%;width:24px;height:24px;margin-right:8px}
+training-view .training-pane{padding:28px;min-height:280px}
+training-view .training-pane h2{font-size:23px;margin:0 0 8px}
+training-view .training-pane .intro{margin:0 0 20px;line-height:1.6}
+training-view .training-form input,training-view .training-form select{width:100%;box-sizing:border-box}
+training-view .training-form details{margin-top:20px}
+training-view .training-form textarea{min-height:90px}
+training-view .training-form .error{color:var(--bad)}
+training-view .training-form [aria-busy=true]{opacity:.75}
+training-view .training-footer{display:flex;justify-content:space-between;padding:16px 28px;border-top:1px solid var(--line);gap:12px}
+training-view .training-footer button:last-child{background:var(--poolside-orange,#ff8a3d);color:var(--poolside-navy,#1b1f3a);border-color:transparent;font-weight:700}
+training-view .training-aside{border-radius:20px;background:var(--bg-raised);border:1px solid var(--line);padding:22px}
+training-view .training-aside h2{font-size:17px;margin:0 0 16px}
+training-view .run-summary{margin:0;display:grid;gap:16px}
+training-view .run-summary dt{font-size:12px;color:var(--muted)}
+training-view .run-summary dd{margin:4px 0 0;font-weight:650;overflow-wrap:anywhere}
+training-view .training-help{margin-top:22px;padding:16px;border-radius:12px;background:#ffd16635;line-height:1.6;font-size:13px}
+training-view .run-monitor{margin-top:24px;padding:24px;border-radius:20px;border:1px solid var(--line);background:var(--bg-raised)}
+training-view .run-monitor .job-list{grid-template-columns:repeat(auto-fit,minmax(240px,1fr));max-height:220px;overflow:auto}
+training-view .training-form .status{margin:0;padding:0 28px 16px;min-height:0}
+training-view .training-form .status:empty{display:none}
+training-view .training-review-actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:24px}
+@media(max-width:1050px){training-view .training-layout{grid-template-columns:1fr}training-view .training-aside{display:none}}
+@media(max-width:650px){training-view .workspace{padding:20px}training-view .training-heading{gap:12px}training-view .training-mark{display:none}training-view .training-pane{padding:20px}training-view .training-steps button{font-size:12px;padding:8px}}
 </style>
 <template>
   <section class="workspace" hidden>
-    <h1>Training lab</h1>
-    <p class="intro">Prepare your dataset, review the command, then train and follow the run.</p>
-    <div class="workspace-actions"><button type="button" id="browse-data">1 · Prepare data</button><button type="button" id="open-gym">Explore live RL worlds</button></div>
-    <div class="workspace-grid">
-      <div class="workspace-card training-form" id="config"></div>
-      <div class="workspace-card"><workspace-jobs></workspace-jobs></div>
+    <header class="training-heading"><div><span class="eyebrow">Studio / Fine-tune</span><h1>Make a model your own.</h1><p class="intro">Start with examples, choose how to learn, and follow every run from one place.</p></div><div class="training-mark" aria-hidden="true">↗</div></header>
+    <div class="training-layout">
+      <div class="training-form" id="config">
+        <nav class="training-steps" aria-label="Fine-tuning steps"><button type="button" data-step="0"><span>1</span>Dataset</button><button type="button" data-step="1"><span>2</span>Model &amp; recipe</button><button type="button" data-step="2"><span>3</span>Review &amp; run</button></nav>
+        <div class="training-pane" id="training-dataset"><h2>Give your model examples</h2><p class="intro">Choose a dataset already in your files, or prepare one in Data.</p><button type="button" id="browse-data">Open dataset library</button></div>
+        <div class="training-pane" id="training-recipe" hidden><h2>Choose what it will learn</h2><p class="intro">A recipe supplies sensible defaults. Tune the essentials here and explore advanced controls when you need them.</p></div>
+        <div class="training-pane" id="training-review" hidden><h2>Ready to train?</h2><p class="intro">Try a short validation run first, or train a checkpoint. Work enters the same managed queue as your other jobs.</p></div>
+        <div class="training-footer"><button type="button" id="training-back">Back</button><button type="button" id="training-next">Continue to model &amp; recipe →</button></div>
+      </div>
+      <aside class="training-aside"><h2>Your run</h2><dl class="run-summary" id="run-summary"></dl><p class="training-help">A short training smoke runs 20 steps without saving a checkpoint. Full training saves to your chosen output directory.</p><button type="button" id="open-gym">Explore RL worlds →</button></aside>
     </div>
+    <section class="run-monitor" aria-label="Training run activity"><workspace-jobs></workspace-jobs></section>
   </section>
 </template>
 <script>
@@ -30,8 +62,9 @@ training-view .training-form textarea { min-height:90px; }
       this.form = this.querySelector('#config');
       this.querySelector('#browse-data').onclick = () => M.go('data');
       this.querySelector('#open-gym').onclick = () => M.go('gym');
-      const b = this.form;
-      b.append(E('h2', {}, '2 · Configure a run'));
+      const b = this.querySelector('#training-recipe');
+      const dataset = this.querySelector('#training-dataset');
+      const review = this.querySelector('#training-review');
       this.mode = W.field(b, 'Workflow', 'select');
       [['recipe', 'Supervised / tool calling'], ['decider', 'Decision model'],
        ['rl', 'Reinforcement learning']].forEach(([value, text]) => this.mode.append(E('option', {value}, text)));
@@ -40,9 +73,9 @@ training-view .training-form textarea { min-height:90px; }
       this.requirements = E('p', {class:'intro'});
       this.parameters = E('div');
       b.append(this.requirements, this.parameters);
-      this.data = W.field(b, 'Dataset path (relative to files root)', 'input', {placeholder:'datasets/examples.jsonl'});
-      this.out = W.field(b, 'Output directory (relative to files root)', 'input', {value:'models/my-run'});
-      this.name = W.field(b, 'Run name', 'input', {value:'my-run'});
+      this.data = W.field(dataset, 'Dataset path (relative to files root)', 'input', {placeholder:'datasets/examples.jsonl'});
+      this.out = W.field(review, 'Output directory (relative to files root)', 'input', {value:'models/my-run'});
+      this.name = W.field(review, 'Run name', 'input', {value:'my-run'});
       this.advanced = E('details', {class:'aside', 'data-advanced':''}, E('summary', {}, 'Advanced options'));
       this.expert = E('div');
       this.advanced.append(this.expert);
@@ -51,7 +84,7 @@ training-view .training-form textarea { min-height:90px; }
       this.options.value = '[]';
       this.lora = W.field(b, 'Fine-tuning strategy', 'select');
       this.lora.append(E('option', {value:'adapter'}, 'LoRA adapter'), E('option', {value:'full'}, 'All model weights'));
-      this.dry = W.field(b, 'Run mode', 'select');
+      this.dry = W.field(review, 'Run mode', 'select');
       this.dry.append(E('option', {value:'true'}, '20-step training smoke'), E('option', {value:'false'}, 'Train model'));
       this.preview = E('pre', {}, 'Review the command before starting.');
       this.reviewDetails = E('details', {class:'aside'}, E('summary', {}, 'Command preview'), this.preview);
@@ -60,8 +93,15 @@ training-view .training-form textarea { min-height:90px; }
       this.startButton = W.button('Queue 20-step training smoke', () => this.start());
       this.retryButton = W.button('Retry loading workflows', () => this.load());
       this.retryButton.hidden = true;
-      b.append(E('div', {class:'workspace-actions'}, this.reviewButton, this.startButton, this.retryButton),
-               this.note, this.reviewDetails);
+      review.append(E('div', {class:'training-review-actions'}, this.reviewButton, this.startButton, this.retryButton), this.reviewDetails);
+      this.form.append(this.note);
+      this.step = 0;
+      this.querySelectorAll('[data-step]').forEach(button => button.onclick = () => this.showStep(Number(button.dataset.step)));
+      this.querySelector('#training-back').onclick = () => this.showStep(this.step - 1);
+      this.querySelector('#training-next').onclick = () => this.showStep(this.step + 1);
+      this.form.addEventListener('input', () => this.updateSummary());
+      this.form.addEventListener('change', () => this.updateSummary());
+      this.showStep(0);
       this.mode.onchange = () => this.buildOptions();
       this.recipe.onchange = () => this.buildFields();
       this.size.onchange = () => this.buildFields();
@@ -69,9 +109,38 @@ training-view .training-form textarea { min-height:90px; }
       W.route(this.host, 'training', () => {
         this.load();
         const chosen = sessionStorage.getItem('ml-stack-dataset');
-        if (chosen) this.data.value = chosen;
+        if (chosen) { this.data.value = chosen; this.showStep(1); }
         this.querySelector('workspace-jobs').refresh();
       });
+    }
+
+    showStep(step) {
+      step = Math.max(0, Math.min(2, step));
+      if (step > 0 && this.mode.value !== 'rl' && !this.data.value.trim()) {
+        this.report(Error('Choose a dataset before continuing.'));
+        this.data.focus(); return;
+      }
+      this.step = step;
+      ['training-dataset', 'training-recipe', 'training-review'].forEach((id, index) => {
+        this.querySelector('#' + id).hidden = index !== step;
+      });
+      this.querySelectorAll('[data-step]').forEach(button => {
+        if (Number(button.dataset.step) === step) button.setAttribute('aria-current', 'step');
+        else button.removeAttribute('aria-current');
+      });
+      this.querySelector('#training-back').disabled = step === 0;
+      this.querySelector('#training-next').hidden = step === 2;
+      this.querySelector('#training-next').textContent = step === 0 ? 'Continue to model & recipe →' : 'Review this run →';
+      this.updateSummary();
+    }
+
+    updateSummary() {
+      const rows = [['Dataset', this.mode.value === 'rl' ? 'Generated by the environment' : this.data.value || 'Choose your examples'],
+        ['Workflow', this.mode.selectedOptions[0]?.textContent || 'Loading'],
+        ['Recipe', this.recipe.selectedOptions[0]?.textContent || 'Choose a recipe'],
+        ['Run', this.mode.value === 'rl' ? 'PPO policy training' : this.dry.value === 'true' ? 'Short validation run' : 'Save a trained checkpoint'],
+        ['Output', this.mode.value === 'rl' ? 'Managed Gym checkpoints' : this.out.value || 'Choose a directory']];
+      this.querySelector('#run-summary').replaceChildren(...rows.flatMap(([label, value]) => [E('dt', {}, label), E('dd', {}, value)]));
     }
 
     async load() {
@@ -174,6 +243,7 @@ training-view .training-form textarea { min-height:90px; }
       const available = !rl || (this.environments || []).some(item => item.id === this.recipe.value && item.available);
       this.reviewButton.disabled = this.startButton.disabled = !!this.pending || !this.recipe.value || !available;
       this.form.setAttribute('aria-busy', String(!!this.pending));
+      this.updateSummary();
       this.startButton.textContent = this.pending ? 'Working…'
         : !rl && this.dry.value === 'true' ? (recipe ? 'Queue 20-step training smoke' : 'Queue configuration check') : 'Start training';
     }
@@ -225,6 +295,7 @@ training-view .training-form textarea { min-height:90px; }
         } else {
           this.note.textContent = `Queued ${result.id}. Follow progress in Runs.`;
           this.querySelector('workspace-jobs').selected = result.id;
+          this.querySelector('workspace-jobs').details.open = true;
           this.querySelector('workspace-jobs').refresh();
         }
       } catch (error) { this.report(error); }
