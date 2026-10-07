@@ -108,3 +108,23 @@ def test_oversized_explicit_configuration_cannot_be_registered(descriptor, monke
     with pytest.raises(OSError, match='Invalid'), registration.registered():
         pytest.fail('oversized bridge was registered')
     assert not path.exists()
+
+
+def test_unknown_bridge_fields_are_refused_before_publication(descriptor, monkeypatch):
+    path, _, config = descriptor
+    config['unused'] = 'extra'
+    monkeypatch.setenv(registration.ENV, json.dumps(config))
+    with pytest.raises(OSError, match='Invalid'), registration.registered():
+        pytest.fail('unknown bridge fields were registered')
+    assert not path.exists()
+
+
+def test_final_descriptor_bound_preserves_previous_record(descriptor, monkeypatch):
+    path, _, config = descriptor
+    path.parent.mkdir()
+    path.write_text('previous registration')
+    monkeypatch.setenv(registration.ENV, json.dumps(config))
+    monkeypatch.setattr(registration.secrets, 'token_hex', lambda _size: 'a' * registration.LIMIT)
+    with pytest.raises(OSError, match='exceeds its message limit'), registration.registered():
+        pytest.fail('oversized registration was published')
+    assert path.read_text() == 'previous registration'
