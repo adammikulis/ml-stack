@@ -875,6 +875,6 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
                                  "bytes": partial.stat().st_size})
 
     for verb in ("GET", "HEAD", "POST", "PUT", "DELETE"):
-        name = "do_" + verb
-        setattr(Handler, name, protected(getattr(Handler, name), daemon.launcher_control))
+        method_name = "do_" + verb
+        setattr(Handler, method_name, protected(getattr(Handler, method_name), daemon.launcher_control))
     return Handler

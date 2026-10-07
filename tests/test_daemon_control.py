@@ -116,7 +116,7 @@ def test_cluster_or_unsigned_identity_cannot_replace_daemon(device):
     body = json.dumps({'instance': control.instance}).encode()
     for token in ('', 'mac:unrelated-cluster'):
         with pytest.raises(ServerError):
-            request_json(f'http://127.0.0.1:{port}{ROUTE}', method='POST', data=body, token=token)
+            request_json(f'http://127.0.0.1:{port}{ROUTE}', method='POST', payload=json.loads(body), token=token)
     assert not stopped.is_set()
 
 
@@ -228,3 +228,13 @@ def test_runtime_control_preserves_queued_jobs_even_when_otherwise_idle(tmp_path
         assert queued == [1] and not stopped.is_set() and not control.stopping
     finally:
         control.close()
+
+
+def test_control_record_refuses_unknown_version(device):
+    root, port, control, _busy, stopped, _active, _release = device
+    row = json.loads(control.path.read_text())
+    row['version'] = 2
+    control.path.write_text(json.dumps(row))
+    with pytest.raises(ControlError, match='invalid'):
+        request_replacement(root, port, {'launcher_control': control.instance}, 'a' * 40)
+    assert not stopped.is_set()

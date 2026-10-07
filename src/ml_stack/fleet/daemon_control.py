@@ -67,7 +67,7 @@ def _record(root: Path, port: int) -> dict:
             value = json.loads(stream.read(MAX_RECORD + 1))
         except (ValueError, UnicodeError) as exc:
             raise ControlError('Daemon launcher control record is invalid.') from exc
-    if not isinstance(value, dict) or value.get('port') != port:
+    if not isinstance(value, dict) or value.get('port') != port or value.get('version') != 1:
         raise ControlError('Daemon launcher control record is invalid.')
     return value
 
@@ -103,7 +103,7 @@ class Control:
         with writing(self.path) as temporary:
             if os.name == 'nt':
                 restrict(temporary)
-            temporary.write_text(json.dumps({'port': port, 'instance': self.instance,
+            temporary.write_text(json.dumps({'version': 1, 'port': port, 'instance': self.instance,
                                              'capability': self.capability}), encoding='utf-8')
 
     def route(self, handler) -> bool:
