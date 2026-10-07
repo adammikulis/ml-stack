@@ -1,4 +1,4 @@
-"""``ml-stack-fleet`` -- make this machine a peer in one command, and see what the fleet sees.
+"""``ml-stack-cluster`` -- make this machine a peer in one command, and see the devices in the cluster.
 
 ``join`` is the whole onboarding: the machine facts serving depends on (`ml_stack.setup.look`),
 a llama-server if there is none, a cluster passphrase, the daemon (started now, and at logon
@@ -291,7 +291,7 @@ def _enrol_via_daemon(port: int, passphrase: str, group: str, mode: str | None) 
                         f"{body.get('error', status)}")
 
 
-# -- what the fleet sees ---------------------------------------------------------------
+# -- the devices in the cluster ---------------------------------------------------------------
 def describe(beacon: Beacon, *, clusters: Iterable[str] = (),
              self_machine: str = "") -> dict[str, Any]:
     """One peer as a row: what it serves, its room, whether it is busy, its commit.
@@ -414,7 +414,7 @@ def table(rows: Sequence[dict[str, Any]]) -> str:
     """The listing, as text."""
     if not rows:
         return ("no peers answered.\n"
-                "  - is the daemon running there?  ml-stack-fleet join\n"
+                "  - is the daemon running there?  ml-stack-cluster join\n"
                 "  - same LAN, and the same passphrase?")
     lines = [f"{'NAME':<16} {'URL':<28} {'ROOM':<16} {'STATE':<12} {'COMMIT':<12} "
              f"{'UPDATES':<12} {'SPEECH':<12} SERVING"]
@@ -666,8 +666,8 @@ def cmd_join(args: argparse.Namespace) -> int:
         + (", starting at logon" if joined.persisted else ""))
     if joined.tracking:
         say(f"  following {joined.tracking}: it updates itself when nothing is running")
-    say("  ml-stack-fleet status   -- who is in the fleet, what each serves")
-    say("  ml-stack-fleet leave    -- undo this")
+    say("  ml-stack-cluster status   -- devices in the cluster, what each serves")
+    say("  ml-stack-cluster leave    -- undo this")
     return 0
 
 
@@ -685,7 +685,7 @@ def cmd_clusters(args: argparse.Namespace) -> int:
 def cmd_status(args: argparse.Namespace) -> int:
     if not memberships(args.cluster_key):
         warn(f"in no cluster (no key at {key_path(args.cluster_key)}); "
-             "run 'ml-stack-fleet join'")
+             "run 'ml-stack-cluster join'")
         return 1
     me = already_running(args.port)
     rows = peers(cluster_key_path=args.cluster_key, timeout_s=args.timeout,
@@ -697,7 +697,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     say(table(rows))
     if me is None:
         say(f"\nthis machine's daemon is not running on port {args.port}; "
-            "'ml-stack-fleet join' starts it")
+            "'ml-stack-cluster join' starts it")
     return 0 if rows else 1
 
 
@@ -714,7 +714,7 @@ def cmd_plan(args: argparse.Namespace) -> int:
 
     if not memberships(args.cluster_key):
         warn(f"in no cluster (no key at {key_path(args.cluster_key)}); "
-             "run 'ml-stack-fleet join'")
+             "run 'ml-stack-cluster join'")
         return 1
     me = already_running(args.port)
     rows = peers(cluster_key_path=args.cluster_key, timeout_s=args.timeout,
@@ -741,7 +741,7 @@ def cmd_plan(args: argparse.Namespace) -> int:
 def cmd_pause(args: argparse.Namespace) -> int:
     if not memberships(args.cluster_key):
         warn(f"in no cluster (no key at {key_path(args.cluster_key)}); "
-             "run 'ml-stack-fleet join'")
+             "run 'ml-stack-cluster join'")
         return 1
     resume = args.cmd == "resume"
     span = str(getattr(args, "span", "") or "")
@@ -771,8 +771,8 @@ def main(argv: list[str] | None = None) -> int:
     from .plan import PREFERENCES
 
     ap = argparse.ArgumentParser(
-        prog="ml-stack-fleet",
-        description="Make this machine a peer in one command, and see what the fleet sees.")
+        prog="ml-stack-cluster",
+        description="Make this machine a peer in one command, and see the devices in the cluster.")
     ap.add_argument("--cluster-key", default=None,
                     help="path to the cluster key (default: ~/.ml-stack/cluster.key)")
     ap.add_argument("--root", default=str(default_root()),
@@ -783,7 +783,7 @@ def main(argv: list[str] | None = None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     join_p = sub.add_parser(
-        "join", help="check this machine, start the daemon, announce, and list the fleet")
+        "join", help="check this machine, start the daemon, announce, and list cluster devices")
     join_p.add_argument("--name", default="",
                         help="how this machine identifies itself (default: the hostname)")
     join_p.add_argument("--persist", action="store_true",
@@ -822,7 +822,7 @@ def main(argv: list[str] | None = None) -> int:
                                          "slots, for a number of users at one context; "
                                          "the best measured models go to the most users")
     plan_p.add_argument("--users", type=int, required=True,
-                        help="how many conversations at once, across the fleet")
+                        help="how many conversations at once, across the cluster")
     plan_p.add_argument("--context", type=int, default=16384,
                         help="tokens each conversation gets (default: 16384)")
     plan_p.add_argument("--prefer", choices=sorted(PREFERENCES), default="quality",

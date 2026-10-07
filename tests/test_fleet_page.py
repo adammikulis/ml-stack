@@ -460,7 +460,7 @@ class TestTheSettingsView:
         for tab, ready in (("Chat", "#chat-none, #chat-askrow"),
                            ("Models", "#browser-results"),
                            ("Settings", "#settings-save"),
-                           ("Fleet", "#cluster-joined .row")):
+                           ("Cluster", "#cluster-joined .row")):
             page.click(f"nav.tabs a:has-text('{tab}')")
             page.wait_for_selector(ready)
             shown = page.locator("#root").inner_text()

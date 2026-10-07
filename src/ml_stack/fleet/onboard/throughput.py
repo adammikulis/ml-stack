@@ -4,7 +4,7 @@
 uses one over all its peers (below the floor for a whole window, the Hub is used instead) and each
 peer has one of its own (its rate is kept in the peer book and ranks it for the next pull).
 `Limiter` is the optional cap on a peer's bytes per second, the metered-connection / bandwidth
-setting (``ml-stack fleet peers limit``): requests are scheduled so that the average never
+setting (``ml-stack cluster peers limit``): requests are scheduled so that the average never
 exceeds it. Both take a clock so tests can move time.
 """
 

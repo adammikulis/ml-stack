@@ -39,7 +39,7 @@ signature was made by that key, in that namespace, over the SHA-256 or SHA-512 o
 signature, a signature from another key or namespace, and an asset that differs from what was signed are each refused
 and the download is deleted. The verifier is Ed25519 in plain Python; nothing else is installed.
 
-`ml-stack-fleet join --track BRANCH` fetches the branch and runs `git verify-commit FETCH_HEAD` with `RELEASE_KEY` as
+`ml-stack-cluster join --track BRANCH` fetches the branch and runs `git verify-commit FETCH_HEAD` with `RELEASE_KEY` as
 the only allowed signer; the checkout then fast-forwards to exactly that commit. A tip commit that is unsigned or
 signed by another key is not pulled. Commits on the branch are signed with the same key, loaded into ssh-agent by `scripts/release-key agent`, which
 prints the git settings to use:

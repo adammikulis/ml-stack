@@ -30,7 +30,7 @@ PURPOSE = "fleet-passphrase"
 HEADER = (
     "# ml-stack cluster recovery file",
     "# Anyone holding this file can run commands on every machine in the cluster.",
-    "# `ml-stack-fleet recovery import FILE` joins a machine with it; it does not reveal the passphrase.",
+    "# `ml-stack-cluster recovery import FILE` joins a machine with it; it does not reveal the passphrase.",
 )
 
 

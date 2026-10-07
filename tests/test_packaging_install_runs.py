@@ -29,7 +29,7 @@ from ml_stack.installed import STANDARD, extras
 REPO = Path(__file__).resolve().parent.parent
 SH = REPO / "packaging" / "install.sh"
 SCRIPTS = ("ml-stack", "ml-stack-serve", "ml-stack-models", "ml-stack-setup",
-           "ml-stack-doctor", "ml-stack-fleet", "ml-stack-traind")
+           "ml-stack-doctor", "ml-stack-cluster", "ml-stack-traind")
 
 pytestmark = pytest.mark.slow
 

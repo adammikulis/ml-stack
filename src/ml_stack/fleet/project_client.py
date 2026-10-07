@@ -43,7 +43,7 @@ def register_local(root, key, project_id, port):
     except ServerUnreachable:
         return
     except ServerError as error:
-        raise ProjectError("local Fleet project registration failed") from error
+        raise ProjectError("local project registration failed") from error
 
 
 def read(peer: Peer, path: str, limit: int, *, deadline: float | None = None) -> bytes:

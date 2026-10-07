@@ -91,7 +91,7 @@ build option creates local install artifacts; it does not publish or commit eith
 
 Past the install, every step is an ml-stack command rather than shell -- `ml-stack-setup`
 (what this machine can do), `ml-stack-serve build` (llama.cpp), `ml-stack-models fetch`
-(into the one cache, every download checked against its sha256), `ml-stack-fleet join
+(into the one cache, every download checked against its sha256), `ml-stack-cluster join
 --persist`, and `ml-stack-doctor` at the end, whose lines it prints.
 
 **Or download it yourself** from the [latest release](https://github.com/adammikulis/ml-stack/releases/latest):

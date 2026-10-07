@@ -43,8 +43,8 @@ no passphrase. A job a peer submits is limited to an allowlist of ml-stack comma
 | Discovery beacons, UDP 8771, multicast `239.255.77.70`, TTL 1 | sent once a cluster is joined | the LAN segment |
 | llama-server and other model servers | `127.0.0.1`, a random port | this machine; the daemon's `/infer` passes signed requests on to a fixed set of model-server paths |
 | `ml-stack-graph` page | `127.0.0.1` | this machine |
-| Pairing listener, TCP 8772, announcements UDP 8773 | off; only while `ml-stack fleet listen` runs | anyone on the LAN can send a request; nothing is given until the owner accepts and the code is typed. TLS only; plain HTTP is refused. `docs/onboarding.md` |
-| Bootstrap offer, an HTTPS port chosen at the time | off; only while `ml-stack fleet bootstrap` runs, for ten minutes | whoever has the unguessable address; program files only |
+| Pairing listener, TCP 8772, announcements UDP 8773 | off; only while `ml-stack cluster listen` runs | anyone on the LAN can send a request; nothing is given until the owner accepts and the code is typed. TLS only; plain HTTP is refused. `docs/onboarding.md` |
+| Bootstrap offer, an HTTPS port chosen at the time | off; only while `ml-stack cluster bootstrap` runs, for ten minutes | whoever has the unguessable address; program files only |
 
 A beacon carries the machine's name, port, device report and its TLS certificate, sealed with
 AES-256-GCM under a key derived from the cluster key; the kind, a timestamp and the asker's nonce
@@ -305,7 +305,7 @@ Hub (`docs/model-discovery.md`, "Peers first"): the digest a file must have is t
 never one a peer states; peers are reached only on private, loopback, link-local or tailnet
 addresses over pinned TLS; the serving device applies the sharing level and withholds a quarantined
 copy; a peer whose bytes fail a digest is dropped and reported to sentinel. Off with `--no-peers`,
-`ML_STACK_NO_PEERS=1` or `ml-stack fleet peers off`. Pairing fills the peer book: each side's
+`ML_STACK_NO_PEERS=1` or `ml-stack cluster peers off`. Pairing fills the peer book: each side's
 share address, pinned certificate, signing key and request key arrive in the grant and in an
 offer sealed under the exchange (a bad tag, or a certificate other than the one the exchange
 bound, stores nothing); revoking removes the rows. `fleet share --models` serves only paths that

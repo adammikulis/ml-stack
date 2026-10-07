@@ -263,7 +263,7 @@ class RotationAnnounced(ManifestError):
 
     def __init__(self, new_public: bytes) -> None:
         super().__init__(f"the signing key was rotated to {key_fingerprint(new_public)}; a "
-                         "person must accept it (ml-stack fleet signing accept)")
+                         "person must accept it (ml-stack cluster signing accept)")
         self.new_public = new_public
 
 

@@ -707,7 +707,7 @@ tests = ["tests/test_roles.py", "tests/test_redteam_chat.py"]
 note = "roles, rules and the taint rail are attacked; hostile --resume session files are tested only for shape in tests/test_chat.py"
 
 [[group]]
-match = ["cli:ml-stack-traind", "cli:ml-stack-fleet", "cli:ml-stack-peers"]
+match = ["cli:ml-stack-traind", "cli:ml-stack-cluster", "cli:ml-stack-peers"]
 status = "partial"
 tests = ["tests/test_redteam_fleet.py", "tests/test_peer_pairing.py"]
 note = "the daemon's handler and the pairing exchange are attacked; the join and peer-book argument parsing are not"

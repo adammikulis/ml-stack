@@ -15,7 +15,7 @@
         <select id="model" aria-label="Selected model" hidden></select>
       </div>
       <div class="hint" id="chat-none" hidden>
-        No model is running yet. <a href="#models">Choose a model to serve</a>, or use one running on your fleet.
+        No model is running yet. <a href="#models">Choose a model to serve</a>, or use one running on your cluster.
       </div>
       <div class="chat-coding-fields" data-coding hidden>
         <label for="chat-project">Project directory</label><input id="chat-project" placeholder="/path/to/project">
@@ -146,7 +146,7 @@
     welcome() {
       this.list.replaceChildren(el("div", { class: "chat-welcome" },
         el("strong", {}, "What would you like to explore?"),
-        "Chat with a model on this machine or anywhere in your fleet."));
+        "Chat with a model on this machine or anywhere in your cluster."));
     }
 
     renderBody(node, text) {

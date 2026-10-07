@@ -8,7 +8,7 @@ import-time registration, which the hard rules forbid; but only when a pull is a
 are on and the book has a row. It owns trust: the digest comes from `Wanted`, never from a peer.
 
 Off for one pull with ``peers=False`` (``--no-peers``), for the shell with ``ML_STACK_NO_PEERS=1``,
-and for the machine with ``ml-stack fleet peers off``.
+and for the machine with ``ml-stack cluster peers off``.
 """
 
 from __future__ import annotations

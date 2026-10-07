@@ -713,7 +713,7 @@ parent-owned file or source-area claim does not transfer with it. The guard rech
 active assignment on later edits, so an expired task or released allocation cannot keep
 editing through a previously transferred claim.
 
-The Fleet **Board → Local agents** panel uses the maintained person-authorized agent launcher.
+The **Board → Local agents** panel uses the maintained person-authorized agent launcher.
 It restores saved model paths, project folders, permissions and harness settings; **Use settings**
 selects another saved worker. Context length, harness and reasoning effort are under collapsed
 **Advanced options**. Start binds the existing authenticated worker identity to the enrolled
@@ -725,11 +725,11 @@ The local UI can hand a signed-in browser launcher a short-lived, single-use ses
 
 ### Explicit shared coordinator across devices
 
-An explicitly configured coordinator shares one existing workspace. Joining a Fleet cluster alone does not share
+An explicitly configured coordinator shares one existing workspace. Joining a cluster alone does not share
 its Board, tasks or claims. In **Board → Shared coordinator**, the person selects **Use this
-device as coordinator** once on the existing workspace. This uses the Fleet daemon's
+device as coordinator** once on the existing workspace. This uses the cluster daemon's
 normal authenticated peer server and TLS, with one stable workspace ID. Other devices
-must join the same Fleet cluster through the maintained pairing/setup flow.
+must join the same cluster through the maintained pairing/setup flow.
 
 The person or an authorized parent creates a normal short-lived workspace invitation.
 Give its existing paste code directly to the agent being enrolled. On an enrolled remote
@@ -741,7 +741,7 @@ ml-stack-workspace whoami --agent windows-codex
 ml-stack-workspace inbox --agent windows-codex
 ```
 
-`--coordinator` discovers and pins that Fleet peer before redeeming the invitation there;
+`--coordinator` discovers and pins that cluster peer before redeeming the invitation there;
 an unavailable or ambiguous peer never causes local redemption. The invitation grants
 its existing bounded role/project permissions. Only the newly minted agent token is
 returned over encrypted remote transport and saved in that device's private token file.
@@ -772,7 +772,7 @@ when its actual authenticated handshake succeeds.
 
 ### Automatic project workspace enrollment
 
-Development is the default Fleet mode. Running ml-stack on nearby devices discovers and
+Development is the default cluster mode. Running ml-stack on nearby devices discovers and
 admits them over pinned TLS. From a Git checkout, the first `ml-stack-workspace` command
 registers the project and discovers its shared Board authority. Matching checkouts connect
 the calling agents' project-scoped identities without a pairing code or invitation.
@@ -788,17 +788,17 @@ device keeps its own project checkout and credential.
 For a generic invitation from your own terminal, run `ml-stack-workspace connect --code-only --no-project`.
 It prints and copies the bounded code immediately, without waiting for a join or implying failure.
 A hosted workspace includes its authenticated advertised coordinator in the paste; the receiving
-computer must first enroll in the same Fleet cluster through person-approved pairing. Agent-issued
+computer must first enroll in the same cluster through person-approved pairing. Agent-issued
 invites still follow the person's policy: the CLI prints the approval request ID and timeout before
 waiting, so the person can approve or deny it in the app's requests view.
 
 A cross-device code belongs to a coordinator, not to whichever local workspace receives it.
 On the coordinator, the person first runs `ml-stack-workspace coordinator host` (or selects
-Host in the UI). Open person-approved network enrollment with `ml-stack-fleet listen --for 10m`;
-on the receiving computer run `ml-stack-fleet pair --host MAC_LAN_ADDRESS --port 8772`, then
+Host in the UI). Open person-approved network enrollment with `ml-stack-cluster listen --for 10m`;
+on the receiving computer run `ml-stack-cluster pair --host MAC_LAN_ADDRESS --port 8772`, then
 approve the actual device and compare the pairing code. Existing enrolled devices skip pairing.
 Now run `ml-stack-workspace connect --remote --code-only --no-project` on the coordinator.
-The complete paste binds the advertised Fleet coordinator and its workspace ID. Paste the whole
+The complete paste binds the advertised cluster coordinator and its workspace ID. Paste the whole
 join command: its code alone cannot identify the correct authority. `--remote` refuses to create
 an invitation before hosting is active, and a workspace-bound join never falls back to a local registry.
 
@@ -810,7 +810,7 @@ From your project checkout, start a worker and give it a task on a discovered de
 ml-stack-workspace remote-agent --device DEVICE_NAME --task "Read the project and report what needs doing"
 ```
 
-Both devices run Dev Fleet services on the same LAN. The target needs a registered local
+Both devices run Dev cluster services on the same LAN. The target needs a registered local
 checkout of the same Git project and a downloaded Qwen model. The command discovers the
 canonical project Board, uses your device's own agent identity, and selects a downloaded
 Qwen that fits the target. With one remote device, `--device` can be omitted. No invitation

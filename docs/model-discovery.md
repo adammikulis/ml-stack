@@ -147,7 +147,7 @@ pair`), each keeps the other's share address (the address the pairing used and t
 `--share-port`, default 8773), pinned certificate, owner signing key and request key, learned from
 the grant and from an offer sealed under the exchange, so it is as authentic as the pairing; a
 device started with `--no-share` has no share address and no row is made for it. Revoking a
-device removes its rows. `ml-stack fleet peers add NAME --url https://host:port --certificate ...
+device removes its rows. `ml-stack cluster peers add NAME --url https://host:port --certificate ...
 --signing-key ... [--device-secret ...]` stays as the manual path for a device paired some other
 way, with `remove`, `on` and `off`. A row that came from pairing names its device, and its route
 is chosen when the pull starts: the address on this network, else its tailnet address
@@ -170,7 +170,7 @@ and a critical `onboard.peer.bad_copy` event goes to the bus and to sentinel; th
 **Who may have what** is decided by the device that serves the file, not by the one asking:
 `never` (the licence forbids copies) is refused, `owner` (gated or licensed models) goes only to
 a device you marked as yours and only after you recorded accepting that licence on the serving
-device (who, when, which licence; keep it with `ml-stack fleet share`), `open` goes to any
+device (who, when, which licence; keep it with `ml-stack cluster share`), `open` goes to any
 paired device. A copy that sentinel holds in quarantine on the serving device is not served.
 Credentials such as `HF_TOKEN` never leave a device. A peer that has no copy, refuses or is
 unreachable costs a few seconds at most (each answer has 4 s) and the pull continues from the Hub.
@@ -178,13 +178,13 @@ unreachable costs a few seconds at most (each answer has 4 s) and the pull conti
 **Speed.** Each peer's rate is measured (bytes completed per second, kept in the peer book and
 blended with earlier transfers); peers are ranked by it, unmeasured ones first so that they get
 measured. A peer gets at most two requests at a time, and an optional bandwidth cap:
-`ml-stack fleet peers limit [NAME] [--rate 20MiB/s] [--streams N] [--metered on|off]` (no NAME
+`ml-stack cluster peers limit [NAME] [--rate 20MiB/s] [--streams N] [--metered on|off]` (no NAME
 means every peer; `--rate off` and `--streams 0` remove a limit; `--metered on` means the link to
 that device costs per byte, so it is not asked and the Hub is used). When the transfer as a whole
 stays under 2 MiB/s for a 15 s window it is given up, the partial bytes are kept for a resume and
 the Hub is used.
 
-**Serving the model store.** `ml-stack fleet share --models [--models-dir DIR ...]` serves the
+**Serving the model store.** `ml-stack cluster share --models [--models-dir DIR ...]` serves the
 GGUF and safetensors files `ml-stack-models list` shows (or only those under the `--models-dir`
 folders), by file name with the repository, size and sha256, under the sharing levels above.
 Nothing outside the model roots is served: each path is resolved at every request and a symlink
@@ -201,7 +201,7 @@ accepted it and when, as the serving device reported it). `ml-stack-models list`
 FROM column and in `--json` as `from_peer`.
 
 **Turning it off.** `ml-stack-models pull --no-peers` or `fetch --no-peers` (or
-`pull(..., peers=False)`) for one pull; `ML_STACK_NO_PEERS=1` for a shell; `ml-stack fleet peers off`
+`pull(..., peers=False)`) for one pull; `ML_STACK_NO_PEERS=1` for a shell; `ml-stack cluster peers off`
 for the machine. Nothing is contacted when it is off.
 
 `search(query, Filters(max_bytes, quant, owner, gated, limit, files))` returns `Repo` rows with

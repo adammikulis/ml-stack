@@ -292,7 +292,7 @@ def _discovered(peers: Sequence[str]) -> dict[str, Any]:
         clients = named
     if not clients:
         raise Refused("error: no peer answered discovery; is another machine running "
-                      "'ml-stack-fleet join'?")
+                      "'ml-stack-cluster join'?")
     return clients
 
 

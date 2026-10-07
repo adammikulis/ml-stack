@@ -40,7 +40,7 @@ fleet-nav { display: contents; }
       ["Data", "data", "Files & datasets"], ["Projects & agents", "projects", "Projects & worker setup"]]],
     ["Develop", [["Training", "training", "Recipes & runs"], ["Gym", "gym", "Environments & policies"],
       ["Benchmarks", "benchmarks", "Measure & compare"], ["Capacity", "fit", "Memory & throughput"]]],
-    ["Manage", [["Fleet", "cluster", "Machines & clusters"], ["Tools", "tools", "Explore capabilities"],
+    ["Manage", [["Cluster", "cluster", "Devices & clusters"], ["Tools", "tools", "Explore capabilities"],
       ["Tasks", "tasks", "Claims, evidence & reviews"], ["History", "history", "Agent actions & details"], ["Settings", "settings", "Preferences & setup"]]],
   ];
   const here = ([, name]) => !!document.querySelector(`${name}-view`);
@@ -98,7 +98,7 @@ fleet-nav { display: contents; }
     }
 
     paint(route) {
-      this.group.textContent = M.group || (M.inCluster ? "Connected fleet" : "Local workspace");
+      this.group.textContent = M.group || (M.inCluster ? "Connected cluster" : "Local workspace");
       const active = GROUPS.flatMap(([label, entries]) => entries.map(entry => [label, entry])).find(([, entry]) => entry[1] === route);
       if (active) { this.heading.textContent = active[1][0]; this.section.textContent = active[0]; }
       const query = this.search.value.trim().toLowerCase();

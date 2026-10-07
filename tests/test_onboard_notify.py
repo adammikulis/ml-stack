@@ -131,8 +131,8 @@ def test_console_prints_the_cleaned_text_and_leaves_the_answer_to_the_commands()
     out = []
     c = notify.Console(out.append)
     assert c.ask("a\nb", "\x1b[31mred") == "unavailable"
-    assert out == ["a b: [31mred Answer with: ml-stack fleet accept ID --mine|--other, or "
-                   "ml-stack fleet decline ID"]
+    assert out == ["a b: [31mred Answer with: ml-stack cluster accept ID --mine|--other, or "
+                   "ml-stack cluster decline ID"]
 
 
 def test_the_question_cleans_text_again_even_for_a_request_built_by_hand():

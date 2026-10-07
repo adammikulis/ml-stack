@@ -71,14 +71,14 @@ def last_screen(name: str, *, track: str = "", port: int = HTTP_PORT) -> list[st
     if already_running(port) is None:
         return [*lines, "",
                 f"  next        ml-stack                        -- starts it and opens {url}",
-                "              ml-stack-fleet join --persist   -- joins the fleet and starts "
+                "              ml-stack-cluster join --persist   -- joins the cluster and starts "
                 "it at every login"]
     return [*lines,
             f"  open        {url}",
             f"  updates     {'follows ' + track if track else 'releases'}, "
             "whenever nothing is running here",
             "",
-            "  next        ml-stack-fleet status    -- who else is in the fleet"]
+            "  next        ml-stack-cluster status    -- other devices in the cluster"]
 
 
 def _open_when_ready(port: int, browser: bool, stopped: threading.Event) -> None:

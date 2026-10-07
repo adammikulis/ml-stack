@@ -1,4 +1,4 @@
-"""``ml-stack fleet devices``: each paired device and the way it is reached (lan, tailnet or
+"""``ml-stack cluster devices``: each paired device and the way it is reached (lan, tailnet or
 unreachable), and whether a Tailscale client was found. ``--learn`` stores the tailnet address
 of a device whose certificate answers there."""
 

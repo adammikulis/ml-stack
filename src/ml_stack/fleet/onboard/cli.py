@@ -1,4 +1,4 @@
-"""``ml-stack fleet nearby | pair | listen | requests | accept | decline | revoke | bootstrap``.
+"""``ml-stack cluster nearby | pair | listen | requests | accept | decline | revoke | bootstrap``.
 
 Every command takes ``--json`` and prints one JSON document; nothing is scraped from text.
 State lives under ``--state`` (default ``<state root>/onboard``): the received requests, the
@@ -281,7 +281,7 @@ def cmd_listen(args: argparse.Namespace) -> int:
                      "gives_cluster_key": bool(held) and not args.no_cluster},
               f"pairing is open on port {server.port} for {int(span)} s "
               f"(certificate {short(ident.fingerprint)}); answer requests with "
-              "'ml-stack fleet accept ID'")
+              "'ml-stack cluster accept ID'")
         try:
             with contextlib.suppress(KeyboardInterrupt):
                 time.sleep(span)
