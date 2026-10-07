@@ -26,6 +26,8 @@ knowledge-view .graph-map { width:100%; height:300px; background:var(--bg-sunken
 knowledge-view .graph-map text { fill:var(--text); font:12px system-ui; pointer-events:none; }
 knowledge-view .graph-map line { stroke:var(--muted); stroke-width:2; }
 knowledge-view .graph-map circle { fill:var(--poolside-yellow); stroke:var(--poolside-navy); stroke-width:2; }
+knowledge-view .graph-map .graph-node-caption { fill:var(--poolside-yellow); }
+knowledge-view .graph-map .graph-node-label { fill:var(--poolside-yellow-ink,#000); }
 knowledge-view .graph-map g { cursor:pointer; }
 knowledge-view .graph-map g:focus circle { stroke-width:5; }
 knowledge-view .relation-row { display:flex; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid var(--line); flex-wrap:wrap; font-size:12px; }
@@ -246,6 +248,10 @@ knowledge-view #counts { font-size:12px; margin:12px 0 0; }
       const ns = 'http://www.w3.org/2000/svg';
       const group = document.createElementNS(ns, 'g');
       const circle = document.createElementNS(ns, 'circle'), text = document.createElementNS(ns, 'text');
+      const caption = document.createElementNS(ns, 'rect');
+      caption.setAttribute('class', 'graph-node-caption');
+      Object.entries({x:x-88, y:y+19, width:176, height:22, rx:5}).forEach(([key, value]) => caption.setAttribute(key, value));
+      text.setAttribute('class', 'graph-node-label');
       group.setAttribute('tabindex', '0'); group.setAttribute('role', 'button');
       group.setAttribute('aria-label', 'Inspect ' + (label || id));
       group.addEventListener('click', () => this.inspect(id));
@@ -255,7 +261,7 @@ knowledge-view #counts { font-size:12px; margin:12px 0 0; }
       Object.entries({cx:x, cy:y, r:16}).forEach(([key, value]) => circle.setAttribute(key, value));
       text.setAttribute('x', x); text.setAttribute('y', y + 32); text.setAttribute('text-anchor', 'middle');
       text.textContent = (label || id).slice(0, 24);
-      group.append(circle, text); svg.append(group);
+      group.append(circle, caption, text); svg.append(group);
     }
   }
   customElements.define('knowledge-view', KnowledgeView);
