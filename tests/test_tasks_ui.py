@@ -3,6 +3,7 @@
 import pytest
 from playwright.sync_api import expect
 from test_fleet_ui import Serving
+
 from ml_stack.workspace import task_summary
 
 pytestmark = pytest.mark.slow

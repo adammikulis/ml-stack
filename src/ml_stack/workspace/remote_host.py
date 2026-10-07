@@ -17,8 +17,8 @@ from ml_stack.workspace import (
     onboard,
     remote_tasks,
     remote_workers,
-    tokens,
     task_routes,
+    tokens,
 )
 from ml_stack.workspace.boards import ANNOUNCE
 from ml_stack.workspace.chain import held
@@ -83,7 +83,7 @@ class WorkspaceHost:
                                   prefix=f"/ui/projects/{project_id}/board/")
 
     def person_tasks(self, request, project_id: str, *, project: dict) -> bool:
-        """Dispatch the authenticated person’s canonical project task request."""
+        """Dispatch canonical project task requests from authenticated people."""
         return task_routes.route(request, workspace=self.workspace(project_id),
                                  prefix=request.path, project=project)
 

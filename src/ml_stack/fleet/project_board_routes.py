@@ -3,7 +3,6 @@
 import re
 import shlex
 
-
 from .discovery import memberships
 from .projects import lan_host
 

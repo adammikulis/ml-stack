@@ -104,17 +104,7 @@ def test_settings_failure_is_visible_and_only_selected_libraries_install(usabili
     assert not errors
 
 
-def test_four_workspaces_context_pages_and_theme_navigation(usability_page):
-    from playwright.sync_api import expect
-    served, page, errors = usability_page
-    page.goto(f'http://127.0.0.1:{served.port}/ui/')
-    expect(page.locator('#app')).to_have_attribute('data-workspace', 'conversations')
-    assert page.locator('fleet-nav header').count() == 0
-    assert page.locator('#nav-title, #nav-section, #nav-group').count() == 0
-    assert page.locator('#workspace').bounding_box()['y'] == 0
-    primary = page.get_by_role('navigation', name='Main navigation')
-    expect(primary.locator('a')).to_have_count(4)
-    assert page.get_by_role('searchbox', name='Find a page').count() == 0
+def _assert_workspace_pages(page, primary, expect):
     headings = {'Models': ('models-view', 'Models'), 'Fine-tune': ('training-view', 'Fine-tuning'),
                 'Worlds': ('gym-view', 'Reinforcement learning'), 'Evaluate': ('benchmarks-view', 'Benchmarks'),
                 'Data': ('data-view', 'Datasets'), 'Projects': ('projects-view', 'Projects'),
@@ -135,6 +125,20 @@ def test_four_workspaces_context_pages_and_theme_navigation(usability_page):
             if title == 'Capacity':
                 expect(page.locator('fit-view').get_by_role('heading', level=1)).to_have_count(1)
         assert primary.evaluate('(nav)=>nav.scrollHeight <= nav.clientHeight')
+
+
+def test_four_workspaces_context_pages_and_theme_navigation(usability_page):
+    from playwright.sync_api import expect
+    served, page, errors = usability_page
+    page.goto(f'http://127.0.0.1:{served.port}/ui/')
+    expect(page.locator('#app')).to_have_attribute('data-workspace', 'conversations')
+    assert page.locator('fleet-nav header').count() == 0
+    assert page.locator('#nav-title, #nav-section, #nav-group').count() == 0
+    assert page.locator('#workspace').bounding_box()['y'] == 0
+    primary = page.get_by_role('navigation', name='Main navigation')
+    expect(primary.locator('a')).to_have_count(4)
+    assert page.get_by_role('searchbox', name='Find a page').count() == 0
+    _assert_workspace_pages(page, primary, expect)
     page.get_by_role('link', name='Settings', exact=True).click()
     expect(page.locator('#app')).to_have_attribute('data-workspace', 'settings')
     assert page.locator('#workspace').bounding_box()['y'] == 0
