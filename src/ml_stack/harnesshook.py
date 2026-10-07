@@ -19,8 +19,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, Any
 
+from ml_stack import hook_bootstrap, hook_diagnostics
+
+if __name__ == "__main__":
+    sys.excepthook = hook_bootstrap.block
+    hook_bootstrap.arm(next(iter(sys.argv[1:2]), "pre"))
+    hook_bootstrap.metadata({})
+    hook_bootstrap.stage("imports")
+
 from ml_stack import harness_claims, requests
-from ml_stack.guard.secrets import env_secrets, redact
 from ml_stack.harnesspolicy import (
     Decision,
     _shell_line,
@@ -29,7 +36,7 @@ from ml_stack.harnesspolicy import (
     workspace_authority,
 )
 from ml_stack.keystore import ENV_NONINTERACTIVE
-from ml_stack.workspace import harness_remote, tokens, worktree_lifecycle
+from ml_stack.workspace import harness_remote, notification_reader, tokens, worktree_lifecycle
 from ml_stack.workspace.identity import Denied
 from ml_stack.workspace.service import Workspace
 
@@ -49,8 +56,7 @@ def _answer(event: str, action: str, reason: str) -> dict[str, Any]:
 
 def _diagnostic(error: BaseException) -> str:
     """Return a bounded credential-redacted failure reason."""
-    text, _ = redact(str(error), env_secrets(os.environ))
-    return f"{type(error).__name__}: {' '.join(text.split())[:1000]}"
+    return hook_diagnostics.reason(error)
 
 
 def _summary(args: object) -> str:
@@ -80,6 +86,7 @@ class Rail:
     roots: Sequence[str] = ()
     protected: Sequence[str] = ()
     wait_s: float = WAIT_S
+    session_id: str = ""
 
 
 def pre(payload: dict[str, Any], rail: Rail, inbox: requests.Inbox | None = None) -> dict[str, Any]:
@@ -95,9 +102,9 @@ def pre(payload: dict[str, Any], rail: Rail, inbox: requests.Inbox | None = None
                     or workspace_authority(_shell_line(name, inputs), label)
                     or decide(role, name, inputs, roots=roots, protected=protected))
     except Denied as error:
-        decision = Decision('deny', 'destructive', _diagnostic(error))
+        decision = Decision('deny', 'destructive', hook_diagnostics.record(error, 'pre', 'classification', metadata=hook_bootstrap.timings()))
     except FAILURES as error:
-        decision = Decision("deny", "unsure", f"the call could not be classified: {_diagnostic(error)}")
+        decision = Decision("deny", "unsure", f"the call could not be classified: {hook_diagnostics.record(error, 'pre', 'classification', metadata=hook_bootstrap.timings())}")
     if decision.action == "allow":
         return _owned_answer(payload, rail, event, f"ml-stack: {decision.label}")
     if decision.action == "deny":
@@ -114,45 +121,58 @@ def _owned_answer(payload, rail, event, reason):
                                str(payload.get('cwd') or (rail.roots[0] if rail.roots else Path.cwd())),
                                rail.label, rail.roots)
     except FAILURES as error:
-        return _answer(event, 'deny', f'ml-stack: ownership refused: {_diagnostic(error)}')
+        return _answer(event, 'deny', f"ml-stack: ownership refused: {hook_diagnostics.record(error, 'pre', 'claim', metadata=hook_bootstrap.timings())}")
     return _answer(event, 'allow', reason)
 
 
-def nudge(label: str) -> str:
-    """What ``ml-stack-workspace nudge --agent LABEL`` prints, or "" when it prints nothing or
-    cannot run."""
+def nudge(label: str, rail: Rail | None = None, *, canonical=None) -> str:
+    """Return workspace context or a redacted notification failure reference."""
     try:
-        done = subprocess.run(["ml-stack-workspace", "nudge", "--agent", label], capture_output=True,
-                              text=True, timeout=NUDGE_S, check=False, stdin=subprocess.DEVNULL)
-    except (OSError, subprocess.SubprocessError) as error:
-        sys.stderr.write(f"workspace nudge unavailable: {_diagnostic(error)}\n")
-        return ""
+        if canonical is not None:
+            return notification_reader.read(label, Path(rail.roots[0]), rail.session_id,
+                                            canonical=canonical)[:NUDGE_MOST]
+        done = subprocess.run([sys.executable, "-m", notification_reader.__name__, label,
+                               str(rail.roots[0] if rail and rail.roots else Path.cwd()),
+                               rail.session_id if rail else ""], capture_output=True,
+                              text=True, timeout=min(NUDGE_S, hook_bootstrap.remaining()),
+                              check=False, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError, Denied, ValueError, RuntimeError) as error:
+        warning = f"workspace nudge unavailable: {hook_diagnostics.record(error, 'post', 'nudge', metadata=hook_bootstrap.timings())}"
+        sys.stderr.write(warning + "\n")
+        return warning
     if done.returncode != 0:
         error = RuntimeError(done.stderr.strip() or f"workspace nudge exited {done.returncode}")
-        sys.stderr.write(f"workspace nudge unavailable: {_diagnostic(error)}\n")
-        return ""
+        warning = f"workspace nudge unavailable: {hook_diagnostics.record(error, 'post', 'nudge', metadata=hook_bootstrap.timings())}"
+        sys.stderr.write(warning + "\n")
+        return warning
     return done.stdout.strip()[:NUDGE_MOST]
 
 
 def post(label: str, rail: Rail | None = None) -> dict[str, Any]:
     """The PostToolUse answer: the nudge as context, or nothing."""
     warning = ""
+    canonical = None
     try:
         if rail is not None and rail.roots:
+            hook_bootstrap.stage("checkpoint-authentication")
             canonical = harness_remote.context(label, rail.roots[0], rail.roots, require_claim=False)
             if canonical:
                 remote, who = canonical
+                hook_bootstrap.stage("checkpoint-write")
                 worktree_lifecycle.checkpoint(remote.base, who.id)
             else:
                 ws = Workspace()
                 who = ws.auth(tokens.load(ws.base, label))
                 if who.id != label:
                     raise Denied('checkpoint requires the launcher-bound identity')
+                hook_bootstrap.stage("checkpoint-write")
                 worktree_lifecycle.checkpoint(ws.base, who.id)
     except FAILURES as error:
-        warning = f"workspace checkpoint unavailable: {_diagnostic(error)}"
+        warning = f"workspace checkpoint unavailable: {hook_diagnostics.record(error, 'post', 'checkpoint', metadata=hook_bootstrap.timings())}"
         sys.stderr.write(warning + "\n")
-    text = warning or nudge(label)
+    hook_bootstrap.stage("nudge")
+    notice = nudge(label, rail, canonical=canonical) if canonical is not None else nudge(label, rail)
+    text = "\n".join(part for part in (warning, notice) if part)
     if not text:
         return {}
     return {"hookSpecificOutput": {"hookEventName": HOOK_EVENTS["post"],
@@ -172,7 +192,7 @@ def stop(rail: Rail) -> dict[str, Any]:
             raise Denied('completion requires the launcher-bound identity')
         worktree_lifecycle.require_clean(ws.base, who.id)
     except (Denied, OSError, RuntimeError) as error:
-        return {"decision": "block", "reason": _diagnostic(error)}
+        return {"decision": "block", "reason": hook_diagnostics.record(error, "stop", "completion", metadata=hook_bootstrap.timings())}
     return {}
 
 
@@ -193,29 +213,32 @@ def run(argv: Sequence[str] | None = None, stdin: IO[str] | None = None,
     """Read one hook event and write the answer; a failure exits 2, which blocks the call."""
     os.environ[ENV_NONINTERACTIVE] = "1"
     words = list(sys.argv[1:] if argv is None else argv)
-    notification = bool(words and words[0] == "post")
+    stage = "options"
+    hook_bootstrap.stage(stage)
     try:
         event, opts = _options(words)
+        stage = "payload"
+        hook_bootstrap.stage(stage)
         payload = json.loads((stdin or sys.stdin).read() or "{}")
         payload = payload if isinstance(payload, dict) else {}
+        hook_bootstrap.metadata(payload)
         label = opts.get("label", ["harness"])[-1]
         rail = Rail(opts.get("role", ["read-only"])[-1], label, opts.get("root") or [str(payload.get("cwd", ""))],
-                    opts.get("protect", []), float(opts.get("wait", [WAIT_S])[-1]))
+                    opts.get("protect", []), float(opts.get("wait", [WAIT_S])[-1]),
+                    str(payload.get("session_id", "")) if event == "post" else "")
+        stage = event
+        hook_bootstrap.stage(stage)
         out = pre(payload, rail) if event == "pre" else stop(rail) if event == "stop" else post(label, rail)
     except FAILURES as exc:
-        outcome = "notification unavailable" if notification else "call blocked"
-        sys.stderr.write(f"ml-stack hook failed, {outcome}: {_diagnostic(exc)}\n")
-        return 0 if notification else 2
+        return hook_bootstrap.failure(exc, words[0] if words else "pre", stage, stdout)
     if out:
         (stdout or sys.stdout).write(json.dumps(out, sort_keys=True) + "\n")
+    hook_bootstrap.finish()
     return 0
 
 
 def _block(kind: type[BaseException], value: BaseException, _trace: object) -> None:
-    notification = sys.argv[1:2] == ["post"]
-    outcome = "notification unavailable" if notification else "call blocked"
-    sys.stderr.write(f"ml-stack hook failed, {outcome}: {_diagnostic(value)}\n")
-    os._exit(0 if notification else 2)
+    hook_bootstrap.block(kind, value, _trace)
 
 
 if __name__ == "__main__":  # pragma: no cover

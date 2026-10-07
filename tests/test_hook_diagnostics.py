@@ -30,7 +30,8 @@ def test_run_reports_authorization_category_without_private_values(monkeypatch, 
     diagnostic = capsys.readouterr().err
     assert expected in diagnostic
     assert "secret-token-value" not in diagnostic
-    assert output.getvalue() == ""
+    assert "diagnostic=" in output.getvalue()
+    assert "secret-token-value" not in output.getvalue()
 
 
 def test_unexpected_errors_do_not_expose_exception_contents(monkeypatch, capsys):
@@ -42,7 +43,8 @@ def test_unexpected_errors_do_not_expose_exception_contents(monkeypatch, capsys)
     monkeypatch.setattr(harnesshook, "post", crashed)
     assert harnesshook.run(["post"], io.StringIO("{}"), io.StringIO()) == 0
     diagnostic = capsys.readouterr().err
-    assert "ml-stack hook failed, notification unavailable: ValueError:" in diagnostic
+    assert "ml-stack hook failed, notification unavailable:" in diagnostic
+    assert "ValueError:" in diagnostic
     assert "secret-token-value" not in diagnostic
 
 

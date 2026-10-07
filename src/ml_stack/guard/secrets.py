@@ -3,39 +3,12 @@
 from __future__ import annotations
 
 import os
-import re
 from collections.abc import Mapping
 
 from ml_stack.interventions import Base, Call, Context, Deny, Proceed, Rewrite, Verdict
-from ml_stack.redact.secrets import PATTERNS
+from ml_stack.redact.secrets import env_secrets, redact
 
 __all__ = ["SecretRail", "redact", "secrets_in"]
-
-MARK = "[REDACTED:{}]"
-
-ENV_NAME = re.compile(r"(?i)(?:key|secret|token|passw|credential|auth)")
-MIN_ENV_VALUE = 8
-
-
-def env_secrets(env: Mapping[str, str]) -> tuple[str, ...]:
-    """The values of the variables whose names say they are credentials, longest first."""
-    found = {v for k, v in env.items() if ENV_NAME.search(k) and len(v) >= MIN_ENV_VALUE}
-    return tuple(sorted(found, key=len, reverse=True))
-
-
-def redact(text: str, known: tuple[str, ...] = ()) -> tuple[str, list[str]]:
-    """``text`` with every credential replaced by a marker, and the kinds that were found."""
-    kinds: list[str] = []
-    for value in known:
-        if value in text:
-            text = text.replace(value, MARK.format("env"))
-            kinds.append("env")
-    for kind, pattern in PATTERNS:
-        text, count = pattern.subn(MARK.format(kind), text)
-        if count:
-            kinds.append(kind)
-    return text, kinds
-
 
 def secrets_in(text: str, known: tuple[str, ...] = ()) -> list[str]:
     """The kinds of credential ``text`` holds, empty when it holds none."""

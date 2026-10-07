@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 
 PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("workspace-token", re.compile(r"\bmlws1\.[A-Za-z0-9._/-]+\.[A-Za-z0-9_-]{8,}")),
@@ -22,3 +23,29 @@ PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
         r"(?i)\b[\w.-]*(?:api[_-]?key|secret|token|passw(?:or)?d|passphrase)[\w.-]*"
         r"\s*[:=]\s*[\"']?[^\s\"',;]{8,}")),
 )
+
+
+MARK = "[REDACTED:{}]"
+
+ENV_NAME = re.compile(r"(?i)(?:key|secret|token|passw|credential|auth)")
+MIN_ENV_VALUE = 8
+
+
+def env_secrets(env: Mapping[str, str]) -> tuple[str, ...]:
+    """The values of the variables whose names say they are credentials, longest first."""
+    found = {v for k, v in env.items() if ENV_NAME.search(k) and len(v) >= MIN_ENV_VALUE}
+    return tuple(sorted(found, key=len, reverse=True))
+
+
+def redact(text: str, known: tuple[str, ...] = ()) -> tuple[str, list[str]]:
+    """``text`` with every credential replaced by a marker, and the kinds that were found."""
+    kinds: list[str] = []
+    for value in known:
+        if value in text:
+            text = text.replace(value, MARK.format("env"))
+            kinds.append("env")
+    for kind, pattern in PATTERNS:
+        text, count = pattern.subn(MARK.format(kind), text)
+        if count:
+            kinds.append(kind)
+    return text, kinds
