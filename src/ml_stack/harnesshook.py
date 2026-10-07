@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import IO, Any
 
 from ml_stack import harness_claims, requests
+from ml_stack.guard.secrets import env_secrets, redact
 from ml_stack.harnesspolicy import (
     Decision,
     _shell_line,
@@ -44,6 +45,12 @@ HOOK_EVENTS = {"pre": "PreToolUse", "post": "PostToolUse", "stop": "Stop"}
 def _answer(event: str, action: str, reason: str) -> dict[str, Any]:
     return {"hookSpecificOutput": {"hookEventName": event, "permissionDecision": action,
                                    "permissionDecisionReason": reason}}
+
+
+def _diagnostic(error: BaseException) -> str:
+    """Return a bounded credential-redacted failure reason."""
+    text, _ = redact(str(error), env_secrets(os.environ))
+    return f"{type(error).__name__}: {' '.join(text.split())[:1000]}"
 
 
 def _summary(args: object) -> str:
@@ -88,9 +95,9 @@ def pre(payload: dict[str, Any], rail: Rail, inbox: requests.Inbox | None = None
                     or workspace_authority(_shell_line(name, inputs), label)
                     or decide(role, name, inputs, roots=roots, protected=protected))
     except Denied as error:
-        decision = Decision('deny', 'destructive', str(error))
-    except FAILURES:
-        decision = Decision("ask", "unsure", "the call could not be classified", "tool_call_destructive")
+        decision = Decision('deny', 'destructive', _diagnostic(error))
+    except FAILURES as error:
+        decision = Decision("deny", "unsure", f"the call could not be classified: {_diagnostic(error)}")
     if decision.action == "allow":
         return _owned_answer(payload, rail, event, f"ml-stack: {decision.label}")
     if decision.action == "deny":
@@ -107,7 +114,7 @@ def _owned_answer(payload, rail, event, reason):
                                str(payload.get('cwd') or (rail.roots[0] if rail.roots else Path.cwd())),
                                rail.label, rail.roots)
     except FAILURES as error:
-        return _answer(event, 'deny', f'ml-stack: ownership refused: {error}')
+        return _answer(event, 'deny', f'ml-stack: ownership refused: {_diagnostic(error)}')
     return _answer(event, 'allow', reason)
 
 
@@ -117,25 +124,35 @@ def nudge(label: str) -> str:
     try:
         done = subprocess.run(["ml-stack-workspace", "nudge", "--agent", label], capture_output=True,
                               text=True, timeout=NUDGE_S, check=False, stdin=subprocess.DEVNULL)
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError) as error:
+        sys.stderr.write(f"workspace nudge unavailable: {_diagnostic(error)}\n")
         return ""
-    return done.stdout.strip()[:NUDGE_MOST] if done.returncode == 0 else ""
+    if done.returncode != 0:
+        error = RuntimeError(done.stderr.strip() or f"workspace nudge exited {done.returncode}")
+        sys.stderr.write(f"workspace nudge unavailable: {_diagnostic(error)}\n")
+        return ""
+    return done.stdout.strip()[:NUDGE_MOST]
 
 
 def post(label: str, rail: Rail | None = None) -> dict[str, Any]:
     """The PostToolUse answer: the nudge as context, or nothing."""
-    if rail is not None and rail.roots:
-        canonical = harness_remote.context(label, rail.roots[0], rail.roots, require_claim=False)
-        if canonical:
-            remote, who = canonical
-            worktree_lifecycle.checkpoint(remote.base, who.id)
-        else:
-            ws = Workspace()
-            who = ws.auth(tokens.load(ws.base, label))
-            if who.id != label:
-                raise Denied('checkpoint requires the launcher-bound identity')
-            worktree_lifecycle.checkpoint(ws.base, who.id)
-    text = nudge(label)
+    warning = ""
+    try:
+        if rail is not None and rail.roots:
+            canonical = harness_remote.context(label, rail.roots[0], rail.roots, require_claim=False)
+            if canonical:
+                remote, who = canonical
+                worktree_lifecycle.checkpoint(remote.base, who.id)
+            else:
+                ws = Workspace()
+                who = ws.auth(tokens.load(ws.base, label))
+                if who.id != label:
+                    raise Denied('checkpoint requires the launcher-bound identity')
+                worktree_lifecycle.checkpoint(ws.base, who.id)
+    except FAILURES as error:
+        warning = f"workspace checkpoint unavailable: {_diagnostic(error)}"
+        sys.stderr.write(warning + "\n")
+    text = "\n".join(part for part in (warning, nudge(label)) if part)
     if not text:
         return {}
     return {"hookSpecificOutput": {"hookEventName": HOOK_EVENTS["post"],
@@ -155,7 +172,7 @@ def stop(rail: Rail) -> dict[str, Any]:
             raise Denied('completion requires the launcher-bound identity')
         worktree_lifecycle.require_clean(ws.base, who.id)
     except (Denied, OSError, RuntimeError) as error:
-        return {"decision": "block", "reason": str(error)}
+        return {"decision": "block", "reason": _diagnostic(error)}
     return {}
 
 
@@ -171,37 +188,6 @@ def _options(words: Sequence[str]) -> tuple[str, dict[str, list[str]]]:
     return words[0], found
 
 
-def _failure_reason(error: BaseException) -> str:
-    if not isinstance(error, Denied):
-        return type(error).__name__
-    message = str(error)
-    public = {
-        "the token is not recognised", "the token was revoked", "the token expired",
-        "the token's parent was revoked or expired",
-        "native roots must belong to the selected canonical project",
-        "native ownership requires the launcher-bound canonical agent identity",
-        "canonical agent capability has no mutation claim permission",
-        "canonical board connection record is unreadable; local fallback is disabled",
-        "shared checkout metadata is invalid; local fallback is disabled",
-        "checkout and saved board connection disagree",
-        "this shared checkout has no canonical board connection; attach it before using workspace commands",
-        "project board response was not authenticated and sealed",
-        "delegated project identities need a live parent-authorized credential",
-    }
-    if message in public:
-        return f"Denied: {message}"
-    for prefix, reason in (
-        ("token file ", "workspace credential file could not be loaded"),
-        ("token directory ", "workspace credential directory could not be loaded"),
-        ("project session storage ", "project session storage could not be loaded"),
-        ("project session records ", "project session records could not be loaded"),
-        ("project board unavailable:", "project board is unavailable"),
-    ):
-        if message.startswith(prefix):
-            return f"Denied: {reason}"
-    return "Denied: workspace authorization refused; check the launcher's project connection and identity"
-
-
 def run(argv: Sequence[str] | None = None, stdin: IO[str] | None = None,
         stdout: IO[str] | None = None) -> int:
     """Read one hook event and write the answer; a failure exits 2, which blocks the call."""
@@ -215,7 +201,7 @@ def run(argv: Sequence[str] | None = None, stdin: IO[str] | None = None,
                     opts.get("protect", []), float(opts.get("wait", [WAIT_S])[-1]))
         out = pre(payload, rail) if event == "pre" else stop(rail) if event == "stop" else post(label, rail)
     except FAILURES as exc:
-        sys.stderr.write(f"ml-stack hook failed, call blocked: {_failure_reason(exc)}\n")
+        sys.stderr.write(f"ml-stack hook failed, call blocked: {_diagnostic(exc)}\n")
         return 2
     if out:
         (stdout or sys.stdout).write(json.dumps(out, sort_keys=True) + "\n")
@@ -223,7 +209,7 @@ def run(argv: Sequence[str] | None = None, stdin: IO[str] | None = None,
 
 
 def _block(kind: type[BaseException], value: BaseException, _trace: object) -> None:
-    sys.stderr.write(f"ml-stack hook failed, call blocked: {_failure_reason(value)}\n")
+    sys.stderr.write(f"ml-stack hook failed, call blocked: {_diagnostic(value)}\n")
     os._exit(2)
 
 

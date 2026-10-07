@@ -111,6 +111,7 @@ class Daemon:
     decide: Deciding | None = None
     ui_from_lan: bool = False
     """Whether the web interface answers other machines. Off: it answers this one alone."""
+    launcher_control: Callable[[], Any] | None = None
     joining: Joining | None = None
     """Answers a machine that asks to join with the passphrase; without it the join routes are off."""
     command: Callable[[list[str]], list[str]] = commands.allowed
@@ -589,6 +590,8 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
             self._send(status, payload)
 
         def do_POST(self) -> None:
+            if daemon.launcher_control and daemon.launcher_control().route(self):
+                return
             if self.path.split("?", 1)[0].startswith("/companion/"):
                 body = self._body(65536)
                 if body is not None:
@@ -870,4 +873,9 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
                 self._send(200, {"ok": True, "partial": str(partial),
                                  "bytes": partial.stat().st_size})
 
+    from .daemon_control import protected
+
+    for verb in ("GET", "HEAD", "POST", "PUT", "DELETE"):
+        name = "do_" + verb
+        setattr(Handler, name, protected(getattr(Handler, name), daemon.launcher_control))
     return Handler

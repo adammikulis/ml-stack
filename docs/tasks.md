@@ -112,3 +112,17 @@ proposal and independent review. A future explicit publication recovery can reus
 candidate only after rechecking its immutable review, ownership, clean commit and unchanged
 development/remote heads; that recovery action is not currently exposed. The scheduler
 does not repeatedly attempt the same review.
+
+A registered worker's authenticated parent can relocate its pending source bindings after
+stopping the worker and dematerializing every affected task checkout:
+
+```sh
+ml-stack-workspace task-rebind-source WORKER CHECKOUT "Source checkout recovery" --agent PARENT
+```
+
+The replacement must belong to the same physical Git repository and contain every original
+baseline. Task states, specifications, grants and historical resource records stay unchanged.
+The operation records source checkpoints and an interruption journal; rerunning the same
+command resumes a prepared recovery. It runs only on the local coordinator. Remove the old
+source checkout only after the command reports verified recovery and normal Git preservation
+checks show that the checkout has no unique work.

@@ -39,6 +39,7 @@ from . import (
 from .api import Daemon, make_handler
 from .availability import Availability, parse_window
 from .conversations import Conversations
+from .daemon_control import create as create_control
 from .deciding import Deciding
 from .device import device_report as default_report, resolve_report, stdlib_device_report
 from .discovery import (
@@ -313,6 +314,7 @@ class DaemonRuntime:
                 hosting=self.hosting,
                 decide=Deciding(self.serving),
                 ui_from_lan=self.ui_from_lan or self.setup_from_lan,
+                launcher_control=lambda: self.control,
                 joining=Joining(lambda: memberships(self.cluster_key_path), self.fingerprint),
             )
         self.handler = make_handler(self.daemon)
@@ -337,6 +339,7 @@ class DaemonRuntime:
             measuring=lambda: bool(self.bench_host.measuring()),
             leases=lambda: bool(self.serving.live()),
         )
+        self.control = create_control(self)
         self.tracked = str(getattr(self.settings, "track_branch", "") or "").strip()
         self.tracked_from = str(getattr(self.settings, "track_repo", "") or "") or updating.GIT_URL
         self.checkout = updating.checkout_here() if self.tracked else None
@@ -455,7 +458,7 @@ class DaemonRuntime:
         try:
             while True:
                 self.httpd.serve_forever()
-                if not self.widen.is_set():
+                if self.control.stopping or not self.widen.is_set():
                     break
                 self.widen.clear()
                 self.httpd.server_close()
@@ -468,16 +471,21 @@ class DaemonRuntime:
         except KeyboardInterrupt:
             pass
         finally:
-            self.convergence_stop.set()
-            if self.convergence is not None:
-                self.convergence.join(timeout=12.0)
-            self.reclaiming.close()
-            self.scanner.stop()
-            _stop_advertisers(self.advertisers)
-            if self.advertiser is not None:
-                self.advertiser.stop()
-            self.runner.shutdown()
-            self.httpd.server_close()
+            try:
+                self.convergence_stop.set()
+                if self.convergence is not None:
+                    self.convergence.join(timeout=12.0)
+                self.reclaiming.close()
+                self.scanner.stop()
+                _stop_advertisers(self.advertisers)
+                if self.advertiser is not None:
+                    self.advertiser.stop()
+                self.runner.shutdown()
+            finally:
+                try:
+                    self.httpd.server_close()
+                finally:
+                    self.control.close()
 
     def update_admission(self):
         return only_one(self.root / "runtime-install.lock", wait=False)
@@ -501,6 +509,7 @@ class DaemonRuntime:
             "labels": self.labels,
             **self.bench_host.report(),
             **updating.state(),
+            "launcher_control": self.control.instance if hasattr(self, "control") else "",
             "speech": list(self.heard),
         }
 

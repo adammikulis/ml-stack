@@ -1,0 +1,183 @@
+"""Owned daemon replacement admission and launcher handoff."""
+
+from __future__ import annotations
+
+import contextlib
+import ipaddress
+import json
+import os
+import secrets
+import stat
+import threading
+from functools import wraps
+from pathlib import Path
+
+from ml_stack import macauth
+from ml_stack.http import request_json
+from ml_stack.lock import Busy
+from ml_stack.windows_private import restrict, validate
+
+ROUTE = '/launcher/replace'
+MAX_RECORD = 4096
+
+
+class ControlError(RuntimeError):
+    """The installed launcher cannot replace the running daemon."""
+
+
+def _directory(root: Path) -> Path:
+    root = root.absolute()
+    path = root / 'launcher-control'
+    if os.name == 'nt':
+        validate(path)
+    for candidate in (path, root, *root.parents):
+        try:
+            info = candidate.lstat()
+        except FileNotFoundError:
+            continue
+        if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+            raise ControlError('Daemon launcher storage must be an owned plain directory.')
+        if os.name != 'nt' and candidate in (path, root) and info.st_uid != os.getuid():
+            raise ControlError('Daemon launcher storage belongs to another account.')
+    path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if os.name == 'nt':
+        restrict(path)
+    elif path.stat().st_mode & 0o077:
+        raise ControlError('Daemon launcher storage must have owner-only permissions.')
+    return path
+
+
+def _record(root: Path, port: int) -> dict:
+    path = _directory(root) / f'{port}.json'
+    if os.name == 'nt':
+        validate(path)
+    flags = os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0)
+    try:
+        fd = os.open(path, flags)
+    except OSError as exc:
+        raise ControlError('This daemon has no owned launcher control; it must exit before replacement.') from exc
+    with os.fdopen(fd, 'rb') as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_RECORD:
+            raise ControlError('Daemon launcher control record is invalid.')
+        if os.name != 'nt' and (info.st_uid != os.getuid() or info.st_mode & 0o077):
+            raise ControlError('Daemon launcher control record must be account-private.')
+        try:
+            value = json.loads(stream.read(MAX_RECORD + 1))
+        except (ValueError, UnicodeError) as exc:
+            raise ControlError('Daemon launcher control record is invalid.') from exc
+    if not isinstance(value, dict) or value.get('port') != port:
+        raise ControlError('Daemon launcher control record is invalid.')
+    return value
+
+
+def request_replacement(root: Path, port: int, running: dict, expected: str) -> dict:
+    """Ask the owned older daemon to stop at its maintained idle boundary."""
+    record = _record(root, port)
+    instance = running.get('launcher_control')
+    capability = record.get('capability', '')
+    if not isinstance(instance, str) or len(instance) != 32 or record.get('instance') != instance:
+        raise ControlError('The running daemon does not match this launcher control record.')
+    if not isinstance(capability, str) or not capability.startswith(macauth.PREFIX) or len(capability) > 128:
+        raise ControlError('Daemon launcher control record is invalid.')
+    answer = request_json(f'http://127.0.0.1:{port}{ROUTE}', method='POST',
+                          data=json.dumps({'instance': instance, 'expected': expected}).encode(),
+                          token=capability, timeout=10)
+    if not isinstance(answer, dict) or answer.get('instance') != instance or not answer.get('stopping'):
+        raise ControlError('Daemon replacement was not acknowledged.')
+    return answer
+
+
+class Control:
+    def __init__(self, root: Path, port: int, idle, admission, shutdown):
+        self.path = _directory(root) / f'{port}.json'
+        self.instance = secrets.token_hex(16)
+        self.capability = macauth.PREFIX + secrets.token_urlsafe(32)
+        self.auth = macauth.Authenticator(lambda: [self.capability])
+        self.idle, self.admission, self.shutdown = idle, admission, shutdown
+        self.lock = threading.Lock()
+        self.held = contextlib.ExitStack()
+        self.stopping = False
+        self.active = 0
+        temporary = self.path.with_name(f'.{port}-{self.instance}.json')
+        fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        try:
+            with os.fdopen(fd, 'w') as stream:
+                json.dump({'port': port, 'instance': self.instance, 'capability': self.capability}, stream)
+            if os.name == 'nt':
+                restrict(temporary)
+            temporary.replace(self.path)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+    def route(self, handler) -> bool:
+        if handler.path != ROUTE:
+            return False
+        if not ipaddress.ip_address(handler.client_address[0]).is_loopback:
+            handler._send(403, {'error': 'Daemon replacement requires this machine.'})
+            return True
+        body = handler._body(1024)
+        if body is None:
+            return True
+        if not self.auth.check('POST', handler.path, handler.headers, body).ok:
+            handler._send(403, {'error': 'Daemon replacement requires its owned launcher.'})
+            return True
+        try:
+            request = json.loads(body)
+            if not isinstance(request, dict) or request.get('instance') != self.instance:
+                raise ControlError('Daemon replacement instance does not match.')
+            with self.lock:
+                if self.stopping or self.active:
+                    raise ControlError('Daemon has requests in progress; retry when it is idle.')
+                self.held.enter_context(self.admission())
+                if not self.idle():
+                    self.held.close()
+                    raise ControlError('Daemon has active work, downloads or setup; retry when it is idle.')
+                self.stopping = True
+        except (ControlError, Busy, ValueError, OSError) as exc:
+            handler._send(409, {'error': str(exc)})
+            return True
+        try:
+            handler._send(202, {'instance': self.instance, 'stopping': True})
+            handler.wfile.flush()
+        finally:
+            threading.Thread(target=self.shutdown, name='launcher-daemon-stop', daemon=True).start()
+        return True
+
+    def close(self) -> None:
+        with self.lock:
+            self.held.close()
+            try:
+                row = _record(self.path.parent.parent, int(self.path.stem))
+            except ControlError:
+                return
+            if row.get('instance') == self.instance:
+                self.path.unlink(missing_ok=True)
+
+
+def protected(method, control):
+    """Admit a complete HTTP operation before daemon replacement drains requests."""
+    @wraps(method)
+    def handle(handler):
+        owner = control() if control else None
+        if owner is None or (handler.command == 'POST' and handler.path == ROUTE):
+            return method(handler)
+        with owner.lock:
+            if owner.stopping:
+                handler.close_connection = True
+                handler._send(503, {'error': 'Daemon replacement is in progress; retry shortly.'})
+                return None
+            owner.active += 1
+        try:
+            return method(handler)
+        finally:
+            with owner.lock:
+                owner.active -= 1
+    return handle
+
+
+def create(runtime):
+    """Publish launcher control for a configured daemon runtime."""
+    return Control(runtime.root, runtime.port,
+                   lambda: runtime.nothing_running() and not runtime.runner.status()['queued'],
+                   runtime.update_admission, lambda: runtime.httpd.shutdown())
