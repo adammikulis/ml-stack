@@ -89,6 +89,18 @@ estimated bytes exceed its room; otherwise it runs `ml-stack-bench ... --detach`
 and adopts the pid into its job list, so `ml-stack-peers ls` shows it `measuring` and no
 training job starts beside it. The dispatcher counts as a peer through `here()`.
 
+## Restarting the daemon
+
+`ml-stack --restart` replaces the running daemon with the code now installed without stopping
+work. The owned daemon refuses only while setup, a download or a benchmark measurement is under
+way; it then freezes its job runner, writes each job's process ownership to a private record and
+exits. Queued jobs stay queued, a running job keeps running as an independent process, and models
+served by their own workers stay loaded. The replacement restores the records, holds the slots the
+surviving processes use, and never starts a job again that may already have run. A job that
+finishes while the daemon is down keeps its exit code, which the job's own launcher recorded beside
+its log. A process whose identity cannot be verified is reported `interrupted` and keeps holding its slot. `ml-stack` without the option still replaces a daemon only at its idle
+boundary when its commit differs.
+
 ## Joining a cluster
 
 Development is the default mode. Start the cluster daemon on each device with
