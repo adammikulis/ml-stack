@@ -20,7 +20,7 @@ ROOT = REPO / "src" / "ml_stack"
 LAYERS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("core", ("activity", "agent_dependency", "asking", "backend", "checks", "command", "command_capture", "contracts", "credentials", "data",
               "entities", "extraction", "files", "files_windows", "gate", "geo",
-              "home", "http", "httpguard", "installed", "interventions", "jobs", "jsonl", "keystore", "limits",
+              "home", "http", "http_cancel", "httpguard", "installed", "interventions", "jobs", "jsonl", "keystore", "limits",
               "lock", "log", "macauth", "sealing",
               "markup", "sandbox",
               "deciders", "desktop", "media", "messages", "net", "paths", "platform", "safenames", "redact", "scrape", "sentinel",
