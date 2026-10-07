@@ -1,25 +1,26 @@
 export const INTEGRATED_STYLES = `
-:host([integrated]) { --ml-text:#1b1f3a; --ml-muted:#68687b; --ml-line:#e7e3dd;
-  --ml-line-strong:#d8cbd1; --ml-surface:#fff; --ml-sunken:#fffaf4;
-  --ml-accent:#ff5fa2; --ml-accent-ink:#a6295e; --ml-on-accent:#1b1f3a; min-height:0; }
+:host([integrated]) { min-height:0; font-family:var(--ml-font); font-size:1rem; }
 :host([integrated]) .shell { display:block; border:0; border-radius:0; height:100%; min-height:0; }
 :host([integrated]) nav { display:none; }
 :host([integrated]) main { display:flex; flex-direction:column; height:100%; padding:0; overflow:hidden; }
-:host([integrated]) main > div:first-child { flex:1; min-height:0; overflow-y:auto; padding:0 28px 24px; }
-:host([integrated]) main header { min-height:77px; margin:0 -28px 20px; padding:16px 28px;
-  border-bottom:1px solid var(--ml-line); background:#fff; position:sticky; top:0; z-index:1; align-items:center; }
-:host([integrated]) main header h2 { font-size:17px; }
-:host([integrated]) .badge { background:#2de2e633; color:#12636a; border:0; }
-:host([integrated]) .msg { position:relative; border:0; padding:14px 10px 14px 48px; margin:4px 0; border-radius:10px; }
-:host([integrated]) .msg:hover { background:#fffaf4; }
+:host([integrated]) main > div:first-child { flex:1; min-height:0; overflow-y:auto; padding:0 calc(28px * var(--ui-density,1)) calc(24px * var(--ui-density,1)); }
+:host([integrated]) main header { min-height:77px; margin:0 calc(-28px * var(--ui-density,1)) calc(20px * var(--ui-density,1)); padding:calc(16px * var(--ui-density,1)) calc(28px * var(--ui-density,1));
+  border-bottom:1px solid var(--ml-line); background:var(--ml-surface); position:sticky; top:0; z-index:1; align-items:center; }
+:host([integrated]) main header h2 { font-size:1.214rem; }
+:host([integrated]) .badge { background:color-mix(in srgb,var(--poolside-cyan,var(--ml-accent)) 20%,var(--ml-surface)); color:var(--ml-text); border:0; }
+:host([integrated]) .msg { position:relative; border:0; padding:calc(14px * var(--ui-density,1)) calc(10px * var(--ui-density,1)) calc(14px * var(--ui-density,1)) calc(48px * var(--ui-density,1)); margin:calc(4px * var(--ui-density,1)) 0; border-radius:10px; }
+:host([integrated]) .msg:hover { background:var(--ml-bg); }
 :host([integrated]) .msg::before { content:"●"; display:grid; place-items:center; width:30px; height:30px;
-  position:absolute; left:4px; top:12px; border-radius:10px; background:#ffd16655; color:#695012; }
+  position:absolute; left:4px; top:12px; border-radius:10px; background:color-mix(in srgb,var(--poolside-yellow) 33%,var(--ml-surface)); color:var(--ml-text); }
 :host([integrated]) .msg pre { line-height:1.7; }
-:host([integrated]) .composer { margin:0 28px 18px; padding:12px; border:1px solid #d8cbd1; border-radius:12px; background:#fff; }
-:host([integrated]) .composer:focus-within { border-color:#ff5fa2; box-shadow:0 0 0 3px #ff5fa21a; }
-:host([integrated]) .composer textarea { background:#fff; border:0; min-height:70px; padding:6px; }
-:host([integrated]) .composer input { background:#fffaf4; border:0; font-size:11px; }
-:host([integrated]) .composer button { justify-self:end; padding:8px 18px; }
-:host([integrated]) .channel-tabs button[aria-pressed=true] { background:#ff5fa226; }
-:host([integrated]) .state { padding:30px 10px; }
+:host([integrated]) .composer { margin:0 calc(28px * var(--ui-density,1)) calc(18px * var(--ui-density,1)); padding:calc(12px * var(--ui-density,1)); border:1px solid var(--ml-line-strong); border-radius:12px; background:var(--ml-surface); }
+:host([integrated]) .composer:focus-within { border-color:var(--poolside-pink); box-shadow:0 0 0 3px color-mix(in srgb,var(--poolside-pink) 10%,transparent); }
+:host([integrated]) .composer textarea { background:var(--ml-surface); border:0; min-height:70px; padding:calc(6px * var(--ui-density,1)); }
+:host([integrated]) .composer input { background:var(--ml-bg); border:0; font-size:0.7857rem; }
+:host([integrated]) .composer button { justify-self:end; padding:calc(8px * var(--ui-density,1)) calc(18px * var(--ui-density,1)); }
+:host([integrated]) .channel-tabs button[aria-pressed=true] { background:color-mix(in srgb,var(--poolside-pink) 15%,var(--ml-surface)); }
+:host([integrated]) .who { font-size:.9286rem; }
+:host([integrated]) .meta { font-size:.8571rem; }
+:host([integrated]) .badge { font-size:.7857rem; }
+:host([integrated]) .state { padding:calc(30px * var(--ui-density,1)) calc(10px * var(--ui-density,1)); }
 `;

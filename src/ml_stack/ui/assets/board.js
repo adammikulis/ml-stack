@@ -139,7 +139,8 @@ class MlBoard extends MlElement {
       const view = JSON.parse(raw);
       if (!view || !["board", "thread", "dm"].includes(view.kind)) return {kind:"none"};
       if (view.kind === "thread" && (!Number.isSafeInteger(view.root) || view.root < 1)) return {kind:"none"};
-      if ([view.name, view.board, view.a, view.b].some(value => value !== undefined && (typeof value !== "string" || value.length > 64))) return {kind:"none"};
+      if ([view.name, view.board].some(value => value !== undefined && (typeof value !== "string" || value.length > 64))) return {kind:"none"};
+      if ([view.a, view.b].some(value => value !== undefined && (typeof value !== "string" || value.length > 97))) return {kind:"none"};
       return view;
     } catch { return {kind:"none"}; }
   }
@@ -299,10 +300,13 @@ class MlBoard extends MlElement {
     const box = this.agents.length
       ? h("select", {"aria-label":"Message an agent"}, h("option", {value:""}, "Choose an agent…"),
           ...this.agents.map(agent => h("option", {value:agent.id}, line(agent.id, 48))))
-      : h("input", {type:"text", maxlength:"48", "aria-label":"Message an agent", placeholder:"agent id"});
+      : h("input", {type:"text", maxlength:"97", "aria-label":"Message an agent", placeholder:"agent id"});
     const open = () => {
-      const name = line(box.value, 48);
-      if (name) this.open({ kind: "dm", a: this.me, b: name });
+      const name = line(box.value, 97);
+      if (name) {
+        this.emit("ml-board-open", {kind:"dm"});
+        this.open({ kind: "dm", a: this.me, b: name });
+      }
     };
     box.addEventListener("keydown", (e) => { if (e.key === "Enter") open(); });
     return h("div", { class: "new" }, box, h("button", { type: "button", onclick: open }, "Open"));
