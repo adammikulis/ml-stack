@@ -124,9 +124,10 @@
       this.live = chat.querySelector('#conversation-models');
 
       chat.querySelector('#conversation-details').onclick = event => {
-        chat.options.open = !chat.options.open;
+        chat.options.open = M.preferences.always_show_advanced || !chat.options.open;
         event.currentTarget.setAttribute('aria-expanded', String(chat.options.open));
       };
+      chat.options.addEventListener('toggle', () => chat.querySelector('#conversation-details').setAttribute('aria-expanded', String(chat.options.open)));
       chat.querySelector('.conversation-choose').onclick = () => chat.modelPicker.button.click();
     }
     route(route) {

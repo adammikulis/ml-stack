@@ -137,7 +137,8 @@ def test_model_picker_groups_and_searches_loaded_and_installed_models(chat_brows
     expect(page.locator("chat-view #model")).to_have_value("model-a")
     page.locator("chat-view #chat-model-button").click()
     page.locator("chat-view").get_by_label("Search models", exact=True).fill("no matches")
-    expect(page.locator("chat-view #chat-model-list")).to_have_text("No models match your search.")
+    expect(page.locator("chat-view #chat-model-list p")).to_have_text("No models match your search.")
+    expect(page.locator("chat-view #chat-model-list").get_by_role("button", name="Browse model library")).to_be_visible()
     page.locator("chat-view").get_by_label("Search models", exact=True).press("Escape")
     expect(page.locator("chat-view #chat-model-dialog")).not_to_be_visible()
     assert page.locator("chat-view textarea:visible").count() == 1
