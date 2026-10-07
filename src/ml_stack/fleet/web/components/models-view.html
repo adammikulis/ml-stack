@@ -1,7 +1,7 @@
 <style>
 models-view #models{max-width:none;padding:28px 32px}
 models-view .models-heading{display:flex;justify-content:space-between;align-items:center;gap:24px;margin-bottom:24px}
-models-view .eyebrow{font-size:12px;text-transform:uppercase;letter-spacing:1.5px;font-weight:750;color:var(--accent-ink,#994c16)}
+models-view .eyebrow{font-size:12px;text-transform:uppercase;letter-spacing:1.5px;font-weight:750;color:var(--text)}
 models-view .models-heading h1{font-size:34px;letter-spacing:-1px;margin:8px 0}
 models-view .models-heading .sub{margin:0;color:var(--muted)}
 models-view #add-model{background:var(--poolside-orange,#ff8a3d);color:var(--poolside-navy,#1b1f3a);font-weight:750;border:0;padding:13px 20px;border-radius:12px;white-space:nowrap}
@@ -23,6 +23,7 @@ models-view #models-room{margin-top:16px}
 models-view #models-note:empty{display:none}
 models-view .model-loading{padding:28px;border-radius:16px;background:var(--bg-raised);border:1px solid var(--line);color:var(--muted)}
 @media(max-width:700px){models-view #models{padding:20px}models-view .models-overview{grid-template-columns:1fr}models-view .models-heading{align-items:start}models-view .models-heading h1{font-size:28px}models-view #add-model{padding:10px}}
+models-view .eyebrow::before{content:"";display:inline-block;width:7px;height:7px;border-radius:2px;background:var(--poolside-orange,#ff8a3d);margin-right:8px}
 </style>
 <template>
   <main id="models" hidden>

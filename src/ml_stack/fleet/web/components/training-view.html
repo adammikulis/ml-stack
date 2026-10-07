@@ -2,7 +2,7 @@
 training-view .workspace{max-width:none;padding:28px 32px}
 training-view .training-heading{display:flex;justify-content:space-between;gap:24px;align-items:center;margin-bottom:28px}
 training-view .training-heading h1{font-size:34px;letter-spacing:-1px;margin:8px 0}
-training-view .eyebrow{font-size:12px;font-weight:750;text-transform:uppercase;letter-spacing:1.5px;color:var(--accent-ink,#994c16)}
+training-view .eyebrow{font-size:12px;font-weight:750;text-transform:uppercase;letter-spacing:1.5px;color:var(--text)}
 training-view .training-heading .intro{margin:0;max-width:620px}
 training-view .training-mark{font-size:36px;padding:18px 24px;border-radius:24px;background:var(--poolside-orange,#ff8a3d);color:var(--poolside-navy,#1b1f3a)}
 training-view .training-layout{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:24px;align-items:start}
@@ -37,6 +37,7 @@ training-view .training-form .status:empty{display:none}
 training-view .training-review-actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:24px}
 @media(max-width:1050px){training-view .training-layout{grid-template-columns:1fr}training-view .training-aside{display:none}}
 @media(max-width:650px){training-view .workspace{padding:20px}training-view .training-heading{gap:12px}training-view .training-mark{display:none}training-view .training-pane{padding:20px}training-view .training-steps button{font-size:12px;padding:8px}}
+training-view .eyebrow::before{content:"";display:inline-block;width:7px;height:7px;border-radius:2px;background:var(--poolside-orange,#ff8a3d);margin-right:8px}
 </style>
 <template>
   <section class="workspace" hidden>
