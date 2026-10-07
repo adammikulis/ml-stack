@@ -29,16 +29,18 @@
         }
       }
     };
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      pending += decoder.decode(value, { stream: true });
-      const lines = pending.split("\n");
-      pending = lines.pop();
-      for (const line of lines) frame(line);
-    }
-    pending += decoder.decode();
-    if (pending.trim()) frame(pending);
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        pending += decoder.decode(value, { stream: true });
+        const lines = pending.split("\n");
+        pending = lines.pop();
+        for (const line of lines) frame(line);
+      }
+      pending += decoder.decode();
+      if (pending.trim()) frame(pending);
+    } finally { reader.releaseLock(); }
     return { content, reasoning };
   };
 })();

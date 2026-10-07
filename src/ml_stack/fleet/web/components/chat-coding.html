@@ -75,7 +75,8 @@
       chat.askrow.hidden = !models.length && !selected;
       chat.options.hidden = !models.length && !selected;
       chat.none.hidden = !!models.length;
-      chat.none.textContent = this.active ? this.data?.model_problem || "Choose a downloaded model on the Models screen to start Coding." : "No model is running. Choose a model on the Models screen or use one serving on your fleet.";
+      chat.none.replaceChildren(document.createTextNode(this.active ? this.data?.model_problem || "Choose a downloaded model to start Coding. " : "No model is running. "),
+        el("a", {href:"#models"}, "Open Models"), document.createTextNode(" to prepare a model, then return here."));
       chat.input.placeholder = this.active ? "Ask the coding agent to work in your project…" : "Message your model…";
       chat.modelPicker?.render();
       this.readiness();
@@ -85,6 +86,7 @@
       const chat = this.chat;
       const available = !!this.data?.harnesses.find((one) => one.name === this.harness.value)?.available;
       chat.send.disabled = !chat.picker.value || chat.picker.selectedOptions[0]?.disabled || !this.project.value.trim() || !available || !this.context.checkValidity();
+      chat.send.title = !this.project.value.trim() ? "Enter a project directory to start Coding." : !available ? "Choose an installed coding agent." : "";
     }
     busy(value) {
       for (const field of [this.mode, this.project, this.harness, this.role, this.context, this.draft]) field.disabled = value;

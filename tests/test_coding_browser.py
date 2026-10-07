@@ -6,6 +6,7 @@ from coding_kit import fixture_worker
 from test_fleet_ui import Serving
 from workspace_kit import Kit
 
+from ml_stack.fleet.conversation_settings import DEFAULTS
 from ml_stack.fleet.conversations import Conversations
 from ml_stack.workspace import coding_turns
 
@@ -24,6 +25,7 @@ def coding_browser(tmp_path, monkeypatch, playwright):
     project.mkdir()
     browser = playwright.chromium.launch(headless=True)
     page = browser.new_page()
+    page.route("**/ui/conversations/defaults", lambda route: route.fulfill(json={"settings": {**DEFAULTS, "max_output_tokens": 13579}}))
     page.route("**/ui/chat", lambda route: route.fulfill(json={"models": [{"model": "chat-model", "local": True}]}))
     page.route("**/ui/coding/catalogue", lambda route: route.fulfill(json={
         "ok": True, "harnesses": [{"name": "pi", "available": True}, {"name": "codex", "available": True}],
@@ -46,7 +48,7 @@ def test_shared_composer_saves_coding_settings_and_resumes_native_session(coding
 
     served, page, project = coding_browser
     page.goto(f"http://127.0.0.1:{served.port}/ui#chat")
-    page.get_by_label("Mode", exact=True).select_option("coding")
+    page.get_by_label("Conversation mode", exact=True).select_option("coding")
     page.get_by_label("Coding agent", exact=True).select_option("codex")
     page.get_by_label("Project directory", exact=True).fill(str(project))
     page.get_by_label("Project directory", exact=True).press("Tab")
@@ -54,7 +56,7 @@ def test_shared_composer_saves_coding_settings_and_resumes_native_session(coding
     page.locator("chat-view #chat-options summary").click()
     output_tokens = page.get_by_label("Maximum output tokens", exact=True)
     expect(output_tokens).to_be_visible()
-    expect(output_tokens).to_have_value("8192")
+    expect(output_tokens).to_have_value("13579")
     output_tokens.fill("23456")
     output_tokens.press("Tab")
     page.locator("chat-view #chat-options summary").click()
@@ -73,7 +75,7 @@ def test_shared_composer_saves_coding_settings_and_resumes_native_session(coding
     assert saved.settings["role"] == "read-only"
     assert saved.settings["max_output_tokens"] == 23456
     page.reload()
-    expect(page.get_by_label("Mode", exact=True)).to_have_value("coding")
+    expect(page.get_by_label("Conversation mode", exact=True)).to_have_value("coding")
     expect(page.get_by_label("Project directory", exact=True)).to_have_value(str(project))
     page.locator("chat-view #chat-options summary").click()
     expect(output_tokens).to_be_visible()
@@ -94,7 +96,7 @@ def test_reload_reattaches_running_coding_turn_and_stop_keeps_the_conversation(c
         "mode": "coding", "project": str(project), "role": "read-only", "harness": "codex"})
     page.goto(f"http://127.0.0.1:{served.port}/ui#chat")
     page.get_by_role("link", name="Live coding", exact=True).click()
-    expect(page.get_by_label("Mode", exact=True)).to_have_value("coding")
+    expect(page.get_by_label("Conversation mode", exact=True)).to_have_value("coding")
     expect(page.get_by_label("Project directory", exact=True)).to_have_value(str(project))
     expect(page.locator("chat-view #model")).to_have_value("test-model")
     expect(page.locator("chat-view #chat-send")).to_be_enabled()
@@ -110,3 +112,41 @@ def test_reload_reattaches_running_coding_turn_and_stop_keeps_the_conversation(c
     composer.fill("continue inspection")
     composer.press("Enter")
     expect(page.locator("chat-view #chat-messages")).to_contain_text("Inspected: continue inspection")
+
+
+def test_enter_preserves_draft_until_coding_prerequisites_are_ready(coding_browser):
+    from playwright.sync_api import expect
+
+    served, page, project = coding_browser
+    page.goto(f"http://127.0.0.1:{served.port}/ui#chat")
+    page.get_by_label("Conversation mode", exact=True).select_option("coding")
+    page.get_by_label("Coding agent", exact=True).select_option("codex")
+    composer = page.get_by_role("textbox", name="Message", exact=True)
+    composer.fill("inspect project")
+    expect(page.locator("chat-view #chat-send")).to_be_disabled()
+    composer.press("Enter")
+    expect(composer).to_have_value("inspect project")
+    assert not served.ui.conversations.all()
+    page.get_by_label("Project directory", exact=True).fill(str(project))
+    page.get_by_label("Project directory", exact=True).press("Tab")
+    expect(page.locator("chat-view #chat-send")).to_be_enabled()
+    composer.press("Enter")
+    expect(page.locator("chat-view #chat-messages")).to_contain_text("Inspected: inspect project")
+
+
+def test_coding_uses_its_runtime_when_chat_runtime_is_unavailable(coding_browser):
+    from playwright.sync_api import expect
+
+    served, page, project = coding_browser
+    page.unroute("**/ui/chat")
+    page.route("**/ui/chat", lambda route: route.fulfill(json={"models": [], "runtime_ready": False}))
+    page.goto(f"http://127.0.0.1:{served.port}/ui#chat")
+    page.get_by_label("Conversation mode", exact=True).select_option("coding")
+    page.get_by_label("Coding agent", exact=True).select_option("codex")
+    page.get_by_label("Project directory", exact=True).fill(str(project))
+    page.get_by_label("Project directory", exact=True).press("Tab")
+    expect(page.locator("chat-view #chat-send")).to_be_enabled()
+    composer = page.get_by_role("textbox", name="Message", exact=True)
+    composer.fill("inspect without chat runtime")
+    composer.press("Enter")
+    expect(page.locator("chat-view #chat-messages")).to_contain_text("Inspected: inspect without chat runtime")

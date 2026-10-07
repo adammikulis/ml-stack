@@ -69,7 +69,8 @@
           group.append(M.el("button", { type: "button", class: "chat-model-choice",
             ...(row.disabled ? { disabled: "" } : {}),
             "aria-pressed": String(chat.picker.value === row.value), onclick: () => this.choose(row) },
-          M.el("span", {}, row.name), M.el("small", {}, [row.status, row.quant].filter(Boolean).join(" · "))));
+          M.el("span", {}, row.name), M.el("small", {}, [row.status, row.quant].filter(Boolean).join(" · ")),
+          row.needsLoad ? M.el("small", {class:"chat-model-action"}, "Configure in Models →") : null));
         }
         this.list.append(group);
       }
@@ -79,8 +80,9 @@
       if (this.chat.request || row.disabled) return;
       if (row.needsLoad) {
         this.dialog.close();
-        window.location.hash = "models";
-        this.chat.note.textContent = "Choose this model's context length on the Models screen, then load it.";
+        window.dispatchEvent(new CustomEvent("fleet-select-model", {detail:{path:row.installed.path, name:row.installed.name, from:"chat"}}));
+        M.go("models");
+        this.chat.note.textContent = "Load the installed model on the Models screen, then return to Model chats.";
         return;
       }
       this.chat.picker.value = row.value;

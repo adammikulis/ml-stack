@@ -153,5 +153,65 @@ def test_installed_model_picker_remains_visible_with_no_loaded_server(chat_brows
         {"path": "/models/qwen.gguf", "name": "Qwen3.8-27B", "family": "Qwen", "servable": True}]}))
     _open(served, page)
     page.locator("chat-view #chat-model-button").click()
-    expect(page.get_by_role("button", name="Qwen3.8-27B Installed", exact=True)).to_be_visible()
+    expect(page.get_by_role("button", name="Qwen3.8-27B Installed Configure in Models →", exact=True)).to_be_visible()
     expect(page.locator("chat-view #chat-askrow")).to_be_hidden()
+
+
+def test_learning_prompts_preserve_draft_and_team_channels_are_connected(chat_browser):
+    from playwright.sync_api import expect
+
+    served, page = chat_browser
+    _open(served, page)
+    page.get_by_role("button", name="Plan an experiment", exact=True).click()
+    composer = page.get_by_role("textbox", name="Message", exact=True)
+    expect(composer).to_have_value("Help me design a reproducible training experiment. Ask me about the model, data, and success criteria.")
+    assert not served.ui.conversations.all()
+    page.locator("chat-view").get_by_role("link", name="Team channels", exact=True).click()
+    expect(page.locator("board-view .board-workspace")).to_be_visible()
+    page.locator("board-view").get_by_role("link", name="Model chats", exact=True).click()
+    expect(composer).to_have_value("Help me design a reproducible training experiment. Ask me about the model, data, and success criteria.")
+    page.screenshot(path="/private/tmp/poolside-conversations-desktop.png", full_page=True)
+    page.set_viewport_size({"width": 390, "height": 844})
+    expect(page.locator("chat-view").get_by_role("link", name="Team channels", exact=True)).to_be_visible()
+    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+    page.screenshot(path="/private/tmp/poolside-conversations-mobile.png", full_page=True)
+
+
+def test_saved_model_switch_updates_visible_picker(chat_browser):
+    from playwright.sync_api import expect
+
+    served, page = chat_browser
+    served.ui.conversations.start(model="offline-model", title="Offline model chat")
+    _open(served, page)
+    page.get_by_role("link", name="Offline model chat", exact=True).click()
+    expect(page.locator("chat-view #chat-model-button")).to_have_text("offline-model — unavailable")
+    expect(page.locator("chat-view #chat-send")).to_be_disabled()
+
+
+def test_output_token_control_uses_backend_defaults_and_accepts_no_cap(chat_browser):
+    from playwright.sync_api import expect
+
+    served, page = chat_browser
+    page.route("**/ui/conversations/defaults", lambda route: route.fulfill(json={"settings": {
+        "mode": "chat", "max_output_tokens": 13579, "context": 0, "draft": "auto"}}))
+    _open(served, page)
+    page.locator("chat-view #chat-options summary").click()
+    cap = page.get_by_label("Maximum output tokens", exact=True)
+    expect(cap).to_have_value("13579")
+    cap.fill("")
+    cap.press("Tab")
+    assert page.locator("chat-view").evaluate("node => node.settings().max_output_tokens") is None
+
+
+def test_installed_model_selection_hands_off_the_selected_model(chat_browser):
+    from playwright.sync_api import expect
+
+    served, page = chat_browser
+    page.route("**/ui/models", lambda route: route.fulfill(json={"library": [
+        {"path": "/models/installed.gguf", "name": "Installed model", "family": "Qwen", "servable": True}]}))
+    page.add_init_script("window.addEventListener('fleet-select-model', e => { window.modelHandoff = e.detail; });")
+    _open(served, page)
+    page.locator("chat-view #chat-model-button").click()
+    page.get_by_role("button", name="Installed model Installed Configure in Models →", exact=True).click()
+    expect(page).to_have_url(f"http://127.0.0.1:{served.port}/ui#models")
+    assert page.evaluate("window.modelHandoff") == {"path": "/models/installed.gguf", "name": "Installed model", "from": "chat"}
