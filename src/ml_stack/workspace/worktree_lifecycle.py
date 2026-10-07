@@ -8,6 +8,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from ml_stack import worktreerules
+from ml_stack.files import promote
 from ml_stack.graph.store import GraphStore
 from ml_stack.workspace import integration_git as repo
 from ml_stack.workspace.chain import held
@@ -42,7 +43,7 @@ def _storage(base: Path, *, write: bool = False):
         staged.chmod(0o600)
         with staged.open('rb') as source:
             os.fsync(source.fileno())
-        staged.replace(database)
+        promote(staged, database)
         if os.name != 'nt':
             directory = os.open(base, os.O_RDONLY)
             try:
