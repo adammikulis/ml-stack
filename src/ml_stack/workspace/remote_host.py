@@ -5,6 +5,7 @@ from __future__ import annotations
 import inspect
 import json
 import math
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -61,6 +62,16 @@ class WorkspaceHost:
 
     def __init__(self, projects: Any) -> None:
         self.projects = projects
+        self._presence: dict[tuple[str, str], float] = {}
+        self._presence_lock = threading.Lock()
+
+    def _seen(self, project_id, actor, now):
+        with self._presence_lock:
+            self._presence = {key: seen for key, seen in self._presence.items()
+                              if now - seen < 90}
+            self._presence[(project_id, actor)] = now
+            if len(self._presence) > 4096:
+                del self._presence[min(self._presence, key=self._presence.get)]
 
     def workspace(self, project_id: str) -> Workspace:
         return Workspace(self.projects.workspace_base(project_id))
@@ -91,8 +102,9 @@ class WorkspaceHost:
                     "agents": [], "boards": [], "messages": [], "history": []}
         ws = self.workspace(project_id)
         agents = [row for row in ws.registered() if row["role"] == AGENT]
-        seen = {row["who"]: row["ts"] for row in ws.audit_log.rows()
-                if row.get("event") == "remote.seen"}
+        with self._presence_lock:
+            seen = {actor: ts for (project, actor), ts in self._presence.items()
+                    if project == project_id}
         for agent in agents:
             agent["last_seen"] = seen.get(agent["id"], 0)
             agent["online"] = bool(agent["last_seen"] and ws.clock() - agent["last_seen"] < 90
@@ -161,6 +173,7 @@ class WorkspaceHost:
             ws.audit("remote.enroll", name, project_id=project_id,
                      admission="dev-cluster", model=model, harness=harness)
             ws.audit("remote.seen", name, project_id=project_id)
+            self._seen(project_id, name, ws.clock())
             return 201, {"id": name, "token": token, "project_id": project_id}
         except Denied as exc:
             return 403, {"error": str(exc)}
@@ -185,6 +198,7 @@ class WorkspaceHost:
             who = ws.registry.renew_dev_project(str(body.get("agent_token") or ""),
                                                  project_id, cluster, cluster_id)
             ws.audit("remote.renew", who.id, project_id=project_id, admission="dev-cluster")
+            self._seen(project_id, who.id, ws.clock())
             return 200, {"id": who.id, "project_id": project_id, "cluster_id": cluster_id}
         except Denied as exc:
             return 403, {"error": str(exc)}
@@ -203,6 +217,7 @@ class WorkspaceHost:
                 name, token = device_sessions.ensure(ws, device, self.projects, document,
                                                     str(body['agent_token']))
                 self._identity(ws, project_id, token)
+                self._seen(project_id, name, ws.clock())
                 return 200, {'id': name, 'token': token, 'project_id': project_id}
             if action == "join":
                 name = onboard.join(ws, str(body.get("code") or ""),
@@ -212,13 +227,13 @@ class WorkspaceHost:
                 token = tokens.load(ws.base, name)
                 self._identity(ws, project_id, token, admission=admission)
                 ws.audit("remote.seen", name, project_id=project_id)
+                self._seen(project_id, name, ws.clock())
                 return 201, {"id": name, "token": token, "project_id": project_id}
             if action != "board":
                 return 404, {"error": "no such workspace operation"}
             token = str(body.get("agent_token") or "")
             device_sessions.check(ws, token, device, self.projects)
             who = self._identity(ws, project_id, token, admission=admission)
-            ws.audit("remote.seen", who.id, project_id=project_id)
             operation = str(body.get("operation") or "")
             args, kwargs = body.get("args", []), body.get("kwargs", {})
             if (not isinstance(args, list) or len(args) > 12 or not isinstance(kwargs, dict)
@@ -228,6 +243,7 @@ class WorkspaceHost:
             reply = {"result": result}
             if len(json.dumps(reply).encode()) > MAX_REPLY:
                 return 413, {"error": "answer too large; request fewer messages"}
+            self._seen(project_id, who.id, ws.clock())
             return 200, reply
         except (Denied, Refused) as exc:
             return 403, {"error": str(exc)}
