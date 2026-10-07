@@ -543,6 +543,9 @@ def test_two_children_in_real_processes_labels_and_the_children_filter(base, tea
     assert [r["from_label"] for r in rows[1:]] == ["lead", "lead"]
     assert all(r["authority"] == "none" for r in rows)
     assert "labelled" in rows[2]["text"]
+    labelled = next(row for row in team[0].audit_log.rows()
+                    if row.get("event") == "message" and row.get("msg") == rows[2]["seq"])
+    assert labelled["who"] == "lead" and labelled["label"] == "scout"
     kids = child(["inbox", "--agent", "worker", "--children", "--json"], base)
     assert {m["from"] for m in json.loads(kids.stdout)} == {"worker/a"}
     assert child(["inbox", "--agent", "worker", "--children", "--ack"], base).returncode == 2
