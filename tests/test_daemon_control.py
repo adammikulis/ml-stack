@@ -221,7 +221,9 @@ def test_runtime_control_preserves_queued_jobs_even_when_otherwise_idle(tmp_path
 
     stopped = threading.Event()
     queued = [1]
-    runtime = SimpleNamespace(root=tmp_path, port=8770, nothing_running=lambda: True,
+    runtime = SimpleNamespace(root=tmp_path, port=8770, background_busy=lambda: False,
+                              bench_host=SimpleNamespace(measuring=lambda: False),
+                              serving=SimpleNamespace(path=tmp_path / 'serving.json'),
                               runner=SimpleNamespace(status=lambda: {'queued': queued[0]}),
                               update_admission=nullcontext, httpd=SimpleNamespace(shutdown=stopped.set))
     control = create(runtime)
@@ -334,3 +336,116 @@ def test_launcher_replacement_refuses_matching_plaintext_acknowledgment(device, 
     with pytest.raises(ControlError, match='authenticate with sealing'):
         request_replacement(root, port, {'launcher_control': control.instance}, 'a' * 40)
     assert not stopped.is_set()
+
+
+@pytest.fixture
+def restart_runtime(tmp_path):
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+
+    from ml_stack.fleet.serving import Serving
+
+    state = {'background': False, 'queued': 0, 'measuring': False}
+    serving = Serving(tmp_path / "serving.json")
+    runtime = SimpleNamespace(
+        root=tmp_path, port=8770, serving=serving,
+        background_busy=lambda: state['background'],
+        runner=SimpleNamespace(status=lambda: {'queued': state['queued']}),
+        bench_host=SimpleNamespace(measuring=lambda: state['measuring']),
+        update_admission=nullcontext, httpd=SimpleNamespace(shutdown=lambda: None),
+    )
+    return runtime, state
+
+
+@pytest.mark.parametrize('slots,idle', [
+    ([{'is_processing': False}], True),
+    ([{'is_processing': True}], False),
+    ([{'is_processing': False}, {'is_processing': True}], False),
+    ([], False), ({'is_processing': False}, False), ([{'unknown': False}], False),
+])
+def test_restart_admission_preserves_idle_loaded_models_and_blocks_busy_or_unknown_slots(
+        restart_runtime, slots, idle):
+    from ml_stack.fleet.daemon_control import create
+
+    class Slots(BaseHTTPRequestHandler):
+        def do_GET(self):
+            assert self.path == '/slots'
+            body = json.dumps(slots).encode()
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_args):
+            pass
+
+    runtime, _state = restart_runtime
+    server = Server(('127.0.0.1', 0), Slots)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    runtime.serving.register(server.server_address[1], models=['fixture-model'])
+    before = runtime.serving.path.read_bytes()
+    control = create(runtime)
+    try:
+        assert control.idle() is idle
+        assert runtime.serving.path.read_bytes() == before
+        assert runtime.serving.all()[0].models == ['fixture-model']
+    finally:
+        control.close()
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.mark.parametrize('field', ['background', 'queued', 'measuring'])
+def test_restart_admission_blocks_other_active_work(restart_runtime, field):
+    from ml_stack.fleet.daemon_control import create
+
+    runtime, state = restart_runtime
+    state[field] = True
+    control = create(runtime)
+    try:
+        assert not control.idle()
+    finally:
+        control.close()
+
+
+@pytest.mark.parametrize('content', ['{', '{}', '[{}]', '[{"port":true}]', '[{"port":8771,"slots":"bad"}]'])
+def test_restart_admission_refuses_unreadable_or_corrupt_serving_state(restart_runtime, content):
+    from ml_stack.fleet.daemon_control import create
+
+    runtime, _state = restart_runtime
+    runtime.serving.path.write_text(content)
+    control = create(runtime)
+    try:
+        assert not control.idle()
+        assert runtime.serving.path.read_text() == content
+    finally:
+        control.close()
+
+
+def test_restart_admission_refuses_a_registered_unreachable_server(restart_runtime):
+    from ml_stack.fleet.daemon_control import create
+
+    runtime, _state = restart_runtime
+    server = Server(('127.0.0.1', 0), BaseHTTPRequestHandler)
+    port = server.server_address[1]
+    server.server_close()
+    runtime.serving.register(port, models=['fixture-model'])
+    control = create(runtime)
+    try:
+        assert not control.idle()
+    finally:
+        control.close()
+
+
+def test_restart_admission_refuses_serving_storage_that_cannot_be_read(restart_runtime):
+    from ml_stack.fleet.daemon_control import create
+
+    runtime, _state = restart_runtime
+    runtime.serving.path.mkdir()
+    control = create(runtime)
+    try:
+        assert not control.idle()
+        assert runtime.serving.path.is_dir()
+    finally:
+        control.close()

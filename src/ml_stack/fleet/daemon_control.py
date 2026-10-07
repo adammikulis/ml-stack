@@ -205,6 +205,33 @@ def protected(method, control):
 
 def create(runtime):
     """Publish launcher control for a configured daemon runtime."""
-    return Control(runtime.root, runtime.port,
-                   lambda: runtime.nothing_running() and not runtime.runner.status()['queued'],
+    from ml_stack.fleet import updates
+    from ml_stack.serve.reclaim import busy_now
+
+    def models_busy():
+        try:
+            with runtime.serving.path.open('rb') as stream:
+                raw = stream.read(1024 * 1024 + 1)
+        except FileNotFoundError:
+            return False
+        if len(raw) > 1024 * 1024:
+            return True
+        rows = json.loads(raw)
+        if not isinstance(rows, list):
+            return True
+        served = runtime.serving.all()
+        if len(rows) != len(served):
+            return True
+        for row, server in zip(rows, served, strict=True):
+            if (not isinstance(row, dict) or type(row.get('port')) is not int
+                    or not 1 <= row['port'] <= 65535 or row['port'] != server.port):
+                return True
+        return any(busy_now(f'http://127.0.0.1:{server.port}') is not False for server in served)
+
+    idle = updates.quiet(
+        jobs=lambda: runtime.background_busy() or bool(runtime.runner.status()['queued']),
+        measuring=lambda: bool(runtime.bench_host.measuring()),
+        leases=models_busy,
+    )
+    return Control(runtime.root, runtime.port, idle,
                    runtime.update_admission, lambda: runtime.httpd.shutdown())
