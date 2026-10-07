@@ -66,7 +66,7 @@ def test_unauthenticated_simulation_controls_do_not_dispatch(daemon, monkeypatch
 
 def test_manual_world_uses_daemon_root_and_rejects_symlink(daemon, monkeypatch, tmp_path):
     calls = []
-    monkeypatch.setattr(gym_routes, 'manager', SimpleNamespace(create=lambda *a, **kw: calls.append(kw) or {'id': 'test'}))
+    monkeypatch.setattr(gym_routes, 'manager', SimpleNamespace(create=lambda *a, **kw: calls.append((a, kw)) or {'id': 'test'}))
     outside = tmp_path / 'private.json'
     outside.write_text('{}')
     (daemon.files / 'escape.json').symlink_to(outside)
@@ -76,6 +76,7 @@ def test_manual_world_uses_daemon_root_and_rejects_symlink(daemon, monkeypatch, 
     (daemon.files / 'map.json').write_text('{}')
     body['config']['world']['map_file'] = 'map.json'
     assert daemon.call('/ui/gym/sessions', method='POST', body=body)[0] == 201
+    assert calls[0][0] == ('car',)
     import os
     assert os.environ['ML_STACK_GYM_FILES_ROOT'] == str(daemon.files)
 

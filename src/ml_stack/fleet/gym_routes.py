@@ -32,10 +32,10 @@ class GymRoutes:
                 return True
             if self.path == "/ui/gym/sessions" and self.method == "POST":
                 req = object_body(self)
-                name = field(req, "environment", str, "")
+                environment_name = field(req, "environment", str, "")
                 environment = getattr(self.ui, "environment", None)
                 if environment is not None:
-                    environment.require_current_runtime(python=interpreter(name))
+                    environment.require_current_runtime(python=interpreter(environment_name))
                 config = field(req, "config", dict, {})
                 world = field(config, "world", dict, {})
                 runner = self.ui.runner
@@ -47,7 +47,7 @@ class GymRoutes:
                     for name in ("map_file", "net_file", "route_file"):
                         if name in world:
                             safe_relpath(runner.files_root, field(world, name, str))
-                self.send(201, manager.create(name,
+                self.send(201, manager.create(environment_name,
                           config=config, controller=field(req, "controller", str, "manual"),
                           seed=field(req, "seed", int, 0)))
                 return True

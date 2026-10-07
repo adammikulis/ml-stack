@@ -91,3 +91,19 @@ def test_stale_runtime_does_not_advertise_compute_or_start_jobs(environment, mon
     runner._run_one(job)
     assert job.state == "failed" and job.pid is None
     assert "Refresh Training essentials" in runner.log_path(job.id).read_text()
+
+
+def test_non_python_job_runs_with_stale_managed_runtime(environment, monkeypatch, tmp_path):
+    import sys
+    from ml_stack.fleet.jobs import JobRunner
+
+    def stale():
+        pytest.fail("non-Python job must not require a managed runtime")
+
+    environment.require_current_runtime = stale
+    monkeypatch.setattr(JobRunner, "_spawn", lambda self, upto: None)
+    runner = JobRunner(tmp_path, environment=environment)
+    argv = ["cmd", "/c", "echo", "done"] if sys.platform == "win32" else ["/bin/echo", "done"]
+    job = runner.submit("implementation-tool", argv)
+    runner._run_one(job)
+    assert job.state == "done" and job.returncode == 0

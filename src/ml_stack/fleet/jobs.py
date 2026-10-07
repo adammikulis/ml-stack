@@ -266,7 +266,11 @@ class JobRunner:
             env["PATH"] = os.pathsep.join(
                 [str(self.environment.python.parent), env.get("PATH", "")])
         try:
-            if self.environment is not None:
+            program = Path(job.argv[0])
+            managed = (program.name in {"python", "python3", "python.exe"}
+                       or program.name.startswith("ml-stack-")
+                       or (self.environment is not None and program == self.environment.python))
+            if self.environment is not None and managed:
                 self.environment.require_current_runtime()
             with log.open("ab") as fh:
                 # Its own process group (a session on POSIX, CREATE_NEW_PROCESS_GROUP on
