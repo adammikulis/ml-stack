@@ -52,9 +52,10 @@ def test_dataset_handoff_opens_model_step_and_keeps_run_summary(joined, open_pag
     assert not errors
 
 
-def test_library_chat_action_selects_server_identity(joined, open_page):
+@pytest.mark.parametrize('model_path', ['/tmp/exact-model.gguf', r'C:\models\exact-model.gguf'])
+def test_library_chat_action_selects_server_identity(joined, open_page, model_path):
     page, errors = open_page(joined, cookie=joined.cookie, path='/ui/#models')
-    row = {'id': 'display-id', 'name': 'Friendly model', 'path': '/tmp/exact-model.gguf',
+    row = {'id': 'display-id', 'name': 'Friendly model', 'path': model_path,
            'family': 'Qwen', 'format': 'gguf', 'quantization': 'Q4', 'kind': 'text',
            'status': 'installed', 'servable': True, 'size_bytes': 1000,
            'shards': 1, 'is_complete': True, 'files': []}
