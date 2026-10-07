@@ -12,24 +12,37 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import rules_loader  # noqa: E402
 
 
+def workspace_brief(event: dict) -> str:
+    label = f"{event.get('agent_type') or 'subagent'}-{str(event.get('agent_id') or '')[:6]}".strip("-")
+    done = subprocess.run(["ml-stack-workspace", "brief", label, "--agent", "claude-code"],
+                          capture_output=True, text=True, check=False, timeout=30)
+    return done.stdout.strip() if done.returncode == 0 else ""
+
+
 def main() -> int:
     event = json.load(sys.stdin)
     rules = rules_loader.load()
     found = rules.checkouts(event.get("cwd") or ".") if rules else None
-    if not found:
+    parts = [workspace_brief(event)]
+    if found:
+        parts.append(checkout_rule(found[1]))
+    text = "\n\n".join(p for p in parts if p)
+    if not text:
         return 0
-    primary = found[1]
+    print(json.dumps({"hookSpecificOutput": {"hookEventName": "SubagentStart",
+                                             "additionalContext": text}}))
+    return 0
+
+
+def checkout_rule(primary: Path) -> str:
     dev = subprocess.run(["git", "-C", str(primary), "branch", "--show-current"],
                          capture_output=True, text=True, check=False).stdout.strip()
-    text = (f"Checkout rule: the primary checkout {primary} is on the development branch {dev}. "
+    return (f"Checkout rule: the primary checkout {primary} is on the development branch {dev}. "
             "Use it when that is the best way to complete the task; concurrent writers, experiments "
             "and conflicts require separate sibling worktrees and branches. Acquire authenticated "
             "claims before mutation, preserve unrelated work, and stage files by name. "
             "Independent review and affected tests are required. Never use editable installs "
             "or commit or push main without the owner's explicit instruction.")
-    print(json.dumps({"hookSpecificOutput": {"hookEventName": "SubagentStart",
-                                             "additionalContext": text}}))
-    return 0
 
 
 if __name__ == "__main__":
