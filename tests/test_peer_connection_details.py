@@ -70,6 +70,14 @@ def test_swapped_network_identity_refused_before_capability_transmission(connect
         connection_details.details(remote, "private-fixture")
 
 
+def test_project_identity_mismatch_refuses_export(connection):
+    remote, calls = connection
+    remote.call = lambda *args: {"id": "worker", "project": {"key": "b" * 32}}
+    with pytest.raises(Denied, match="selected project"):
+        connection_details.details(remote, "private-fixture")
+    assert calls == []
+
+
 @pytest.mark.parametrize("network_host, status", [("https://192.168.40.2:8770", 201), ("", 409)])
 @pytest.mark.parametrize("authority", ["device", ""])
 def test_copied_invitation_uses_current_network_before_creating_code(monkeypatch, network_host, status, authority):
