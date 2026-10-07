@@ -119,7 +119,7 @@ def test_fresh_rl_workflow_requires_no_dataset(joined, open_page):
     page, errors = open_page(joined, cookie=joined.cookie, path='/ui/#training')
     expect(page.get_by_label('Workflow', exact=True)).to_be_visible()
     page.get_by_label('Workflow', exact=True).select_option('rl')
-    expect(page.get_by_label('Environment', exact=True)).to_be_visible()
+    expect(page.locator('training-view').get_by_label('Environment', exact=True)).to_be_visible()
     expect(page.get_by_label('Training timesteps', exact=True)).to_be_visible()
     assert page.get_by_label('Dataset path (relative to files root)').input_value() == ''
     assert not page.get_by_label('Dataset path (relative to files root)').is_visible()
