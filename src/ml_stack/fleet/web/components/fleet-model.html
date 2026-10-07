@@ -65,6 +65,38 @@ cluster-view, chat-view, models-view, settings-view, fit-view, data-view, traini
   };
   const el = M.el;
 
+  M.preferences = {always_show_advanced:false};
+  M.applyAdvanced = function (root = document) {
+    const details = [...root.querySelectorAll("details")];
+    if (root.matches?.("details")) details.unshift(root);
+    for (const node of details) {
+      if (!node.hasAttribute("data-advanced") && !/advanced/i.test(node.querySelector(":scope > summary")?.textContent || "")) continue;
+      node.setAttribute("data-advanced", "");
+      if (M.preferences.always_show_advanced) node.open = true;
+    }
+  };
+  M.setPreferences = function (settings) {
+    const previous = M.preferences.always_show_advanced;
+    M.preferences = {...settings, always_show_advanced:settings.always_show_advanced === true};
+    if (previous && !M.preferences.always_show_advanced) {
+      for (const node of document.querySelectorAll("details[data-advanced]")) node.open = false;
+    }
+    M.applyAdvanced();
+    window.dispatchEvent(new CustomEvent("fleet-preferences", {detail:M.preferences}));
+  };
+  new MutationObserver(records => {
+    for (const record of records) for (const node of record.addedNodes) {
+      if (node.nodeType === Node.ELEMENT_NODE) M.applyAdvanced(node);
+    }
+  }).observe(document.documentElement, {childList:true, subtree:true});
+  document.addEventListener("toggle", event => {
+    if (M.preferences.always_show_advanced && event.target.matches?.("details[data-advanced]") && !event.target.open) event.target.open = true;
+  }, true);
+  M.loadPreferences = async function () {
+    const result = await request("/ui/settings");
+    if (result.ok && !result.error) M.setPreferences(result.settings || {});
+  };
+
   /** An ml-ui element with its properties set; a property set before the element is defined
       is kept by the element when it upgrades. */
   M.ui = function (tag, props = {}) {
@@ -135,10 +167,6 @@ cluster-view, chat-view, models-view, settings-view, fit-view, data-view, traini
 
   /** Show one screen by name, and tell every component that is watching. */
   M.go = function (name, remember = true) {
-    if (name === "fit" && document.querySelector("models-view")) {
-      name = "models";
-      document.getElementById("model-capacity").open = true;
-    }
     if (name === "cluster" && ["sign-in", "first-run"].includes(M.route) && available(M.requestedRoute)) {
       name = M.requestedRoute;
     }
@@ -147,6 +175,7 @@ cluster-view, chat-view, models-view, settings-view, fit-view, data-view, traini
       M.requestedRoute = name;
       if (remember && location.hash !== `#${name}`) history.pushState(null, "", `#${name}`);
     }
+    if (["sign-in", "first-run"].includes(M.route) && IN_APP.includes(name)) M.loadPreferences().catch(() => {});
     M.route = name;
     const app = document.getElementById("app");
     if (app) app.hidden = !IN_APP.includes(name);
@@ -214,11 +243,12 @@ cluster-view, chat-view, models-view, settings-view, fit-view, data-view, traini
       M.group = setup.group || "";
       M.inCluster = !!setup.needs_password;
       if (setup.needs_setup && document.querySelector("first-run")) { releaseBoot(); return M.go("first-run"); }
-      if (!setup.needs_password) { releaseBoot(); return M.go(opened); }
+      if (!setup.needs_password) { await M.loadPreferences(); releaseBoot(); return M.go(opened); }
       if (setup.cluster_mode === "dev" && ["127.0.0.1", "localhost", "[::1]"].includes(location.hostname)) {
         await request("/ui/setup/local-session", { method: "POST" });
       }
       const s = await request("/ui/session");
+      if (s.signed_in) await M.loadPreferences();
       releaseBoot();
       return s.signed_in ? M.go(opened) : M.signIn();
     } finally {

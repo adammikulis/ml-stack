@@ -45,6 +45,7 @@ class Settings:
     fetch_slots: int = 2
     autodownload_models: bool = True
     download_sources: str = ""
+    always_show_advanced: bool = False
     context: int = 8192
     """How much of a conversation a model is given to read. Costs memory per token."""
 
