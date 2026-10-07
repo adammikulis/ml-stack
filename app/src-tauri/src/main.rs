@@ -14,12 +14,12 @@ use tauri::PhysicalPosition;
 use tauri::{AppHandle, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_shell::process::CommandChild;
 
-const TITLE: &str = "ml-stack";
-const WIDTH: f64 = 1180.0;
-const HEIGHT: f64 = 820.0;
-const MIN_WIDTH: f64 = 900.0;
+const TITLE: &str = "Poolside";
+const WIDTH: f64 = 1360.0;
+const HEIGHT: f64 = 900.0;
+const MIN_WIDTH: f64 = 760.0;
 const MIN_HEIGHT: f64 = 640.0;
-const BACKGROUND: Color = Color(11, 15, 20, 255);
+const BACKGROUND: Color = Color(13, 19, 27, 255);
 const PORT: u16 = 8770;
 const ROOT: &str = ".ml-stack/traind";
 

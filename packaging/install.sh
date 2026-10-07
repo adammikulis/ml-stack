@@ -140,20 +140,18 @@ install_app() {
   have unzip || die "this needs unzip"
   unzip -q "$TMP/pkg.zip" -d "$TMP/out" || die "the download could not be unpacked"
 
-  if [ "$OS" = macos ] && [ -d "$TMP/out/ml-stack.app" ]; then
+  if [ "$OS" = macos ] && [ -d "$TMP/out/Poolside.app" ]; then
     DEST="${ML_STACK_DEST:-/Applications}"
     [ -w "$DEST" ] || DEST="$HOME/Applications"
     mkdir -p "$DEST"
-    rm -rf "$DEST/ml-stack.app"
-    cp -R "$TMP/out/ml-stack.app" "$DEST/ml-stack.app"
-    [ -d "$DEST/ml-stack.app" ] || die "$KEY could not be copied into $DEST"
-    # Downloads are quarantined; without this macOS refuses to open it at all.
-    xattr -dr com.apple.quarantine "$DEST/ml-stack.app" 2>/dev/null || true
+    rm -rf "$DEST/Poolside.app"
+    cp -R "$TMP/out/Poolside.app" "$DEST/Poolside.app"
+    [ -d "$DEST/Poolside.app" ] || die "$KEY could not be copied into $DEST"
     say ""
-    say "Installed to $DEST/ml-stack.app"
+    say "Installed to $DEST/Poolside.app"
     say "Open it to name this device and choose Dev or Prod."
     say "Setup downloads continue in the background while you finish onboarding."
-    open "$DEST/ml-stack.app" 2>/dev/null || true
+    open "$DEST/Poolside.app" 2>/dev/null || true
   else
     DEST="${ML_STACK_DEST:-$HOME/.local/bin}"
     mkdir -p "$DEST"

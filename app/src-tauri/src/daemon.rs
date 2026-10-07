@@ -10,7 +10,12 @@ use tauri_plugin_shell::ShellExt;
 
 const SIDECAR: &str = "ml-stack-headless";
 const CONNECT_TIMEOUT: Duration = Duration::from_millis(500);
-const HEALTH_SECONDS: u64 = 30;
+const HEALTH_SECONDS: u64 = 60;
+const HEALTH_BYTES: u64 = 1024 * 1024;
+
+#[cfg(test)]
+#[path = "daemon_tests.rs"]
+mod tests;
 
 /// Whether a daemon answers `/health` on this port.
 pub fn healthy(port: u16) -> bool {
@@ -24,10 +29,29 @@ pub fn healthy(port: u16) -> bool {
     if sock.write_all(request.as_bytes()).is_err() {
         return false;
     }
-    let mut head = [0u8; 16];
-    let read = sock.read(&mut head).unwrap_or(0);
+    let mut response = Vec::new();
+    let read = Read::by_ref(&mut sock).take(HEALTH_BYTES + 1).read_to_end(&mut response);
     let _ = sock.shutdown(Shutdown::Both);
-    String::from_utf8_lossy(&head[..read]).contains(" 200")
+    read.is_ok() && response.len() <= HEALTH_BYTES as usize && valid_health(&response)
+}
+
+fn valid_health(response: &[u8]) -> bool {
+    let Some(split) = response.windows(4).position(|part| part == b"\r\n\r\n") else {
+        return false;
+    };
+    let headers = String::from_utf8_lossy(&response[..split]);
+    let status: Vec<_> = headers.lines().next().unwrap_or("").split_whitespace().collect();
+    if status.len() < 2 || !matches!(status[0], "HTTP/1.0" | "HTTP/1.1") || status[1] != "200" {
+        return false;
+    }
+    let Ok(body) = serde_json::from_slice::<serde_json::Value>(&response[split + 4..]) else {
+        return false;
+    };
+    body["ok"].as_bool() == Some(true)
+        && body["name"].as_str().is_some()
+        && body["slots"].as_u64().is_some()
+        && body["free"].as_u64().is_some()
+        && body["busy"].as_bool().is_some()
 }
 
 /// Block until the daemon answers, or give up.
