@@ -154,12 +154,11 @@ def test_wsl_runtime_cache_preserves_revision_and_translates_source(tmp_path, ha
     original = wheel.read_bytes()
     prefix = tmp_path / "runtime"
     environment = dict(os.environ, PYTHONPATH=str(Path(wsl.__file__).resolve().parents[2]))
-    child = launch([sys.executable, "-c", wsl._CACHE_RUNTIME, str(wheel),
-                    str(translated_source) if has_source else "", str(prefix)],
-                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=environment)
-    output, errors = child.communicate(timeout=30)
-    assert child.returncode == 0, errors.decode()
-    cached = Path(output.decode().strip())
+    child = subprocess.run([sys.executable, "-c", wsl._CACHE_RUNTIME, str(wheel),
+                            str(translated_source) if has_source else "", str(prefix)],
+                           capture_output=True, text=True, env=environment, timeout=30)
+    assert child.returncode == 0, child.stderr
+    cached = Path(child.stdout.strip())
     assert cached == prefix / "ml-stack-wheels" / commit / wheel.name
     assert runtime_wheel.wheel_commit(cached) == commit
     with zipfile.ZipFile(cached) as archive:
