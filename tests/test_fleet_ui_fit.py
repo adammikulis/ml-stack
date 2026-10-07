@@ -196,8 +196,11 @@ class TestTheSplitBetweenTheFitComponents:
         served.ui.settings.setup_done = True
         browser = playwright.chromium.launch(headless=True)
         try:
-            page = browser.new_page()
+            page = browser.new_page(color_scheme="light")
             page.goto(f'http://127.0.0.1:{served.port}/ui/')
+            assert page.locator('html').get_attribute('lang') == 'en'
+            assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--ml-bg').trim()") == '#1b1f3a'
+            assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--ml-accent').trim()") == '#2de2e6'
             nav = page.locator('fleet-nav nav')
             nav.locator('a[href="#fit"]').click()
             expect(page.locator('#nav-title')).to_have_text('Capacity')
