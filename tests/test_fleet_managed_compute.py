@@ -1,6 +1,7 @@
 """Frozen fleet capability reports use the managed execution environment."""
 
 import json
+import os
 import subprocess
 from types import SimpleNamespace
 
@@ -108,3 +109,23 @@ def test_non_python_job_runs_with_stale_managed_runtime(environment, monkeypatch
     job = runner.submit("implementation-tool", argv, str(tmp_path))
     runner._run_one(job)
     assert job.state == "done" and job.returncode == 0
+
+
+@pytest.mark.skipif(os.name == 'nt', reason='POSIX executable path syntax')
+def test_managed_probe_uses_literal_hostile_path_and_redacts_real_child_environment(tmp_path, monkeypatch):
+    import sys
+
+    python = tmp_path / "python;touch injected"
+    python.symlink_to(sys.executable)
+    environment = SimpleNamespace(python=python, exists=True, _cache={})
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("EXAMPLE_API_KEY", "private-value")
+    monkeypatch.setattr(managed_compute, "_PROBE", """
+import json, os, sys
+print(json.dumps({'backends': [], 'compute_runtime': {'python': sys.executable},
+                  'secret_seen': os.environ.get('EXAMPLE_API_KEY')}))
+""")
+    result = managed_compute.report(environment)
+    assert result["compute_runtime"]["python"] == str(python)
+    assert result["secret_seen"] is None
+    assert not (tmp_path / "injected").exists()
