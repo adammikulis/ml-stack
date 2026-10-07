@@ -133,6 +133,7 @@ standard = ["lm-eval[ifeval]>=0.4"]
 # PyRIT: about 110 packages and 550 MB, installed in a virtualenv of its own.
 redteam = ["ml-stack[web,pdf,testing]", "pyrit>=1.1,<2"]
 agents = ["openai-agents>=0.23.1"]
+pi = ["nodejs-wheel==24.19.0"]
 all = [
     "ml-stack[agents,train,gguf,graph,store,scrape,vision,pdf,testing,telemetry,plot,fleet-tls,fleet-update,fleet-onboard]",
 ]
