@@ -39,6 +39,22 @@ subagent. Read it first. Apply the operational requirements below alongside it.
 - Never modify application code, remove imports, or create local mock implementations to bypass a missing package or dependency. If a library is required, install it with the appropriate package manager and retry.
 - When behavior is broken, trace the failing path and fix the underlying cause. Do not add narrowly scoped workarounds that leave the root behavior broken; add regression coverage for the corrected behavior.
 
+## Activate verified fixes promptly
+
+- A requested fix includes landing, publishing, installing or activating it in the owner's
+  current setup, and exercising the original failure on available hardware. A source commit,
+  review, passing test or prepared artifact is a checkpoint, never completion.
+- After independent review and affected checks, immediately finish the authorized integration,
+  build, installation and verification. Do not leave a ready fix waiting behind unrelated work,
+  another feature, refactoring, cleanup or a background full suite. Keep required gates intact.
+- Assign one owner responsible through activation. A worker handoff must name the exact commit,
+  affected-check evidence, activation steps and remaining verification; the receiving owner must
+  acknowledge responsibility. Sending a message does not transfer or complete the task.
+- Verify the active command or application selects the repaired artifact. Record its installed
+  version, commit and path, then repeat the original user workflow. Preserve active jobs and
+  models. If access, required approval or unavailable hardware prevents activation, report the
+  exact blocker promptly and keep the fix unfinished; do not describe it as fixed or ready.
+
 ## Hook failures are active incidents
 
 - When a development hook fails repeatedly, or the owner asks to fix it, pause unrelated work and
