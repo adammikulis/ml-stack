@@ -1,18 +1,18 @@
 <style>
-models-view #models{max-width:none;padding:28px 32px}
+models-view #models{max-width:none;padding:calc(28px * var(--ui-density,1)) calc(32px * var(--ui-density,1))}
 models-view .models-heading{display:flex;justify-content:space-between;align-items:center;gap:24px;margin-bottom:24px}
 models-view .eyebrow{font-size:12px;text-transform:uppercase;letter-spacing:1.5px;font-weight:750;color:var(--text)}
 models-view .models-heading h1{font-size:34px;letter-spacing:-1px;margin:8px 0}
 models-view .models-heading .sub{margin:0;color:var(--muted)}
-models-view #add-model{background:var(--poolside-orange,#ff8a3d);color:var(--poolside-navy,#1b1f3a);font-weight:750;border:0;padding:13px 20px;border-radius:12px;white-space:nowrap}
+models-view #add-model{background:var(--poolside-orange,#ff8a3d);color:var(--poolside-orange-ink,var(--poolside-navy,#1b1f3a));font-weight:750;border:0;padding:13px 20px;border-radius:12px;white-space:nowrap}
 models-view .models-overview{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-bottom:28px}
 models-view .models-stat{display:flex;align-items:center;gap:16px;padding:18px 20px;border:1px solid var(--line);border-radius:16px;background:var(--bg-raised,#fff)}
 models-view .models-stat strong{font-size:26px;line-height:1.1}
 models-view .models-stat span{font-size:13px;color:var(--muted)}
 models-view .stat-icon{font-size:22px;width:42px;height:42px;display:grid;place-items:center;border-radius:12px;color:var(--poolside-navy)}
-models-view .models-stat:nth-child(1) .stat-icon{background:var(--poolside-orange,#ff8a3d)}
-models-view .models-stat:nth-child(2) .stat-icon{background:var(--poolside-cyan,#2de2e6)}
-models-view .models-stat:nth-child(3) .stat-icon{background:var(--poolside-yellow,#ffd166)}
+models-view .models-stat:nth-child(1) .stat-icon{background:var(--poolside-orange,#ff8a3d);color:var(--poolside-orange-ink,var(--poolside-navy,#1b1f3a))}
+models-view .models-stat:nth-child(2) .stat-icon{background:var(--poolside-cyan,#2de2e6);color:var(--poolside-cyan-ink,var(--poolside-navy,#1b1f3a))}
+models-view .models-stat:nth-child(3) .stat-icon{background:var(--poolside-yellow,#ffd166);color:var(--poolside-yellow-ink,var(--poolside-navy,#1b1f3a))}
 models-view #models-here{padding:0;border:0;background:transparent}
 models-view #model-discovery{margin-top:28px;padding:24px;border-radius:20px;background:var(--bg-raised);border:1px solid var(--line)}
 models-view #model-discovery>summary{font-weight:750;font-size:17px;cursor:pointer}

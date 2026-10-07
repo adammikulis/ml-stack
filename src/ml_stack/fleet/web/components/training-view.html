@@ -1,10 +1,10 @@
 <style>
-training-view .workspace{max-width:none;padding:28px 32px}
+training-view .workspace{max-width:none;padding:calc(28px * var(--ui-density,1)) calc(32px * var(--ui-density,1))}
 training-view .training-heading{display:flex;justify-content:space-between;gap:24px;align-items:center;margin-bottom:28px}
 training-view .training-heading h1{font-size:34px;letter-spacing:-1px;margin:8px 0}
 training-view .eyebrow{font-size:12px;font-weight:750;text-transform:uppercase;letter-spacing:1.5px;color:var(--text)}
 training-view .training-heading .intro{margin:0;max-width:620px}
-training-view .training-mark{font-size:36px;padding:18px 24px;border-radius:24px;background:var(--poolside-orange,#ff8a3d);color:var(--poolside-navy,#1b1f3a)}
+training-view .training-mark{font-size:36px;padding:18px 24px;border-radius:24px;background:var(--poolside-orange,#ff8a3d);color:var(--poolside-orange-ink,var(--poolside-navy,#1b1f3a))}
 training-view .training-layout{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:24px;align-items:start}
 training-view .training-form{padding:0;border:1px solid var(--line);border-radius:20px;background:var(--bg-raised,#fff);overflow:hidden}
 training-view .training-workflow{display:flex;align-items:center;gap:16px;padding:16px 28px;border-bottom:1px solid var(--line)}
@@ -12,7 +12,7 @@ training-view .training-workflow label{margin:0;font-weight:700}
 training-view .training-workflow select{width:auto;flex:1;max-width:360px}
 training-view .training-steps{display:flex;gap:4px;padding:16px;background:var(--bg-sunken);border-bottom:1px solid var(--line)}
 training-view .training-steps button{flex:1;border:0;background:transparent;color:var(--muted);text-align:left;padding:12px;border-radius:12px}
-training-view .training-steps button[aria-current=step]{background:var(--poolside-orange,#ff8a3d);color:var(--poolside-navy,#1b1f3a);font-weight:750}
+training-view .training-steps button[aria-current=step]{background:var(--poolside-orange,#ff8a3d);color:var(--poolside-orange-ink,var(--poolside-navy,#1b1f3a));font-weight:750}
 training-view .training-steps span{display:inline-grid;place-items:center;background:#ffffff80;border-radius:50%;width:24px;height:24px;margin-right:8px}
 training-view .training-pane{padding:28px;min-height:280px}
 training-view .training-pane h2{font-size:23px;margin:0 0 8px}
@@ -23,7 +23,7 @@ training-view .training-form textarea{min-height:90px}
 training-view .training-form .error{color:var(--bad)}
 training-view .training-form [aria-busy=true]{opacity:.75}
 training-view .training-footer{display:flex;justify-content:space-between;padding:16px 28px;border-top:1px solid var(--line);gap:12px}
-training-view .training-footer button:last-child{background:var(--poolside-orange,#ff8a3d);color:var(--poolside-navy,#1b1f3a);border-color:transparent;font-weight:700}
+training-view .training-footer button:last-child{background:var(--poolside-orange,#ff8a3d);color:var(--poolside-orange-ink,var(--poolside-navy,#1b1f3a));border-color:transparent;font-weight:700}
 training-view .training-aside{border-radius:20px;background:var(--bg-raised);border:1px solid var(--line);padding:22px}
 training-view .training-aside h2{font-size:17px;margin:0 0 16px}
 training-view .run-summary{margin:0;display:grid;gap:16px}

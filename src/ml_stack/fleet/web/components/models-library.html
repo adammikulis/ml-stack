@@ -15,7 +15,7 @@ models-library .model-grid{display:grid;grid-template-columns:repeat(auto-fill,m
 models-library article{padding:22px;border:1px solid var(--line);border-radius:18px;background:var(--bg-raised);min-width:0;display:flex;flex-direction:column;gap:18px;position:relative}
 models-library article[data-selected=true]{border-color:var(--poolside-orange);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 20%,transparent)}
 models-library .model-card-heading{display:flex;gap:14px;align-items:start}
-models-library .model-avatar{background:var(--poolside-orange,#ff8a3d);color:var(--poolside-navy,#1b1f3a);border-radius:14px;width:46px;min-width:46px;height:46px;display:grid;place-items:center;font-size:19px;font-weight:750}
+models-library .model-avatar{background:var(--poolside-orange,#ff8a3d);color:var(--poolside-orange-ink,var(--poolside-navy,#1b1f3a));border-radius:14px;width:46px;min-width:46px;height:46px;display:grid;place-items:center;font-size:19px;font-weight:750}
 models-library .model-card-heading b{font-size:16px;line-height:1.4;overflow-wrap:anywhere;display:block}
 models-library .model-card-heading small{display:block;color:var(--muted);font-size:12px;margin-top:4px;overflow-wrap:anywhere}
 models-library .model-chips{display:flex;gap:6px;flex-wrap:wrap}
@@ -23,7 +23,7 @@ models-library .model-chips span{font-size:11px;padding:5px 8px;border-radius:6p
 models-library .model-chips .model-running{background:color-mix(in srgb,var(--good) 16%,var(--bg-raised));color:var(--text)}
 models-library .model-card-actions{display:flex;gap:8px;margin-top:auto;flex-wrap:wrap}
 models-library .model-card-actions button{border-radius:10px;padding:10px 14px;font-weight:650}
-models-library .model-card-actions button:first-child:not(.ghost){background:var(--poolside-orange);color:var(--poolside-navy);border-color:transparent}
+models-library .model-card-actions button:first-child:not(.ghost){background:var(--poolside-orange);color:var(--poolside-orange-ink,var(--poolside-navy,#1b1f3a));border-color:transparent}
 models-library article details{font-size:12px;padding-top:14px;border-top:1px solid var(--line)}
 models-library article summary{color:var(--muted);cursor:pointer}
 models-library details code{display:block;overflow-wrap:anywhere;font-size:11px;padding:10px;border-radius:8px;background:var(--bg-sunken)}
