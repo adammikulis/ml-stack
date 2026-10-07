@@ -94,3 +94,64 @@
   window.ChatModelPicker = ChatModelPicker;
 })();
 </script>
+<script>
+(function () {
+  const M = window.fleetModel;
+  class ConversationsWorkspace {
+    constructor(chat) {
+      this.chat = chat;
+      this.board = chat.querySelector('ml-board');
+      this.team = chat.querySelector('#conversation-team');
+      this.model = chat.querySelector('#conversation-model');
+      this.channels = chat.querySelector('#conversation-channels');
+      this.direct = chat.querySelector('#conversation-direct');
+      this.live = chat.querySelector('#conversation-models');
+      this.board.addEventListener('board-navigation', event => this.navigation(event.detail));
+      chat.querySelector('#conversation-details').onclick = event => {
+        chat.options.open = !chat.options.open;
+        event.currentTarget.setAttribute('aria-expanded', String(chat.options.open));
+      };
+      chat.querySelector('.conversation-choose').onclick = () => chat.modelPicker.button.click();
+    }
+    route(route) {
+      this.active = route === 'board';
+      this.team.hidden = !this.active;
+      this.model.hidden = this.active;
+      if (this.navigationData) this.navigation(this.navigationData);
+    }
+    navigation(data) {
+      this.navigationData = data;
+      const button = (label, current, view) => M.el('button', {
+        type:'button', 'aria-current':String(this.active && current), onclick:() => {
+          M.go('board'); this.board.open(view);
+        }}, label);
+      this.channels.replaceChildren(...data.boards.map(row => button(
+        `${row.name}${row.unread ? ` · ${row.unread}` : ''}`,
+        [data.view.name, data.view.board].includes(row.name), {kind:'board', name:row.name})));
+      if (!data.boards.length) this.channels.append(M.el('p', {class:'hint'}, data.error || 'No team channels in this workspace.'));
+      const peers = new Map();
+      for (const row of data.dms) {
+        const id = row.a === data.me ? row.b : row.a;
+        peers.set(id, {id, label:id, view:{kind:'dm', a:row.a, b:row.b}});
+      }
+      for (const agent of data.agents) {
+        if (agent.id !== data.me) peers.set(agent.id, {id:agent.id,
+          label:agent.display_name || agent.display_label || agent.id,
+          view:{kind:'dm', a:data.me, b:agent.id}});
+      }
+      this.direct.replaceChildren(...[...peers.values()].map(row => button(row.label,
+        data.view.kind === 'dm' && [data.view.a,data.view.b].includes(row.id), row.view)));
+      if (!peers.size) this.direct.append(M.el('p', {class:'hint'}, 'Agents and direct messages appear here.'));
+    }
+    models(rows) {
+      this.live.replaceChildren(...rows.map(row => M.el('button', {type:'button', onclick:() => {
+        M.go('chat'); this.chat.picker.value = row.model;
+        this.chat.picker.dispatchEvent(new Event('change'));
+        this.chat.input.focus();
+      }}, `● ${row.model.split('/').pop()}`)));
+      if (!rows.length) this.live.append(M.el('p', {class:'hint'}, 'No models running. Choose one from the library.'));
+    }
+  }
+  window.ConversationsWorkspace = ConversationsWorkspace;
+})();
+</script>

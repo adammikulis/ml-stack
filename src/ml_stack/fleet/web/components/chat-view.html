@@ -1,52 +1,25 @@
-<style>
-chat-view .chats { padding:20px 16px; background:var(--bg); }
-chat-view .chat-heading { gap:8px; }
-chat-view .chat-heading h1 { font-size:19px; }
-chat-view .chats label { font-size:12px; color:var(--muted); }
-chat-view .chat-search { margin-top:22px; }
-chat-view .chatrow { border-radius:9px; margin:4px 0; }
-chat-view .chatrow a { padding:12px; overflow-wrap:anywhere; }
-chat-view .talk { background:var(--bg-raised); min-width:0; }
-chat-view .chat-toolbar { border-bottom:1px solid var(--line); padding:16px 24px; }
-chat-view .chat-toolbar h1 { font-size:18px; }
-chat-view .pickrow { margin:0; padding:12px 24px; border-bottom:1px solid var(--line); }
-chat-view .messages { padding:24px; }
-chat-view .msg { max-width:920px; margin:0 auto 24px; border-radius:0; border:0; padding:10px 14px; background:transparent; }
-chat-view .msg.user { background:var(--bg); border-radius:12px; }
-chat-view .speaker { font-size:12px; letter-spacing:.02em; }
-chat-view .chat-welcome { max-width:640px; margin:40px auto; display:block; text-align:left; }
-chat-view .chat-welcome strong { font-size:28px; }
-chat-view .chat-welcome p { margin:12px 0 24px; }
-chat-view .chat-starters { display:grid; gap:10px; }
-chat-view .chat-starters button { text-align:left; padding:14px 18px; border:1px solid var(--line); border-radius:12px; }
-chat-view .askrow { margin:0 24px; padding:12px; border:1px solid var(--line); border-radius:14px; background:var(--bg); }
-chat-view .askrow textarea { border:0; background:transparent; resize:vertical; min-height:64px; }
-chat-view .chat-hint { padding:10px 24px 16px; }
-chat-view #chat-options { margin:8px 24px; }
-chat-view #chat-note { padding:0 24px; }
-chat-view .chat-model-action { color:var(--accent); }
-@media(max-width:760px) { chat-view .chats { padding:12px; max-height:none; } chat-view #chat-list { max-height:160px; overflow-y:auto; } chat-view .messages { padding:12px; } chat-view .askrow { margin:0 12px; } chat-view .chat-welcome { margin:16px auto; padding:12px; } chat-view .chat-welcome strong { font-size:22px; } }
-</style>
 <template>
   <main class="chatmain" id="chat" hidden>
     <aside class="chats" aria-label="Conversations">
-      <div class="chat-heading"><h1>Conversations</h1><button class="ghost small" id="chat-new">New chat</button></div>
-      <nav class="conversation-tabs" aria-label="Conversation spaces"><a href="#chat" aria-current="page">Model chats</a><a href="#board">Team channels</a></nav>
-      <p class="hint">Private model chats and project work.</p>
-      <label for="chat-mode">Conversation mode</label><select id="chat-mode"><option value="chat">Chat</option><option value="coding">Coding</option></select>
-      <div class="chat-search"><label for="chat-search">Search conversations</label>
-        <input type="search" id="chat-search" placeholder="Search messages…"></div>
-      <div id="chat-list"></div>
+      <div class="conversation-space"><span class="conversation-space-mark" aria-hidden="true">✦</span><div><strong>Poolside</strong><small>Your shared workspace</small></div></div>
+      <button id="chat-new" class="conversation-new">＋ New conversation</button>
+      <label class="conversation-search" for="chat-search"><input type="search" id="chat-search" placeholder="Search model chats…" aria-label="Search model chats"></label>
+      <section class="conversation-group"><h2>Team channels</h2><div id="conversation-channels" role="status">Connecting to workspace…</div></section>
+      <section class="conversation-group"><h2>Direct messages</h2><div id="conversation-direct"></div></section>
+      <section class="conversation-group"><h2>Model chats</h2><div id="chat-list"></div></section>
+      <section class="conversation-group"><h2>Running models</h2><div id="conversation-models"></div><a class="conversation-library" href="#models">Browse model library →</a></section>
+      <details class="conversation-coordination" data-advanced><summary>Workspace connection</summary><coordinator-control></coordinator-control><div id="conversation-agents"></div></details>
     </aside>
-    <div class="talk">
-      <header class="chat-toolbar"><h1 id="chat-title">New chat</h1>
-        <span class="chat-status" id="chat-status">Chat</span></header>
+    <div id="conversation-team" hidden><ml-board endpoint="/ui/board" channel-feed integrated></ml-board></div>
+    <div class="talk" id="conversation-model">
+      <header class="chat-toolbar"><div class="conversation-title"><span class="conversation-avatar" aria-hidden="true">✦</span><div><h1 id="chat-title">New conversation</h1><span class="chat-status" id="chat-status">Model chat</span></div></div>
+        <div class="conversation-actions"><label class="sr" for="chat-mode">Conversation mode</label><select id="chat-mode"><option value="chat">Chat</option><option value="coding">Coding agent</option></select><button class="ghost" id="conversation-details" aria-expanded="false" aria-controls="chat-options">Options</button></div></header>
       <div class="pickrow" id="chat-pickrow" hidden>
         <span>Model</span><button class="ghost chat-model-current" id="chat-model-button" aria-haspopup="dialog">Choose a model</button>
         <select id="model" aria-label="Selected model" hidden></select>
       </div>
       <div class="hint" id="chat-none" hidden>
-        No model is running yet. <a href="#models">Choose a model to serve</a>, or use one running on your pool.
+        <strong>Bring a model into the conversation.</strong> Choose an installed model to serve on your pool.<button type="button" class="conversation-choose">Choose a model</button>
       </div>
       <div class="chat-coding-fields" data-coding hidden>
         <label for="chat-project">Project directory</label><input id="chat-project" placeholder="/path/to/project">
@@ -143,10 +116,11 @@ chat-view .chat-model-action { color:var(--accent); }
       this.coding = new window.ChatCoding(this);
       this.modelPicker = new window.ChatModelPicker(this);
       this.newChat.onclick = () => {
+        M.go("chat");
         if (this.request) return;
         this.open = null;
         localStorage.removeItem("ml-stack.chat.selected");
-        this.heading.textContent = "New chat";
+        this.heading.textContent = "New conversation";
         this.loadEpoch++;
         this.input.value = "";
         this.messages = [];
@@ -166,9 +140,11 @@ chat-view .chat-model-action { color:var(--accent); }
       this.input.onkeydown = (e) => {
         if (e.key === "Enter" && !e.shiftKey && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); this.ask(); }
       };
+      this.workspace = new window.ConversationsWorkspace(this);
       M.onRoute((route) => {
-        const on = route === "chat";
+        const on = route === "chat" || route === "board";
         this.box.hidden = !on;
+        this.workspace.route(route);
         if (on && !this.request) this.draw();
       });
       window.addEventListener("fleet-chat-ready", event => { this.pendingModel = event.detail.model; });
@@ -177,8 +153,8 @@ chat-view .chat-model-action { color:var(--accent); }
 
     welcome() {
       this.list.replaceChildren(el("div", { class: "chat-welcome" },
-        el("strong", {}, "What would you like to explore?"),
-        el("p", {}, "Explore ideas with a model, or switch to Coding to work in a project."),
+        el("strong", {}, "A place to think and build together"),
+        el("p", {}, "Talk to a model, plan an experiment, or bring a coding agent into your project. Your team channels and model conversations live together here."),
         el("div", { class: "chat-starters" }, ...[
           ["Explain a model", "Help me understand this model’s strengths, limitations, and how to evaluate it."],
           ["Plan an experiment", "Help me design a reproducible training experiment. Ask me about the model, data, and success criteria."],
@@ -236,11 +212,12 @@ chat-view .chat-model-action { color:var(--accent); }
         this.picker.replaceChildren(...available.map((m) =>
           el("option", { value: m.model }, m.local ? m.model : `${m.model} — on ${m.peer}`)));
         if (available.some((m) => m.model === selected)) this.picker.value = selected;
-        this.pickrow.hidden = !available.length;
+        this.pickrow.hidden = false;
         this.askrow.hidden = !available.length;
         this.none.hidden = !!available.length;
-        this.options.hidden = !available.length;
+        this.options.hidden = false;
         await this.modelPicker.catalogue();
+        this.workspace.models(available);
         this.outputTokens.value = this.savedSettings.max_output_tokens ?? "";
         await this.coding.restore(this.savedSettings, this.picker.value);
         this.updateReadiness();
@@ -293,7 +270,7 @@ chat-view .chat-model-action { color:var(--accent); }
         this.sidebar.replaceChildren(...rows.map((c) =>
           el("div", { class: `chatrow${c.id === this.open ? " on" : ""}`, "data-conversation": c.id },
             el("a", { href: "#chat", onclick: (e) => {
-              e.preventDefault(); if (!this.request) this.load(c.id);
+              e.preventDefault(); if (!this.request) { M.go("chat"); this.load(c.id); }
             } }, c.title || "New chat"),
             el("details", { class: "chat-row-menu" },
               el("summary", { "aria-label": `Options for ${c.title || "New chat"}` }, "•••"),
@@ -337,7 +314,7 @@ chat-view .chat-model-action { color:var(--accent); }
         if (!changed.ok) throw new Error(changed.error || "Could not update the conversation.");
         if (this.open === conversation.id) {
           if (deleting) {
-            this.open = null; this.messages = []; this.heading.textContent = "New chat";
+            this.open = null; this.messages = []; this.heading.textContent = "New conversation";
             localStorage.removeItem("ml-stack.chat.selected");
             this.welcome();
           } else this.heading.textContent = changed.title || this.nameInput.value.trim();
@@ -357,7 +334,7 @@ chat-view .chat-model-action { color:var(--accent); }
         const one = await api(`/ui/conversations/${id}`);
         if (epoch !== this.loadEpoch || M.refused(one)) return;
         if (one.status === 404) {
-          this.open = null; this.messages = []; this.heading.textContent = "New chat";
+          this.open = null; this.messages = []; this.heading.textContent = "New conversation";
           localStorage.removeItem("ml-stack.chat.selected");
           this.welcome();
           this.note.textContent = "This conversation was removed.";

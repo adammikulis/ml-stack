@@ -1,60 +1,62 @@
 <style>
-board-view { display:contents; }
-board-view .board-workspace { padding:24px; width:100%; min-width:0; }
-board-view .board-workspace h1 { margin:0 0 6px; }
-board-view .board-workspace .sub { margin:0 0 18px; }
-board-view ml-board { display:block; height:calc(100dvh - 188px); min-height:420px; }
-@media(max-width:640px) { board-view .board-workspace { padding:16px; } board-view ml-board { height:72dvh; } }
-.conversation-tabs { display:flex; gap:4px; padding:4px; border:1px solid var(--line); border-radius:12px; background:var(--bg); margin:12px 0; }
-.conversation-tabs a { flex:1; padding:8px 12px; border-radius:8px; text-align:center; text-decoration:none; font-size:13px; color:var(--muted); }
-.conversation-tabs a[aria-current=page] { color:var(--text); background:var(--bg-raised); box-shadow:0 1px 4px #0002; font-weight:600; }
-.conversation-heading { display:flex; justify-content:space-between; gap:24px; align-items:center; }
-@media(max-width:760px) { .conversation-heading { display:block; } }
+chat-view .chatmain { display:grid; grid-template-columns:260px minmax(0,1fr); height:calc(100dvh - var(--header-height,88px)); min-height:520px; overflow:hidden; padding:0; }
+chat-view .chats { display:flex; flex-direction:column; overflow-y:auto; padding:20px 12px; background:#fff0f5; border-right:1px solid var(--line); gap:12px; }
+chat-view .conversation-space { display:flex; align-items:center; gap:10px; padding:0 8px 8px; }
+chat-view .conversation-space strong { display:block; font-size:18px; }
+chat-view .conversation-space small { display:block; font-size:11px; color:var(--muted); }
+chat-view .conversation-space-mark { display:grid; place-items:center; width:36px; height:36px; border-radius:12px; background:var(--poolside-pink,#ff5fa2); color:#1b1f3a; font-size:25px; }
+chat-view .conversation-new { width:100%; background:var(--poolside-pink,#ff5fa2); color:#1b1f3a; border:0; padding:11px; border-radius:9px; font-weight:650; }
+chat-view .conversation-search input { width:100%; background:#fff; padding:9px 11px; border-radius:8px; font-size:12px; }
+chat-view .conversation-group h2 { font-size:10px; text-transform:uppercase; letter-spacing:.1em; color:#8b4664; margin:6px 10px; }
+chat-view .conversation-group button, chat-view .conversation-library, chat-view .chatrow a { display:block; width:100%; text-align:left; padding:9px 10px; background:transparent; color:var(--text); border:0; border-radius:7px; text-decoration:none; font-size:13px; }
+chat-view .conversation-group button:hover, chat-view .chatrow:hover { background:#ff5fa21a; }
+chat-view .conversation-group button[aria-current=true],chat-view .chatrow.on { background:#ff5fa233; color:#82244b; }
+chat-view .chatrow { display:flex; align-items:center; border-radius:7px; margin:2px 0; }
+chat-view .chatrow a { min-width:0; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+chat-view .chat-row-menu { padding-right:7px; }
+chat-view .conversation-coordination { margin-top:auto; padding:10px; font-size:12px; }
+chat-view #conversation-team { min-width:0; height:100%; background:white; }
+chat-view #conversation-team ml-board { height:100%; min-height:0; }
+chat-view .talk { display:flex; flex-direction:column; min-height:0; min-width:0; background:#fff; }
+chat-view .chat-toolbar { display:flex; justify-content:space-between; align-items:center; flex:none; padding:16px 28px; min-height:77px; border-bottom:1px solid var(--line); gap:12px; }
+chat-view .conversation-title { display:flex; align-items:center; gap:12px; min-width:0; }
+chat-view .conversation-title h1 { margin:0; font-size:17px; }
+chat-view .chat-status { color:var(--muted); font-size:11px; }
+chat-view .conversation-avatar { display:grid; place-items:center; width:38px; height:38px; flex:none; background:#2de2e633; color:#12636a; border-radius:12px; font-size:22px; }
+chat-view .conversation-actions { display:flex; align-items:center; gap:8px; }
+chat-view .conversation-actions select { width:auto; margin:0; font-size:12px; }
+chat-view .pickrow { display:flex; gap:8px; align-items:center; padding:10px 28px; border-bottom:1px solid var(--line); font-size:12px; flex:none; }
+chat-view .chat-model-current { max-width:75%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--accent-ink,#a6295e); }
+chat-view .messages { min-height:0; flex:1; overflow-y:auto; padding:24px 32px; }
+chat-view .msg { position:relative; padding:12px 16px 12px 50px; margin:0 0 8px; background:transparent; border:0; border-radius:10px; }
+chat-view .msg::before { content:"✦"; position:absolute; left:5px; top:10px; display:grid; place-items:center; width:30px; height:30px; border-radius:10px; background:#2de2e633; color:#12636a; }
+chat-view .msg.user::before { content:"●"; background:#ff5fa233; color:#a6295e; }
+chat-view .msg:hover { background:#fffaf4; }
+chat-view .speaker { font-size:13px; font-weight:700; color:#1b1f3a; }
+chat-view .message-body { margin-top:5px; font-size:14px; line-height:1.7; }
+chat-view .chat-welcome { max-width:660px; margin:7vh auto 24px; padding:20px; text-align:left; }
+chat-view .chat-welcome strong { display:block; font-size:32px; color:#1b1f3a; line-height:1.15; }
+chat-view .chat-welcome p { color:var(--muted); line-height:1.7; margin:16px 0 26px; }
+chat-view .chat-starters { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
+chat-view .chat-starters button { padding:22px 14px; min-height:95px; text-align:left; border-radius:12px; border:0; background:#ff5fa226; color:#82244b; }
+chat-view .chat-starters button:nth-child(2) { background:#ffd16655; color:#695012; }
+chat-view .chat-starters button:nth-child(3) { background:#2de2e633; color:#12636a; }
+chat-view .askrow { display:flex; align-items:flex-end; gap:12px; margin:0 28px; padding:12px 14px; border:1px solid #d8cbd1; border-radius:12px; background:white; flex:none; }
+chat-view .askrow:focus-within { border-color:#ff5fa2; box-shadow:0 0 0 3px #ff5fa21a; }
+chat-view .askrow textarea { flex:1; min-height:48px; max-height:170px; border:0; resize:vertical; margin:0; padding:6px; background:transparent; }
+chat-view #chat-send { background:#ff5fa2; color:#1b1f3a; border:0; }
+chat-view .chat-hint { padding:8px 28px 15px; font-size:10px; color:var(--muted); }
+chat-view #chat-options { margin:0; padding:14px 28px; background:#fffaf4; max-height:35vh; overflow-y:auto; border-bottom:1px solid var(--line); }
+chat-view #chat-options:not([open]) { display:none; }
+chat-view #chat-note { padding:0 28px; }
+chat-view #chat-none { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin:0; padding:14px 28px; background:#ffd16633; font-size:12px; }
+chat-view #chat-none strong { color:#695012; }
+chat-view .conversation-choose { margin-left:auto; background:#ff5fa2; color:#1b1f3a; border:0; font-size:12px; }
+chat-view #chat-activity { max-height:25vh; overflow:auto; }
+chat-view .sr { position:absolute; width:1px; height:1px; clip:rect(0,0,0,0); overflow:hidden; }
+@media(max-width:850px) { chat-view .chatmain { grid-template-columns:210px minmax(0,1fr); } chat-view .chat-toolbar { padding:12px 16px; } chat-view .chat-starters { grid-template-columns:1fr; } }
+@media(max-width:600px) { chat-view .chatmain { grid-template-columns:1fr; overflow:auto; height:auto; } chat-view .chats { max-height:240px; } chat-view .talk { min-height:65vh; } chat-view .conversation-actions { flex-wrap:wrap; } chat-view .chat-welcome { margin:10px auto; } }
 </style>
-<template>
-  <section class="board-workspace" hidden>
-    <header class="conversation-heading"><div><h1>Conversations</h1>
-      <p class="sub">Team channels, project threads, and direct messages to agents.</p></div>
-      <nav class="conversation-tabs" aria-label="Conversation spaces"><a href="#chat">Model chats</a><a href="#board" aria-current="page">Team channels</a></nav></header>
-    <coordinator-control></coordinator-control>
-    <details id="board-agents" data-advanced><summary>Local agents</summary><div id="agents-mount"></div></details>
-    <div id="board-mount"></div>
-  </section>
-</template>
 <script>
-(function () {
-  const M = window.fleetModel;
-  class BoardView extends HTMLElement {
-    connectedCallback() {
-      if (this.wired) return;
-      this.wired = true;
-      this.host = this.querySelector('section');
-      this.mount = this.querySelector('#board-mount');
-      this.sharedRemote = null;
-      this.addEventListener('coordination', event => {
-        this.sharedRemote = event.detail.mode === 'remote';
-        this.querySelector('#board-agents').hidden = this.sharedRemote;
-        if (this.sharedRemote) this.viewer?.remove();
-        else if (!this.host.hidden) this.showBoard();
-      });
-      this.querySelector('#board-agents').ontoggle = event => {
-        if (event.target.open && !this.agents) {
-          this.agents = M.el('ml-agents', {endpoint:'/ui/agents'});
-          this.querySelector('#agents-mount').append(this.agents);
-        }
-      };
-      M.onRoute(route => {
-        this.host.hidden = route !== 'board';
-        if (route === 'board') {
-          if (this.sharedRemote === false) this.showBoard();
-        } else this.viewer?.remove();
-      });
-    }
-    showBoard() {
-      this.viewer ||= M.el('ml-board', {endpoint:'/ui/board', 'channel-feed':''});
-      this.mount.append(this.viewer);
-    }
-  }
-  customElements.define('board-view', BoardView);
-})();
+customElements.define('board-view', class extends HTMLElement {});
 </script>
