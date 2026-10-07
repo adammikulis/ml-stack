@@ -519,3 +519,21 @@ def test_remote_none_and_large_explicit_task_limits_preserve_shape():
     for caps in ({"calls": True}, {"seconds": float("inf")}, {"unknown": None}):
         with pytest.raises(ValueError):
             remote_workers._settings({**body, "task_caps": caps}, ("dev", "id"))
+
+
+def test_connection_acl_failure_preserves_destination_without_credential_bytes(tmp_path, monkeypatch):
+    path = tmp_path / "connection.json"
+    remote_workers._save_connection(path, {"identity": "existing"})
+    before = path.read_bytes()
+    seen = []
+    def refuse(temporary):
+        seen.append(temporary.read_bytes())
+        raise OSError("temporary ACL denied")
+    if remote_workers.os.name != "nt":
+        pytest.skip("Windows ACL behavior")
+    monkeypatch.setattr(remote_workers, "restrict", refuse)
+    with pytest.raises(OSError, match="temporary ACL denied"):
+        remote_workers._save_connection(path, {"identity": "replacement"})
+    assert seen == [b""]
+    assert path.read_bytes() == before
+    assert list(tmp_path.iterdir()) == [path]

@@ -55,7 +55,7 @@ def task_spec(value: Any) -> dict[str, Any]:
     if wall is not None and (type(wall) not in (int, float) or not math.isfinite(wall) or wall <= 0):
         raise ValueError('max_wall_s must be None or a positive finite number')
     retries = limits.get('max_retries')
-    if retries is not None and (type(retries) is not int or not 0 <= retries <= 10):
+    if 'max_retries' in limits and (type(retries) is not int or not 0 <= retries <= 10):
         raise ValueError('max_retries must be between 0 and 10')
     if 'model' in limits:
         text(limits['model'], 'model', 1024)

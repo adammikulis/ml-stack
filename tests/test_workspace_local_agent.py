@@ -555,7 +555,7 @@ def test_each_turn_extends_the_last_prompt_byte_for_byte_and_tasks_share_their_p
 
     with fake_llama_server(Served(answer="words only")) as fake:
         client = localloop.client_on(fake.base_url)
-        with Rig(kit, client) as rig:
+        with Rig(kit, client, caps=localloop.Caps(rounds=2)) as rig:
             for text in ("first task", "second task"):
                 sent = kit.ws.send(kit.owner, "local-t", "task", text)
                 rig.reply_to(kit.owner, sent["seq"])

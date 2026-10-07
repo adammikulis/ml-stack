@@ -4,12 +4,15 @@ client that stops at its caps, and tools to read a thread and to send messages t
 from __future__ import annotations
 
 import io
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
 from ml_stack import do, requests, roles
+from ml_stack.http import ServerError
+from ml_stack.http_cancel import Cancellation, scope
 from ml_stack.interventions import Call, Confirm
 from ml_stack.workspace import localeffort as le, localprofile as lp, plain, work_reputation
 from ml_stack.workspace.identity import Denied
@@ -151,7 +154,35 @@ class Guarded:
                 kwargs["n_predict"] = cap
         if self.max_output_tokens and "n_predict" not in kwargs:
             kwargs["n_predict"] = self.max_output_tokens
-        return self.client.chat(messages, **{**kwargs, "think": self.think})
+        control, done, reason = Cancellation(), threading.Event(), []
+
+        def supervise():
+            while not done.wait(0.02):
+                if self.stop():
+                    reason.append("stopped by the person")
+                elif self.deadline is not None and time.monotonic() > self.deadline:
+                    reason.append(f"over the {self.seconds:.0f} s limit for one task")
+                else:
+                    continue
+                control.set()
+                return
+
+        watcher = threading.Thread(target=supervise, daemon=True)
+        watcher.start()
+        try:
+            with scope(control):
+                result = self.client.chat(messages, **{**kwargs, "think": self.think})
+            if reason:
+                raise TaskStopped(reason[0])
+            return result
+        except (OSError, ValueError, ServerError) as error:
+            if reason:
+                raise TaskStopped(reason[0]) from error
+            raise
+        finally:
+            done.set()
+            watcher.join()
+
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self.client, name)

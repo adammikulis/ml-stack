@@ -60,3 +60,49 @@ def test_saved_explicit_old_default_values_remain_finite(tmp_path):
     saved = la.load(ws, agent.name)
     assert saved.max_output_tokens is None
     assert localloop.caps_of(saved).seconds is None
+
+
+@pytest.mark.parametrize("cause", ["cancel", "wall"])
+def test_guarded_none_transport_interrupts_before_response_headers(cause):
+    import threading
+
+    from test_http_cancel import pending_headers
+
+    from ml_stack.client import Client, Transport, families
+    stopped = threading.Event()
+    with pending_headers() as (url, received, closed):
+        client = Client(url.removesuffix("/v1/chat/completions"), family=families.GENERIC,
+                        transport=Transport(timeout=None))
+        guarded = localtools.Guarded(client, effort="off",
+            limits=localtools.Limits(0.2 if cause == "wall" else None, None), stop=stopped.is_set)
+        failures = []
+        def run():
+            try:
+                guarded.chat([{"role": "user", "content": "wait"}])
+            except localtools.TaskStopped as error:
+                failures.append(str(error))
+        worker = threading.Thread(target=run, daemon=True)
+        worker.start()
+        assert received.wait(2)
+        if cause == "cancel":
+            stopped.set()
+        worker.join(1)
+        assert not worker.is_alive()
+        assert closed.wait(1)
+        assert failures and ("person" if cause == "cancel" else "limit") in failures[0]
+
+
+def test_optional_wall_limits_preserve_recovery_bounds_and_counter_schema(tmp_path):
+    import json
+
+    from ml_stack.workspace import task_caps, task_schema
+    spec = {"title": "Inspect queue", "acceptance": ["Report queue state"]}
+    for wall in (None, 200000):
+        assert task_schema.task_spec({**spec, "limits": {"max_wall_s": wall}})["limits"]["max_wall_s"] == wall
+    with pytest.raises(ValueError, match="max_retries"):
+        task_schema.task_spec({**spec, "limits": {"max_retries": None}})
+    path = tmp_path / "counter.json"
+    for value in ([], {"version": 1, "calls": 0}, {"version": True, "calls": 0, "limit": None}):
+        path.write_text(json.dumps(value))
+        with pytest.raises(ValueError):
+            task_caps.admit(path)

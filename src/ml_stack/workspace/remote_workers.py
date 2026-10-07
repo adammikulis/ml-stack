@@ -10,7 +10,7 @@ from pathlib import Path
 
 from ml_stack import home, jobs
 from ml_stack.command import flag, option
-from ml_stack.files import read_json, write_json
+from ml_stack.files import read_json, writing
 from ml_stack.fleet.discovery import memberships
 from ml_stack.fleet.remote import Peer
 from ml_stack.graph.store import GraphStore
@@ -51,11 +51,15 @@ OPTIONS = [option('json'), flag('--device', default='', help='discovered target 
 
 
 def _save_connection(path, value):
-    write_json(path, value)
-    if os.name == "nt":
-        restrict(path)
-    else:
-        path.chmod(0o600)
+    why = tokens.problem(path)
+    if why not in {"", "missing"}:
+        raise Denied(f"worker connection storage: {why}")
+    with writing(path) as temporary:
+        if os.name == "nt":
+            restrict(temporary)
+        else:
+            temporary.chmod(0o600)
+        temporary.write_text(json.dumps(value), encoding="utf-8")
 
 
 def credential(remote, name, model, authority, harness="ml-stack-agent"):
