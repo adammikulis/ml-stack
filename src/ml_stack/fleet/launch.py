@@ -21,8 +21,8 @@ from .discovery import (
     DEFAULT_PORT as DISCOVERY_PORT,  # noqa: F401  (keeps ports in view)
     memberships,
 )
-from .join import default_root
 from .measuring import same_commit
+from .runtime_paths import default_root
 from .updates import state
 from .wsl import WSLError, prepare, replace_running, start
 

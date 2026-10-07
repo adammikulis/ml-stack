@@ -102,3 +102,22 @@ def test_person_startup_displays_token(monkeypatch, capsys):
     monkeypatch.setattr(person, "is_terminal", lambda _stream: True)
     announce_token("fixture-token")
     assert capsys.readouterr().out == "  token fixture-token\n"
+
+
+@pytest.mark.parametrize('first', ['launch', 'join'])
+def test_launcher_and_cluster_cli_import_in_a_fresh_process(first):
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    source = Path(__file__).resolve().parents[1] / 'src'
+    script = ("import importlib; "
+              f"importlib.import_module('ml_stack.fleet.{first}'); "
+              "from ml_stack.fleet import launch, join; "
+              "from ml_stack.fleet.runtime_paths import default_root; "
+              "assert launch.default_root is default_root; "
+              "assert join.default_root is default_root")
+    done = subprocess.run([sys.executable, '-c', script], capture_output=True,
+                          text=True, timeout=30, env={**os.environ, 'PYTHONPATH': str(source)})
+    assert done.returncode == 0, done.stderr

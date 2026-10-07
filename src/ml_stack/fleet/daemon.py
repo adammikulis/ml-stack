@@ -56,13 +56,12 @@ from .files import Fetcher
 from .framing import LimitedServer
 from .invites import Invitations
 from .jobs import JobRunner
-from .join import default_root
 from .measuring import BenchHost, bench_home as bench_home_beside
 from .models import Downloads, Models
 from .onboard.joining import PLAIN, Joining
 from .pausing import ADOPT_S, adopt_pause, peer_pause
 from .projects import ProjectRegistry, lan_host, local_candidates
-from .runtime_paths import announce_token, configure as configure_runtime_paths
+from .runtime_paths import announce_token, configure as configure_runtime_paths, default_root
 from .serving import Hosting, Serving
 from .settings import Settings
 from .ui import UI

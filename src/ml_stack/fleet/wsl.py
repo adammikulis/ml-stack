@@ -132,7 +132,7 @@ def replace_running(arguments: list[str], port: int, running: dict, expected: st
         root = _read("wslpath", "-a", "-u", str(Path(root).expanduser().resolve()))
     script = """import json, pathlib, sys
 from ml_stack.fleet.daemon_control import request_replacement
-from ml_stack.fleet.join import default_root
+from ml_stack.fleet.runtime_paths import default_root
 root = pathlib.Path(sys.argv[1]) if sys.argv[1] else default_root()
 request_replacement(root, int(sys.argv[2]), json.loads(sys.argv[3]), sys.argv[4])
 """
