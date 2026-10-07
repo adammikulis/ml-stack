@@ -104,7 +104,7 @@ class ModelsLibrary extends HTMLElement{
   const chat=E('button',{class:'small',onclick:()=>owner.openChat(row.name)},'Open chat');
   const heading=E('div',{class:'model-card-heading'},E('div',{class:'model-avatar','aria-hidden':'true'},(row.family||'M').slice(0,2).toUpperCase()),E('div',{},E('b',{},row.name),E('small',{},row.repo||row.architecture||row.family)));
   const chips=E('div',{class:'model-chips'},...[row.format.toUpperCase(),row.quantization,row.kind,M.fileSize(row.size_bytes)].filter(Boolean).map(value=>E('span',{},value)),E('span',{class:server?'model-running':''},server?'● Running':status));
-  return E('article',{'data-model':row.id,'data-selected':String(!!selected),...(selected?{tabindex:'-1','aria-label':'Selected model '+row.name}:{})},heading,chips,E('div',{class:'model-card-actions'},...(server?[chat,action]:[action]),...(!row.servable?[E('p',{class:'hint'},'This model needs a compatible runtime before it can be served.')]:[]),details);
+  return E('article',{'data-model':row.id,'data-selected':String(!!selected),...(selected?{tabindex:'-1','aria-label':'Selected model '+row.name}:{})},heading,chips,E('div',{class:'model-card-actions'},...(server?[chat,action]:[action])),...(!row.servable?[E('p',{class:'hint'},'This model needs a compatible runtime before it can be served.')]:[]),details);
  }
 }customElements.define('models-library',ModelsLibrary);})();
 </script>

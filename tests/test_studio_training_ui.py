@@ -16,7 +16,7 @@ def test_training_steps_validate_dataset_and_preserve_recipe_arguments(joined, o
     page, errors = open_page(joined, cookie=joined.cookie, path='/ui/#training')
     expect(page.get_by_label('Dataset path (relative to files root)')).to_be_visible()
     page.get_by_role('button', name='Continue to model & recipe').click()
-    expect(page.locator('training-view .status')).to_contain_text('Choose a dataset')
+    expect(page.locator('training-view #config > .status')).to_contain_text('Choose a dataset')
     page.get_by_label('Dataset path (relative to files root)').fill('datasets/demo.jsonl')
     page.get_by_role('button', name='Continue to model & recipe').click()
     page.get_by_label('Recipe', exact=True).select_option('tool-calls')
@@ -25,7 +25,7 @@ def test_training_steps_validate_dataset_and_preserve_recipe_arguments(joined, o
     page.get_by_role('button', name='Review this run').click()
     expect(page.get_by_role('button', name='Queue 20-step training smoke', exact=True)).to_be_visible()
     page.get_by_role('button', name='Review command', exact=True).click()
-    expect(page.locator('training-view .status')).to_contain_text('trains for 20 steps')
+    expect(page.locator('training-view #config > .status')).to_contain_text('trains for 20 steps')
     spec = page.evaluate("document.querySelector('training-view').spec()")
     from ml_stack.train.run import _parser
     parsed = _parser().parse_args(spec['args'])
@@ -44,7 +44,7 @@ def test_training_steps_validate_dataset_and_preserve_recipe_arguments(joined, o
 def test_dataset_handoff_opens_model_step_and_keeps_run_summary(joined, open_page):
     page, errors = open_page(joined, cookie=joined.cookie, path='/ui/#training')
     page.evaluate("sessionStorage.setItem('ml-stack-dataset','datasets/chosen.jsonl')")
-    page.goto(f'http://127.0.0.1:{joined.port}/ui/#training')
+    page.evaluate("window.fleetModel.go('models'); window.fleetModel.go('training')")
     expect(page.get_by_label('Recipe', exact=True)).to_be_visible()
     expect(page.locator('training-view #run-summary')).to_contain_text('datasets/chosen.jsonl')
     page.get_by_role('button', name='Back', exact=True).click()
