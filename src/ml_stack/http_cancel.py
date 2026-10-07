@@ -6,6 +6,7 @@ import ipaddress
 import queue
 import socket
 import threading
+import time
 import urllib.request
 from collections.abc import Callable
 from contextlib import contextmanager, suppress
@@ -44,7 +45,7 @@ def _resolve_worker() -> None:
             _DNS_JOBS.task_done()
 
 
-def _resolve(control: Cancellation, address: tuple[str, int]) -> Any:
+def _resolve(control: Cancellation, address: tuple[str, int], timeout: float | None) -> Any:
     global _DNS_STARTED
     if control.is_set():
         raise OSError('HTTP request cancelled')
@@ -59,15 +60,25 @@ def _resolve(control: Cancellation, address: tuple[str, int]) -> Any:
             for index in range(_DNS_WORKERS):
                 threading.Thread(target=_resolve_worker, name=f'ml-stack-dns-{index}', daemon=True).start()
             _DNS_STARTED = True
-    job = _Resolution(address, socket.getaddrinfo, control.is_set)
+    deadline = None if timeout is None else time.monotonic() + timeout
+    def wait_interval() -> float:
+        if deadline is None:
+            return 0.05
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError('HTTP hostname resolution timed out')
+        return min(0.05, remaining)
+    job = _Resolution(address, socket.getaddrinfo,
+        lambda: control.is_set() or (deadline is not None and time.monotonic() >= deadline))
     while not control.is_set():
         try:
-            _DNS_JOBS.put(job, timeout=0.05)
+            _DNS_JOBS.put(job, timeout=wait_interval())
             break
         except queue.Full:
             continue
     while not control.is_set():
-        if job.ready.wait(0.05):
+        if job.ready.wait(wait_interval()):
+            wait_interval()
             if job.error is not None:
                 raise job.error
             return job.result
@@ -108,7 +119,8 @@ class Cancellation:
 
     def connect(self, address: tuple[str, int], timeout: Any = socket._GLOBAL_DEFAULT_TIMEOUT,
                 source_address: Any = None) -> socket.socket:
-        for family, kind, protocol, _, target in _resolve(self, address):
+        resolver_timeout = socket.getdefaulttimeout() if timeout is socket._GLOBAL_DEFAULT_TIMEOUT else timeout
+        for family, kind, protocol, _, target in _resolve(self, address, resolver_timeout):
             if self.is_set():
                 raise OSError('HTTP request cancelled')
             sock = socket.socket(family, kind, protocol)

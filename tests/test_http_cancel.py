@@ -166,3 +166,29 @@ def test_cancel_during_hostname_resolution_releases_sdk_opening_thread(monkeypat
     finally:
         release.set()
         assert exited.wait(1)
+
+
+def test_explicit_sdk_timeout_applies_during_hostname_resolution(monkeypatch):
+    import socket
+
+    entered, release, exited = threading.Event(), threading.Event(), threading.Event()
+    def blocked_resolver(*_args):
+        entered.set()
+        release.wait(3)
+        exited.set()
+        return []
+    monkeypatch.setattr(socket, 'getaddrinfo', blocked_resolver)
+    async def run():
+        url = 'http://unresolved.invalid/v1/chat/completions'
+        transport = FleetTransport(url, '', timeout=0.1)
+        began = time.monotonic()
+        response = await transport.handle_async_request(httpx.Request('POST', url, json={}))
+        assert response.status_code == 502
+        assert 0.09 <= time.monotonic() - began < 1
+        assert entered.is_set() and not exited.is_set()
+        await transport.aclose()
+    try:
+        asyncio.run(run())
+    finally:
+        release.set()
+        assert exited.wait(1)
