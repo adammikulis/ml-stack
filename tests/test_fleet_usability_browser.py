@@ -104,28 +104,37 @@ def test_settings_failure_is_visible_and_only_selected_libraries_install(usabili
     assert not errors
 
 
-def test_navigation_search_shortcuts_no_results_and_mobile_width(usability_page):
+def test_four_workspaces_context_pages_and_theme_navigation(usability_page):
     from playwright.sync_api import expect
     served, page, errors = usability_page
-    page.goto(f'http://127.0.0.1:{served.port}/ui/#chat')
-    page.keyboard.press('Control+k')
-    search = page.get_by_role('searchbox', name='Find a page')
-    expect(search).to_be_focused()
-    search.fill('not-a-workspace-page')
-    expect(page.locator('#nav-empty')).to_be_visible()
-    search.press('Escape')
-    expect(page.locator('#nav-empty')).not_to_be_visible()
-    search.fill('training')
-    search.press('Enter')
-    expect(page.locator('#nav-title')).to_have_text('Training')
-    expect(page.locator('training-view section')).to_be_visible()
-    search.fill('board')
-    page.evaluate("window.fleetModel.go('settings')")
-    expect(page.locator('#nav-title')).to_have_text('Settings')
-    search.press('Escape')
+    page.goto(f'http://127.0.0.1:{served.port}/ui/')
+    expect(page.locator('#nav-title')).to_have_text('Model chats')
+    primary = page.get_by_role('navigation', name='Main navigation')
+    expect(primary.locator('a')).to_have_count(4)
+    assert page.get_by_role('searchbox', name='Find a page').count() == 0
+    for group, titles in [('Studio', ['Models', 'Fine-tune', 'Worlds', 'Evaluate', 'Data']),
+                          ('Work', ['Tasks', 'Projects', 'Tools', 'Graph', 'History']),
+                          ('Pool', ['Devices', 'Capacity']),
+                          ('Conversations', ['Model chats', 'Team channels'])]:
+        primary.get_by_role('link', name=group, exact=True).click()
+        context = page.get_by_role('navigation', name='Workspace pages')
+        assert context.locator('a').all_text_contents() == titles
+        for title in titles:
+            context.get_by_role('link', name=title, exact=True).click()
+            expect(page.locator('#nav-title')).to_have_text(title)
+        assert primary.evaluate('(nav)=>nav.scrollHeight <= nav.clientHeight')
+    page.get_by_role('link', name='Settings', exact=True).click()
+    expect(page.locator('#nav-section')).to_have_text('Settings')
+    primary.get_by_role('link', name='Conversations', exact=True).click()
+    for theme in ('light', 'dark'):
+        page.evaluate('(theme)=>window.fleetModel.setPreferences({...window.fleetModel.preferences,theme})', theme)
+        expect(page.locator('html')).to_have_attribute('data-theme', theme)
+        assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--poolside-pink').trim()") == '#ff5fa2'
+        page.screenshot(path=f'/private/tmp/poolside-rebuild-shell-{theme}.png', full_page=True)
     page.set_viewport_size({'width': 390, 'height': 844})
     assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
-    assert page.locator('fleet-nav a[href="#board"]').count() == 1
+    expect(primary.locator('a')).to_have_count(4)
+    page.screenshot(path='/private/tmp/poolside-rebuild-shell-narrow.png', full_page=True)
     assert not errors
 
 

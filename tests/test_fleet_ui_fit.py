@@ -199,9 +199,10 @@ class TestTheSplitBetweenTheFitComponents:
             page = browser.new_page(color_scheme="light")
             page.goto(f'http://127.0.0.1:{served.port}/ui/')
             assert page.locator('html').get_attribute('lang') == 'en'
-            assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--ml-bg').trim()") == '#1b1f3a'
-            assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--ml-accent').trim()") == '#2de2e6'
-            nav = page.locator('fleet-nav nav')
+            assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--ml-bg').trim()") == '#f4f5f7'
+            assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--ml-accent').trim()") == '#ff5fa2'
+            page.get_by_role('navigation', name='Main navigation').get_by_role('link', name='Pool', exact=True).click()
+            nav = page.get_by_role('navigation', name='Workspace pages')
             nav.locator('a[href="#fit"]').click()
             expect(page.locator('#nav-title')).to_have_text('Capacity')
             assert page.url.endswith('#fit')
@@ -216,7 +217,7 @@ class TestTheSplitBetweenTheFitComponents:
             expect(page.locator('.demo-slice')).to_have_count(10)
             page.screenshot(path='/private/tmp/poolside-demo-guide.png', full_page=True)
             page.locator('.demo-slice').filter(has_text='Fine-tune a model').click()
-            expect(page.locator('#nav-title')).to_have_text('Training')
+            expect(page.locator('#nav-title')).to_have_text('Fine-tune')
             page.screenshot(path='/private/tmp/poolside-training-shell.png', full_page=True)
             page.set_viewport_size({'width':390,'height':844})
             page.locator('#nav-guide').click()
