@@ -27,7 +27,8 @@ def test_desktop_grants_only_window_and_close_commands():
 
 
 @pytest.mark.slow
-def test_native_capability_authority_rejects_hostile_origins_and_commands(tmp_path):
+@pytest.mark.parametrize("selector", ["security_tests", "daemon::tests"])
+def test_native_capability_authority_rejects_hostile_origins_and_commands(tmp_path, selector):
     if sys.platform != "darwin":
         pytest.skip("native desktop capability enforcement runs on macOS")
     cargo = shutil.which("cargo")
@@ -45,7 +46,7 @@ def test_native_capability_authority_rejects_hostile_origins_and_commands(tmp_pa
     (binaries / f"ml-stack-headless-{target}").write_bytes(b"")
     done = subprocess.run(
         [cargo, "test", "--manifest-path", str(project / "Cargo.toml"),
-         "--offline", "security_tests", "--", "--nocapture"],
+         "--offline", selector, "--", "--nocapture"],
         env={**native_env, "CARGO_TARGET_DIR": os.environ.get(
             "ML_STACK_TAURI_TEST_TARGET", str(tmp_path / "target"))},
         capture_output=True, text=True, timeout=600,

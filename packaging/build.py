@@ -108,6 +108,8 @@ def daemon() -> Path:
     run([str(pip), "install", "-q", "--upgrade", *EXTERNAL])
     run([str(pip), "install", "-q", "--no-index", "--find-links", str(DIST),
          "--force-reinstall", "--no-deps", "ml-stack"])
+    run([str(pip), "install", "-q", "--find-links", str(DIST),
+         "ml-stack[agents,hub,fleet-onboard,coordinator]"])
 
     built_from()
     tool = env / ("Scripts" if sys.platform == "win32" else "bin") / "pyinstaller"
@@ -144,15 +146,19 @@ def window(frozen: Path) -> list[Path]:
     run([npm, "ci", "--silent"], cwd=APP)
     run([npm, "run", "--silent", "build"], cwd=APP)
 
+    artifacts = _artifacts(APP / "src-tauri" / "target" / "release" / "bundle")
+    if not artifacts:
+        raise SystemExit("the native build produced no application bundle")
     made: list[Path] = []
-    for found in _artifacts(APP / "src-tauri" / "target" / "release" / "bundle"):
+    for found in artifacts:
         into = DIST / "bundle" / found.name
         shutil.rmtree(into, ignore_errors=True)
         into.unlink(missing_ok=True)
         (shutil.copytree if found.is_dir() else shutil.copy2)(found, into)
         made.append(into)
     if sys.platform == "darwin":
-        _adhoc_sign(DIST / "bundle" / "ml-stack.app")
+        for app in made:
+            _adhoc_sign(app)
     return made
 
 
@@ -166,10 +172,12 @@ def _artifacts(out: Path) -> list[Path]:
 
 
 def _adhoc_sign(app: Path) -> None:
-    """Sign with no identity, which is what macOS needs to open it at all."""
+    """Ad-hoc sign and verify the native application bundle."""
     if app.exists():
         run(["codesign", "--force", "--deep", "--sign", "-", str(app)],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            stdout=subprocess.DEVNULL)
+        run(["codesign", "--verify", "--deep", "--strict", str(app)],
+            stdout=subprocess.DEVNULL)
 
 
 def report(made: Path) -> None:
