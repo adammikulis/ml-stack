@@ -123,7 +123,7 @@ def test_stop_closes_model_stream_and_releases_chat_controls(joined, serving_cha
     page.fill("#ask", "Tell a long story")
     page.click("#chat-send")
     page.wait_for_function("document.querySelector('.msg.assistant .message-body')?.textContent.includes('Still writing')")
-    page.click("#chat-stop")
+    page.locator("chat-view").get_by_role("button", name="Stop", exact=True).click()
     page.wait_for_selector("#chat-send:not([hidden])")
     assert "Generation stopped" in page.locator("#chat-note").inner_text()
     assert not page.locator("#chat-new").is_disabled()
