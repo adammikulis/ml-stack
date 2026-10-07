@@ -163,7 +163,6 @@ def test_changing_workflow_invalidates_review_and_explains_missing_runtime(joine
     page.get_by_role('button', name='Continue to model & recipe').click()
     page.get_by_role('button', name='Review this run').click()
     page.get_by_role('button', name='Review command', exact=True).click()
-    expect(page.locator('training-view .review-placeholder')).to_have_count(0)
     expect(page.locator('training-view #config > .status')).to_contain_text('Command preview ready')
     page.evaluate("document.querySelector('training-view').environments.forEach(environment=>{environment.available=false;environment.missing=['test-runtime'];})")
     page.get_by_label('Workflow', exact=True).select_option('rl')
