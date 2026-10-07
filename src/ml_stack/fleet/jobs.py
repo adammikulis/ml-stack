@@ -266,6 +266,8 @@ class JobRunner:
             env["PATH"] = os.pathsep.join(
                 [str(self.environment.python.parent), env.get("PATH", "")])
         try:
+            if self.environment is not None:
+                self.environment.require_current_runtime()
             with log.open("ab") as fh:
                 # Its own process group (a session on POSIX, CREATE_NEW_PROCESS_GROUP on
                 # Windows), so a stop reaches this job and nothing beside it.

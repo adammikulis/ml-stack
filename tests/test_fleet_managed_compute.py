@@ -73,3 +73,21 @@ def test_missing_environment_and_unfrozen_daemon_do_not_spawn_probe(environment,
     monkeypatch.setattr(device, "stdlib_device_report", lambda: {"backends": ["torch"]})
     monkeypatch.setattr(device, "registered_reports", lambda: [])
     assert device.device_report(environment=environment) == {"backends": ["torch"]}
+
+
+def test_stale_runtime_does_not_advertise_compute_or_start_jobs(environment, monkeypatch, tmp_path):
+    from ml_stack.fleet.jobs import JobRunner
+
+    def stale():
+        raise OSError("Refresh Training essentials")
+
+    environment.require_current_runtime = stale
+    expected = managed_compute.report(environment)
+    assert expected["backends"] == [] and expected["accelerator"] is False
+    assert expected["compute_runtime"]["ready"] is False
+    monkeypatch.setattr(JobRunner, "_spawn", lambda self, upto: None)
+    runner = JobRunner(tmp_path, environment=environment)
+    job = runner.submit("training", ["python", "-m", "ml_stack.train"])
+    runner._run_one(job)
+    assert job.state == "failed" and job.pid is None
+    assert "Refresh Training essentials" in runner.log_path(job.id).read_text()
