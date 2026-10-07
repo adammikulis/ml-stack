@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import runpy
 import shutil
 import subprocess
 import sys
@@ -17,6 +18,7 @@ from packaging.version import InvalidVersion, Version
 ROOT = Path(__file__).resolve().parent.parent
 DIST = ROOT / "dist"
 APP = ROOT / "app"
+STAMP = runpy.run_path(str(ROOT / "src/ml_stack/fleet/wheel_provenance.py"))["stamp"]
 EXTERNAL = ("pyinstaller", "packaging", "psutil", "ladybug>=0.20.4,<0.21", "py-machineid")
 SIDECAR = "ml-stack-headless"
 
@@ -28,8 +30,6 @@ def run(argv: list[str], **kw) -> None:
 
 
 def wheels() -> list[Path]:
-    from ml_stack.fleet.runtime_wheel import stamp
-
     DIST.mkdir(exist_ok=True)
     for old in DIST.glob("ml_stack-*.whl"):
         old.unlink()
@@ -39,7 +39,7 @@ def wheels() -> list[Path]:
     commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
     for wheel in made:
         if wheel.name.startswith("ml_stack-"):
-            stamp(wheel, commit, ROOT)
+            STAMP(wheel, commit, ROOT)
     return made
 
 

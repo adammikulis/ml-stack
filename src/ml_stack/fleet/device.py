@@ -14,6 +14,7 @@ from typing import Any
 
 from ml_stack.hub import free_memory, total_memory
 
+from . import managed_compute
 from .jobs import DaemonError
 
 REPORT_GROUP = "ml_stack.device_report"
@@ -138,6 +139,5 @@ def device_report(extra: Callable[[], dict[str, Any]] | None = None, *, environm
         except Exception:                             # noqa: BLE001
             _LOG.debug("Device capability probe unavailable")
     if environment is not None and getattr(sys, "frozen", False):
-        from .managed_compute import report
-        out.update(report(environment))
+        out.update(managed_compute.report(environment))
     return out

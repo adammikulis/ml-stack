@@ -27,6 +27,7 @@ from ml_stack.httpguard import Refused
 from ml_stack.lock import only_one
 from ml_stack.net import packages
 
+from .managed_compute import process_environment
 from .runtime_wheel import cache_wheel, current_wheel, wheel_commit
 
 __all__ = ["CATALOG", "Environment", "Library", "catalog_for"]
@@ -375,8 +376,6 @@ class Environment:
 
     def require_current_runtime(self, *, python: Path | str | None = None) -> None:
         """Require the bundled source revision in a frozen app's job interpreter."""
-        from .managed_compute import process_environment
-
         if not getattr(sys, "frozen", False):
             return
         found = self.wheels()

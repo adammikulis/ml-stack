@@ -2,10 +2,6 @@
 
 from __future__ import annotations
 
-import base64
-import csv
-import hashlib
-import io
 import re
 import shutil
 import subprocess
@@ -15,10 +11,9 @@ import zipfile
 from pathlib import Path
 
 from ml_stack.files import writing
+from ml_stack.fleet.wheel_provenance import ORIGIN, stamp, wheel_commit
 from ml_stack.net import packages
 from ml_stack.safenames import unpack
-
-ORIGIN = "source-checkout"
 
 
 def source_checkout() -> Path | None:
@@ -60,42 +55,6 @@ def current_wheel() -> Path | None:
         raise OSError("the cached runtime wheel is invalid") from exc
 
     return found[0]
-
-
-def wheel_commit(wheel: Path) -> str:
-    """Return the wheel's bounded commit marker, or empty for an unstamped wheel."""
-    with zipfile.ZipFile(wheel) as archive:
-        name = "ml_stack/fleet/built-from"
-        try:
-            info = archive.getinfo(name)
-        except KeyError:
-            return ""
-        if info.file_size > 100:
-            raise ValueError("runtime wheel commit marker is too large")
-        return archive.read(name).decode().strip()
-
-
-def stamp(wheel: Path, commit: str, checkout: Path) -> None:
-    """Record runtime provenance and update the wheel's integrity manifest."""
-    with zipfile.ZipFile(wheel) as archive:
-        contents = {name: archive.read(name) for name in archive.namelist()}
-    records = [name for name in contents if name.endswith(".dist-info/RECORD")]
-    if len(records) != 1:
-        raise ValueError("wheel must contain one RECORD")
-    record = records[0]
-    contents["ml_stack/fleet/built-from"] = (commit + "\n").encode()
-    contents[f"ml_stack/fleet/{ORIGIN}"] = (str(checkout.resolve()) + "\n").encode()
-    manifest = io.StringIO(newline="")
-    writer = csv.writer(manifest)
-    for name, data in contents.items():
-        if name != record:
-            digest = base64.urlsafe_b64encode(hashlib.sha256(data).digest()).rstrip(b"=").decode()
-            writer.writerow((name, f"sha256={digest}", str(len(data))))
-    writer.writerow((record, "", ""))
-    contents[record] = manifest.getvalue().encode()
-    with zipfile.ZipFile(wheel, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        for name, data in contents.items():
-            archive.writestr(name, data)
 
 
 def install_checkout(checkout: Path, *, timeout: float) -> tuple[int, str]:
