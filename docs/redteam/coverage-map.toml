@@ -1042,3 +1042,9 @@ status = "covered"
 tests = ["tests/test_model_components.py::test_addon_route_refuses_untrusted_requests_before_component_lookup",
          "tests/test_model_components.py::test_component_flags_refuse_untyped_selection_before_source_lookup"]
 note = "unauthenticated and forged UI requests refuse before lookup; malformed component flags refuse before source lookup"
+
+[[group]]
+match = ["route:fleet/knowledge_routes.py:*"]
+status = "covered"
+tests = ["tests/test_fleet_knowledge.py::test_inspector_authorization_path_bounds_and_read_only", "tests/test_fleet_knowledge.py::test_registered_project_graph_requires_local_person", "tests/test_fleet_knowledge.py::test_large_fields_and_directory_discovery_are_bounded", "tests/test_fleet_knowledge.py::test_kind_identity_bounds_refuse_oversized_values"]
+note = "UI authorization, registered project scope, read-only access, traversal, symlinks and bounded graph fields are exercised"

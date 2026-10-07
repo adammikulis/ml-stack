@@ -128,7 +128,7 @@ fleet-nav { display: contents; }
     }
 
     paint(route) {
-      this.group.textContent = M.group || (M.inCluster ? "Connected fleet" : "Local workspace");
+      this.group.textContent = M.group || (M.inCluster ? "Connected pool" : "Local workspace");
       const active = GROUPS.flatMap(([label, entries]) => entries.map(entry => [label, entry])).find(([, entry]) => entry[1] === route);
       if (active) { this.heading.textContent = active[1][0]; this.section.textContent = active[0]; }
       const query = this.search.value.trim().toLowerCase();

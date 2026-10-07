@@ -1,7 +1,7 @@
 {
- "surfaces": 780,
+ "surfaces": 785,
  "by_status": {
-  "covered": 456,
+  "covered": 461,
   "partial": 199,
   "uncovered": 53,
   "n/a": 72,
@@ -51,7 +51,7 @@
    "unmapped": 0
   },
   "human": {
-   "covered": 97,
+   "covered": 98,
    "partial": 0,
    "uncovered": 0,
    "n/a": 0,
@@ -86,7 +86,7 @@
    "unmapped": 0
   },
   "route": {
-   "covered": 89,
+   "covered": 93,
    "partial": 58,
    "uncovered": 0,
    "n/a": 0,
@@ -567,6 +567,19 @@
    "note": "run by the person with the person's own arguments; an agent reaches these commands only through an mcp-tool or chat-tool row, which carry the hostile-argument tests"
   },
   {
+   "id": "cli:ml-stack-cluster",
+   "kind": "cli",
+   "source": "ml_stack.fleet.join:main",
+   "trust": "the person at a terminal; arguments may carry text from outside",
+   "attacker": "hostile argument text or path reaches the command",
+   "status": "partial",
+   "tests": [
+    "tests/test_redteam_fleet.py",
+    "tests/test_peer_pairing.py"
+   ],
+   "note": "the daemon's handler and the pairing exchange are attacked; the join and peer-book argument parsing are not"
+  },
+  {
    "id": "cli:ml-stack-codex",
    "kind": "cli",
    "source": "ml_stack.codex:launch",
@@ -618,19 +631,6 @@
    "status": "n/a",
    "tests": [],
    "note": "run by the person with the person's own arguments; an agent reaches these commands only through an mcp-tool or chat-tool row, which carry the hostile-argument tests"
-  },
-  {
-   "id": "cli:ml-stack-cluster",
-   "kind": "cli",
-   "source": "ml_stack.fleet.join:main",
-   "trust": "the person at a terminal; arguments may carry text from outside",
-   "attacker": "hostile argument text or path reaches the command",
-   "status": "partial",
-   "tests": [
-    "tests/test_redteam_fleet.py",
-    "tests/test_peer_pairing.py"
-   ],
-   "note": "the daemon's handler and the pairing exchange are attacked; the join and peer-book argument parsing are not"
   },
   {
    "id": "cli:ml-stack-graph",
@@ -4547,6 +4547,26 @@
    "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
   },
   {
+   "id": "human:workspace/task_source_recovery.py:_worker",
+   "kind": "human",
+   "source": "workspace/task_source_recovery.py:_worker",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item",
+    "tests/test_requests_floor.py::test_the_request_commands_refuse_a_process_an_agent_started",
+    "tests/test_redteam_requests.py::test_a_model_cannot_answer_its_own_request_by_any_tool_name_or_command_text",
+    "tests/test_workspace_model.py::test_only_a_person_or_launcher_process_records_a_verified_model",
+    "tests/test_workspace_model.py::test_an_agent_cannot_verify_itself_or_overwrite_a_verified_model_or_set_anothers",
+    "tests/test_workspace_model.py::test_a_claimed_model_changes_no_right"
+   ],
+   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+  },
+  {
    "id": "human:workspace/task_worktree_recovery.py:dematerialize",
    "kind": "human",
    "source": "workspace/task_worktree_recovery.py:dematerialize",
@@ -8113,6 +8133,66 @@
     "tests/test_fleet_invites.py::test_join_invitation_passes_owner_and_setup_router_guards"
    ],
    "note": "Owner router guards reject missing UI headers, unauthenticated joined hosts and foreign addressed setup; local owner actions return noncacheable invitations and sessions"
+  },
+  {
+   "id": "route:fleet/knowledge_routes.py:/ui/knowledge/*",
+   "kind": "route",
+   "source": "fleet/knowledge_routes.py:KnowledgeRoutes.route",
+   "trust": "network peer or local browser",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "covered",
+   "tests": [
+    "tests/test_fleet_knowledge.py::test_inspector_authorization_path_bounds_and_read_only",
+    "tests/test_fleet_knowledge.py::test_registered_project_graph_requires_local_person",
+    "tests/test_fleet_knowledge.py::test_large_fields_and_directory_discovery_are_bounded",
+    "tests/test_fleet_knowledge.py::test_kind_identity_bounds_refuse_oversized_values"
+   ],
+   "note": "UI authorization, registered project scope, read-only access, traversal, symlinks and bounded graph fields are exercised"
+  },
+  {
+   "id": "route:fleet/knowledge_routes.py:/ui/knowledge/node",
+   "kind": "route",
+   "source": "fleet/knowledge_routes.py:KnowledgeRoutes.route",
+   "trust": "network peer or local browser",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "covered",
+   "tests": [
+    "tests/test_fleet_knowledge.py::test_inspector_authorization_path_bounds_and_read_only",
+    "tests/test_fleet_knowledge.py::test_registered_project_graph_requires_local_person",
+    "tests/test_fleet_knowledge.py::test_large_fields_and_directory_discovery_are_bounded",
+    "tests/test_fleet_knowledge.py::test_kind_identity_bounds_refuse_oversized_values"
+   ],
+   "note": "UI authorization, registered project scope, read-only access, traversal, symlinks and bounded graph fields are exercised"
+  },
+  {
+   "id": "route:fleet/knowledge_routes.py:/ui/knowledge/nodes",
+   "kind": "route",
+   "source": "fleet/knowledge_routes.py:KnowledgeRoutes.route",
+   "trust": "network peer or local browser",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "covered",
+   "tests": [
+    "tests/test_fleet_knowledge.py::test_inspector_authorization_path_bounds_and_read_only",
+    "tests/test_fleet_knowledge.py::test_registered_project_graph_requires_local_person",
+    "tests/test_fleet_knowledge.py::test_large_fields_and_directory_discovery_are_bounded",
+    "tests/test_fleet_knowledge.py::test_kind_identity_bounds_refuse_oversized_values"
+   ],
+   "note": "UI authorization, registered project scope, read-only access, traversal, symlinks and bounded graph fields are exercised"
+  },
+  {
+   "id": "route:fleet/knowledge_routes.py:/ui/knowledge/stores",
+   "kind": "route",
+   "source": "fleet/knowledge_routes.py:KnowledgeRoutes.route",
+   "trust": "network peer or local browser",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "covered",
+   "tests": [
+    "tests/test_fleet_knowledge.py::test_inspector_authorization_path_bounds_and_read_only",
+    "tests/test_fleet_knowledge.py::test_registered_project_graph_requires_local_person",
+    "tests/test_fleet_knowledge.py::test_large_fields_and_directory_discovery_are_bounded",
+    "tests/test_fleet_knowledge.py::test_kind_identity_bounds_refuse_oversized_values"
+   ],
+   "note": "UI authorization, registered project scope, read-only access, traversal, symlinks and bounded graph fields are exercised"
   },
   {
    "id": "route:fleet/launch_routes.py:/ui/launch-ticket",
