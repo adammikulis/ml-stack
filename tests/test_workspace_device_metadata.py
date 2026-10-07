@@ -53,9 +53,9 @@ def test_agent_device_report_cannot_claim_paired_authority_or_change_another_act
     kit.ws.registry._record_device('bob', device('Windows'))
     before = kit.ws.registry.info('bob')
     kit.ws.registry.record_device_claim(alice, {**device(), 'verification': 'paired',
-                                               'peer_id': 'b' * 64, 'source': 'fleet-pairing'})
+                                               'peer_id': 'b' * 64, 'peer_verification': 'paired', 'source': 'fleet-pairing'})
     own = kit.ws.registry.info('alice')['device']
-    assert own['verification'] == 'agent-reported' and own['peer_id'] is None
+    assert own['verification'] == 'agent-reported' and own['peer_id'] is None and own['peer_verification'] == 'unknown'
     assert kit.ws.registry.info('bob') == before and kit.ws.auth(bob).id == 'bob'
     with pytest.raises(Denied):
         kit.ws.registry.record_device_claim('', device())

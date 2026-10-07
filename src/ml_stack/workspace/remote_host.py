@@ -234,6 +234,8 @@ class WorkspaceHost:
             ws = self.workspace(project_id)
             who = ws.registry.renew_dev_project(str(body.get("agent_token") or ""),
                                                  project_id, cluster, cluster_id)
+            if body.get("device") is not None:
+                ws.registry.record_device_claim(str(body.get("agent_token") or ""), body["device"])
             ws.audit("remote.renew", who.id, project_id=project_id, admission="dev-cluster")
             self._seen(project_id, who.id, ws.clock())
             return 200, {"id": who.id, "project_id": project_id, "cluster_id": cluster_id}
@@ -248,7 +250,7 @@ class WorkspaceHost:
                 return 413, {"error": "workspace operation exceeds the size limit"}
             ws = self.workspace(project_id)
             if action == 'ensure':
-                if set(body) != {'name', 'model', 'harness', 'project', 'agent_token'}:
+                if set(body) - {'device'} != {'name', 'model', 'harness', 'project', 'agent_token'}:
                     raise ValueError('agent registration carries identity labels and project')
                 document = {**body, 'project': {'key': project_id}}
                 name, token = device_sessions.ensure(ws, device, self.projects, document,

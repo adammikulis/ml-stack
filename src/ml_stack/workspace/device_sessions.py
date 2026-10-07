@@ -4,7 +4,7 @@ import hashlib
 import secrets
 
 from ml_stack.graph.store import GraphStore
-from ml_stack.workspace import onboard, tokens
+from ml_stack.workspace import device_metadata, onboard, tokens
 from ml_stack.workspace.chain import held
 from ml_stack.workspace.identity import AGENT, CAPS, PREFIX, Denied, valid_name
 from ml_stack.workspace.modelid import CLAIMED, clean_harness, clean_model
@@ -70,6 +70,7 @@ def ensure(ws, device, projects, document, token=''):
     if model:
         clean_model(model)
     fingerprint = device.fingerprint
+    profile = device_metadata.reported(document.get('device', {}), peer=fingerprint)
     requested_scope = _project(projects, document.get('project'))
     with held(ws.base / 'device-sessions.lock'), GraphStore(ws.base / 'device-sessions.db') as graph:
         bindings = [node['attrs'] for node in graph.nodes('device-session')]
@@ -96,6 +97,7 @@ def ensure(ws, device, projects, document, token=''):
                 raise Denied('this agent identity belongs to another device registration')
             binding = {'device': fingerprint, 'requested': name, 'agent': agent, 'project': scope}
         credential = _credential(ws, graph, binding, token)
+        ws.registry._record_device(agent, {**profile, 'observed_at': ws.clock()})
         tokens.store(ws.base, agent, credential)
         ws.board.place(agent, scope)
         if model or harness:

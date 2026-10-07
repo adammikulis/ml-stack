@@ -48,7 +48,7 @@ def answer(ws, call, *, device=None, projects=None):
         if document.get('workspace') != identity:
             raise Denied('the requested coordinator workspace does not match')
         if path == PREFIX + 'ensure':
-            if set(document) != {'workspace', 'name', 'model', 'harness', 'project'}:
+            if set(document) - {'device'} != {'workspace', 'name', 'model', 'harness', 'project'}:
                 raise ValueError('agent registration carries identity labels and project')
             name, token = device_sessions.ensure(ws, device, projects, document,
                                                 headers.get('X-ML-Stack-Workspace-Token', ''))
