@@ -3,6 +3,7 @@
 import pytest
 from playwright.sync_api import expect
 from test_fleet_ui import Serving
+from ml_stack.workspace import task_summary
 
 pytestmark = pytest.mark.slow
 
@@ -13,7 +14,7 @@ def test_tasks_filters_artifacts_and_independent_review_payload(tmp_path, playwr
     task = {'id': 'task:' + 'a' * 32, 'title': 'Native road replay', 'description': '<img src=x> inspect sensors',
             'state': 'review', 'acceptance': ['Replay passes'], 'worker': 'worker-a', 'base_id': 'device-account',
             'device_id': 'device-1', 'lease': {'resource': {'model': 'Strands2B', 'project': '/approved/worktree'}},
-            'checkpoints': [{'summary': 'Worker claims progress'}],
+            'created_at': 1, 'checkpoints': [{'at': 2, 'summary': 'Worker claims progress'}],
             'proposal': {'artifacts': {'replay.json': 'a' * 64}}, 'reviews': []}
     posts = []
     def respond(route):
@@ -22,15 +23,21 @@ def test_tasks_filters_artifacts_and_independent_review_payload(tmp_path, playwr
             task['state'] = 'completed' if posts[-1]['action'] == 'review' else 'queued'
             route.fulfill(json={'accepted': True})
         else:
-            route.fulfill(json={'tasks': [task], 'metrics': {'verified_outcomes': int(task['state'] == 'completed'),
+            task['activity'] = task_summary.inspection(task, 100)
+            route.fulfill(json={'tasks': [task], 'overview': task_summary.overview([task], 100), 'metrics': {'verified_outcomes': int(task['state'] == 'completed'),
                                                           'accepted_artifacts': int(task['state'] == 'completed'),
                                                           'failures': 0, 'blocked_seconds': 0}})
     try:
         with playwright.chromium.launch(headless=True) as browser:
             page = browser.new_page(viewport={'width': 390, 'height': 844})
-            page.route('**/ui/tasks', respond)
+            project_id = 'b' * 32
+            page.route('**/ui/projects', lambda route: route.fulfill(json={'workspaces': [{'id': project_id, 'name': 'Demo workspace', 'local_authority': True, 'board_host': 'http://canonical', 'authority_machine': 'device-1'}]}))
+            page.route(f'**/ui/projects/{project_id}/tasks', respond)
             page.goto(f'http://127.0.0.1:{server.port}/ui/#tasks')
             viewer = page.locator('tasks-view')
+            expect(viewer.locator('.task-remaining-number')).to_have_text('1')
+            expect(viewer.locator('[data-task-count=review] strong')).to_have_text('1')
+            expect(viewer.locator('.task-eta-value')).to_have_text('Unknown')
             viewer.get_by_role('button', name='Native road replay').click()
             expect(viewer.get_by_text('Strands2B', exact=True)).to_be_visible()
             viewer.get_by_label('Task status').select_option('blocked')

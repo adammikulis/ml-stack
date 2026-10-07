@@ -51,7 +51,7 @@ def canonical(tmp_path):
         headers = {"Host": "127.0.0.1:8770", "Cookie": cookie, "Origin": origin,
                    "Content-Type": "application/json", "Content-Length": str(len(raw))}
         codes = []
-        handler = SimpleNamespace(path=f"/ui/projects/{project}/board/{suffix}", command=method,
+        handler = SimpleNamespace(path=options.get("path", f"/ui/projects/{project}/board/{suffix}"), command=method,
                                   client_address=(ip, 1000), headers=headers,
                                   rfile=io.BytesIO(raw), wfile=io.BytesIO(),
                                   server=SimpleNamespace(server_address=("127.0.0.1", 8770)),
