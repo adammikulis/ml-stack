@@ -53,7 +53,7 @@ def sessions(tmp_path, monkeypatch):
     monkeypatch.setattr(cli, "Workspace", lambda: local)
     monkeypatch.setattr(cli, "_local_token", lambda args: "local-agent-token")
     monkeypatch.setattr(automatic_connection.device_agent, "owned_project_session",
-                        lambda *args: nullcontext(SimpleNamespace(id="codex")))
+                        lambda *args: nullcontext(SimpleNamespace(id=args[2])))
     monkeypatch.setattr(automatic_connection, "discover", lambda root: choice)
     monkeypatch.setattr(automatic_connection, "RemoteWorkspace", Remote)
     monkeypatch.setattr(project_connection, "RemoteWorkspace", Remote)
@@ -61,8 +61,8 @@ def sessions(tmp_path, monkeypatch):
     return root, choice, enrolled, revoked
 
 
-def join(root, label=""):
-    args = SimpleNamespace(agent="codex", token_file="", label=label)
+def join(root, label="", agent="codex"):
+    args = SimpleNamespace(agent=agent, token_file="", label=label)
     cli._context(args, project_connection.selected(root))
     return args.agent
 
@@ -172,7 +172,7 @@ def test_unexpected_enrollment_identity_preserves_existing_connection(sessions, 
     root, _, _, _ = sessions
     monkeypatch.setenv("CODEX_THREAD_ID", "fixture-thread")
     monkeypatch.setattr(automatic_connection.RemoteWorkspace, "enroll", lambda *a, **kw: {"id": "other-worker"})
-    with pytest.raises(Denied, match="another Codex session"):
+    with pytest.raises(Denied, match="another native session"):
         join(root)
     assert project_connection._saved()[str(root)]["agent"] == "legacy-agent"
 
@@ -198,3 +198,64 @@ def test_claim_owner_is_readable_and_json_is_unchanged(capsys):
     assert "codex-fixture on shared project Board" in capsys.readouterr().out
     cli._show(SimpleNamespace(json=True), row)
     assert json.loads(capsys.readouterr().out)["owner"] == owner
+
+
+@pytest.fixture(autouse=True)
+def native_environment(monkeypatch):
+    monkeypatch.delenv("ML_STACK_SESSION_ID", raising=False)
+    monkeypatch.delenv("ML_STACK_SESSION_HARNESS", raising=False)
+
+
+@pytest.mark.parametrize("native", ["claude-code", "codex"])
+def test_native_sessions_are_distinct_stable_and_preserve_legacy_binding(sessions, monkeypatch, native):
+    root, _, enrolled, _ = sessions
+    monkeypatch.setenv("CODEX_THREAD_ID", "inherited-parent-codex")
+    monkeypatch.setenv("ML_STACK_SESSION_HARNESS", native)
+    monkeypatch.setenv("ML_STACK_SESSION_ID", "native-one")
+    first = join(root, agent=native)
+    monkeypatch.setenv("ML_STACK_SESSION_ID", "native-two")
+    second = join(root, agent=native)
+    assert first != second
+    monkeypatch.setenv("ML_STACK_SESSION_ID", "native-one")
+    assert join(root, agent=native) == first
+    assert join(root, "child-label", agent=native) == first
+    assert enrolled == [first, second]
+    assert project_connection._saved()[str(root)]["agent"] == "legacy-agent"
+    assert "native-one" not in json.dumps(project_connection._saved())
+
+
+def test_native_context_does_not_select_inherited_other_harness(monkeypatch):
+    monkeypatch.setenv("CODEX_THREAD_ID", "same-native-session")
+    codex = project_session.current()
+    monkeypatch.setenv("ML_STACK_SESSION_ID", "same-native-session")
+    monkeypatch.setenv("ML_STACK_SESSION_HARNESS", "claude-code")
+    assert project_session.current() != codex
+    assert project_session.current("codex") == ""
+    assert project_session.name("codex") == "codex"
+    assert project_session.name("claude-code").startswith("claude-code-")
+
+
+@pytest.mark.parametrize("native,session", [("claude-code", ""), ("", "event"),
+    ("claude-code", "bad\nvalue"), ("claude-code", "bad value"),
+    ("claude-code", "x" * 257), ("not/a/harness", "event")])
+def test_invalid_native_context_is_refused(monkeypatch, native, session):
+    monkeypatch.setenv("ML_STACK_SESSION_HARNESS", native)
+    monkeypatch.setenv("ML_STACK_SESSION_ID", session)
+    with pytest.raises(Denied, match="native session"):
+        project_session.current()
+
+
+def test_native_saved_foreign_harness_and_revocation_are_not_replaced(sessions, monkeypatch):
+    root, _, enrolled, revoked = sessions
+    monkeypatch.setenv("ML_STACK_SESSION_HARNESS", "claude-code")
+    monkeypatch.setenv("ML_STACK_SESSION_ID", "native-session")
+    actor = join(root, agent="claude-code")
+    revoked.add(actor)
+    with pytest.raises(Denied, match="revoked"):
+        join(root, agent="claude-code")
+    assert enrolled == [actor]
+    saved = project_connection._saved()
+    saved[str(root)]["sessions"][project_session.current()]["local_agent"] = "codex"
+    home.state("workspace-connections.json").write_text(json.dumps(saved))
+    with pytest.raises(Denied, match="session is invalid"):
+        project_connection.selected(root)

@@ -95,10 +95,10 @@ def cli_connection(args, connection, local_token, workspace):
     if getattr(args, "token_file", ""):
         return connection
     args._canonical_dev = _active_dev(connection)
-    requested = args.agent or os.environ.get(tokens.AGENT_ENV, "") or ("codex" if project_session.current() else "")
+    requested = args.agent or os.environ.get(tokens.AGENT_ENV, "") or project_session.harness()
     if requested and not args.agent and not os.environ.get(tokens.AGENT_ENV):
         args.agent = requested
-    session = project_session.current() if requested == "codex" else ""
+    session = project_session.current(requested) if requested else ""
     if session and connection.get("session") != session:
         local = workspace()
         root = Path(connection["root"])
@@ -282,7 +282,7 @@ def _attach(root: Path, name: str, choice: dict, *, claim):
     joined = remote.enroll(name, model=claim[0], harness=claim[1],
                            authority_machine=choice["authority_machine"])
     if session and joined["id"] != name and not joined["id"].startswith(name + "-"):
-        raise Denied("the shared project Board returned another Codex session identity")
+        raise Denied("the shared project Board returned another native session identity")
     return bind(remote, root, joined["id"], choice["cluster"],
                 local_agent=choice.get("local_agent", name))
 

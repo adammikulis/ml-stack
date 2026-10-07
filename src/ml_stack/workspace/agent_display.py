@@ -2,6 +2,18 @@
 from ml_stack.workspace.identity import AGENT, CAPS
 
 
+def family(model: str) -> str:
+    """Return a readable family from a recorded exact model identifier."""
+    model = model.lower().rsplit("/", 1)[-1]
+    if model.startswith("claude-"):
+        return "Claude"
+    if model.startswith(("gpt-", "chatgpt-", "o1", "o3", "o4")):
+        return "ChatGPT"
+    if model.startswith("qwen"):
+        return "Qwen"
+    return "Model unknown"
+
+
 def metadata(registry, name, label=''):
     """Derive parentage from the registry, never from arbitrary activity text."""
     registry.ensure_presentation(name)
@@ -16,12 +28,12 @@ def metadata(registry, name, label=''):
         kind = 'subagent'
     else:
         presentation = info.get('presentation', {})
-        family = 'Codex' if name == 'codex' or name.startswith('codex-') else name
+        model_family = family(info.get('model', ''))
         device = info.get('device', {})
         system = {'macOS': 'Mac', 'Darwin': 'Mac'}.get(device.get('os'), device.get('os'))
         ordinal = presentation.get('ordinal')
         suffix = f"session {ordinal}" if ordinal else 'unregistered session'
-        display = f"{family} · {system or device.get('hostname') or 'device unknown'} · {suffix}"
+        display = f"{model_family} · {system or device.get('hostname') or 'device unknown'} · {suffix}"
         kind = presentation.get('kind', 'unknown')
     eligible = bool(not parent and kind == 'main' and registry.role_of(name) == AGENT
                     and set(CAPS) <= set(info['can']))

@@ -41,7 +41,7 @@ def test_authenticated_child_cannot_promote_and_labels_do_not_grant_main_status(
     with pytest.raises(Denied, match='top-level'):
         registry.register_session(child)
     shown = metadata(registry, 'codex-main/task')
-    assert shown['display_name'].startswith('Subagent · task (parent Codex')
+    assert shown['display_name'].startswith('Subagent · task (parent Model unknown')
     assert not shown['coordinator_eligible']
     activity = metadata(registry, 'codex-main', 'integration')
     assert activity['session_kind'] == 'main'
@@ -50,7 +50,7 @@ def test_authenticated_child_cannot_promote_and_labels_do_not_grant_main_status(
     kit.ws.claim_model(token, 'gpt-6', label='helper')
     helper = metadata(registry, 'codex-main', 'helper')
     assert helper['session_kind'] == 'helper'
-    assert helper['display_name'].startswith('Subagent · helper (parent Codex')
+    assert helper['display_name'].startswith('Subagent · helper (parent Model unknown')
 
 
 def test_revoked_main_is_ineligible(kit):
@@ -72,7 +72,7 @@ def test_canonical_registration_preserves_model_and_rights_and_refuses_child(hos
     code, shown = call(host, first, 'register_session', device={'os': 'macOS', 'hostname': 'test'})
     assert code == 200
     shown = shown['result']
-    assert shown['display_name'] == 'Codex · Mac · session 1'
+    assert shown['display_name'] == 'Model unknown · Mac · session 1'
     assert shown['coordinator_eligible']
     after = call(host, first, 'whoami')[1]['result']
     assert (after['model'], after['can'], after['parent']) == (before['model'], before['can'], before['parent'])
@@ -145,3 +145,38 @@ def test_cli_main_session_uses_canonical_mutation_rpc(host, monkeypatch, capsys)
     args = SimpleNamespace(cmd='main-session', json=True, request_id='')
     assert cli._runner(handler)(args) == 0
     assert '"session_kind": "main"' in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("model,harness,expected", [
+    ("gpt-6", "codex", "ChatGPT"),
+    ("claude-sonnet-4-6", "claude-code", "Claude"),
+    ("Qwen3.8-Flash-Next-GSQ-RCO-Coder", "codex", "Qwen"),
+    ("unknown-provider-model", "claude-code", "Model unknown"),
+])
+def test_readable_family_uses_recorded_model_not_harness_or_auth_id(kit, model, harness, expected):
+    token = kit.agent('codex-opaque-session')
+    kit.ws.claim_model(token, model, harness)
+    shown = metadata(kit.ws.registry, 'codex-opaque-session')
+    assert shown['display_name'].startswith(expected + ' · ')
+    assert 'codex-opaque-session' not in shown['display_name']
+    assert not shown['coordinator_eligible']
+    before = kit.ws.registry.info('codex-opaque-session')
+    kit.ws.register_session(token)
+    assert kit.ws.registry.info('codex-opaque-session')['can'] == before['can']
+    assert kit.ws.registry.info('codex-opaque-session')['model'] == model
+
+
+def test_same_family_native_sessions_get_distinct_stable_ordinals(kit):
+    registry = kit.ws.registry
+    first = kit.agent('claude-code-' + 'a' * 32)
+    second = kit.agent('claude-code-' + 'b' * 32)
+    for token in (first, second):
+        kit.ws.claim_model(token, 'claude-sonnet-4-6', 'claude-code')
+        kit.ws.register_session(token)
+    names = ['claude-code-' + digit * 32 for digit in ('a', 'b')]
+    before = [registry.info(name)['presentation'].copy() for name in names]
+    assert before[0]['ordinal'] != before[1]['ordinal']
+    assert metadata(registry, names[0])['display_name'] != metadata(registry, names[1])['display_name']
+    kit.ws.claim_model(second, 'Qwen3.8-Flash', 'codex')
+    assert [registry.info(name)['presentation'] for name in names] == before
+    assert metadata(registry, names[1])['display_name'].startswith('Qwen · ')

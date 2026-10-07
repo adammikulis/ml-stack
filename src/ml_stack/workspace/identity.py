@@ -190,11 +190,9 @@ class Registry:
             if not entry or entry.get('role') != AGENT or entry.get('parent') or entry.get('presentation'):
                 return
             device = entry.get('device', {}).get('device_id')
-            family = 'codex' if name == 'codex' or name.startswith('codex-') else name
             peers = [row.get('presentation', {}) for row in agents.values()]
-            ordinal = max((row.get('ordinal', 0) for row in peers
-                           if row.get('family') == family), default=0) + 1
-            entry['presentation'] = {'device': device, 'family': family, 'ordinal': ordinal, 'kind': 'unknown'}
+            ordinal = max((row.get('ordinal', 0) for row in peers), default=0) + 1
+            entry['presentation'] = {'device': device, 'ordinal': ordinal, 'kind': 'unknown'}
             self._save(agents)
 
     def register_session(self, token: str) -> None:
