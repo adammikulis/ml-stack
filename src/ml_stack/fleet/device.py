@@ -126,7 +126,7 @@ def resolve_report(spec: str) -> Callable[[], dict[str, Any]]:
         raise DaemonError(f"cannot load report {spec!r}: {exc}") from None
 
 
-def device_report(extra: Callable[[], dict[str, Any]] | None = None) -> dict[str, Any]:
+def device_report(extra: Callable[[], dict[str, Any]] | None = None, *, environment=None) -> dict[str, Any]:
     """What is on this box. Best effort, and additive."""
     out = stdlib_device_report()
     for fn in ([extra] if extra is not None else registered_reports()):
@@ -134,5 +134,7 @@ def device_report(extra: Callable[[], dict[str, Any]] | None = None) -> dict[str
             out.update(fn() or {})
         except Exception:                             # noqa: BLE001
             pass
+    if environment is not None and getattr(sys, "frozen", False):
+        from .managed_compute import report
+        out.update(report(environment))
     return out
-

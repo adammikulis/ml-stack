@@ -10,6 +10,7 @@ import os
 import secrets
 import socket
 import threading
+from functools import partial
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from importlib.metadata import entry_points
@@ -277,7 +278,7 @@ class DaemonRuntime:
                 peer_port=self.port,
                 setup_token=self.setup_token,
             )
-        self.base_report = self.device_report or default_report
+        self.base_report = self.device_report or partial(default_report, environment=self.environment)
         self.labels = sorted({s.strip() for s in self.labels if s and s.strip()})
         self.heard: list[str] = []
         threading.Thread(target=self.probe_speech, name="speech-probe", daemon=True).start()
