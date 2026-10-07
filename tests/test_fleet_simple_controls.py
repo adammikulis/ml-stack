@@ -167,3 +167,26 @@ def test_settings_backend_validation_error_stays_visible(joined, open_page):
     page.locator('#settings-save').click()
     expect(page.locator('#settings-note .err')).to_contain_text('Choose a download source')
     assert not errors
+
+
+def test_central_output_default_saves_and_survives_reloading(joined, open_page):
+    from playwright.sync_api import expect
+
+    page, errors = open_page(joined, cookie=joined.cookie, path='/ui/#settings')
+    output = page.get_by_label('Default maximum output tokens', exact=True)
+    expect(output).to_have_value('8192')
+    output.fill('2048')
+    page.locator('#settings-save').click()
+    expect(page.locator('#settings-note .ok')).to_contain_text('Preferences saved')
+    _, defaults, _ = joined.call('/ui/conversations/defaults', cookie=joined.cookie)
+    assert defaults['settings']['max_output_tokens'] == 2048
+    page.reload()
+    expect(output).to_have_value('2048')
+    output.fill('')
+    page.locator('#settings-save').click()
+    expect(page.locator('#settings-note .ok')).to_contain_text('Preferences saved')
+    _, defaults, _ = joined.call('/ui/conversations/defaults', cookie=joined.cookie)
+    assert defaults['settings']['max_output_tokens'] is None
+    page.reload()
+    expect(output).to_have_value('')
+    assert not errors

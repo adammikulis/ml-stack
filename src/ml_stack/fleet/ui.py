@@ -282,6 +282,10 @@ class UI:
         if "download_sources" in req and req["download_sources"] not in ("internet", "lan", "both"):
             return {"error": "Choose Internet only, LAN only, or Both."}
 
+        from .settings import apply_preferences
+        if error := apply_preferences(settings, req):
+            return {"error": error}
+
         if "slots" in req and self.runner is not None:
             settings.slots = self.runner.set_slots(1)
             out["applied"].append("one job at a time")
@@ -297,10 +301,9 @@ class UI:
             settings.on_paused = req["on_paused"]
         if "on_close" in req and req["on_close"] in ("", "background", "quit"):
             settings.on_close = req["on_close"]
-        if "auto_update" in req:
-            settings.auto_update = bool(req["auto_update"])
-        if "autodownload_models" in req:
-            settings.autodownload_models = bool(req["autodownload_models"])
+        for key in ("auto_update", "autodownload_models"):
+            if key in req:
+                setattr(settings, key, bool(req[key]))
         if "download_sources" in req:
             settings.download_sources = str(req["download_sources"])
         if "always_show_advanced" in req:

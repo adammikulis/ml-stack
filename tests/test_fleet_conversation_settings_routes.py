@@ -68,3 +68,22 @@ def test_conversation_mutations_require_ui_authority(conversation_api):
         assert served.call(path, method=method, body=payload,
                            headers={"Origin": "https://foreign.invalid"})[0] == 403
     assert served.ui.conversations.get(made.id).title == "Protected"
+
+
+@pytest.mark.parametrize("limit", [512, None])
+def test_new_conversations_use_central_output_defaults_and_keep_snapshots(conversation_api, limit):
+    served = conversation_api
+    _, first, _ = served.call("/ui/conversations", method="POST", body={"title": "Original defaults"})
+    _, response, _ = served.call("/ui/settings", method="POST", body={"chat_max_output_tokens": limit})
+    assert "error" not in response
+    _, defaults, _ = served.call("/ui/conversations/defaults")
+    assert defaults["settings"]["max_output_tokens"] == limit
+    assert defaults["settings"]["effort"] == "off"
+    assert defaults["settings"]["context"] == 0
+    _, second, _ = served.call("/ui/conversations", method="POST", body={"title": "Central defaults"})
+    assert second["settings"]["max_output_tokens"] == limit
+    _, original, _ = served.call(f"/ui/conversations/{first['id']}")
+    assert original["settings"]["max_output_tokens"] == first["settings"]["max_output_tokens"]
+    _, explicit, _ = served.call("/ui/conversations", method="POST", body={"settings": {"max_output_tokens": 123, "effort": "high"}})
+    assert explicit["settings"]["max_output_tokens"] == 123
+    assert explicit["settings"]["effort"] == "high"

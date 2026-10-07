@@ -10,7 +10,7 @@ from typing import Any
 
 from ml_stack.records import Document
 
-__all__ = ["Settings", "Suggestion", "suggest"]
+__all__ = ["Settings", "Suggestion", "apply_preferences", "suggest"]
 
 
 @dataclass
@@ -45,6 +45,7 @@ class Settings:
     fetch_slots: int = 2
     autodownload_models: bool = True
     download_sources: str = ""
+    chat_max_output_tokens: int | None = 8192
     always_show_advanced: bool = False
     context: int = 8192
     """How much of a conversation a model is given to read. Costs memory per token."""
@@ -136,3 +137,16 @@ def suggest(report: dict[str, Any] | None = None) -> dict[str, Suggestion]:
         "stop", "pausing gives the machine back straight away; the run picks up from "
                 "its last checkpoint")
     return out
+
+
+def apply_preferences(settings: Settings, request: dict[str, Any]) -> str:
+    """Validate and apply interface and conversation defaults."""
+    if "always_show_advanced" in request and not isinstance(request["always_show_advanced"], bool):
+        return "Always show advanced options must be a boolean."
+    limit = request.get("chat_max_output_tokens")
+    if limit is not None and (type(limit) is not int or limit < 1):
+        return "Default output tokens must be null or a positive integer."
+    for key in ("always_show_advanced", "chat_max_output_tokens"):
+        if key in request:
+            setattr(settings, key, request[key])
+    return ""
