@@ -28,6 +28,8 @@
     }
     async catalogue() {
       const data = await M.api("/ui/models");
+      if (M.refused(data)) return;
+      this.problem = data.ok ? '' : data.error || 'Could not read the model library.';
       if (data.ok) this.library = data.library || [];
     }
     rows() {
@@ -74,7 +76,9 @@
         }
         this.list.append(group);
       }
-      if (!rows.length) this.list.append(M.el("p", { class: "hint" }, "No models match your search."));
+      if (!rows.length) this.list.append(M.el("p", { class: "hint" }, this.problem ||
+        (query ? "No models match your search." : "No installed or running models are available.")),
+        M.el('button', {type:'button', onclick:() => { this.dialog.close(); M.go('models'); }}, 'Browse model library'));
     }
     async choose(row) {
       if (this.chat.request || row.disabled) return;
