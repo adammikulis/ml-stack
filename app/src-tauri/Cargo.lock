@@ -1857,7 +1857,7 @@ dependencies = [
 
 [[package]]
 name = "ml-stack-app"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
  "serde_json",
  "tauri",
