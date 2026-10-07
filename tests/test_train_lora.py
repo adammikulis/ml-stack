@@ -233,7 +233,7 @@ class TestTheAdapter:
 
     def test_it_resumes_from_its_own_adapter(self, dataset, tmp_path):
         pytest.importorskip("peft", reason="ml-stack[train-lora]")
-        data, base = dataset
+        data, _base = dataset
         out = tmp_path / "run"
         config = {"lora": True, "steps": 20, "context": 256, "batch_size": 2,
                   "learning_rate": 0.001}
