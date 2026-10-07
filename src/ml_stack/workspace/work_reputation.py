@@ -8,7 +8,13 @@ from typing import Any
 from ml_stack.files import read_json
 from ml_stack.reputation import economy
 from ml_stack.reputation.work import WorkLedger
-from ml_stack.workspace import coordination, device_accounts, family_accounts, tokens
+from ml_stack.workspace import (
+    coordination,
+    device_accounts,
+    family_accounts,
+    tokens,
+    work_dimensions,
+)
 from ml_stack.workspace.identity import HUMAN, Denied, valid_id, valid_name
 from ml_stack.workspace.service import Workspace
 
@@ -66,7 +72,8 @@ def standings(ws, token: str, *, agent: str = "", offset: int = 0,
     for item in team:
         item['evidence_held'] = max(0, len(item['evidence']) - offset - 20)
         item['evidence'] = item['evidence'][offset:offset + 20]
-    return {'own': own, 'team': [item for item in team if not agent or item['agent'] == agent or agent in item['members']],
+    return {'dimensions': work_dimensions.views(ws, scope(ws), agent=agent, offset=offset),
+            'own': own, 'team': [item for item in team if not agent or item['agent'] == agent or agent in item['members']],
             'offset': offset, 'authority': 'none',
             'economy_mode': 'free',
             'metric': 'Completion credits and reviewed quality bonuses; runs are free.'}

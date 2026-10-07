@@ -49,7 +49,8 @@ def assign(ws, token, worker, task, lease_id):
     account = account_for(ws, worker)
     if account is None or account["device_id"] != device_id():
         raise Denied("the worker has no person-enrolled account on this device")
-    grant = _grant(lease_id, broker_wire.status(start=False))
+    status = broker_wire.status(start=False)
+    grant = _grant(lease_id, status)
     runner = _worker(ws, worker)
     if caller.role != HUMAN and (runner.pid != grant["holder_pid"]
                                  or runner.process_started != grant["holder_started"]):
@@ -61,6 +62,8 @@ def assign(ws, token, worker, task, lease_id):
                   "owner": caller.id, "person_assigned": caller.role == HUMAN, "requester": worker, "reason": f"Task {task}",
                   "profile": runner.profile, "capabilities": [runner.profile], "harness": runner.harness,
                   "execution_config": _execution_config(runner),
+                  "actor_alias": runner.name, "actor_alias_source": "registered-worker",
+                  "broker_runtime": status.get("runtime"),
                   "project": runner.project, "interpreter": sys.executable, "python": sys.version.split()[0], "scheduler_pid": os.getpid()}
     if runner.profile == 'coding':
         task_worktrees.prepare(ws, token, worker, task)

@@ -2,7 +2,7 @@
 
 from ml_stack import activity
 from ml_stack.reputation import economy
-from ml_stack.workspace import task_schema, work_reputation
+from ml_stack.workspace import task_schema, work_dimensions, work_reputation
 from ml_stack.workspace.identity import Denied
 from ml_stack.workspace.taskboard import TaskBoard
 
@@ -60,9 +60,8 @@ def verify_task(ws, token, task_id, *, ledger=None):
             'source': 'canonical-taskboard'}
     with work_reputation._store(ledger) as held:
         contribution = held.record_contribution({key: value for key, value in data.items() if key != 'award'})
-        if outcome != 'accepted':
-            return {**contribution, 'credited': False}
-        result = held.record(data)
+        result = held.record(data) if outcome == 'accepted' else {**contribution, 'credited': False}
+    work_dimensions.receipt(ws, result)
     if result['credited']:
         ws.audit('work.verified', who.id, agent=worker, task=task['id'], evidence=result['id'])
         activity.record('agent.work_verified', actor=worker, subject=task['title'], outcome='verified',
