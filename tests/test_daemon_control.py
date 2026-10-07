@@ -71,7 +71,7 @@ def test_owned_idle_replacement_retains_admission_and_rejects_new_work(device):
     with pytest.raises(Busy), only_one(root / 'runtime-install.lock', wait=False):
         pass
     with pytest.raises(ServerError):
-        request_json(f'http://127.0.0.1:{port}/jobs', method='POST', data=b'{}')
+        request_json(f'http://127.0.0.1:{port}/jobs', method='POST', payload={})
     assert not active.is_set()
     control.close()
     with only_one(root / 'runtime-install.lock', wait=False):
@@ -92,7 +92,7 @@ def test_request_in_progress_cannot_race_idle_replacement(device):
     root, port, control, _busy, stopped, active, release = device
     replies = []
     thread = threading.Thread(target=lambda: replies.append(request_json(
-        f'http://127.0.0.1:{port}/jobs', method='POST', data=b'{}')))
+        f'http://127.0.0.1:{port}/jobs', method='POST', payload={})))
     thread.start()
     assert active.wait(2)
     with pytest.raises(ServerError):

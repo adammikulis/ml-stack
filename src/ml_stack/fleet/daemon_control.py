@@ -82,7 +82,7 @@ def request_replacement(root: Path, port: int, running: dict, expected: str) -> 
     if not isinstance(capability, str) or not capability.startswith(macauth.PREFIX) or len(capability) > 128:
         raise ControlError('Daemon launcher control record is invalid.')
     answer = request_json(f'http://127.0.0.1:{port}{ROUTE}', method='POST',
-                          data=json.dumps({'instance': instance, 'expected': expected}).encode(),
+                          payload={'instance': instance, 'expected': expected},
                           token=capability, timeout=10)
     if not isinstance(answer, dict) or answer.get('instance') != instance or not answer.get('stopping'):
         raise ControlError('Daemon replacement was not acknowledged.')
