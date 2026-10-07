@@ -4,6 +4,7 @@ import hashlib
 import json
 import logging
 import os
+import shlex
 import sys
 import time
 from dataclasses import asdict
@@ -347,7 +348,8 @@ def main_cli(args):
         say(f"Caller: {reply['requested_by']}")
         say("Effective limits: " + json.dumps(reply['effective_limits'], sort_keys=True))
         if 'task_seq' in reply:
-            say(f"Task: {reply['task_seq']}; read with ml-stack-workspace thread {reply['task_seq']} --agent {reply['requested_by']}")
+            project = shlex.quote(str(Path(args.project).resolve()))
+            say(f"Task: {reply['task_seq']}; read with cd {project} && ml-stack-workspace thread {reply['task_seq']} --agent {reply['requested_by']}")
     return 0
 
 

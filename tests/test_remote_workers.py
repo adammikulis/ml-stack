@@ -552,8 +552,8 @@ def test_cli_prints_authenticated_followup_and_effective_limits(monkeypatch, cap
              'requested_by': 'caller', 'task_seq': 17,
              'effective_limits': {'max_output_tokens': None, 'task_caps': {'rounds': None}}}
     monkeypatch.setattr(remote_workers, 'run', lambda args: reply)
-    assert remote_workers.main_cli(SimpleNamespace(json=False, device='target')) == 0
+    assert remote_workers.main_cli(SimpleNamespace(json=False, device='target', project='/tmp/project space')) == 0
     output = capsys.readouterr().out
     assert 'Caller: caller' in output
-    assert 'thread 17 --agent caller' in output
+    assert "cd '/tmp/project space' && ml-stack-workspace thread 17 --agent caller" in output
     assert '"max_output_tokens": null' in output
