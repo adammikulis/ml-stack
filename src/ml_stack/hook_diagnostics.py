@@ -14,7 +14,8 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
-from ml_stack import __version__, home, lock, windows_private
+import ml_stack
+from ml_stack import home, lock, windows_private
 from ml_stack.command import Group, flag
 from ml_stack.files import writing
 from ml_stack.log import say, warn
@@ -164,7 +165,7 @@ def _occurrence(root: Path, body: dict) -> dict:
 def _runtime() -> dict[str, str]:
     marker = Path(__file__).parent / "fleet" / "built-from"
     commit = marker.read_text()[:100].strip() if marker.is_file() else "unstamped"
-    return {"version": __version__, "commit": clean(commit), "python": clean(sys.executable),
+    return {"version": ml_stack.__version__, "commit": clean(commit), "python": clean(sys.executable),
             "package": clean(Path(__file__).parent)}
 
 
