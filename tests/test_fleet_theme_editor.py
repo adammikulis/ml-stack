@@ -13,12 +13,8 @@ pytestmark = pytest.mark.slow
 
 
 def mount_editor(page):
-    page.wait_for_selector('#settings-interface')
-    page.evaluate('''() => {
-      if (!document.querySelector('theme-editor')) {
-        document.querySelector('#settings-interface').append(document.createElement('theme-editor'));
-      }
-    }''')
+    page.get_by_role('tab', name='Appearance & advanced', exact=True).click()
+    assert page.locator('theme-editor').count() == 1
     page.get_by_role('button', name='Poolside Light', exact=True).wait_for()
 
 
@@ -32,6 +28,10 @@ def test_theme_selector_preview_save_reload_reset_and_delete(joined, open_page):
     page.get_by_label('Interface font size').fill('17')
     page.get_by_label('Interface density').select_option('compact')
     page.get_by_label('Custom theme name').fill('Quiet water')
+    assert page.evaluate("document.documentElement.dataset.theme") == 'light'
+    assert page.evaluate("document.documentElement.dataset.density") == 'compact'
+    assert page.evaluate("document.documentElement.style.getPropertyValue('--ui-font-size')") == '17px'
+    assert page.evaluate("document.documentElement.style.getPropertyValue('--poolside-pink')") == '#aa3377'
     _, current, _ = joined.call('/ui/settings', cookie=joined.cookie)
     assert current['settings']['appearance']['active_theme'] == 'light'
     page.get_by_role('button', name='Save theme', exact=True).click()
