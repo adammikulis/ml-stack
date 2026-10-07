@@ -39,6 +39,45 @@ def _git_environment() -> dict[str, str]:
     return {name: value for name, value in os.environ.items() if name not in selectors}
 
 
+def checkout_metadata(directory: str | Path) -> dict[str, str]:
+    """Read bounded checkout branch and HEAD metadata without starting Git."""
+    def read(path: Path, limit: int = 4096) -> str:
+        with path.open("rb") as stream:
+            value = stream.read(limit + 1)
+        if len(value) > limit:
+            raise ValueError("Git metadata exceeds its bound")
+        return value.decode("utf-8").strip()
+    here = Path(directory).absolute()
+    try:
+        root = next((item for item in (here, *here.parents) if (item / ".git").exists()), None)
+        if root is None:
+            return {"cwd": str(here), "branch": "", "head": ""}
+        git = root / ".git"
+        if git.is_file():
+            pointer = read(git)
+            if not pointer.startswith("gitdir: "):
+                raise ValueError("invalid checkout Git directory")
+            git = (root / pointer.removeprefix("gitdir: ")).resolve()
+        common = (git / read(git / "commondir")).resolve() if (git / "commondir").exists() else git
+        head = read(git / "HEAD")
+        branch = ""
+        if head.startswith("ref: refs/heads/"):
+            ref = head.removeprefix("ref: ")
+            if any(part in ("", ".", "..") for part in ref.split("/")) or "\\" in ref:
+                raise ValueError("invalid checkout Git reference")
+            branch = ref.removeprefix("refs/heads/")
+            if (common / ref).exists():
+                head = read(common / ref)
+            else:
+                rows = read(common / "packed-refs", 65536).splitlines()
+                head = next((line.split(" ")[0] for line in rows if line.endswith(" " + ref)), "")
+        if not re.fullmatch("[0-9a-f]{40}", head):
+            head = ""
+        return {"cwd": str(here), "root": str(root), "branch": branch, "head": head}
+    except (OSError, ValueError, StopIteration):
+        return {"cwd": str(here), "branch": "", "head": "", "metadata": "unavailable"}
+
+
 def checkouts(directory: str | Path) -> tuple[Path, Path] | None:
     """(top of the checkout holding `directory`, the primary checkout), None outside a repository."""
     here = Path(directory)

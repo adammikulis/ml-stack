@@ -13,7 +13,7 @@ from ml_stack import harnesshook, hook_diagnostics
 
 
 def _record() -> dict:
-    paths = list(hook_diagnostics.directory().glob("*.json"))
+    paths = [p for p in hook_diagnostics.directory().glob("*.json") if hook_diagnostics.IDENTIFIER.fullmatch(p.stem)]
     assert len(paths) == 1
     assert paths[0].stat().st_mode & 0o077 == 0
     return json.loads(paths[0].read_text())
@@ -62,7 +62,7 @@ runpy.run_module('ml_stack.harnesshook', run_name='__main__')
     else:
         assert answer["decision"] == "block"
     assert "sk-" + "a" * 30 not in done.stdout + done.stderr
-    held = json.loads(next((tmp_path / "state" / "hook-diagnostics").glob("*.json")).read_text())
+    held = json.loads(next(p for p in (tmp_path / "state" / "hook-diagnostics").glob("*.json") if hook_diagnostics.IDENTIFIER.fullmatch(p.stem)).read_text())
     assert held["stage"] == "bootstrap" and held["runtime"]["python"]
 
 

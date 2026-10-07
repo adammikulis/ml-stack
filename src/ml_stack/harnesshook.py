@@ -23,6 +23,9 @@ from ml_stack import hook_bootstrap, hook_diagnostics
 
 if __name__ == "__main__":
     sys.excepthook = hook_bootstrap.block
+    hook_bootstrap.arm(next(iter(sys.argv[1:2]), "pre"))
+    hook_bootstrap.metadata({})
+    hook_bootstrap.stage("imports")
 
 from ml_stack import harness_claims, requests
 from ml_stack.harnesspolicy import (
@@ -98,9 +101,9 @@ def pre(payload: dict[str, Any], rail: Rail, inbox: requests.Inbox | None = None
                     or workspace_authority(_shell_line(name, inputs), label)
                     or decide(role, name, inputs, roots=roots, protected=protected))
     except Denied as error:
-        decision = Decision('deny', 'destructive', hook_diagnostics.record(error, 'pre', 'classification'))
+        decision = Decision('deny', 'destructive', hook_diagnostics.record(error, 'pre', 'classification', metadata=hook_bootstrap.timings()))
     except FAILURES as error:
-        decision = Decision("deny", "unsure", f"the call could not be classified: {hook_diagnostics.record(error, 'pre', 'classification')}")
+        decision = Decision("deny", "unsure", f"the call could not be classified: {hook_diagnostics.record(error, 'pre', 'classification', metadata=hook_bootstrap.timings())}")
     if decision.action == "allow":
         return _owned_answer(payload, rail, event, f"ml-stack: {decision.label}")
     if decision.action == "deny":
@@ -117,7 +120,7 @@ def _owned_answer(payload, rail, event, reason):
                                str(payload.get('cwd') or (rail.roots[0] if rail.roots else Path.cwd())),
                                rail.label, rail.roots)
     except FAILURES as error:
-        return _answer(event, 'deny', f"ml-stack: ownership refused: {hook_diagnostics.record(error, 'pre', 'claim')}")
+        return _answer(event, 'deny', f"ml-stack: ownership refused: {hook_diagnostics.record(error, 'pre', 'claim', metadata=hook_bootstrap.timings())}")
     return _answer(event, 'allow', reason)
 
 
@@ -125,14 +128,14 @@ def nudge(label: str) -> str:
     """Return workspace context or a redacted notification failure reference."""
     try:
         done = subprocess.run(["ml-stack-workspace", "nudge", "--agent", label], capture_output=True,
-                              text=True, timeout=NUDGE_S, check=False, stdin=subprocess.DEVNULL)
+                              text=True, timeout=min(NUDGE_S, hook_bootstrap.remaining()), check=False, stdin=subprocess.DEVNULL)
     except (OSError, subprocess.SubprocessError) as error:
-        warning = f"workspace nudge unavailable: {hook_diagnostics.record(error, 'post', 'nudge')}"
+        warning = f"workspace nudge unavailable: {hook_diagnostics.record(error, 'post', 'nudge', metadata=hook_bootstrap.timings())}"
         sys.stderr.write(warning + "\n")
         return warning
     if done.returncode != 0:
         error = RuntimeError(done.stderr.strip() or f"workspace nudge exited {done.returncode}")
-        warning = f"workspace nudge unavailable: {hook_diagnostics.record(error, 'post', 'nudge')}"
+        warning = f"workspace nudge unavailable: {hook_diagnostics.record(error, 'post', 'nudge', metadata=hook_bootstrap.timings())}"
         sys.stderr.write(warning + "\n")
         return warning
     return done.stdout.strip()[:NUDGE_MOST]
@@ -143,19 +146,23 @@ def post(label: str, rail: Rail | None = None) -> dict[str, Any]:
     warning = ""
     try:
         if rail is not None and rail.roots:
+            hook_bootstrap.stage("checkpoint-authentication")
             canonical = harness_remote.context(label, rail.roots[0], rail.roots, require_claim=False)
             if canonical:
                 remote, who = canonical
+                hook_bootstrap.stage("checkpoint-write")
                 worktree_lifecycle.checkpoint(remote.base, who.id)
             else:
                 ws = Workspace()
                 who = ws.auth(tokens.load(ws.base, label))
                 if who.id != label:
                     raise Denied('checkpoint requires the launcher-bound identity')
+                hook_bootstrap.stage("checkpoint-write")
                 worktree_lifecycle.checkpoint(ws.base, who.id)
     except FAILURES as error:
-        warning = f"workspace checkpoint unavailable: {hook_diagnostics.record(error, 'post', 'checkpoint')}"
+        warning = f"workspace checkpoint unavailable: {hook_diagnostics.record(error, 'post', 'checkpoint', metadata=hook_bootstrap.timings())}"
         sys.stderr.write(warning + "\n")
+    hook_bootstrap.stage("nudge")
     text = warning or nudge(label)
     if not text:
         return {}
@@ -176,7 +183,7 @@ def stop(rail: Rail) -> dict[str, Any]:
             raise Denied('completion requires the launcher-bound identity')
         worktree_lifecycle.require_clean(ws.base, who.id)
     except (Denied, OSError, RuntimeError) as error:
-        return {"decision": "block", "reason": hook_diagnostics.record(error, "stop", "completion")}
+        return {"decision": "block", "reason": hook_diagnostics.record(error, "stop", "completion", metadata=hook_bootstrap.timings())}
     return {}
 
 
@@ -198,20 +205,25 @@ def run(argv: Sequence[str] | None = None, stdin: IO[str] | None = None,
     os.environ[ENV_NONINTERACTIVE] = "1"
     words = list(sys.argv[1:] if argv is None else argv)
     stage = "options"
+    hook_bootstrap.stage(stage)
     try:
         event, opts = _options(words)
         stage = "payload"
+        hook_bootstrap.stage(stage)
         payload = json.loads((stdin or sys.stdin).read() or "{}")
         payload = payload if isinstance(payload, dict) else {}
+        hook_bootstrap.metadata(payload)
         label = opts.get("label", ["harness"])[-1]
         rail = Rail(opts.get("role", ["read-only"])[-1], label, opts.get("root") or [str(payload.get("cwd", ""))],
                     opts.get("protect", []), float(opts.get("wait", [WAIT_S])[-1]))
         stage = event
+        hook_bootstrap.stage(stage)
         out = pre(payload, rail) if event == "pre" else stop(rail) if event == "stop" else post(label, rail)
     except FAILURES as exc:
         return hook_bootstrap.failure(exc, words[0] if words else "pre", stage, stdout)
     if out:
         (stdout or sys.stdout).write(json.dumps(out, sort_keys=True) + "\n")
+    hook_bootstrap.finish()
     return 0
 
 

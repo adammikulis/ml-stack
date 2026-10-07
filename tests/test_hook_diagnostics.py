@@ -43,7 +43,8 @@ def test_unexpected_errors_do_not_expose_exception_contents(monkeypatch, capsys)
     monkeypatch.setattr(harnesshook, "post", crashed)
     assert harnesshook.run(["post"], io.StringIO("{}"), io.StringIO()) == 0
     diagnostic = capsys.readouterr().err
-    assert "ml-stack hook failed, notification unavailable: ValueError:" in diagnostic
+    assert "ml-stack hook failed, notification unavailable:" in diagnostic
+    assert "ValueError:" in diagnostic
     assert "secret-token-value" not in diagnostic
 
 

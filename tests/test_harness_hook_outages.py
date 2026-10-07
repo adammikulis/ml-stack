@@ -89,7 +89,7 @@ def test_unhandled_post_failure_is_nonblocking(monkeypatch, capsys):
     monkeypatch.setattr(harnesshook.os, '_exit', exits.append)
     harnesshook._block(Denied, Denied('daemon unavailable'), None)
     assert exits == [0]
-    assert 'notification unavailable: Denied: daemon unavailable' in capsys.readouterr().err
+    assert 'Denied: daemon unavailable' in capsys.readouterr().err
 
 
 def test_post_checkpoint_outage_does_not_start_a_nudge_subprocess(monkeypatch):
