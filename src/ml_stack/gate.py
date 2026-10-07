@@ -152,15 +152,18 @@ def _ahead(path: Path, mine: str) -> list[str]:
             fd = os.open(path / name, os.O_RDWR)
         except OSError:
             continue
+        stale = False
         try:
             if take(fd):
                 release(fd)
-                with contextlib.suppress(OSError):
-                    (path / name).unlink()
+                stale = True
             else:
                 live.append(name)
         finally:
             os.close(fd)
+        if stale:
+            with contextlib.suppress(OSError):
+                (path / name).unlink()
     return live
 
 
@@ -183,17 +186,19 @@ def _take_ticket(path: Path, url: str) -> tuple[str, int]:
         take(fd)
         note = json.dumps({"pid": os.getpid(), "url": url, "since": time.time(),
                            "label": " ".join(sys.argv[:2])[:80]})
+        os.lseek(fd, 0, os.SEEK_SET)
         os.write(fd, note.encode("utf-8"))
     return name, fd
 
 
 def _drop(path: Path, name: str, fd: int) -> None:
-    with contextlib.suppress(OSError):
-        (path / name).unlink()
-    with contextlib.suppress(OSError):
-        release(fd)
-    with contextlib.suppress(OSError):
-        os.close(fd)
+    with _directory_lock(path):
+        with contextlib.suppress(OSError):
+            release(fd)
+        with contextlib.suppress(OSError):
+            os.close(fd)
+        with contextlib.suppress(OSError):
+            (path / name).unlink()
 
 
 @contextmanager
@@ -259,21 +264,22 @@ def snapshot() -> dict[str, list[dict[str, Any]]]:
         return out
     for pool in sorted(p for p in root.iterdir() if p.is_dir()):
         rows: list[dict[str, Any]] = []
-        for name in _tickets(pool):
-            try:
-                fd = os.open(pool / name, os.O_RDWR)
-            except OSError:
-                continue
-            try:
-                if take(fd):
-                    release(fd)
+        with _directory_lock(pool):
+            for name in _tickets(pool):
+                try:
+                    fd = os.open(pool / name, os.O_RDWR)
+                except OSError:
                     continue
-                info = json.loads((pool / name).read_text(encoding="utf-8") or "{}")
-            except (OSError, ValueError):
-                info = {}
-            finally:
-                os.close(fd)
-            rows.append({**info, "ticket": name})
+                try:
+                    if take(fd):
+                        release(fd)
+                        continue
+                    info = json.loads((pool / name).read_text(encoding="utf-8") or "{}")
+                except (OSError, ValueError):
+                    info = {}
+                finally:
+                    os.close(fd)
+                rows.append({**info, "ticket": name})
         if rows:
             rows[0]["running"] = True
             out[pool.name] = rows
