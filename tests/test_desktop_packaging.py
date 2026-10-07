@@ -32,6 +32,25 @@ def test_window_refuses_empty_native_build(builder, tmp_path, monkeypatch):
         builder.window(sidecar)
 
 
+def test_built_desktop_wheel_carries_full_commit_and_distribution_metadata(builder, monkeypatch):
+    def build(argv, **kwargs):
+        assert argv[1:4] == ["-m", "build", "--wheel"]
+        subprocess.run([sys.executable, "-c",
+                        "import hatchling.build; hatchling.build.build_wheel(" + repr(str(builder.DIST)) + ")"],
+                       cwd=builder.ROOT, check=True, capture_output=True, text=True)
+
+    monkeypatch.setattr(builder, "run", build)
+    expected = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+    made = builder.wheels()
+    assert len(made) == 1
+    with zipfile.ZipFile(made[0]) as archive:
+        assert archive.read("ml_stack/fleet/built-from").decode().strip() == expected
+        assert len(expected) == 40
+        metadata = next(name for name in archive.namelist() if name.endswith(".dist-info/METADATA"))
+        assert "Name: ml-stack\n" in archive.read(metadata).decode()
+        assert "ml_stack/fleet/daemon.py" in archive.namelist()
+
+
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS application bundles")
 def test_window_signs_the_built_application_name(builder, tmp_path, monkeypatch):
     sidecar = tmp_path / "daemon"
