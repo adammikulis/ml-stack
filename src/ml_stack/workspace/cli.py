@@ -109,13 +109,15 @@ def _coordinator_token(args: argparse.Namespace, remote) -> str:
 def _local_token(args: argparse.Namespace) -> str:
     base = limits.root()
     agent = args.agent or os.environ.get(tokens.AGENT_ENV, "")
-    if agent and not args.token_file:
+    token_file = getattr(args, "token_file", "")
+    if agent and not token_file:
         ws = Workspace(base)
         try:
             ws.auth(tokens.load(base, agent))
         except Denied:
-            guide.agent_connect(ws, agent, project.describe())
-    return tokens.resolve(base, token_file=args.token_file, agent=args.agent)
+            guide.agent_connect(ws, agent, project.describe(),
+                                host_coordinator=not getattr(args, "_canonical_dev", False))
+    return tokens.resolve(base, token_file=token_file, agent=args.agent)
 
 
 def _project_connection(cwd: Path | None = None):

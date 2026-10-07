@@ -433,3 +433,109 @@ def test_saved_canonical_git_grant_refuses_another_repository(repository, tmp_pa
     with pytest.raises(Denied, match='not authorized'), device_agent.owned_project_session(
             kit.ws, token, 'worker', foreign):
         pytest.fail('inherited Git selectors received canonical project authorization')
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize('expired', [False, True])
+def test_claude_first_command_and_saved_codex_session_share_dev_without_pairing(dev_pair, monkeypatch, expired):
+    import json
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    from ml_stack.workspace import coordinator_bootstrap, coordinator_client, guide, project, tokens
+
+    devices, project_id = dev_pair
+    device = devices[0]
+    monkeypatch.setenv('ML_STACK_HOME', str(device.state / 'client'))
+    monkeypatch.setenv('ML_STACK_WORKSPACE_HOME', str(device.state / 'own-workspace'))
+    monkeypatch.setenv('ML_STACK_CLUSTER_KEY', str(device.keyfile))
+    monkeypatch.setenv('ML_STACK_DISCOVERY_PORT', str(device.advertiser.port))
+    monkeypatch.setenv('CODEX_THREAD_ID', 'existing-main-session')
+    monkeypatch.setattr(automatic_connection, 'HTTP_PORT', device.local_port)
+    monkeypatch.chdir(device.checkout)
+    monkeypatch.setattr(coordinator_bootstrap, 'ensure_host', lambda *a: pytest.fail('legacy coordinator hosting'))
+    monkeypatch.setattr(coordinator_client, '_device_peer', lambda *a: pytest.fail('paired-device credential'))
+    codex_args = SimpleNamespace(agent='codex', token_file='')
+    codex_board, codex_token = cli._context(codex_args)
+    if expired:
+        local = cli.Workspace()
+        guide.agent_connect(local, 'claude-code', project.describe(), host_coordinator=False)
+        entries = local.registry._load()
+        entries['claude-code']['expires'] = local.clock() - 1
+        local.registry._save(entries)
+    source = '''import sys
+from ml_stack.workspace import automatic_connection, cli, coordinator_bootstrap, coordinator_client
+from ml_stack.fleet import discovery
+original_destinations = discovery._destinations
+discovery._destinations = lambda group, port: [(address, interface) for address, interface in original_destinations(group, port) if address[0] != discovery.LOOPBACK and interface != discovery.LOOPBACK]
+def forbidden(*args, **kwargs):
+    raise AssertionError("legacy credential or host path")
+coordinator_bootstrap.ensure_host = forbidden
+coordinator_client._device_peer = forbidden
+automatic_connection.HTTP_PORT = int(sys.argv[1])
+raise SystemExit(cli.main(["whoami", "--agent", "claude-code", "--json"]))
+'''
+    environment = dict(os.environ)
+    environment['PYTHONPATH'] = str(Path(cli.__file__).parents[2])
+    done = subprocess.run([sys.executable, '-c', source, str(device.local_port)],
+                          env=environment, capture_output=True, text=True, timeout=120)
+    assert done.returncode == 0, done.stderr
+    actor = json.loads(done.stdout)['id']
+    assert actor != codex_args.agent
+    args = SimpleNamespace(agent='claude-code', token_file='')
+    claude_board, claude_token = cli._context(args)
+    assert args.agent == actor
+    assert claude_board.remote.host == codex_board.remote.host
+    assert claude_board.remote.project_id == project_id
+    assert claude_token != codex_token
+    assert cli._context(SimpleNamespace(agent='claude-code', token_file=''))[1] == claude_token
+    assert project_connection.selected(device.checkout)['agent'] == codex_args.agent
+    for command in ('inbox', 'agents', 'status', 'connect'):
+        assert cli.main([command, '--agent', 'claude-code', '--json']) == 0
+    assert tokens.load(cli.Workspace().base, 'claude-code')
+    (tokens.directory(claude_board.remote.base) / actor).unlink()
+    with pytest.raises(Denied):
+        cli._context(SimpleNamespace(agent='claude-code', token_file=''))
+
+
+@pytest.mark.parametrize('failure', ['revoked', 'foreign', 'restricted', 'lead', 'child'])
+def test_different_dev_local_actor_cannot_escape_existing_authority(repository, tmp_path, monkeypatch, failure):
+    from ml_stack.workspace import Workspace, guide, project, tokens
+
+    local = Workspace(tmp_path / 'private-local')
+    found = project.describe(str(repository))
+    guide.agent_connect(local, 'claude-code', found, host_coordinator=False)
+    token = tokens.load(local.base, 'claude-code')
+    entries = local.registry._load()
+    entry = entries['claude-code']
+    if failure == 'revoked':
+        entry['revoked'] = True
+    elif failure == 'foreign':
+        entry['project'] = {'key': 'f' * 16, 'name': 'other'}
+    elif failure == 'restricted':
+        entry['can'] = ['read']
+    elif failure == 'lead':
+        entry['role'] = 'lead'
+    else:
+        parent_token = local.registry.bootstrap_agent('parent', found, (10, 64))
+        entries = local.registry._load()
+        entries['claude-code']['parent'] = local.auth(parent_token).id
+    local.registry._save(entries)
+    monkeypatch.setattr(automatic_connection, 'RemoteWorkspace', lambda *a, **kw: SimpleNamespace(base=tmp_path / 'remote'))
+    monkeypatch.setattr(automatic_connection, 'selected', lambda *a, **kw: None)
+    monkeypatch.setattr(automatic_connection, 'discover', lambda *a: pytest.fail('discovery after rejected actor'))
+    connection = {'host': 'https://board.invalid', 'project_id': 'a' * 32,
+                  'cluster': 'development', 'root': str(repository)}
+    with pytest.raises(Denied):
+        automatic_connection._other_local_actor(SimpleNamespace(agent='claude-code'), connection,
+                                                lambda args: token, lambda: local, 'claude-code')
+
+
+def test_binding_explicit_capability_cannot_swap_same_project_actor(monkeypatch, tmp_path):
+    remote = SimpleNamespace(mode='prod', project_id='a' * 32, cluster_key='',
+                             call=lambda *args: {'id': 'codex', 'role': 'agent', 'project': {'key': 'a' * 32}})
+    monkeypatch.setattr(project_connection, 'selected', lambda *a, **kw: None)
+    with pytest.raises(Denied, match='another agent'):
+        project_connection.bind(remote, tmp_path, 'claude-code', local_agent='claude-code', agent_token='fixture')

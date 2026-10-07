@@ -1,10 +1,10 @@
 {
- "surfaces": 789,
+ "surfaces": 790,
  "by_status": {
   "covered": 465,
   "partial": 199,
   "uncovered": 53,
-  "n/a": 72,
+  "n/a": 73,
   "unmapped": 0
  },
  "by_kind": {
@@ -68,7 +68,7 @@
    "covered": 3,
    "partial": 5,
    "uncovered": 0,
-   "n/a": 18,
+   "n/a": 19,
    "unmapped": 0
   },
   "mcp-tool": {
@@ -5025,6 +5025,16 @@
    "id": "listener:workspace/automatic_connection.py:_attach",
    "kind": "listener",
    "source": "workspace/automatic_connection.py:_attach",
+   "trust": "anything that can connect to the address",
+   "attacker": "an unauthenticated or cross-origin client reaches the port",
+   "status": "n/a",
+   "tests": [],
+   "note": "binds only to probe whether a port is free, to serve a local fit page on loopback, or to run the sandbox self-test; no request is read from a client"
+  },
+  {
+   "id": "listener:workspace/automatic_connection.py:_other_local_actor",
+   "kind": "listener",
+   "source": "workspace/automatic_connection.py:_other_local_actor",
    "trust": "anything that can connect to the address",
    "attacker": "an unauthenticated or cross-origin client reaches the port",
    "status": "n/a",

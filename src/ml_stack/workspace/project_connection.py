@@ -33,15 +33,20 @@ def _saved() -> dict:
         raise Denied("canonical board connection record is unreadable; local fallback is disabled") from exc
 
 
-def bind(remote: RemoteWorkspace, root: Path, agent: str, cluster: str = "", *, local_agent: str = "") -> dict:
+def bind(remote: RemoteWorkspace, root: Path, agent: str, cluster: str = "", **options: str) -> dict:
     """Bind a local project root to an authenticated canonical board identity."""
+    if set(options) - {"local_agent", "agent_token"}:
+        raise TypeError("unsupported project binding option")
+    local_agent, agent_token = options.get("local_agent", ""), options.get("agent_token", "")
     prior = selected(root)
     if (prior and prior.get("agent") == agent and prior["host"] == remote.host
             and prior["project_id"] == remote.project_id and getattr(remote, "mode", "prod") == "dev"
             and (prior.get("cluster_id") or prior.get("local_agent"))
             and prior.get("cluster_id") != remote.cluster_id):
         remote.renew(agent, remote.authority_machine)
-    who = remote.call("whoami", remote.token(agent=agent))
+    who = remote.call("whoami", agent_token or remote.token(agent=agent))
+    if agent_token and who.get("id") != agent:
+        raise Denied("the saved project capability belongs to another agent")
     if who.get("role") != AGENT or who.get("project", {}).get("key") != remote.project_id:
         raise Denied("connect using this project's scoped agent identity")
     agent = who["id"]
@@ -87,13 +92,14 @@ def bind(remote: RemoteWorkspace, root: Path, agent: str, cluster: str = "", *, 
     return {"root": str(root), **made, "state": "connected"}
 
 
-def selected(cwd: Path | None = None) -> dict | None:
+def selected(cwd: Path | None = None, *, local_agent: str = "") -> dict | None:
     """Return the closest project connection or verified checkout authority."""
     current = (cwd or Path.cwd()).resolve()
     connections = _saved()
     for root in (current, *current.parents):
         configured = connections.get(str(root))
-        if configured:
+        if configured and not (local_agent and local_agent != "codex"
+                               and configured.get("local_agent") == local_agent):
             configured = project_session.connection(configured)
         metadata_path = root / ".ml-stack-project.json"
         metadata = read_json(metadata_path, {})
@@ -207,6 +213,11 @@ class CanonicalWorkspace(Operations):
     def model_of(self, name, label=""):
         info = self.info(name)
         return info.get("model", ""), info.get("model_state", "")
+
+    def status(self):
+        registered = self.registered()
+        return {"agents": [row["id"] for row in registered], "registered": registered,
+                "claims": self.listing(), "project": self.remote.project_id, "state": "connected"}
 
     def registered(self):
         return self.remote.call("agents", self.token)
