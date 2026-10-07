@@ -36,7 +36,7 @@ from ml_stack.harnesspolicy import (
     workspace_authority,
 )
 from ml_stack.keystore import ENV_NONINTERACTIVE
-from ml_stack.workspace import harness_remote, tokens, worktree_lifecycle
+from ml_stack.workspace import harness_remote, notification_reader, tokens, worktree_lifecycle
 from ml_stack.workspace.identity import Denied
 from ml_stack.workspace.service import Workspace
 
@@ -86,6 +86,7 @@ class Rail:
     roots: Sequence[str] = ()
     protected: Sequence[str] = ()
     wait_s: float = WAIT_S
+    session_id: str = ""
 
 
 def pre(payload: dict[str, Any], rail: Rail, inbox: requests.Inbox | None = None) -> dict[str, Any]:
@@ -124,12 +125,18 @@ def _owned_answer(payload, rail, event, reason):
     return _answer(event, 'allow', reason)
 
 
-def nudge(label: str) -> str:
+def nudge(label: str, rail: Rail | None = None, *, canonical=None) -> str:
     """Return workspace context or a redacted notification failure reference."""
     try:
-        done = subprocess.run(["ml-stack-workspace", "nudge", "--agent", label], capture_output=True,
-                              text=True, timeout=min(NUDGE_S, hook_bootstrap.remaining()), check=False, stdin=subprocess.DEVNULL)
-    except (OSError, subprocess.SubprocessError) as error:
+        if canonical is not None:
+            return notification_reader.read(label, Path(rail.roots[0]), rail.session_id,
+                                            canonical=canonical)[:NUDGE_MOST]
+        done = subprocess.run([sys.executable, "-m", notification_reader.__name__, label,
+                               str(rail.roots[0] if rail and rail.roots else Path.cwd()),
+                               rail.session_id if rail else ""], capture_output=True,
+                              text=True, timeout=min(NUDGE_S, hook_bootstrap.remaining()),
+                              check=False, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError, Denied, ValueError, RuntimeError) as error:
         warning = f"workspace nudge unavailable: {hook_diagnostics.record(error, 'post', 'nudge', metadata=hook_bootstrap.timings())}"
         sys.stderr.write(warning + "\n")
         return warning
@@ -144,6 +151,7 @@ def nudge(label: str) -> str:
 def post(label: str, rail: Rail | None = None) -> dict[str, Any]:
     """The PostToolUse answer: the nudge as context, or nothing."""
     warning = ""
+    canonical = None
     try:
         if rail is not None and rail.roots:
             hook_bootstrap.stage("checkpoint-authentication")
@@ -163,7 +171,8 @@ def post(label: str, rail: Rail | None = None) -> dict[str, Any]:
         warning = f"workspace checkpoint unavailable: {hook_diagnostics.record(error, 'post', 'checkpoint', metadata=hook_bootstrap.timings())}"
         sys.stderr.write(warning + "\n")
     hook_bootstrap.stage("nudge")
-    text = warning or nudge(label)
+    notice = nudge(label, rail, canonical=canonical) if canonical is not None else nudge(label, rail)
+    text = "\n".join(part for part in (warning, notice) if part)
     if not text:
         return {}
     return {"hookSpecificOutput": {"hookEventName": HOOK_EVENTS["post"],
@@ -215,7 +224,8 @@ def run(argv: Sequence[str] | None = None, stdin: IO[str] | None = None,
         hook_bootstrap.metadata(payload)
         label = opts.get("label", ["harness"])[-1]
         rail = Rail(opts.get("role", ["read-only"])[-1], label, opts.get("root") or [str(payload.get("cwd", ""))],
-                    opts.get("protect", []), float(opts.get("wait", [WAIT_S])[-1]))
+                    opts.get("protect", []), float(opts.get("wait", [WAIT_S])[-1]),
+                    str(payload.get("session_id", "")) if event == "post" else "")
         stage = event
         hook_bootstrap.stage(stage)
         out = pre(payload, rail) if event == "pre" else stop(rail) if event == "stop" else post(label, rail)

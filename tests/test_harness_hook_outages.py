@@ -14,7 +14,7 @@ def unavailable(*args, **kwargs):
 
 def test_post_outage_does_not_reverse_a_completed_tool(monkeypatch, capsys):
     monkeypatch.setattr(harnesshook.harness_remote, 'context', unavailable)
-    monkeypatch.setattr(harnesshook, 'nudge', lambda label: '')
+    monkeypatch.setattr(harnesshook, 'nudge', lambda label, rail=None: '')
     out = io.StringIO()
     assert harnesshook.run(['post', '--label', 'worker', '--root', '/project'], io.StringIO('{}'), out) == 0
     context = json.loads(out.getvalue())['hookSpecificOutput']['additionalContext']
@@ -92,9 +92,34 @@ def test_unhandled_post_failure_is_nonblocking(monkeypatch, capsys):
     assert 'Denied: daemon unavailable' in capsys.readouterr().err
 
 
-def test_post_checkpoint_outage_does_not_start_a_nudge_subprocess(monkeypatch):
+def test_post_checkpoint_outage_preserves_pending_message_alert(monkeypatch):
     monkeypatch.setattr(harnesshook.harness_remote, 'context', unavailable)
-    monkeypatch.setattr(harnesshook, 'nudge', lambda _label: pytest.fail('retried unavailable workspace'))
+    seen = []
+
+    def pending(label, rail=None):
+        seen.append(label)
+        return '1 waiting for you; run inbox'
+
+    monkeypatch.setattr(harnesshook, 'nudge', pending)
     out = io.StringIO()
     assert harnesshook.run(['post', '--label', 'worker', '--root', '/project'], io.StringIO('{}'), out) == 0
-    assert 'connection refused' in out.getvalue()
+    context = json.loads(out.getvalue())['hookSpecificOutput']['additionalContext']
+    assert 'connection refused' in context
+    assert '1 waiting for you; run inbox' in context
+    assert seen == ['worker']
+
+
+def test_post_lifecycle_failure_preserves_stop_message_alert(monkeypatch):
+
+    def broken(*args, **kwargs):
+        raise RuntimeError('checkpoint missing shadow')
+
+    remote = type('Remote', (), {'base': '/project'})()
+    worker = type('Worker', (), {'id': 'worker'})()
+    monkeypatch.setattr(harnesshook.harness_remote, 'context', lambda *args, **kwargs: (remote, worker))
+    monkeypatch.setattr(harnesshook.worktree_lifecycle, 'checkpoint', broken)
+    monkeypatch.setattr(harnesshook, 'nudge', lambda _label, rail=None, **kwargs: 'urgent message waiting; run inbox')
+    result = harnesshook.post('worker', harnesshook.Rail('plan-and-go', 'worker', ['/project']))
+    context = result['hookSpecificOutput']['additionalContext']
+    assert 'checkpoint missing shadow' in context
+    assert 'urgent message waiting; run inbox' in context
