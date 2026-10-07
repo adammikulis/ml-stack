@@ -1,13 +1,16 @@
 """Private project connections and canonical workspace dispatch."""
 
 import json
+import os
 from pathlib import Path
 
-from ml_stack import home
-from ml_stack.files import read_json, write_json
+from ml_stack import home, worktreerules
+from ml_stack.files import read_json, writing
 from ml_stack.fleet import discovery, project_client, projects, remote
 from ml_stack.http import ServerError
 from ml_stack.net import git
+from ml_stack.windows_private import restrict
+from ml_stack.workspace import project_session
 from ml_stack.workspace.chain import held
 from ml_stack.workspace.identity import AGENT, Denied, Identity
 from ml_stack.workspace.remote import RemoteWorkspace
@@ -56,14 +59,31 @@ def bind(remote: RemoteWorkspace, root: Path, agent: str, cluster: str = "", *, 
         made["cluster_id"] = who["project"]["cluster_id"]
     if local_agent:
         made["local_agent"] = local_agent
+    session = (project_session.current() if local_agent == "codex"
+               and agent.startswith(project_session.name("codex") + "-") else "")
+    if local_agent == "codex" and agent == project_session.name("codex"):
+        session = project_session.current()
+    if session:
+        made["session"] = session
     with held(path.with_suffix(".lock")):
         connections = _saved()
         existing = connections.get(str(root))
         if existing and (existing["host"], existing["project_id"]) != (made["host"], made["project_id"]):
             raise Denied("this project already uses another canonical board")
-        connections[str(root)] = made
-        write_json(path, connections)
-        path.chmod(0o600)
+        if session:
+            existing = existing or made.copy()
+            sessions = existing.setdefault("sessions", {})
+            if session in sessions and sessions[session].get("agent") != agent:
+                raise Denied("this Codex session already has another shared project identity")
+            sessions[session] = made
+            connections[str(root)] = existing
+        else:
+            if existing and existing.get("sessions"):
+                made["sessions"] = existing["sessions"]
+            connections[str(root)] = made
+        with writing(path) as tmp:
+            restrict(tmp) if os.name == "nt" else tmp.chmod(0o600)
+            tmp.write_text(json.dumps(connections), encoding="utf-8")
     return {"root": str(root), **made, "state": "connected"}
 
 
@@ -73,6 +93,8 @@ def selected(cwd: Path | None = None) -> dict | None:
     connections = _saved()
     for root in (current, *current.parents):
         configured = connections.get(str(root))
+        if configured:
+            configured = project_session.connection(configured)
         metadata_path = root / ".ml-stack-project.json"
         metadata = read_json(metadata_path, {})
         if not isinstance(metadata, dict):
@@ -92,6 +114,17 @@ def selected(cwd: Path | None = None) -> dict | None:
             raise Denied("this shared checkout has no canonical board connection; attach it before using workspace commands")
         if configured:
             return {**configured, "root": str(root)}
+    checkout = worktreerules.checkouts(current)
+    if checkout and checkout[0] != checkout[1]:
+        configured = connections.get(str(checkout[1]))
+        if configured:
+            if configured["project_id"] != projects.identity(checkout[0]):
+                raise Denied("this worktree differs from its shared project Board")
+            chosen = project_session.connection(configured)
+            if chosen.get("session"):
+                return {**chosen, "root": str(checkout[0])}
+            return {**configured, "agent": "", "local_agent": "", "root": str(checkout[0]),
+                    "automatic": True}
     return None
 
 
