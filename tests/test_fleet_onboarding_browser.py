@@ -3,7 +3,7 @@
 import pytest
 from playwright.sync_api import expect
 
-from test_fleet_page import browser, daemon, joined, no_release_lookup, open_page  # noqa: F401
+pytest_plugins = ["test_fleet_page"]
 
 pytestmark = pytest.mark.slow
 
