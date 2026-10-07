@@ -105,13 +105,20 @@
         this.mobile.setAttribute('aria-expanded', String(open));
         chat.box.dataset.sidebar = String(open);
       };
-      this.board = chat.querySelector('ml-board');
+      this.project = chat.querySelector('#conversation-project');
+      this.project.onchange = () => this.selectProject();
+      chat.querySelector('#conversation-local-agents').ontoggle = event => {
+        if (event.target.open && !this.localAgents) {
+          this.localAgents = M.el('ml-agents', {endpoint:'/ui/agents'});
+          chat.querySelector('#conversation-agents').append(this.localAgents);
+        }
+      };
       this.team = chat.querySelector('#conversation-team');
       this.model = chat.querySelector('#conversation-model');
       this.channels = chat.querySelector('#conversation-channels');
       this.direct = chat.querySelector('#conversation-direct');
       this.live = chat.querySelector('#conversation-models');
-      this.board.addEventListener('board-navigation', event => this.navigation(event.detail));
+
       chat.querySelector('#conversation-details').onclick = event => {
         chat.options.open = !chat.options.open;
         event.currentTarget.setAttribute('aria-expanded', String(chat.options.open));
@@ -125,6 +132,33 @@
       this.team.hidden = !this.active;
       this.model.hidden = this.active;
       if (this.navigationData) this.navigation(this.navigationData);
+      if (['chat','board'].includes(route) && !this.projectsLoaded) { this.projectsLoaded = true; this.projects(); }
+    }
+    async projects() {
+      const result = await M.api('/ui/projects');
+      const projects = result.ok ? result.projects || [] : [];
+      let saved = '';
+      try { saved = localStorage.getItem('poolside.conversations.project') || ''; } catch {}
+      this.project.replaceChildren(M.el('option', {value:''}, 'Choose a workspace'),
+        ...projects.filter(row => /^[a-f0-9]{32}$/.test(row.id)).map(row => M.el('option', {value:row.id}, row.name)),
+        M.el('option', {value:'local'}, 'Device-local Board'));
+      const valid = projects.find(row => row.id === saved) || projects.find(row => row.is_self) || projects[0];
+      if (valid) { this.project.value = valid.id; this.selectProject(); }
+      else this.channels.replaceChildren(M.el('p', {class:'hint'}, result.error || 'Choose a workspace to open its channels. Device-local messages are not shared with your pool.'));
+    }
+    selectProject() {
+      const id = this.project.value;
+      this.board?.remove();
+      this.board = null;
+      this.navigationData = null;
+      this.direct.replaceChildren();
+      if (!id) { this.channels.textContent = 'Choose a workspace to see its channels.'; return; }
+      this.channels.textContent = 'Connecting to workspace…';
+      this.board = M.el('ml-board', {endpoint:id === 'local' ? '/ui/board' : `/ui/projects/${id}/board`,
+        'channel-feed':'', integrated:''});
+      this.board.addEventListener('board-navigation', event => this.navigation(event.detail));
+      this.team.replaceChildren(this.board);
+      try { localStorage.setItem('poolside.conversations.project', id); } catch {}
     }
     navigation(data) {
       this.navigationData = data;
@@ -146,14 +180,15 @@
           label:agent.display_name || agent.display_label || agent.id,
           view:{kind:'dm', a:data.me, b:agent.id}});
       }
-      this.direct.replaceChildren(...[...peers.values()].map(row => button(row.label,
+      const newMessage = data.me ? M.el('details', {}, M.el('summary', {}, '+ New direct message'), this.board.newDm()) : null;
+      this.direct.replaceChildren(newMessage, ...[...peers.values()].map(row => button(row.label,
         data.view.kind === 'dm' && [data.view.a,data.view.b].includes(row.id), row.view)));
       if (!peers.size) this.direct.append(M.el('p', {class:'hint'}, 'Agents and direct messages appear here.'));
     }
     models(rows) {
       this.live.replaceChildren(...rows.map(row => M.el('button', {type:'button', onclick:() => {
-        M.go('chat'); this.chat.picker.value = row.model;
-        this.chat.picker.dispatchEvent(new Event('change'));
+        if (M.route !== 'chat') { this.chat.pendingModel = row.model; M.go('chat'); }
+        else { this.chat.picker.value = row.model; this.chat.picker.dispatchEvent(new Event('change')); }
         this.chat.input.focus();
       }}, `● ${row.model.split('/').pop()}`)));
       if (!rows.length) this.live.append(M.el('p', {class:'hint'}, 'No models running. Choose one from the library.'));

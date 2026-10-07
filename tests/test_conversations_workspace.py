@@ -23,6 +23,7 @@ def test_shared_sidebar_routes_channels_dms_threads_and_saved_model_chats(chat_b
     saved = served.ui.conversations.start(model='model-a', title='Experiment plan')
     served.ui.conversations.append(saved.id, 'assistant', 'Compare the two evaluation runs.')
     page.goto(f'http://127.0.0.1:{served.port}/ui#chat')
+    page.get_by_label('Workspace', exact=True).select_option('local')
     expect(page.locator('#conversation-channels')).to_contain_text('#experiments')
     sidebar = page.locator('chat-view .chats')
     sidebar.get_by_role('button', name='#experiments').click()

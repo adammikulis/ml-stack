@@ -3,15 +3,16 @@
     <button class="conversation-mobile-nav ghost" id="conversation-mobile-nav" aria-expanded="false" aria-controls="conversation-sidebar">Channels and model chats ▾</button>
     <aside class="chats" id="conversation-sidebar" aria-label="Conversations">
       <div class="conversation-space"><span class="conversation-space-mark" aria-hidden="true">✦</span><div><strong>Poolside</strong><small>Your shared workspace</small></div></div>
+      <label class="conversation-project-label" for="conversation-project">Workspace</label><select id="conversation-project"><option value="">Loading projects…</option></select>
       <button id="chat-new" class="conversation-new">＋ New conversation</button>
       <label class="conversation-search" for="chat-search"><input type="search" id="chat-search" placeholder="Search model chats…" aria-label="Search conversations"></label>
       <section class="conversation-group"><h2>Team channels</h2><div id="conversation-channels" role="status">Connecting to workspace…</div></section>
       <section class="conversation-group"><h2>Direct messages</h2><div id="conversation-direct"></div></section>
       <section class="conversation-group"><h2>Model chats</h2><div id="chat-list"></div></section>
       <section class="conversation-group"><h2>Running models</h2><div id="conversation-models"></div><a class="conversation-library" href="#models">Browse model library →</a></section>
-      <details class="conversation-coordination" data-advanced><summary>Workspace connection</summary><coordinator-control></coordinator-control><div id="conversation-agents"></div></details>
+      <details class="conversation-coordination" data-advanced><summary>Workspace connection</summary><coordinator-control></coordinator-control><details id="conversation-local-agents"><summary>Device agents</summary><div id="conversation-agents"></div></details></details>
     </aside>
-    <div id="conversation-team" hidden><ml-board endpoint="/ui/board" channel-feed integrated></ml-board></div>
+    <div id="conversation-team" hidden></div>
     <div class="talk" id="conversation-model">
       <header class="chat-toolbar"><div class="conversation-title"><span class="conversation-avatar" aria-hidden="true">✦</span><div><h1 id="chat-title">New conversation</h1><span class="chat-status" id="chat-status">Model chat</span></div></div>
         <div class="conversation-actions"><label class="sr" for="chat-mode">Conversation mode</label><select id="chat-mode"><option value="chat">Chat</option><option value="coding">Coding agent</option></select><button class="ghost" id="conversation-details" aria-expanded="false" aria-controls="chat-options">Options</button></div></header>
