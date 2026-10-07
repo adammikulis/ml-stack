@@ -13,7 +13,7 @@ from pathlib import Path
 from ml_stack.log import say, warn
 from ml_stack.platform import launch
 
-from . import discovery, wsl_network
+from . import discovery, runtime_wheel, wsl_network
 
 __all__ = ["WSLError", "command", "prepare", "start"]
 
@@ -40,6 +40,20 @@ def _read(*args: str) -> str:
     return done.stdout.strip()
 
 
+_CACHE_RUNTIME = """import pathlib, shutil, sys, tempfile
+from ml_stack.fleet import runtime_wheel
+wheel = pathlib.Path(sys.argv[1])
+commit = runtime_wheel.wheel_commit(wheel)
+with tempfile.TemporaryDirectory(prefix='ml-stack-wsl-wheel-') as temporary:
+    copied = pathlib.Path(temporary) / wheel.name
+    shutil.copyfile(wheel, copied)
+    source = pathlib.Path(sys.argv[2]) if sys.argv[2] else None
+    if source is not None and source.is_absolute() and (source / '.git').exists():
+        runtime_wheel.stamp(copied, commit, source)
+    print(runtime_wheel.cache_wheel(copied, commit, prefix=pathlib.Path(sys.argv[3])))
+"""
+
+
 def prepare() -> str:
     """Check WSL and install the application in its Linux user environment."""
     probe = """import json, os, platform, shutil, sys
@@ -48,16 +62,22 @@ print(json.dumps(dict(kernel=platform.release(), python=list(sys.version_info[:2
 """
     found = json.loads(_read("python3", "-c", probe))
     if "microsoft" not in found["kernel"].lower() or "wsl2" not in found["kernel"].lower():
-        raise WSLError("ml-stack needs a WSL 2 distribution. Convert Ubuntu to WSL 2.")
+        raise WSLError("ml-stack needs a WSL 2 distribution. Use WSL 2 for Ubuntu.")
     if tuple(found["python"]) < (3, 12):
         raise WSLError("Install the Python required by ml-stack in Ubuntu.")
     if not found["bwrap"]:
         raise WSLError("Install bubblewrap in Ubuntu: sudo apt install bubblewrap python3-venv")
     _read(found["bwrap"], "--unshare-all", "--ro-bind", "/", "/", "--", "/usr/bin/true")
-    source = Path(__file__).resolve().parents[3]
-    if not (source / "pyproject.toml").is_file():
-        raise WSLError("The Windows launcher needs the local ml-stack source checkout.")
-    linux_source = _read("wslpath", "-a", "-u", str(source))
+    try:
+        wheel = runtime_wheel.current_wheel()
+        if wheel is None:
+            raise OSError("no committed runtime wheel is installed")
+        wheel_digest = hashlib.sha256(wheel.read_bytes()).hexdigest()
+    except (OSError, ValueError) as exc:
+        raise WSLError("Update the Windows ml-stack installation to provide its committed runtime wheel.") from exc
+    linux_wheel = _read("wslpath", "-a", "-u", str(wheel))
+    source = runtime_wheel.source_checkout()
+    linux_source = _read("wslpath", "-a", "-u", str(source)) if source else ""
     runtime = found["home"] + "/.local/share/ml-stack/runtime"
     python = runtime + "/bin/python"
     ready = _read("python3", "-c", "import os,sys; print(int(os.path.isfile(sys.argv[1])))", python)
@@ -65,17 +85,25 @@ print(json.dumps(dict(kernel=platform.release(), python=list(sys.version_info[:2
         say("Preparing ml-stack's Linux runtime in Ubuntu.")
         _read("python3", "-m", "venv", runtime)
     extras = "graph,store,web,hub,memory,plot,fleet-tls,fleet-update,fleet-onboard"
-    fingerprint = hashlib.sha256((linux_source + "\n" + extras + "\n").encode()
-                                 + (source / "pyproject.toml").read_bytes()).hexdigest()
+    fingerprint = hashlib.sha256((wheel_digest + "\n" + extras + "\n" + linux_source + "\ncache-v1\n").encode()).hexdigest()
     marker = runtime + "/ml-stack-install"
     installed = _read(python, "-c", "import pathlib,sys; p=pathlib.Path(sys.argv[1]); "
                       "print(p.read_text() if p.is_file() else '')", marker)
     if installed != fingerprint:
         say("Installing ml-stack's Linux dependencies.")
         done = subprocess.run(command(python, "-m", "pip", "install", "--disable-pip-version-check",
-                                      "-e", linux_source + "[" + extras + "]"))
+                                      "--force-reinstall", "--no-deps", "--no-index", linux_wheel))
+        if done.returncode:
+            raise WSLError("The ml-stack Linux runtime installation did not complete.")
+        done = subprocess.run(command(python, "-m", "pip", "install", "--disable-pip-version-check",
+                                      "--upgrade", linux_wheel + "[" + extras + "]"))
         if done.returncode:
             raise WSLError("The ml-stack Linux dependency installation did not complete.")
+        cached = _read(python, "-c", _CACHE_RUNTIME, linux_wheel, linux_source, runtime)
+        done = subprocess.run(command(python, "-m", "pip", "install", "--disable-pip-version-check",
+                                      "--force-reinstall", "--no-deps", "--no-index", cached))
+        if done.returncode:
+            raise WSLError("The ml-stack Linux runtime installation did not complete.")
         _read(python, "-c", "import pathlib,sys; pathlib.Path(sys.argv[1]).write_text(sys.argv[2])",
               marker, fingerprint)
     return python
@@ -106,8 +134,6 @@ def start(argv: list[str], *, executable: str | None = None) -> int:
     executable = executable or prepare()
     arguments = list(argv)
     host_python = _read("wslpath", "-a", "-u", sys.executable)
-    subprocess.run(command("systemctl", "--user", "disable", "ml-stack-traind.service"),
-                   capture_output=True, check=False)
     environment = ["ML_STACK_SANDBOX_SERVE=1", "ML_STACK_WINDOWS_PYTHON=" + host_python]
     for name in ("ML_STACK_HOME", "ML_STACK_CACHE"):
         if value := os.environ.get(name):

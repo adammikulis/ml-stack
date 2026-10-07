@@ -7,6 +7,7 @@ import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
+from pathlib import Path
 
 __all__ = ["AllowUnsandboxed", "Limits", "Net", "NetMode", "Policy", "PolicyError",
            "checked_path", "checked_paths"]
@@ -32,21 +33,30 @@ def checked_path(value: str | os.PathLike[str], *, what: str = "path", link: boo
         text.encode("utf-8")
     except UnicodeEncodeError:
         raise PolicyError(f"{what}: {text!r} is not valid UTF-8") from None
-    if not text.startswith("/"):
+    if os.name == "nt":
+        drive, tail = os.path.splitdrive(text)
+        if not re.fullmatch(r"[A-Za-z]:", drive) or not tail.startswith(("/", "\\")):
+            raise PolicyError(f"{what}: {text!r} is not an absolute local drive path")
+        segments = tail.replace("\\", "/")
+        if ":" in tail:
+            raise PolicyError(f"{what}: {text!r} names an alternate data stream")
+    else:
+        segments = text
+    if not segments.startswith("/"):
         raise PolicyError(f"{what}: {text!r} is not absolute")
-    if ".." in text.split("/"):
+    if ".." in segments.split("/"):
         raise PolicyError(f"{what}: {text!r} climbs with ..")
-    if text != "/" and text.endswith("/"):
+    if segments != "/" and segments.endswith("/"):
         raise PolicyError(f"{what}: {text!r} ends with a slash")
-    if "//" in text:
+    if "//" in segments:
         raise PolicyError(f"{what}: {text!r} holds an empty segment")
-    if "/./" in text or text.endswith("/."):
+    if "/./" in segments or segments.endswith("/."):
         raise PolicyError(f"{what}: {text!r} holds a . segment")
     if not os.path.lexists(text):
         raise PolicyError(f"{what}: {text!r} does not exist")
-    parent, _, leaf = text.rpartition("/")
-    real = f"{os.path.realpath(parent or '/').rstrip('/')}/{leaf}" if link else os.path.realpath(text)
-    if real != text:
+    parent, leaf = os.path.split(text)
+    real = str(Path(os.path.realpath(parent or "/")) / leaf) if link else os.path.realpath(text)
+    if os.path.normcase(real) != os.path.normcase(text):
         raise PolicyError(f"{what}: {text!r} passes through a symlink and resolves to "
                           f"{real!r}; name the resolved path")
     return text

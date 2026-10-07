@@ -104,6 +104,41 @@ def test_remote_filesystems_do_not_bypass_package_source_admission(monkeypatch, 
     assert len(calls) == 1
 
 
+@pytest.mark.parametrize("source", [r"C:\wheelhouse", "D:/wheelhouse", "/bundle", "./wheelhouse"])
+@pytest.mark.parametrize("configured", [False, True])
+def test_local_find_links_paths_are_preserved(monkeypatch, tmp_path, source, configured):
+    config = f":env:.find-links={source!r}\n" if configured else ""
+    calls = capture(monkeypatch, tmp_path, config)
+    args = ["install", "--no-index", "tensor"]
+    if not configured:
+        args.extend(["--find-links", source])
+    packages.run("python", args, timeout=5, env={})
+    argv = calls[-1][0]
+    assert argv[argv.index("--find-links") + 1] == source
+
+
+@pytest.mark.parametrize("source", [r"\\foreign\share", "//foreign/share", "c:relative", "c://foreign/share",
+                                         "ftp://packages.example/wheels", "http://packages.example/wheels",
+                                         "https://evil.example/wheels"])
+@pytest.mark.parametrize("configured", [False, True])
+def test_find_links_sources_require_admission(monkeypatch, tmp_path, source, configured):
+    config = f":env:.find-links={source!r}\n" if configured else ""
+    calls = capture(monkeypatch, tmp_path, config)
+    args = ["install", "--no-index", "tensor"]
+    if not configured:
+        args.extend(["--find-links", source])
+    with pytest.raises(Refused):
+        packages.run("python", args, timeout=5, env={})
+    assert len(calls) == 1
+
+
+def test_configured_find_links_splits_whitespace_and_preserves_each_path(monkeypatch, tmp_path):
+    sources = [r"C:\wheelhouse", r"D:\packages"]
+    calls = capture(monkeypatch, tmp_path, f"global.find-links={chr(10).join(sources)!r}\n")
+    packages.run("python", ["install", "--no-index", "tensor"], timeout=5, env={})
+    assert calls[-1][0][4:] == ["--no-index", "--find-links", sources[0], "--find-links", sources[1], "tensor"]
+
+
 @pytest.mark.parametrize("args", [["index", "versions", "tensor"], ["list", "--outdated"], ["list", "--uptodate"]])
 def test_other_network_commands_cannot_bypass_admission(monkeypatch, tmp_path, args):
     calls = capture(monkeypatch, tmp_path)
