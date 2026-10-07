@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from ml_stack import person, worktreerules
+from ml_stack import home, person, worktreerules
 from ml_stack.fleet import automatic_clusters
 from ml_stack.fleet.discovery import memberships
 from ml_stack.fleet.launch import HTTP_PORT
@@ -14,7 +14,8 @@ from ml_stack.fleet.project_client import catalogue, register_local
 from ml_stack.fleet.project_source import ProjectError
 from ml_stack.fleet.projects import identity
 from ml_stack.fleet.remote import Peer, device_address
-from ml_stack.workspace import device_agent, tokens
+from ml_stack.workspace import device_agent, project_session, tokens
+from ml_stack.workspace.chain import held
 from ml_stack.workspace.harness_seat import Seat
 from ml_stack.workspace.identity import AGENT, Denied
 from ml_stack.workspace.project_connection import bind, selected
@@ -45,6 +46,24 @@ def cli_connection(args, connection, local_token, workspace):
     """Resolve this command's authenticated local agent on its Dev Board."""
     if getattr(args, "token_file", ""):
         return connection
+    requested = args.agent or os.environ.get(tokens.AGENT_ENV, "") or ("codex" if project_session.current() else "")
+    if requested and not args.agent and not os.environ.get(tokens.AGENT_ENV):
+        args.agent = requested
+    session = project_session.current() if requested == "codex" else ""
+    if session and connection.get("session") != session:
+        local = workspace()
+        root = Path(connection["root"])
+        with device_agent.owned_project_session(local, local_token(args), requested, root) as actor:
+            metadata = local.registry.info(actor.id)
+            choice = discover(root)
+            if choice is None:
+                raise Denied("this Dev cluster does not advertise the shared project Board")
+            choice = {**choice, "session": session, "local_agent": actor.id}
+            connection = attach(root, project_session.name(actor.id), choice,
+                                claim=(getattr(args, "model", "") or metadata["model"],
+                                       getattr(args, "harness", "") or metadata["harness"]))
+            args.agent = connection["agent"]
+        return refresh(connection, args.agent)
     if connection.get("automatic"):
         local = workspace()
         name = args.agent or os.environ.get(tokens.AGENT_ENV, "")
@@ -122,10 +141,10 @@ def discover(root: Path, *, cluster_key=None, cluster="", port=None):
     if not members:
         return None
     if len(members) != 1:
-        raise Denied("select this project's Dev cluster with --cluster NAME")
+        raise Denied("select this project's development cluster with --cluster NAME")
     member = settle(members[0], cluster_key, port)
     if cluster and member.group != cluster:
-        raise Denied("the selected Dev cluster changed during project discovery")
+        raise Denied("the selected development cluster changed during project discovery")
     _register(root, member, project_id)
     deadline = time.monotonic() + DISCOVERY_SECONDS
     peers = Peer.discover(key=member.key, group=member.group, timeout=2,
@@ -186,20 +205,31 @@ def connect(root: Path, name: str, *, claim=("", ""), cluster_key=None, cluster=
 
 def attach(root: Path, name: str, choice: dict, *, claim=("", "")):
     """Attach an agent to the selected authenticated project authority."""
+    with held(home.state("workspace-project-joining.lock")):
+        return _attach(root, name, choice, claim=claim)
+
+
+def _attach(root: Path, name: str, choice: dict, *, claim):
     prior = selected(root)
     if prior and (prior["host"], prior["project_id"]) != (choice["host"], choice["project_id"]):
         raise Denied("this project already names another canonical Board")
     remote = RemoteWorkspace(choice["host"], choice["project_id"],
                              cluster_key=Path(choice["cluster_key"]) if choice.get("cluster_key") else None,
                              cluster=choice["cluster"])
-    if prior and prior.get("agent") and (not name or name in (prior["agent"], prior.get("local_agent"))):
+    session = choice.get("session", "")
+    if (prior and prior.get("agent") and (not session or prior.get("session") == session)
+            and (not name or name in (prior["agent"], prior.get("local_agent"))
+                 or (session and name == project_session.name(prior.get("local_agent", ""))))):
         return bind(remote, root, prior["agent"], choice["cluster"],
                     local_agent=prior.get("local_agent", ""))
     if not name:
         raise Denied("select your own agent name with --name NAME")
     joined = remote.enroll(name, model=claim[0], harness=claim[1],
                            authority_machine=choice["authority_machine"])
-    return bind(remote, root, joined["id"], choice["cluster"], local_agent=name)
+    if session and joined["id"] != name and not joined["id"].startswith(name + "-"):
+        raise Denied("the shared project Board returned another Codex session identity")
+    return bind(remote, root, joined["id"], choice["cluster"],
+                local_agent=choice.get("local_agent", name))
 
 
 def startup(root: Path, name: str, parent: str = "", *, claim=("", "")) -> Seat | None:

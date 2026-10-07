@@ -25,12 +25,13 @@ def test_cli_discovers_unconfigured_dev_board_before_legacy_attachment(monkeypat
     assert cli._project_connection() is choice
 
 
-def test_explicit_remote_coordinator_does_not_elect_dev_project_board(monkeypatch):
+def test_remote_coordinator_discovers_dev_project_board(monkeypatch):
     monkeypatch.setattr(project_connection, "selected", lambda cwd: None)
     monkeypatch.setattr(cli.coordinator_config, "load", lambda base: {"mode": "remote"})
-    monkeypatch.setattr(automatic_connection, "local_project", lambda cwd: pytest.fail("automatic election"))
-    monkeypatch.setattr(project_connection, "auto_attach", lambda cwd: None)
-    assert cli._project_connection() is None
+    choice = {"host": "https://board.invalid", "automatic": True}
+    monkeypatch.setattr(automatic_connection, "local_project", lambda cwd: choice)
+    monkeypatch.setattr(project_connection, "auto_attach", lambda cwd: pytest.fail("legacy discovery"))
+    assert cli._project_connection() is choice
 
 
 @pytest.mark.parametrize("model,harness", [("fixture-model", "codex"), ("", "")])

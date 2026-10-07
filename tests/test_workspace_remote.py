@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 from test_project_source import repository  # noqa: F401
 
-from ml_stack import http
+from ml_stack import home, http
 from ml_stack.fleet import tls
 from ml_stack.fleet.api import Daemon, make_handler
 from ml_stack.fleet.daemon import ALL_INTERFACES
@@ -512,7 +512,8 @@ def test_https_client_discovers_pins_and_authenticates_self_signed_host(host, tm
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
         probe.bind(("", 0))
         udp = probe.getsockname()[1]
-    advertiser = Advertiser(Beacon(name="project-host", port=server.server_port, cert=ident.beacon),
+    advertiser = Advertiser(Beacon(name="project-host", port=server.server_port, cert=ident.beacon,
+                                  machine=home.machine_id()),
                             key, port=udp, interval_s=30).start()
     discover = Peer.discover
     monkeypatch.setattr("ml_stack.workspace.remote.load_cluster_key", lambda path: key)
