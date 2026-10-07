@@ -71,14 +71,19 @@ def test_swapped_network_identity_refused_before_capability_transmission(connect
 
 
 @pytest.mark.parametrize("network_host, status", [("https://192.168.40.2:8770", 201), ("", 409)])
-def test_copied_invitation_uses_current_network_before_creating_code(monkeypatch, network_host, status):
+@pytest.mark.parametrize("authority", ["device", ""])
+def test_copied_invitation_uses_current_network_before_creating_code(monkeypatch, network_host, status, authority):
     invites, responses = [], []
-    project = SimpleNamespace(authority_machine="device", board_host="https://127.0.0.1:8770")
+    project = SimpleNamespace(authority_machine=authority, board_host="https://127.0.0.1:8770")
+    def invite(*args):
+        invites.append(args)
+        project.authority_machine = "device"
+        return {"code": "fixture"}
     class Route(project_board_routes.ProjectBoardRoutes):
         path = "/ui/projects/" + "a" * 32 + "/invite"
         client_ip, cookie, host_header, method = "127.0.0.1", "session", "localhost:8770", "POST"
         ui = SimpleNamespace(projects=SimpleNamespace(machine="device", get=lambda _: project),
-                             workspaces=SimpleNamespace(invite=lambda *args: invites.append(args) or {"code": "fixture"}),
+                             workspaces=SimpleNamespace(invite=invite),
                              peer_port=8770, cluster_key_path=None, authed=lambda _: True, host_ok=lambda _: True)
         def header(self, key, default=""):
             return "http://localhost:8770" if key == "Origin" else default
