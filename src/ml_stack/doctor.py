@@ -407,7 +407,9 @@ def main(argv: list[str] | None = None) -> int:
         description="Check what ml-stack-setup does not: the checkouts (hooks, working "
                     "tree, branch, worktrees, the editable install), the bench store "
                     "(empty runs, a dead lock, a log with no run) and the managed "
-                    "llama.cpp. Offers a fix for what has one; never pushes.")
+                    "llama.cpp. Offers a fix for what has one; never pushes.",
+        epilog="ml-stack-doctor hooks [ID] inspects local hook failures, first occurrence, "
+               "checkout branch and installed runtime revision.")
     ap.add_argument("--repo", action="append", metavar="PATH",
                     help="a checkout to look at; may repeat. Default: those "
                          f"${CHECKOUTS} lists, separated by {os.pathsep!r}")
