@@ -146,7 +146,15 @@ def apply_preferences(settings: Settings, request: dict[str, Any]) -> str:
     limit = request.get("chat_max_output_tokens")
     if limit is not None and (type(limit) is not int or limit < 1):
         return "Default output tokens must be null or a positive integer."
-    for key in ("always_show_advanced", "chat_max_output_tokens"):
-        if key in request:
-            setattr(settings, key, request[key])
+    if "download_sources" in request and request["download_sources"] not in ("internet", "lan", "both"):
+        return "Choose Internet only, LAN only, or Both."
+    values = {key: request[key] for key in ("always_show_advanced", "chat_max_output_tokens", "download_sources")
+              if key in request}
+    if "context" in request:
+        try:
+            values["context"] = max(512, min(1 << 20, int(request["context"])))
+        except (TypeError, ValueError, OverflowError):
+            return "Context length must be an integer."
+    for key, value in values.items():
+        setattr(settings, key, value)
     return ""

@@ -4,6 +4,8 @@ from __future__ import annotations
 import math
 from typing import Any
 
+from .settings import Settings
+
 DEFAULTS: dict[str, Any] = {"mode": "chat", "temperature": None, "project": "", "role": "",
                             "effort": "off", "max_effort": "medium", "harness": "pi", "context": 0, "draft": "auto", "max_output_tokens": None}
 LEVELS = ("off", "low", "medium", "high")
@@ -49,7 +51,5 @@ def checked(settings: dict | None = None) -> dict[str, Any]:
 
 def effective(machine_settings=None) -> dict[str, Any]:
     """Return effective defaults for a new conversation."""
-    from .settings import Settings
-
     source = machine_settings if machine_settings is not None else Settings()
     return checked({**DEFAULTS, "max_output_tokens": source.chat_max_output_tokens})

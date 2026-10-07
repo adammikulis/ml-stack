@@ -39,6 +39,7 @@ from .page import FIT_ONLY
 from .routes import ASSETS, UI_HEADER, asset_bytes, routes, write, write_json
 from .runtime_paths import default_root
 from .session import Sessions, Throttle, parse_cookie
+from .settings import apply_preferences
 
 __all__ = ["ASSETS", "UI", "UI_HEADER", "asset_bytes", "routes", "serve_page"]
 
@@ -277,12 +278,6 @@ class UI:
         settings = self.settings
         if settings is None:
             return out
-        if "always_show_advanced" in req and not isinstance(req["always_show_advanced"], bool):
-            return {"error": "Always show advanced options must be a boolean."}
-        if "download_sources" in req and req["download_sources"] not in ("internet", "lan", "both"):
-            return {"error": "Choose Internet only, LAN only, or Both."}
-
-        from .settings import apply_preferences
         if error := apply_preferences(settings, req):
             return {"error": error}
 
@@ -304,12 +299,6 @@ class UI:
         for key in ("auto_update", "autodownload_models"):
             if key in req:
                 setattr(settings, key, bool(req[key]))
-        if "download_sources" in req:
-            settings.download_sources = str(req["download_sources"])
-        if "always_show_advanced" in req:
-            settings.always_show_advanced = req["always_show_advanced"]
-        if "context" in req:
-            settings.context = max(512, min(1 << 20, int(req["context"])))
 
         if req.get("work_hours") and self.schedule is not None:
             spec = str(req.get("work_hours_spec") or "mon-fri 09:00-17:00")
