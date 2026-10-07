@@ -82,6 +82,7 @@ def test_models_browser_groups_shards_filters_sorts_and_serves_exact_path(joined
     row.locator('summary').click()
     assert row.locator('li').count() == 2
     assert '2 shards expected' in row.inner_text()
+    library.get_by_text('Advanced library filters', exact=True).click()
     library.get_by_label('Family', exact=True).select_option('Qwen')
     assert library.locator('article').count() == 1
     library.get_by_label('Quantization', exact=True).select_option('Q8_0')
