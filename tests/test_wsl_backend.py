@@ -50,36 +50,182 @@ def test_owned_process_preserves_hostile_arguments_without_a_shell(tmp_path):
 def test_wsl_read_preserves_hostile_text_and_unicode(monkeypatch, tmp_path):
     marker = tmp_path / "injected"
     payload = f"$(touch {marker}); `touch {marker}` \u2603\n"
-    script = "import json,sys; print(json.dumps(sys.argv[1:], ensure_ascii=False))"
+    script = ("import json,sys; sys.stdout.reconfigure(encoding='utf-8'); "
+              "print(json.dumps(sys.argv[1:], ensure_ascii=False))")
     monkeypatch.setattr(wsl, "command", lambda *args: [sys.executable, "-c", script, *args])
     assert json.loads(wsl._read("program", payload)) == ["program", payload]
     assert not marker.exists()
 
 
-def test_wsl_installer_passes_a_hostile_source_path_as_one_argument(monkeypatch):
-    source = "/tmp/source path; $(touch injected) `touch injected`"
-    calls = []
+def _prepare_runtime(monkeypatch, tmp_path, *, installed="", returncode=0):
+    wheel = tmp_path / "ml_stack-0.2-py3-none-any.whl"
+    wheel.write_bytes(b"committed runtime one")
+    calls, reads = [], []
 
     def read(*args):
-        if args[0] == "python3":
+        reads.append(args)
+        if args[0] == "python3" and len(args) == 3:
             return json.dumps({"kernel": "microsoft-standard-WSL2", "python": [3, 12],
                                "bwrap": "/usr/bin/bwrap", "home": "/home/test"})
+        if args[0] == "python3":
+            return "1"
         if args[0] == "wslpath":
-            return source
+            return "/tmp/wheel path; $(touch injected) `touch injected`.whl"
+        if len(args) > 2 and args[2] == wsl._CACHE_RUNTIME:
+            return "/home/test/.local/share/ml-stack/runtime/ml-stack-wheels/" + "a" * 40 + "/" + wheel.name
+        if args[0].endswith("/bin/python") and "p.read_text" in args[2]:
+            return installed
         return ""
 
     def install(argv, **kwargs):
         calls.append((argv, kwargs))
-        return subprocess.CompletedProcess(argv, 0)
+        return subprocess.CompletedProcess(argv, returncode)
 
+    monkeypatch.setattr(wsl.runtime_wheel, "source_checkout", lambda: None)
+    monkeypatch.setattr(wsl.runtime_wheel, "current_wheel", lambda: wheel)
+    monkeypatch.setattr(wsl, "__file__", str(tmp_path / "site-packages/ml_stack/fleet/wsl.py"))
     monkeypatch.setattr(wsl, "_read", read)
     monkeypatch.setattr(wsl, "command", lambda *args: ["wsl.exe", "--exec", *args])
     monkeypatch.setattr(wsl.subprocess, "run", install)
+    return wheel, calls, reads
+
+
+def test_wsl_installer_uses_cached_wheel_without_source_checkout(monkeypatch, tmp_path):
+    _, calls, _ = _prepare_runtime(monkeypatch, tmp_path)
     assert wsl.prepare().endswith("/bin/python")
-    assert len(calls) == 1
-    argv, kwargs = calls[0]
-    assert argv[argv.index("-e") + 1].startswith(source + "[")
+    assert len(calls) == 3
+    argv, kwargs = calls[1]
+    assert argv[-1].startswith("/tmp/wheel path; $(touch injected) `touch injected`.whl[")
+    assert "--upgrade" in argv
+    assert "-e" not in argv
     assert not kwargs.get("shell")
+    assert "--force-reinstall" in calls[0][0]
+    assert "--no-deps" in calls[0][0]
+    assert "--no-index" in calls[0][0]
+    assert calls[0][0][-1].startswith("/tmp/wheel path;")
+    assert "--force-reinstall" in calls[2][0]
+    assert "--no-deps" in calls[2][0]
+    assert "--no-index" in calls[2][0]
+    assert "/ml-stack-wheels/" in calls[2][0][-1]
+
+
+def test_wsl_runtime_reuses_matching_install_and_refreshes_changed_revision(monkeypatch, tmp_path):
+    wheel, calls, reads = _prepare_runtime(monkeypatch, tmp_path)
+    wsl.prepare()
+    marker = reads[-1][-1]
+    _, calls, reads = _prepare_runtime(monkeypatch, tmp_path, installed=marker)
+    wsl.prepare()
+    assert not calls
+    wheel.write_bytes(b"committed runtime two")
+    wsl.prepare()
+    assert len(calls) == 3
+    assert reads[-1][-1] != marker
+
+
+@pytest.mark.parametrize("failure", [1, 2, 3])
+def test_wsl_failed_install_does_not_record_marker(monkeypatch, tmp_path, failure):
+    _, calls, reads = _prepare_runtime(monkeypatch, tmp_path)
+
+    def install(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return subprocess.CompletedProcess(argv, int(len(calls) == failure))
+
+    monkeypatch.setattr(wsl.subprocess, "run", install)
+    with pytest.raises(wsl.WSLError, match="installation did not complete"):
+        wsl.prepare()
+    assert not any("write_text" in arg for args in reads for arg in args)
+
+
+@pytest.mark.parametrize("has_source", [False, True])
+def test_wsl_runtime_cache_preserves_revision_and_translates_source(tmp_path, has_source):
+    import zipfile
+
+    from ml_stack.fleet import runtime_wheel
+
+    wheel = tmp_path / "ml_stack-0.2-py3-none-any.whl"
+    with zipfile.ZipFile(wheel, "w") as archive:
+        archive.writestr("ml_stack-0.2.dist-info/RECORD", "")
+    original_source = tmp_path / "windows-source"
+    translated_source = tmp_path / "linux-source"
+    translated_source.mkdir()
+    (translated_source / ".git").mkdir()
+    commit = "a" * 40
+    runtime_wheel.stamp(wheel, commit, original_source)
+    original = wheel.read_bytes()
+    prefix = tmp_path / "runtime"
+    environment = dict(os.environ, PYTHONPATH=str(Path(wsl.__file__).resolve().parents[2]))
+    child = launch([sys.executable, "-c", wsl._CACHE_RUNTIME, str(wheel),
+                    str(translated_source) if has_source else "", str(prefix)],
+                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=environment)
+    output, errors = child.communicate(timeout=30)
+    assert child.returncode == 0, errors.decode()
+    cached = Path(output.decode().strip())
+    assert cached == prefix / "ml-stack-wheels" / commit / wheel.name
+    assert runtime_wheel.wheel_commit(cached) == commit
+    with zipfile.ZipFile(cached) as archive:
+        assert archive.read("ml_stack/fleet/source-checkout").decode().strip() == str((translated_source if has_source else original_source).resolve())
+    assert wheel.read_bytes() == original
+
+
+def test_wsl_failed_cache_does_not_record_marker(monkeypatch, tmp_path):
+    _, _, reads = _prepare_runtime(monkeypatch, tmp_path)
+    read = wsl._read
+
+    def failing_read(*args):
+        if len(args) > 2 and args[2] == wsl._CACHE_RUNTIME:
+            raise wsl.WSLError("wheel cache failed")
+        return read(*args)
+
+    monkeypatch.setattr(wsl, "_read", failing_read)
+    with pytest.raises(wsl.WSLError, match="wheel cache failed"):
+        wsl.prepare()
+    assert not any("write_text" in arg for args in reads for arg in args)
+
+
+def test_wsl_missing_cached_wheel_requests_windows_update(monkeypatch, tmp_path):
+    _prepare_runtime(monkeypatch, tmp_path)
+    monkeypatch.setattr(wsl.runtime_wheel, "current_wheel", lambda: None)
+    with pytest.raises(wsl.WSLError, match="Update the Windows"):
+        wsl.prepare()
+
+
+def test_wsl_start_preserves_service_setup_and_closes_owned_resources(monkeypatch):
+    from types import SimpleNamespace
+
+    events = []
+    bridge = SimpleNamespace(config="bridge-config", close=lambda: events.append("bridge-close"))
+    pipe = SimpleNamespace(close=lambda: events.append("pipe-close"))
+
+    def wait(**kwargs):
+        events.append(("wait", kwargs, "pipe-close" in events))
+        return 0
+
+    child = SimpleNamespace(stdin=pipe, wait=wait)
+    launches = []
+
+    def owned_launch(argv, **kwargs):
+        launches.append((argv, kwargs))
+        return child
+
+    def unexpected_process(*args, **kwargs):
+        pytest.fail("WSL launch managed another process")
+
+    monkeypatch.setattr(wsl, "_read", lambda *args: "/mnt/c/runtime/python.exe")
+    monkeypatch.setattr(wsl, "_bridge", lambda *args: bridge)
+    monkeypatch.setattr(wsl, "command", lambda *args: ["wsl.exe", "--exec", *args])
+    monkeypatch.setattr(wsl, "launch", owned_launch)
+    monkeypatch.setattr(wsl.subprocess, "run", unexpected_process)
+    monkeypatch.delenv("ML_STACK_HOME", raising=False)
+    monkeypatch.delenv("ML_STACK_CACHE", raising=False)
+    arguments = ["--port", "8771", "argument; $(touch injected)"]
+    assert wsl.start(arguments, executable="/home/test/runtime/bin/python") == 0
+    assert len(launches) == 1
+    argv, kwargs = launches[0]
+    assert argv[-len(arguments):] == arguments
+    assert wsl.wsl_network.ENV + "=bridge-config" in argv
+    assert kwargs == {"stdin": subprocess.PIPE}
+    assert events == [("wait", {}, False), "pipe-close",
+                      ("wait", {"timeout": 10}, True), "bridge-close"]
 
 
 def test_model_namespace_allows_granted_reads_and_denies_host_loopback(tmp_path):

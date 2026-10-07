@@ -1,13 +1,12 @@
-"""Package commands with admitted indexes, artifact URLs and HTTPS Git transport."""
+"""Package commands with admitted indexes, artifact URLs and Git over HTTPS."""
 
 from __future__ import annotations
 
 import ast
 import os
-import shlex
 import subprocess
 import tempfile
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from urllib.parse import urlsplit
 
 from packaging.requirements import InvalidRequirement, Requirement
@@ -43,7 +42,7 @@ def _config(python, command, environment, timeout):
 
 
 def _options(args, configured):
-    values = {name: shlex.split(configured.get(name, "")) for name in ("index-url", "extra-index-url", "find-links")}
+    values = {name: configured.get(name, "").split() for name in ("index-url", "extra-index-url", "find-links")}
     offline = configured.get("no-index", "").lower() in {"1", "true", "yes", "on"}
     remaining = []
     iterator = iter(args)
@@ -85,7 +84,8 @@ def _admit(value, hosts):
         if parsed.netloc:
             raise Refused("remote filesystem package sources are not supported")
         return
-    if not scheme or (len(scheme) == 1 and value[1:3] in (":/", ":\\")):
+    windows = PureWindowsPath(value)
+    if not scheme or (len(scheme) == 1 and windows.is_absolute() and not parsed.netloc):
         return
     if scheme != "https":
         raise Refused("package sources require HTTPS")

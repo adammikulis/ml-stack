@@ -12,13 +12,14 @@ import json
 import logging
 import re
 import stat
+import sys
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from ml_stack import activity, files, home
+from ml_stack import activity, files, home, windows_private
 from ml_stack.chatpolicy import (
     _TOOL_NAME,
     CONFIRM,
@@ -135,10 +136,15 @@ class Rules:
         if not path.exists():
             return
         try:
-            if path.stat().st_mode & (stat.S_IRWXG | stat.S_IRWXO):
+            if sys.platform == "win32":
+                if problem := windows_private.problem(path):
+                    raise ValueError(problem)
+            elif path.stat().st_mode & (stat.S_IRWXG | stat.S_IRWXO):
                 raise ValueError("the file is readable or writable by others (mode must be 0600)")
             data = json.loads(path.read_text(encoding="utf-8"))
-            if not isinstance(data, dict) or data.get("schema_version") not in READABLE_VERSIONS:
+            if not isinstance(data, dict):
+                raise ValueError("unknown schema_version")
+            if data.get("version", data.get("schema_version")) not in READABLE_VERSIONS:
                 raise ValueError("unknown schema_version")
             self.rules = [_valid(r) for r in data.get("rules") or []]
         except (OSError, ValueError, TypeError) as exc:
@@ -148,8 +154,16 @@ class Rules:
         rows = [{"tool": r.tool, "match": dict(r.match), "verdict": r.verdict, "role": r.role,
                  "created": r.created, "fired": r.fired, "tainted_ok": r.tainted_ok}
                 for r in self.rules]
-        files.write_json(self.path, {"schema_version": SCHEMA_VERSION, "rules": rows})
-        self.path.chmod(0o600)
+        path = self.path
+        if sys.platform == "win32":
+            windows_private.validate(path)
+        with files.writing(path) as temporary:
+            if sys.platform == "win32":
+                windows_private.restrict(temporary)
+            else:
+                temporary.chmod(0o600)
+            temporary.write_text(json.dumps({"version": SCHEMA_VERSION, "rules": rows},
+                                            indent=2, ensure_ascii=False), encoding="utf-8")
 
     def _event(self, kind: str, rule: Rule) -> None:
         line = {"ts": time.strftime("%FT%T"), "event": kind, "rule": describe(rule)}

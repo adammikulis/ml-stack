@@ -774,9 +774,9 @@ status = "covered"
 tests = [
   "tests/test_wsl_backend.py::test_owned_process_preserves_hostile_arguments_without_a_shell",
   "tests/test_wsl_backend.py::test_wsl_read_preserves_hostile_text_and_unicode",
-  "tests/test_wsl_backend.py::test_wsl_installer_passes_a_hostile_source_path_as_one_argument",
+  "tests/test_wsl_backend.py::test_wsl_installer_uses_cached_wheel_without_source_checkout",
 ]
-note = "shell metacharacters remain argv values; the WSL installer source path is one pip argument"
+note = "shell metacharacters remain argv values; the WSL installer wheel path is one pip argument"
 
 [[group]]
 match = ["spawn:workspace/integration_git.py:git", "spawn:workspace/integration_git.py:ancestor",

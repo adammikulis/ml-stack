@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 from packaging.requirements import Requirement
+from packaging.tags import parse_tag, sys_tags
 
 from ml_stack.fleet import runtime_wheel
 from ml_stack.net import packages
@@ -113,7 +114,8 @@ def _dependency_wheels(wheel, target):
         installed = distribution(requirement.name)
         pending.extend((value, "") for value in installed.requires or [])
         manifest = email.message_from_string(installed.read_text("WHEEL"))
-        tag = manifest.get_all("Tag")[0]
+        tags = {tag for value in manifest.get_all("Tag") for tag in parse_tag(value)}
+        tag = next(tag for tag in sys_tags() if tag in tags)
         path = target / f"{installed.metadata['Name'].replace('-', '_')}-{installed.version}-{tag}.whl"
         with zipfile.ZipFile(path, "w") as archive:
             for entry in installed.files:
@@ -148,7 +150,7 @@ def test_built_wheel_imports_from_an_immutable_install(tmp_path):
            "PIP_FIND_LINKS": str(_dependency_wheels(wheel, tmp_path / "dependency-wheels"))}
     script = ("import json, os, subprocess, sys; from pathlib import Path; from importlib.metadata import version; "
               "from ml_stack.fleet import runtime_wheel as r; from ml_stack.fleet.environment import Environment; "
-              f"sys.prefix = {str(prefix)!r}; managed = Environment(Path({str(tmp_path)!r}) / 'managed'); "
+              f"sys.prefix = {str(prefix)!r}; managed = Environment(Path({str(tmp_path)!r}) / 'managed', python_version=f'{sys.version_info.major}.{sys.version_info.minor}'); "
               "result = managed.install(['core']); assert result['core']['ok'], result; "
               "clean = dict(os.environ); clean.pop('PYTHONPATH', None); "
               "loaded = subprocess.run([str(managed.python), '-c', "
@@ -167,7 +169,7 @@ def test_built_wheel_imports_from_an_immutable_install(tmp_path):
     assert done.returncode == 0, done.stderr
     installed, source, commit, version, wheels, managed_runtime, updated_commit = json.loads(done.stdout)
     assert Path(installed).is_relative_to(target)
-    assert source == str(root) and commit == COMMIT
+    assert Path(source) == root and commit == COMMIT
     assert version == wheel.name.split("-")[1]
     assert Path(wheels) == cached.parent
     assert Path(managed_runtime[0]).is_relative_to(tmp_path / "managed" / "env")

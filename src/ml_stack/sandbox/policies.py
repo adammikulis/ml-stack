@@ -11,11 +11,15 @@ from pathlib import Path
 
 from ml_stack.sandbox.policy import Limits, Net, Policy
 
+if os.name == "nt":
+    import win32api
+
 __all__ = ["SYSTEM_EXEC", "bash", "mcp_server", "model_server", "runtime_reads", "scratch",
            "system_env"]
 
-SYSTEM_EXEC = tuple(dict.fromkeys(os.path.realpath(path)
-                                  for path in ("/bin", "/usr/bin", "/sbin", "/usr/sbin")))
+SYSTEM_EXEC = ((os.path.realpath(win32api.GetSystemDirectory()),) if os.name == "nt" else
+               tuple(dict.fromkeys(os.path.realpath(path)
+                                   for path in ("/bin", "/usr/bin", "/sbin", "/usr/sbin"))))
 """The directories of system programs a shell may start."""
 
 
