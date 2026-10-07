@@ -1,7 +1,7 @@
 {
- "surfaces": 779,
+ "surfaces": 780,
  "by_status": {
-  "covered": 455,
+  "covered": 456,
   "partial": 199,
   "uncovered": 53,
   "n/a": 72,
@@ -100,7 +100,7 @@
    "unmapped": 0
   },
   "spawn": {
-   "covered": 45,
+   "covered": 46,
    "partial": 62,
    "uncovered": 0,
    "n/a": 2,
@@ -4974,9 +4974,9 @@
    "note": "binds only to probe whether a port is free, to serve a local fit page on loopback, or to run the sandbox self-test; no request is read from a client"
   },
   {
-   "id": "listener:workspace/automatic_connection.py:attach",
+   "id": "listener:workspace/automatic_connection.py:_attach",
    "kind": "listener",
-   "source": "workspace/automatic_connection.py:attach",
+   "source": "workspace/automatic_connection.py:_attach",
    "trust": "anything that can connect to the address",
    "attacker": "an unauthenticated or cross-origin client reaches the port",
    "status": "n/a",
@@ -10253,6 +10253,23 @@
     "tests/test_redteam_spawn.py::test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line"
    ],
    "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
+  },
+  {
+   "id": "spawn:fleet/projects.py:local_root",
+   "kind": "spawn",
+   "source": "fleet/projects.py:local_root",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_project_registration.py::test_windows_registration_in_wsl_uses_literal_argv_and_verified_git_root",
+    "tests/test_project_registration.py::test_registration_refuses_invalid_path_without_spawning",
+    "tests/test_project_registration.py::test_registration_refuses_invalid_wsl_translation",
+    "tests/test_project_registration.py::test_windows_drive_path_is_not_translated_outside_wsl",
+    "tests/test_project_registration.py::test_registration_rejects_unauthenticated_caller_before_path_translation",
+    "tests/test_project_registration.py::test_sealed_wsl_registration_checks_identity_before_persisting"
+   ],
+   "note": "WSL drive paths reach a fixed literal argument vector; bounded absolute paths and authenticated local Dev admission are checked before translation, and mismatched Git identities cannot persist"
   },
   {
    "id": "spawn:fleet/runtime_wheel.py:_run",
