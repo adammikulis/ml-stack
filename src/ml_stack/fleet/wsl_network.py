@@ -132,6 +132,7 @@ class NetworkBridge:
                  factory: Callable[..., socket.socket | DiscoverySocket]) -> None:
         self.host, self.target, self.group, self.port = host, target, group, port
         self.factory = factory
+        self.gateway = ""
         self.token = secrets.token_hex(32)
         self.stop = threading.Event()
         self.listeners: list[socket.socket] = []
@@ -143,17 +144,21 @@ class NetworkBridge:
     def start(self) -> NetworkBridge:
         try:
             control = self._listen(0, self._discovery)
-            self._listen(self.target[1], lambda client: _forward(client, self.target, self.stop))
+            def forward(client):
+                _forward(client, self.target, self.stop)
+            self._listen(self.target[1], forward)
+            if self.gateway and self.gateway != self.host:
+                self._listen(self.target[1], forward, host=self.gateway)
             self.config = json.dumps({"address": control.getsockname(), "token": self.token})
             return self
         except OSError:
             self.close()
             raise
 
-    def _listen(self, port: int, handler: Callable[[socket.socket], None]) -> socket.socket:
+    def _listen(self, port: int, handler: Callable[[socket.socket], None], *, host: str = "") -> socket.socket:
         listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.listeners.append(listener)
-        listener.bind((self.host, port))
+        listener.bind((host or self.host, port))
         listener.listen(32)
         listener.settimeout(0.25)
         thread = threading.Thread(target=self._accept, args=(listener, handler), daemon=True)
@@ -203,7 +208,7 @@ class NetworkBridge:
             client.settimeout(None)
             with self.factory(**{**options, "bind": bind}) as udp:
                 udp.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton(self.host))
-                allowed = {(self.group, self.port), ("255.255.255.255", self.port), ("127.0.0.1", self.port)}
+                allowed = dict.fromkeys(((self.group, self.port), ("255.255.255.255", self.port), ("127.0.0.1", self.port)))
                 _write(stream, {})
                 while not self.stop.is_set():
                     request = _read(stream)
@@ -215,7 +220,7 @@ class NetworkBridge:
                         reply = {"error": str(exc)}
                     _write(stream, reply)
 
-    def _operate(self, udp: socket.socket | DiscoverySocket, request: dict, allowed: set) -> dict:
+    def _operate(self, udp: socket.socket | DiscoverySocket, request: dict, allowed: dict) -> dict:
         if request["operation"] == "send":
             address = tuple(request["address"])
             data = base64.b64decode(request["data"], validate=True)
@@ -228,8 +233,13 @@ class NetworkBridge:
         data, address = udp.recvfrom(max(1, min(int(request["size"]), 65535)))
         if not ipaddress.ip_address(address[0]).is_private:
             raise OSError("Discovery reply is outside the local network")
-        if len(allowed) < 128:
-            allowed.add(address)
+        fixed = {(self.group, self.port), ("255.255.255.255", self.port), ("127.0.0.1", self.port)}
+        if address not in fixed:
+            allowed.pop(address, None)
+            allowed[address] = None
+            if len(allowed) > 128:
+                oldest = next(peer for peer in allowed if peer not in fixed)
+                del allowed[oldest]
         return {"data": base64.b64encode(data).decode(), "address": address}
 
     def close(self) -> None:

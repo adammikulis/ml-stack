@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 import os
 import shutil
+import socket
 import subprocess
 import sys
 from pathlib import Path
@@ -127,6 +129,21 @@ def _port(arguments: list[str]) -> int:
     return port
 
 
+def _gateway(host: str) -> str:
+    route = _read("ip", "-4", "route", "show", "default").split()
+    if "via" not in route:
+        return ""
+    address = ipaddress.IPv4Address(route[route.index("via") + 1])
+    if not address.is_private or address.is_loopback or address.is_unspecified or str(address) == host:
+        return ""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.bind((str(address), 0))
+    except OSError:
+        return ""
+    return str(address)
+
+
 def _bridge(executable: str, arguments: list[str]) -> wsl_network.NetworkBridge | None:
     host = discovery.primary_ip()
     if not host:
@@ -136,6 +153,7 @@ def _bridge(executable: str, arguments: list[str]) -> wsl_network.NetworkBridge 
     port = _port(arguments)
     bridge = wsl_network.NetworkBridge(host, (linux_host, port), discovery.default_group(),
                                       discovery.default_port(), discovery._native_socket)
+    bridge.gateway = _gateway(host)
     try:
         return bridge.start()
     except OSError as exc:

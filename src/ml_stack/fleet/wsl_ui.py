@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import contextlib
+import os
 import socket
 import subprocess
 import sys
 import threading
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 from ml_stack.platform import start_process
 
@@ -31,6 +32,22 @@ class LocalUIBridge(NetworkBridge):
         except OSError:
             self.close()
             raise
+
+    def _accept(self, listener: socket.socket, handler: Callable[[socket.socket], None]) -> None:
+        while not self.stop.is_set():
+            if not self.slots.acquire(timeout=0.25):
+                continue
+            try:
+                client, _ = listener.accept()
+            except TimeoutError:
+                self.slots.release()
+                continue
+            except OSError:
+                self.slots.release()
+                return
+            with self.lock:
+                self.clients.add(client)
+            threading.Thread(target=self._handle, args=(client, handler), daemon=True).start()
 
     def _relay(self, client: socket.socket) -> None:
         client.settimeout(IDLE_SECONDS)
@@ -96,7 +113,7 @@ def stdio(port: int) -> None:
 
         def upload() -> None:
             try:
-                while data := sys.stdin.buffer.read1(65536):
+                while data := os.read(sys.stdin.fileno(), 65536):
                     upstream.sendall(data)
             except OSError:
                 pass

@@ -1,10 +1,10 @@
 {
- "surfaces": 778,
+ "surfaces": 779,
  "by_status": {
   "covered": 455,
   "partial": 199,
   "uncovered": 53,
-  "n/a": 71,
+  "n/a": 72,
   "unmapped": 0
  },
  "by_kind": {
@@ -68,7 +68,7 @@
    "covered": 3,
    "partial": 5,
    "uncovered": 0,
-   "n/a": 17,
+   "n/a": 18,
    "unmapped": 0
   },
   "mcp-tool": {
@@ -2066,6 +2066,7 @@
     "tests/test_remote_transport_attacks.py::test_wsl_control_replies_reject_oversized_and_malformed_frames",
     "tests/test_wsl_network.py::test_udp_bridge_refuses_non_discovery_destinations",
     "tests/test_wsl_network.py::test_udp_bridge_preserves_timeout",
+    "tests/test_wsl_network.py::test_discovery_reply_cache_retains_recent_peers_and_fixed_destinations",
     "tests/test_wsl_network.py::test_lan_relay_preserves_stream_half_close_and_releases_ports"
    ],
    "note": "launcher-selected control and fixed daemon destinations cannot be redirected by relay bytes; control frames and discovery datagrams have bounded reads and deadlines"
@@ -2081,6 +2082,7 @@
     "tests/test_remote_transport_attacks.py::test_wsl_control_replies_reject_oversized_and_malformed_frames",
     "tests/test_wsl_network.py::test_udp_bridge_refuses_non_discovery_destinations",
     "tests/test_wsl_network.py::test_udp_bridge_preserves_timeout",
+    "tests/test_wsl_network.py::test_discovery_reply_cache_retains_recent_peers_and_fixed_destinations",
     "tests/test_wsl_network.py::test_lan_relay_preserves_stream_half_close_and_releases_ports"
    ],
    "note": "launcher-selected control and fixed daemon destinations cannot be redirected by relay bytes; control frames and discovery datagrams have bounded reads and deadlines"
@@ -2095,6 +2097,7 @@
    "tests": [
     "tests/test_wsl_ui.py::test_local_ui_relay_preserves_bytes_and_actual_loopback_peer",
     "tests/test_wsl_ui.py::test_local_ui_transport_keeps_silent_connections_unbounded",
+    "tests/test_wsl_ui.py::test_stdio_helper_exits_cleanly_after_http_response_with_input_open",
     "tests/test_wsl_ui.py::test_local_ui_close_terminates_idle_helper_and_releases_slot"
    ],
    "note": "the helper connects only to Linux loopback with a launcher-selected port, preserves opaque bytes and releases owned sockets and processes on cancellation"
@@ -4794,6 +4797,16 @@
    "note": "the daemon handler is attacked; forged UDP beacons are attacked in tests/test_fleet_discovery.py only for the signature"
   },
   {
+   "id": "listener:fleet/wsl.py:_gateway",
+   "kind": "listener",
+   "source": "fleet/wsl.py:_gateway",
+   "trust": "anything that can connect to the address",
+   "attacker": "an unauthenticated or cross-origin client reaches the port",
+   "status": "n/a",
+   "tests": [],
+   "note": "binds only to probe whether a port is free, to serve a local fit page on loopback, or to run the sandbox self-test; no request is read from a client"
+  },
+  {
    "id": "listener:fleet/wsl_network.py:NetworkBridge._listen",
    "kind": "listener",
    "source": "fleet/wsl_network.py:NetworkBridge._listen",
@@ -4805,8 +4818,9 @@
     "tests/test_wsl_network.py::test_bridge_caps_messages_and_datagrams",
     "tests/test_wsl_network.py::test_lan_relay_preserves_stream_half_close_and_releases_ports",
     "tests/test_wsl_ui.py::test_local_ui_relay_preserves_bytes_and_actual_loopback_peer",
-    "tests/test_wsl_ui.py::test_local_ui_rejects_connections_over_admission_limit",
-    "tests/test_wsl_ui.py::test_local_ui_close_terminates_idle_helper_and_releases_slot"
+    "tests/test_wsl_ui.py::test_local_ui_queues_connections_over_admission_limit",
+    "tests/test_wsl_ui.py::test_local_ui_close_terminates_idle_helper_and_releases_slot",
+    "tests/test_wsl_network.py::test_gateway_relay_preserves_raw_transport_and_nonloopback_scope"
    ],
    "note": "the discovery control listener rejects bad capabilities, destinations and oversized frames; the TCP listener relays opaque bytes to the fixed daemon target"
   },

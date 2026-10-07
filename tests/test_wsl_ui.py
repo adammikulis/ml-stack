@@ -93,18 +93,24 @@ def test_local_ui_close_terminates_idle_helper_and_releases_slot(monkeypatch):
         assert not relay.processes
 
 
-def test_local_ui_rejects_connections_over_admission_limit(monkeypatch):
+def test_local_ui_queues_connections_over_admission_limit(monkeypatch):
     relay = wsl_ui.LocalUIBridge(["unstarted-helper"], 0)
     for _ in range(32):
         assert relay.slots.acquire(blocking=False)
     monkeypatch.setattr(wsl_ui, "start_process", lambda *_a, **_k: pytest.fail("helper exceeded admission"))
+    monkeypatch.setattr(relay, "_relay", lambda client: client.sendall(b"admitted"))
     relay.start()
     try:
         with socket.create_connection(relay.listeners[0].getsockname(), timeout=5) as client:
-            assert client.recv(1) == b""
+            client.settimeout(.1)
+            with pytest.raises(TimeoutError):
+                client.recv(1)
+            relay.slots.release()
+            client.settimeout(5)
+            assert client.recv(65536) == b"admitted"
     finally:
         relay.close()
-        for _ in range(32):
+        for _ in range(31):
             relay.slots.release()
 
 
@@ -119,8 +125,10 @@ def test_local_ui_transport_keeps_silent_connections_unbounded(monkeypatch):
     upstream.__enter__.return_value = upstream
     upstream.recv.side_effect = [b"delayed response", b""]
     monkeypatch.setattr(wsl_ui.socket, "create_connection", lambda *_args, **_kwargs: upstream)
+    inputs = iter([b"request", b""])
+    monkeypatch.setattr(wsl_ui.os, "read", lambda fd, size: next(inputs))
     output = io.BytesIO()
-    monkeypatch.setattr(wsl_ui.sys, "stdin", SimpleNamespace(buffer=io.BytesIO(b"request")))
+    monkeypatch.setattr(wsl_ui.sys, "stdin", SimpleNamespace(fileno=lambda: 123))
     monkeypatch.setattr(wsl_ui.sys, "stdout", SimpleNamespace(buffer=output))
     wsl_ui.stdio(12345)
     upstream.settimeout.assert_called_once_with(None)
@@ -135,3 +143,43 @@ def test_local_ui_transport_keeps_silent_connections_unbounded(monkeypatch):
     relay._relay(client)
     client.settimeout.assert_called_once_with(None)
     client.sendall.assert_called_once_with(b"delayed response")
+
+
+def test_stdio_helper_exits_cleanly_after_http_response_with_input_open(monkeypatch):
+    with socket.socket() as upstream:
+        upstream.bind(("127.0.0.1", 0))
+        upstream.listen()
+        upstream.settimeout(10)
+
+        def respond():
+            with upstream.accept()[0] as client:
+                request = bytearray()
+                while not request.endswith(b"\r\n\r\n"):
+                    request.extend(client.recv(65536))
+                client.sendall(b"HTTP/1.0 200 OK\r\nContent-Length: 2\r\n\r\nok")
+
+        server = threading.Thread(target=respond, daemon=True)
+        server.start()
+        argv, children = _helper(monkeypatch, upstream.getsockname()[1])
+        original = wsl_ui.start_process
+
+        def capture_stderr(argv, **kwargs):
+            return original(argv, **{**kwargs, "stderr": subprocess.PIPE})
+
+        monkeypatch.setattr(wsl_ui, "start_process", capture_stderr)
+        relay = wsl_ui.LocalUIBridge(argv, 0).start()
+        try:
+            with socket.create_connection(relay.listeners[0].getsockname(), timeout=10) as client:
+                client.sendall(b"GET /ui/setup HTTP/1.0\r\nHost: localhost\r\n\r\n")
+                response = bytearray()
+                while chunk := client.recv(65536):
+                    response.extend(chunk)
+            assert response.endswith(b"\r\n\r\nok")
+        finally:
+            relay.close()
+        server.join(10)
+        for child in children:
+            code = child.wait(timeout=10)
+            error = child.stderr.read().decode(errors="replace")
+            child.stderr.close()
+            assert code == 0, error

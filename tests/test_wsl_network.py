@@ -157,13 +157,13 @@ def test_udp_bridge_rejects_public_reply_address(bridge):
     udp = MagicMock()
     udp.recvfrom.return_value = (b"untrusted", ("8.8.8.8", 8771))
     with pytest.raises(OSError, match="outside the local network"):
-        bridge._operate(udp, {"operation": "receive", "timeout": .1, "size": 10}, set())
+        bridge._operate(udp, {"operation": "receive", "timeout": .1, "size": 10}, {})
     udp.sendto.assert_not_called()
 
 
 def test_udp_bridge_rejects_unknown_operation(bridge):
     with pytest.raises(OSError, match="Unknown discovery operation"):
-        bridge._operate(MagicMock(), {"operation": "execute", "command": "hostile"}, set())
+        bridge._operate(MagicMock(), {"operation": "execute", "command": "hostile"}, {})
 
 
 def test_wsl_launcher_cleans_bridge_when_process_creation_fails(monkeypatch):
@@ -203,7 +203,8 @@ def test_windows_bridge_factory_uses_native_socket_with_inherited_proxy(monkeypa
     monkeypatch.setattr(wsl, "_read", lambda *_args: "127.0.0.2")
     captured = []
 
-    def factory(*args):
+    def factory(*args, **kwargs):
+        assert kwargs == {}
         captured.append(args[-1])
         return MagicMock()
 
@@ -227,3 +228,64 @@ def test_lan_forward_refuses_public_target(monkeypatch):
     client = MagicMock()
     wsl_network._forward(client, ("8.8.8.8", 80), threading.Event())
     connect.assert_not_called()
+
+
+@pytest.mark.parametrize("route, owned, expected", [
+    ("default via 172.19.32.1 dev eth0", True, "172.19.32.1"),
+    ("default via 192.168.7.1 dev eth0", False, ""),
+    ("default via 192.168.7.2 dev eth0", True, ""),
+    ("default via 127.0.0.1 dev lo", True, ""),
+    ("default via 8.8.8.8 dev eth0", True, ""),
+    ("default via 0.0.0.0 dev eth0", True, ""),
+    ("default dev eth0", True, ""),
+])
+def test_wsl_gateway_requires_windows_owned_private_address(monkeypatch, route, owned, expected):
+    monkeypatch.setattr(wsl, "_read", lambda *args: route)
+    probe = MagicMock()
+    probe.__enter__.return_value = probe
+    if not owned:
+        probe.bind.side_effect = OSError("address belongs to router")
+    monkeypatch.setattr(wsl.socket, "socket", lambda *_args: probe)
+    assert wsl._gateway("192.168.7.2") == expected
+    if expected:
+        probe.bind.assert_called_once_with((expected, 0))
+
+
+def test_gateway_relay_preserves_raw_transport_and_nonloopback_scope(monkeypatch):
+    service = wsl_network.NetworkBridge("127.0.0.1", ("127.0.0.2", 12345),
+                                       discovery.DEFAULT_GROUP, 12346, native_socket)
+    service.gateway = "127.0.0.3"
+    listeners = []
+
+    def listen(port, handler, **kwargs):
+        listeners.append((port, handler, kwargs))
+        return SimpleNamespace(getsockname=lambda: ("127.0.0.1", 23456))
+
+    monkeypatch.setattr(service, "_listen", listen)
+    raw = MagicMock()
+    monkeypatch.setattr(wsl_network, "_forward", raw)
+    service.start()
+    assert listeners[2][0] == 12345
+    assert listeners[2][2] == {"host": "127.0.0.3"}
+    client = object()
+    listeners[2][1](client)
+    raw.assert_called_once_with(client, ("127.0.0.2", 12345), service.stop)
+
+
+def test_discovery_reply_cache_retains_recent_peers_and_fixed_destinations(bridge):
+    fixed = {(bridge.group, bridge.port), ("255.255.255.255", bridge.port), ("127.0.0.1", bridge.port)}
+    allowed = dict.fromkeys(fixed)
+    udp = MagicMock()
+    udp.sendto.return_value = 5
+    first = ("10.50.0.1", 10000)
+    for index in range(200):
+        peer = ("10.50.0.1", 10000 + index)
+        udp.recvfrom.return_value = (b"query", peer)
+        assert bridge._operate(udp, {"operation": "receive", "timeout": .1, "size": 10}, allowed)["address"] == peer
+        assert len(allowed) <= 128
+        assert fixed <= allowed.keys()
+    with pytest.raises(OSError, match="Only LAN discovery"):
+        bridge._operate(udp, {"operation": "send", "data": "cmVwbHk=", "address": first}, allowed)
+    latest = ("10.50.0.1", 10199)
+    assert bridge._operate(udp, {"operation": "send", "data": "cmVwbHk=", "address": latest}, allowed) == {"sent": 5}
+    udp.sendto.assert_called_once_with(b"reply", latest)
