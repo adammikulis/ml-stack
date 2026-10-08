@@ -49,6 +49,15 @@ def test_the_contract_data_ships_in_the_contracts_wheel(tmp_path):
 
 
 @pytest.mark.slow
+def test_the_model_tier_table_ships_in_the_wheel(tmp_path):
+    """The coordinator gate reads `ml_stack/workspace/model_tiers.json`; without it every model is unknown."""
+    wheel = build(tmp_path)
+    names = zipfile.ZipFile(wheel).namelist()
+
+    assert "ml_stack/workspace/model_tiers.json" in names, f"model_tiers.json missing from {wheel.name}"
+
+
+@pytest.mark.slow
 def test_the_measured_fit_records_ship_in_the_wheel(tmp_path):
     """`ml-stack-serve fit` reads `ml_stack/data/fit.json` at runtime, and a wheel without
     it is a command that says nothing has ever been measured."""

@@ -807,7 +807,9 @@ class Workspace:
     def status(self) -> dict[str, Any]:
         """Counts, the live claims and the test-slot queue, all read-only."""
         chain = self.audit_verify()
-        return {"agents": self.registry.ids(), "registered": self.registered(), "messages": chain["bus"]["rows"],
+        registered = self.registered()
+        return {"agents": self.registry.ids(), "registered": registered,
+                "coordinator_notice": agent_display.vacancy_notice(registered), "messages": chain["bus"]["rows"],
                 "notes": chain["notes"]["rows"],
                 "quarantined": sum(1 for q in self.quarantine_list() if q["state"] == "quarantined"),
                 "claims": self.claims.listing(), "chains_ok": chain["ok"],
