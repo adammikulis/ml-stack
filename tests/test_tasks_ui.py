@@ -136,7 +136,10 @@ def test_failed_previous_project_does_not_replace_current_project_status(tmp_pat
             page.evaluate("""() => {
                 window.taskStatusHistory = [];
                 const note = document.querySelector('tasks-view .status');
-                new MutationObserver(() => window.taskStatusHistory.push(note.textContent))
+                new MutationObserver(records => {
+                    for (const record of records) for (const node of record.addedNodes)
+                        window.taskStatusHistory.push(node.textContent);
+                })
                     .observe(note, {childList:true, subtree:true, characterData:true});
             }""")
             pending[0].fulfill(status=403, json={'error': 'Previous project denied'})
