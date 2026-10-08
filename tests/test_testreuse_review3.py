@@ -147,14 +147,13 @@ def test_a_same_size_edit_with_the_old_modification_time_is_recorded_by_content(
     attempt(project, store)
     stat = (project / HELPER).stat()
 
-    def sneak(real):
-        def launch(command):
+    class Sneaker(Recorder):
+        def claimed(self, file, key):
             (project / HELPER).write_text("VALUE = 2\n")
             os.utime(project / HELPER, ns=(stat.st_atime_ns, stat.st_mtime_ns))
-            return real(command)
-        return launch
+            return 0
 
-    attempt(project, store, launch=sneak, extra=("-k", "test_a"))
+    attempt(project, store, extra=("-k", "test_a"), events=Sneaker())
     (project / HELPER).write_text("VALUE = 1\n")
     assert hows(attempt(project, store, extra=("-k", "test_a"))[0]) == ["ran"]
 
@@ -222,6 +221,14 @@ def test_stat_accepts_keywords_and_directory_descriptors_under_the_plugin(projec
     assert report.outcomes[0].passed and "pass" in kinds(store)
     (project / "tests/flag.txt").write_text("x")
     assert hows(attempt(project, store)[0]) == ["ran"]
+
+
+def test_a_path_relative_to_a_directory_descriptor_is_resolved_against_that_directory(tmp_path):
+    descriptor = os.open(tmp_path, os.O_RDONLY)
+    try:
+        assert Path(plugin._resolve("x.txt", descriptor)).resolve() == (tmp_path / "x.txt").resolve()
+    finally:
+        os.close(descriptor)
 
 
 def test_a_sqlite_connection_to_a_checkout_file_is_a_recorded_read():
