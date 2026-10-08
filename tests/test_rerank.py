@@ -9,6 +9,7 @@ import pytest
 
 from ml_stack.bench.ranking import ndcg_at, recall_at, reciprocal_rank
 from ml_stack.bench.retrieval import MODES, Finder, compare, node_texts, report, table
+from ml_stack.client import rerank as rerank_client
 from ml_stack.client.rerank import RerankError, rerank
 from ml_stack.graph.search import RERANK, hybrid, reranked_by
 from ml_stack.http import ServerError
@@ -84,10 +85,9 @@ def test_rerank_of_nothing_asks_nothing_and_a_bad_answer_raises():
 
 @pytest.mark.parametrize("answer", [{"x": 1}, {"results": [{"index": 9, "relevance_score": 1}]},
                                     {"results": [{"index": 0}]}])
-def test_an_answer_of_the_wrong_shape_is_a_rerank_error(monkeypatch, answer):
-    monkeypatch.setattr("ml_stack.client.rerank.request_json", lambda *a, **k: answer)
-    with pytest.raises(RerankError):
-        rerank("q", ["a"])
+def test_an_answer_of_the_wrong_shape_is_a_rerank_error(answer):
+    with hostile(says(json.dumps(answer).encode())) as url, pytest.raises(RerankError):
+        rerank("q", ["a"], base_url=url)
 
 
 ROWS = [{"id": c, "label": c, "kind": "k"} for c in "abcdefgh"]
@@ -191,3 +191,165 @@ def test_a_model_reranker_over_http_orders_the_hits_by_the_servers_scores():
         sent = [r for r in fake.requests if r[1] == "/v1/rerank"]
     assert len(sent) == 1 and b"robots fix machines" in sent[0][2]
     assert len(rows) == len(graph["nodes"])
+
+
+# ---- a hostile reranking server -----------------------------------------------------------
+
+import json  # noqa: E402
+import threading  # noqa: E402
+import time  # noqa: E402
+from contextlib import contextmanager  # noqa: E402
+from http.server import BaseHTTPRequestHandler  # noqa: E402
+
+from ml_stack.http import Server  # noqa: E402
+
+
+@contextmanager
+def hostile(reply):
+    """A real socket server whose /v1/rerank answers with ``reply(handler)``."""
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.rfile.read(int(self.headers.get("Content-Length", "0")))
+            reply(self)
+
+        def log_message(self, *_args):
+            pass
+
+    server = Server(("127.0.0.1", 0), Handler)
+    worker = threading.Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}"
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join(2)
+
+
+def says(raw: bytes):
+    def reply(handler):
+        handler.send_response(200)
+        handler.send_header("Content-Type", "application/json")
+        handler.send_header("Content-Length", str(len(raw)))
+        handler.end_headers()
+        handler.wfile.write(raw)
+    return reply
+
+
+def results(*rows):
+    return json.dumps({"results": list(rows)}).encode()
+
+
+ROW = {"index": 0, "relevance_score": 0.5}
+HOSTILE = [
+    pytest.param(b"not json at all", id="non-json"),
+    pytest.param(b"\xff\xfe\x00", id="not-utf8"),
+    pytest.param(b"", id="empty"),
+    pytest.param(b"[1, 2]", id="array"),
+    pytest.param(b"null", id="null"),
+    pytest.param(b'"results"', id="string"),
+    pytest.param(b"{}", id="no-results"),
+    pytest.param(b'{"results": {"index": 0}}', id="results-a-dict"),
+    pytest.param(b'{"results": "abc"}', id="results-a-string"),
+    pytest.param(results(1), id="entry-int"),
+    pytest.param(results("x"), id="entry-string"),
+    pytest.param(results(None), id="entry-null"),
+    pytest.param(results([0, 1]), id="entry-list"),
+    pytest.param(results({"index": True, "relevance_score": 1.0}), id="index-bool"),
+    pytest.param(results({"index": -1, "relevance_score": 1.0}), id="index-negative"),
+    pytest.param(results({"index": 1, "relevance_score": 1.0}), id="index-out-of-range"),
+    pytest.param(results({"index": 0.0, "relevance_score": 1.0}), id="index-float"),
+    pytest.param(results({"index": "0", "relevance_score": 1.0}), id="index-string"),
+    pytest.param(results({"index": None, "relevance_score": 1.0}), id="index-null"),
+    pytest.param(results({"relevance_score": 1.0}), id="index-missing"),
+    pytest.param(results({"index": 0, "relevance_score": None}), id="score-null"),
+    pytest.param(results({"index": 0, "relevance_score": "high"}), id="score-string"),
+    pytest.param(results({"index": 0, "relevance_score": "1.5"}), id="score-numeric-string"),
+    pytest.param(results({"index": 0, "relevance_score": True}), id="score-bool"),
+    pytest.param(results({"index": 0, "relevance_score": [1]}), id="score-list"),
+    pytest.param(b'{"results": [{"index": 0, "relevance_score": NaN}]}', id="score-nan"),
+    pytest.param(b'{"results": [{"index": 0, "relevance_score": Infinity}]}', id="score-inf"),
+    pytest.param(b'{"results": [{"index": 0, "relevance_score": -Infinity}]}', id="score-neg-inf"),
+    pytest.param(b'{"results": [{"index": 0, "relevance_score": 1e999}]}', id="score-overflow"),
+    pytest.param(b"[" * 100000, id="deeply-nested"),
+]
+
+
+@pytest.mark.parametrize("raw", HOSTILE)
+def test_a_hostile_reranker_answer_raises_rerank_error(raw):
+    with hostile(says(raw)) as url, pytest.raises(RerankError):
+        rerank("q", ["a"], base_url=url)
+
+
+def test_an_oversized_answer_is_refused_without_reading_it_all(monkeypatch):
+    monkeypatch.setattr(rerank_client, "TIMEOUT", 10.0)
+    sent = []
+
+    def flood(handler):
+        handler.send_response(200)
+        handler.send_header("Content-Type", "application/json")
+        handler.end_headers()
+        try:
+            for _ in range(4096):
+                handler.wfile.write(b" " * 65536)
+                sent.append(1)
+        except OSError:
+            pass
+
+    started = time.monotonic()
+    with hostile(flood) as url, pytest.raises(RerankError, match="more than"):
+        rerank("q", ["a"], base_url=url)
+    assert time.monotonic() - started < 8
+    assert len(sent) < 4096
+
+
+def test_a_server_that_never_answers_hits_the_timeout(monkeypatch):
+    monkeypatch.setattr(rerank_client, "TIMEOUT", 0.5)
+    release = threading.Event()
+    started = time.monotonic()
+    with hostile(lambda handler: release.wait(5)) as url:
+        try:
+            with pytest.raises(RerankError):
+                rerank("q", ["a"], base_url=url)
+            assert time.monotonic() - started < 3
+        finally:
+            release.set()
+
+
+def test_a_server_that_drips_its_answer_cannot_outlast_the_deadline(monkeypatch):
+    monkeypatch.setattr(rerank_client, "TIMEOUT", 1.0)
+    def drip(handler):
+        handler.send_response(200)
+        handler.send_header("Content-Type", "application/json")
+        handler.end_headers()
+        try:
+            for _ in range(50):
+                handler.wfile.write(b" ")
+                handler.wfile.flush()
+                time.sleep(0.1)
+        except OSError:
+            pass
+
+    started = time.monotonic()
+    with hostile(drip) as url:
+        with pytest.raises(RerankError, match="did not finish"):
+            rerank("q", ["a"], base_url=url)
+        elapsed = time.monotonic() - started
+    assert elapsed < 3
+
+
+def test_a_server_error_status_is_a_rerank_error_that_keeps_the_status():
+    def broken(handler):
+        handler.send_response(500)
+        handler.send_header("Content-Length", "0")
+        handler.end_headers()
+
+    with hostile(broken) as url, pytest.raises(RerankError) as caught:
+        rerank("q", ["a"], base_url=url)
+    assert caught.value.status == 500
+
+
+def test_a_clean_answer_in_any_order_still_scores_by_index():
+    rows = results({"index": 1, "relevance_score": 2}, {"index": 0, "relevance_score": -0.5})
+    with hostile(says(rows)) as url:
+        assert rerank("q", ["a", "b"], base_url=url) == [-0.5, 2.0]

@@ -1,8 +1,8 @@
 {
- "surfaces": 810,
+ "surfaces": 811,
  "by_status": {
-  "covered": 484,
-  "partial": 199,
+  "covered": 486,
+  "partial": 198,
   "uncovered": 53,
   "n/a": 74,
   "unmapped": 0
@@ -37,8 +37,8 @@
    "unmapped": 0
   },
   "egress": {
-   "covered": 44,
-   "partial": 49,
+   "covered": 46,
+   "partial": 48,
    "uncovered": 0,
    "n/a": 0,
    "unmapped": 0
@@ -1711,16 +1711,36 @@
    "note": "loopback and LAN calls to servers the person configured; the net-no-bypass scan keeps public hosts out, answers from a hostile server (oversized, slow, malformed JSON) are not sent"
   },
   {
+   "id": "egress:client/rerank.py:_read",
+   "kind": "egress",
+   "source": "client/rerank.py:_read",
+   "trust": "addresses and redirects named by pages, repositories and peers",
+   "attacker": "a redirect or address sends the request somewhere the person did not choose",
+   "status": "covered",
+   "tests": [
+    "tests/test_rerank.py::test_a_hostile_reranker_answer_raises_rerank_error",
+    "tests/test_rerank.py::test_an_oversized_answer_is_refused_without_reading_it_all",
+    "tests/test_rerank.py::test_a_server_that_never_answers_hits_the_timeout",
+    "tests/test_rerank.py::test_a_server_that_drips_its_answer_cannot_outlast_the_deadline",
+    "tests/test_rerank.py::test_a_server_error_status_is_a_rerank_error_that_keeps_the_status"
+   ],
+   "note": "a real hostile socket server: oversized, slow or dripping replies, non-JSON, wrong shapes, bool, negative, out-of-range or non-int indexes, null, string, NaN or infinite scores all raise RerankError"
+  },
+  {
    "id": "egress:client/rerank.py:rerank",
    "kind": "egress",
    "source": "client/rerank.py:rerank",
    "trust": "addresses and redirects named by pages, repositories and peers",
    "attacker": "a redirect or address sends the request somewhere the person did not choose",
-   "status": "partial",
+   "status": "covered",
    "tests": [
-    "tests/test_net_no_bypass.py"
+    "tests/test_rerank.py::test_a_hostile_reranker_answer_raises_rerank_error",
+    "tests/test_rerank.py::test_an_oversized_answer_is_refused_without_reading_it_all",
+    "tests/test_rerank.py::test_a_server_that_never_answers_hits_the_timeout",
+    "tests/test_rerank.py::test_a_server_that_drips_its_answer_cannot_outlast_the_deadline",
+    "tests/test_rerank.py::test_a_server_error_status_is_a_rerank_error_that_keeps_the_status"
    ],
-   "note": "loopback and LAN calls to servers the person configured; the net-no-bypass scan keeps public hosts out, answers from a hostile server (oversized, slow, malformed JSON) are not sent"
+   "note": "a real hostile socket server: oversized, slow or dripping replies, non-JSON, wrong shapes, bool, negative, out-of-range or non-int indexes, null, string, NaN or infinite scores all raise RerankError"
   },
   {
    "id": "egress:client/sdk.py:_open_response",
