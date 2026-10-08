@@ -105,8 +105,9 @@ class Estimate:
         return self.seconds / max(1, workers)
 
 
-def _files(root: Path, selectors: list[str]) -> list[str]:
+def _files(root: Path, selectors: list[str], skip: frozenset = frozenset()) -> list[str]:
     tests = sorted(p.relative_to(root).as_posix() for p in (root / "tests").rglob("test_*.py"))
+    tests = [t for t in tests if t not in skip]
     chosen = [s.split("::", 1)[0].rstrip("/") for s in selectors if "::" not in s]
     if not selectors:
         return tests
@@ -117,13 +118,13 @@ def _matches(node: str, selector: str) -> bool:
     return node == selector or (node.startswith(selector) and node[len(selector)] in "[:")
 
 
-def estimate(tests: dict[str, dict], root: Path, selectors: list[str]) -> Estimate:
-    """Seconds the selected tests are expected to take, summed per file from the history without collecting."""
+def estimate(tests: dict[str, dict], root: Path, selectors: list[str], reused: frozenset = frozenset()) -> Estimate:
+    """Seconds the selected tests are expected to take, summed per file from the history without collecting; ``reused`` files cost nothing."""
     by_file: dict[str, list[tuple[str, float]]] = {}
     for node, entry in tests.items():
         by_file.setdefault(node.split("::", 1)[0], []).append((node, seconds(entry)))
     total, recorded, unknown = 0.0, 0, 0
-    for file in _files(root, selectors):
+    for file in _files(root, selectors, reused):
         rows = by_file.get(file, [])
         total += sum(s for _, s in rows) if rows else DEFAULT_FILE_S
         recorded += len(rows)

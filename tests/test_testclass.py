@@ -211,3 +211,12 @@ def test_forecast_puts_an_aged_run_first(monkeypatch):
     runs = [_run(2, "queued", "background", 4000.0, 500.0), _run(3, "queued", "interactive", 40.0, 990.0)]
     views = testqueue.forecast(runs, 4, now)
     assert views[2].position == 1 and views[3].position == 2
+
+
+def test_files_the_reuse_store_would_serve_cost_nothing_in_the_estimate(tmp_path):
+    root = _tree(tmp_path, ["test_a.py", "test_b.py"])
+    tests = _history({"test_a.py": 100.0, "test_b.py": 20.0})
+    assert testhistory.estimate(tests, root, [], frozenset({"tests/test_a.py"})).seconds == 20.0
+    basis = testclass.Basis({**tests, **_history({f"test_{n}.py": 0.0 for n in range(60)})}, 1,
+                            frozenset({"tests/test_a.py"}))
+    assert testclass.classify("all", [], root, basis).estimate_s == 20.0

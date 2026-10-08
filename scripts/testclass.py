@@ -24,6 +24,7 @@ class Basis:
     """What an estimate rests on: the recorded durations and the workers the run is expected to get."""
     tests: dict[str, dict]
     workers: int = 1
+    reused: frozenset = frozenset()
 
 
 def selectors(arguments: list[str]) -> list[str]:
@@ -63,7 +64,7 @@ def classify(tier: str, rest: list[str], root: Path, basis: Basis, background: b
     if len(basis.tests) < testhistory.MIN_RECORDED:
         klass, why = fallback(tier, rest, chosen, root)
         return Verdict(klass, why and f"{why}; no duration history yet")
-    found = testhistory.estimate(basis.tests, root, chosen)
+    found = testhistory.estimate(basis.tests, root, chosen, basis.reused)
     wall = found.wall(basis.workers)
     limit = testhistory.threshold()
     klass = BACKGROUND if wall >= limit else INTERACTIVE

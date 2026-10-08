@@ -44,7 +44,8 @@ ENV_SKIP = frozenset({"PYTHONPATH", "DEV_TEST_PYTEST_TOKEN", "DEV_TEST_PYTEST_EN
                       "DEV_TEST_WORKERS", "DEV_TEST_SLOTS_DIR", "DEV_TEST_REMOTE_BROKER",
                       "DEV_TEST_LEASE", "DEV_TEST_REMOTE_LEASE", "DEV_TEST_REUSE_DIR",
                       "DEV_TEST_REUSE_CANARY", "DEV_TEST_REUSE_RECORD", "DEV_TEST_REUSE_ROOT",
-                      "DEV_TEST_JOB", "DEV_TEST_AGENT", "ML_STACK_SHIM_LOG"})
+                      "DEV_TEST_JOB", "DEV_TEST_AGENT", "ML_STACK_SHIM_LOG", "DEV_TEST_CLASS",
+                      "DEV_TEST_ESTIMATE_S", "DEV_TEST_HISTORY"})
 CONFIG = ("pyproject.toml", "pytest.ini", "tox.ini", "setup.cfg", "tests/heavy-modules.txt", *RUNNER_FILES)
 TREE_DIRS = ("src", "scripts", "tests", "docs", "packaging")
 TREE_FILES = ("budgets.json", "AGENTS.md", "CLAUDE.md", "pyproject.toml", "HANDOFF.md")

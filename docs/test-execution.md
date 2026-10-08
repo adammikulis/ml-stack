@@ -118,7 +118,9 @@ its wall seconds. `scripts/test heavy` rewrites `tests/heavy-modules.txt` from t
 
 Before admission `scripts/test` estimates the run: the recorded seconds of the selected files and nodes,
 summed per file without collecting, plus 30 s for each file with no record, divided by the workers the
-broker would grant. It prints the estimate (`test: estimated 38 s`, or `estimated 42 min from 3,120
+broker would grant. Named files whose pass the test-reuse store would serve (a read-only lookup, no
+claim) cost nothing; a reused file never runs, so the plugin records no duration for it, and a
+selection of directories or nodes is estimated in full. It prints the estimate (`test: estimated 38 s`, or `estimated 42 min from 3,120
 recorded tests`). An estimate of `DEV_TEST_BACKGROUND_S` (default 180) or more classes the run
 `background`, below it `interactive`, whatever the tier name. With fewer than 50 recorded tests the
 command shape decides: tiers `full`, `slow`, `record`, `all` or `fast` with no file or node selector,

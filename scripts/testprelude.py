@@ -10,13 +10,13 @@ import testhistory
 import testslots
 
 
-def begin(args: argparse.Namespace, rest: list[str], root: Path) -> testclass.Verdict:
-    """Estimate and classify the run, export its class, estimate and history path, and print the lines."""
+def begin(args: argparse.Namespace, rest: list[str], root: Path, reused: set[str] = frozenset()) -> testclass.Verdict:
+    """Estimate and classify the run (files the reuse store serves cost nothing), export its class, estimate and history path, and print the lines."""
     history = testhistory.history_path(root)
     budget = testslots.budget()
     workers = min(args.workers, budget) if args.workers > 0 else budget
     verdict = testclass.classify(args.tier, rest, root,
-                                 testclass.Basis(testhistory.load(history), workers), args.background)
+                                 testclass.Basis(testhistory.load(history), workers, frozenset(reused)), args.background)
     os.environ["DEV_TEST_HISTORY"] = str(history)
     os.environ["DEV_TEST_CLASS"] = verdict.klass
     if verdict.estimate_s is not None:
