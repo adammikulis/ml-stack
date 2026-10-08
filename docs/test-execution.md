@@ -14,6 +14,12 @@ end-to-end checks, and schedules background full suites. Workers do not repeat t
 The main agent owns `quick`, whose cold-map recording and fallback can start full runs; workers
 use explicit affected selectors.
 
+`scripts/test <tier>` runs as a background job that the command follows: `submit` prints the job id
+and returns, `status`, `wait`, `result` and `cancel` act on it, and Ctrl-C on a followed run
+cancels its job. Jobs use the admission below and are owned by the submitting workspace agent,
+which `scripts/testslots.py status` shows beside each lease. A run that names test files reuses
+earlier passes of unchanged files and says so per file ([test-reuse.md](test-reuse.md)).
+
 CPU capacity defaults to the logical CPU count minus one, with a minimum of
 one. `DEV_TEST_RESERVED_CORES` changes that reservation. This reserves capacity;
 it does not pin execution to a particular efficiency core. `DEV_TEST_BUDGET`
