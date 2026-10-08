@@ -397,6 +397,18 @@ note = "hostile pytest text remains literal argv; source mount is read-only, no 
 
 # -- the human-only floor ------------------------------------------------------------------
 [[group]]
+match = ["human:workspace/person_session.py:SessionWorkspace._person", "human:workspace/person_session.py:SessionWorkspace.connect"]
+status = "covered"
+count = 2
+tests = [
+  "tests/test_person_session.py::test_actor_rechecks_live_session_project_and_person",
+  "tests/test_person_session.py::test_connect_refuses_get_collision_and_revoked_person",
+  "tests/test_person_session.py::test_explicit_connect_creates_hashless_person_without_token",
+  "tests/test_person_session.py::test_session_person_preserves_existing_capability_restrictions",
+]
+note = "request-bound sessions recheck project authority and live person permissions; explicit POST binds a hashless principal"
+
+[[group]]
 match = ["human:*"]
 status = "covered"
 tests = [
@@ -1041,6 +1053,18 @@ status = "covered"
 tests = ["tests/test_net_untrusted.py", "tests/test_pdf_engine.py",
          "tests/test_hub_modelfile.py::test_every_hostile_header_is_refused_quickly",
          "tests/test_redteam_judge.py"]
+
+[[group]]
+match = ["parser:workspace/remote_host.py"]
+status = "covered"
+count = 1
+tests = [
+  "tests/test_project_board_ui.py::test_person_connect_rejects_invalid_content_length_without_registry_mutation",
+  "tests/test_project_board_ui.py::test_person_connect_rejects_invalid_json_without_registry_mutation",
+  "tests/test_project_board_ui.py::test_canonical_person_board_rejects_foreign_requests",
+  "tests/test_project_board_ui.py::test_canonical_person_post_rejects_different_browser_origin",
+]
+note = "person joins reject hostile length and JSON bodies without registry mutation; browser session and origin remain checked"
 
 [[group]]
 match = ["parser:workspace/*"]

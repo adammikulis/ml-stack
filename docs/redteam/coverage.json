@@ -1,7 +1,7 @@
 {
- "surfaces": 790,
+ "surfaces": 793,
  "by_status": {
-  "covered": 465,
+  "covered": 468,
   "partial": 199,
   "uncovered": 53,
   "n/a": 73,
@@ -51,7 +51,7 @@
    "unmapped": 0
   },
   "human": {
-   "covered": 99,
+   "covered": 101,
    "partial": 0,
    "uncovered": 0,
    "n/a": 0,
@@ -79,7 +79,7 @@
    "unmapped": 0
   },
   "parser": {
-   "covered": 74,
+   "covered": 75,
    "partial": 0,
    "uncovered": 49,
    "n/a": 0,
@@ -4299,6 +4299,36 @@
    "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
   },
   {
+   "id": "human:workspace/person_session.py:SessionWorkspace._person",
+   "kind": "human",
+   "source": "workspace/person_session.py:SessionWorkspace._person",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_person_session.py::test_actor_rechecks_live_session_project_and_person",
+    "tests/test_person_session.py::test_connect_refuses_get_collision_and_revoked_person",
+    "tests/test_person_session.py::test_explicit_connect_creates_hashless_person_without_token",
+    "tests/test_person_session.py::test_session_person_preserves_existing_capability_restrictions"
+   ],
+   "note": "request-bound sessions recheck project authority and live person permissions; explicit POST binds a hashless principal"
+  },
+  {
+   "id": "human:workspace/person_session.py:SessionWorkspace.connect",
+   "kind": "human",
+   "source": "workspace/person_session.py:SessionWorkspace.connect",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_person_session.py::test_actor_rechecks_live_session_project_and_person",
+    "tests/test_person_session.py::test_connect_refuses_get_collision_and_revoked_person",
+    "tests/test_person_session.py::test_explicit_connect_creates_hashless_person_without_token",
+    "tests/test_person_session.py::test_session_person_preserves_existing_capability_restrictions"
+   ],
+   "note": "request-bound sessions recheck project authority and live person permissions; explicit POST binds a hashless principal"
+  },
+  {
    "id": "human:workspace/quarantine.py:Quarantine.release",
    "kind": "human",
    "source": "workspace/quarantine.py:Quarantine.release",
@@ -7449,6 +7479,21 @@
     "tests/test_workspace_remote.py"
    ],
    "note": "sealed replies must be bounded JSON objects and project capabilities cannot cross authorities or projects"
+  },
+  {
+   "id": "parser:workspace/remote_host.py",
+   "kind": "parser",
+   "source": "workspace/remote_host.py",
+   "trust": "files, pages and archives from outside",
+   "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
+   "status": "covered",
+   "tests": [
+    "tests/test_project_board_ui.py::test_person_connect_rejects_invalid_content_length_without_registry_mutation",
+    "tests/test_project_board_ui.py::test_person_connect_rejects_invalid_json_without_registry_mutation",
+    "tests/test_project_board_ui.py::test_canonical_person_board_rejects_foreign_requests",
+    "tests/test_project_board_ui.py::test_canonical_person_post_rejects_different_browser_origin"
+   ],
+   "note": "person joins reject hostile length and JSON bodies without registry mutation; browser session and origin remain checked"
   },
   {
    "id": "parser:workspace/remote_task_client.py",
