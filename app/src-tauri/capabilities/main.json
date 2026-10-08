@@ -10,6 +10,7 @@
     "core:default",
     "window-state:default",
     "allow-close-choice",
-    "allow-on-closing"
+    "allow-on-closing",
+    "allow-reopen-page"
   ]
 }
