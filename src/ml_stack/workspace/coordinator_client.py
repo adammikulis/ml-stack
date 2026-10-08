@@ -12,7 +12,7 @@ from ml_stack.fleet.onboard.requests import Devices
 from ml_stack.fleet.remote import Peer
 from ml_stack.graph.store import GraphStore
 from ml_stack.hub.peerbook import PeerBook
-from ml_stack.workspace import coordinator_config, tokens
+from ml_stack.workspace import coordinator_config, device_metadata, tokens
 from ml_stack.workspace.chain import held
 from ml_stack.workspace.identity import Denied
 
@@ -58,7 +58,8 @@ class Remote:
             if not problem:
                 credential = tokens.load(base, agent)
             payload = {'workspace': self.config['workspace'], 'name': name,
-                       'model': model, 'harness': harness, 'project': project or {}}
+                       'model': model, 'harness': harness, 'project': project or {},
+                       'device': device_metadata.current()}
             _status, body, _headers = self.peer._request(
                 'POST', '/workspace/v1/ensure', data=json.dumps(payload).encode(),
                 headers={'Content-Type': 'application/json',

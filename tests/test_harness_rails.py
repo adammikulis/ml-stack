@@ -161,8 +161,7 @@ class TestHook:
 
     def test_the_post_hook_warns_without_blocking_when_nudge_is_missing(self, monkeypatch):
         monkeypatch.setenv("PATH", "/nonexistent")
-        answer = harnesshook.post("local-test")
-        assert "workspace nudge unavailable" in answer["hookSpecificOutput"]["additionalContext"]
+        assert "notification unavailable" in harnesshook.post("local-test")["hookSpecificOutput"]["additionalContext"]
 
 
 class TestSessionFiles:
@@ -374,7 +373,7 @@ class TestWorkspaceCommands:
         def run(command, **kwargs):
             seen.append((command, kwargs))
             return subprocess.CompletedProcess(command, 0, 'nudge text', '')
-        monkeypatch.setattr(harnesshook.subprocess, 'run', run)
+        monkeypatch.setattr(harnesshook, '_reader_run', run)
         assert harnesshook.nudge(hostile) == "nudge text"
         command, options = seen[0]
         assert command == [sys.executable, '-m', 'ml_stack.workspace.notification_reader',

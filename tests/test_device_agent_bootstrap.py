@@ -151,7 +151,7 @@ def test_project_bootstrap_has_same_device_boundary(enrolled):
     kit, device, projects, document = enrolled
     projects.workspace_base = lambda project_id: kit.base
     host = WorkspaceHost(projects)
-    body = {**document, 'agent_token': ''}
+    body = {**document, 'agent_token': '', 'device': {}}
     project_id = document['project']['key']
     assert host.answer(project_id, 'ensure', body)[0] == 403
     status, result = host.answer(project_id, 'ensure', body, device=device)
@@ -380,3 +380,54 @@ def test_saved_project_scope_accepts_its_primary_worktree_equivalent(saved_proje
     monkeypatch.setattr(device_agent.worktreerules, 'checkouts', lambda path: (checkout, primary))
     with device_agent.owned_project_session(kit.ws, token, 'worker', checkout) as actor:
         assert actor.id == 'worker'
+
+
+def test_registration_records_reported_device_and_authenticated_peer_then_refreshes(enrolled):
+    kit, device, projects, document = enrolled
+    metadata = {'machine_id': '1' * 16, 'device_id': 'b' * 64,
+                'hostname': 'worker', 'os': 'Linux', 'architecture': 'x86_64',
+                'runtime_version': '0.2.2', 'runtime_commit': 'c' * 40,
+                'peer_id': 'f' * 64, 'verification': 'local-observed'}
+    name, token = device_sessions.ensure(kit.ws, device, projects, {**document, 'device': metadata})
+    before = kit.ws.auth(token)
+    profile = kit.ws.registry.info(name)['device']
+    assert profile['os'] == 'Linux' and profile['hostname'] == 'worker'
+    assert profile['machine_id'] is None and profile['device_id'] is None
+    assert profile['peer_id'] == device.fingerprint
+    assert profile['peer_verification'] == 'paired'
+    assert profile['verification'] == 'agent-reported'
+    child = kit.ws.delegate(token, 'helper')
+    inherited = kit.ws.registry.info(child['id'])['device']
+    assert (inherited['verification'], inherited['inherited_from'], inherited['parent_verification']) == (
+        'inherited', name, 'agent-reported')
+    assert {key: inherited[key] for key in ('hostname', 'os', 'peer_id', 'peer_verification')} == {
+        key: profile[key] for key in ('hostname', 'os', 'peer_id', 'peer_verification')}
+    updated = {**metadata, 'runtime_version': '0.2.3', 'runtime_commit': 'd' * 40}
+    assert device_sessions.ensure(kit.ws, device, projects, {**document, 'device': updated}, token) == (name, token)
+    assert kit.ws.registry.info(name)['device']['runtime_commit'] == 'd' * 40
+    assert kit.ws.auth(token) == before
+
+
+@pytest.mark.redteam
+def test_malformed_registration_device_cannot_create_identity(enrolled):
+    kit, device, projects, document = enrolled
+    before = kit.ws.registry.ids()
+    with pytest.raises(ValueError):
+        device_sessions.ensure(kit.ws, device, projects, {**document, 'device': {'machine_id': 'invented'}})
+    assert kit.ws.registry.ids() == before
+
+
+@pytest.mark.parametrize('mode', ['dev', 'paired'])
+def test_cached_delegated_token_returns_without_root_registration(enrolled, mode):
+    from ml_stack.workspace.remote import RemoteWorkspace
+    kit, device, projects, document = enrolled
+    _name, parent = device_sessions.ensure(kit.ws, device, projects, document)
+    child = kit.ws.delegate(parent, 'helper')
+    cached = tokens.load(kit.base, child['id'])
+    remote = object.__new__(RemoteWorkspace)
+    remote.base, remote.mode = kit.base, mode
+    remote.call = lambda operation, token: kit.ws.auth(token)
+    def refused(*args, **kwargs):
+        pytest.fail('a delegated token must not register or renew its root')
+    remote._request = refused
+    assert remote.token(agent=child['id']) == cached

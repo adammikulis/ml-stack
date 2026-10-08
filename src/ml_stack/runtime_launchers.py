@@ -15,7 +15,7 @@ from pathlib import Path
 from ml_stack import runtime, windows_private
 from ml_stack.files import writing
 
-MODULES = frozenset({"ml_stack.harnesshook", "ml_stack.profilehook", "ml_stack.workspace.cli"})
+MODULES = frozenset({"ml_stack.harnesshook", "ml_stack.workspace.profilehook", "ml_stack.workspace.cli"})
 
 
 def owned(path: Path) -> None:
@@ -43,10 +43,10 @@ def install(directory: Path, chosen: runtime.Runtime | None = None) -> list[Path
     done = subprocess.run([str(chosen.python), "-I", "-c", script], capture_output=True,
                           text=True, timeout=30, env=runtime.environment())
     if done.returncode or len(done.stdout) > 65536:
-        raise OSError("selected runtime console metadata is unavailable")
+        raise OSError("the selected runtime does not list its console entry points")
     entries = json.loads(done.stdout)
     if not isinstance(entries, dict) or not 1 <= len(entries) <= 256:
-        raise ValueError("invalid runtime console metadata")
+        raise ValueError("invalid runtime console entry points")
     targets = []
     for name, value in entries.items():
         if (not isinstance(name, str) or not re.fullmatch(r"ml-stack(?:-[a-z0-9-]+)?", name)

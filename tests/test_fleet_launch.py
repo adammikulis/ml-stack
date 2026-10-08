@@ -133,7 +133,7 @@ def test_new_launcher_replaces_owned_older_idle_daemon_before_start(monkeypatch,
     calls = []
     monkeypatch.setattr(launch, "already_running", lambda _port: {"commit": "old", "launcher_control": "a" * 32})
     monkeypatch.setattr(launch, "state", lambda: {"commit": "new"})
-    monkeypatch.setattr(launch, "request_replacement", lambda *args: calls.append(("replace", args)))
+    monkeypatch.setattr(launch, "request_replacement", lambda *args, **kwargs: calls.append(("replace", args)))
     monkeypatch.setattr(launch, "_wait_for_exit", lambda _port: True)
     monkeypatch.setattr(launch, "_open_when_ready", lambda *_args: None)
     assert launch.main(["--no-browser", "--root", str(tmp_path)],
@@ -145,7 +145,7 @@ def test_new_launcher_replaces_owned_older_idle_daemon_before_start(monkeypatch,
 def test_new_launcher_keeps_busy_or_unowned_daemon_and_reports_retry(monkeypatch, capsys):
     monkeypatch.setattr(launch, "already_running", lambda _port: {"commit": "old"})
     monkeypatch.setattr(launch, "state", lambda: {"commit": "new"})
-    def refuse(*_args):
+    def refuse(*_args, **_kwargs):
         raise launch.ControlError("Daemon has active work; retry when it is idle.")
     monkeypatch.setattr(launch, "request_replacement", refuse)
     assert launch.main(["--no-browser"], daemon_main=lambda _argv: pytest.fail("started over active daemon")) == 1
@@ -176,3 +176,21 @@ def test_launcher_waits_for_tcp_close_when_health_is_unavailable(monkeypatch):
     monkeypatch.setattr(launch, "already_running", lambda _port: None)
     assert launch._wait_for_exit(8770)
     assert len(connections) == 3
+
+
+def test_explicit_restart_replaces_same_commit_without_passing_flag_to_daemon(monkeypatch):
+    flag = '--restart'
+    calls = []
+    monkeypatch.setattr(launch, 'already_running', lambda _port: {'commit': 'a' * 40})
+    monkeypatch.setattr(launch, 'state', lambda: {'commit': 'a' * 40})
+    monkeypatch.setattr(launch, 'request_replacement', lambda *args, **kwargs: calls.append(kwargs) or {'preserved': {'queued': 1, 'running': 1}})
+    monkeypatch.setattr(launch, '_wait_for_exit', lambda _port: True)
+    monkeypatch.setattr(launch, '_open_when_ready', lambda *_args: None)
+    assert launch.main([flag, '--no-browser'], daemon_main=lambda args: calls.append(args) or 0) == 0
+    assert calls[0]['restart'] == 'preserve'
+    assert flag not in calls[1]
+
+
+def test_launcher_refuses_the_removed_force_restart_flag_as_a_daemon_option(monkeypatch):
+    known, rest = launch._arguments(['--restart', '--no-browser', '--force-restart'])
+    assert known.restart and rest == ['--force-restart']

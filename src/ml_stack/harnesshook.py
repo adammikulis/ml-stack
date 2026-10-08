@@ -15,6 +15,7 @@ import os
 import subprocess
 import sys
 from collections.abc import Sequence
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, Any
@@ -27,7 +28,7 @@ if __name__ == "__main__":
     hook_bootstrap.metadata({})
     hook_bootstrap.stage("imports")
 
-from ml_stack import harness_claims, requests
+from ml_stack import harness_claims, platform, requests
 from ml_stack.harnesspolicy import (
     Decision,
     _shell_line,
@@ -36,6 +37,7 @@ from ml_stack.harnesspolicy import (
     workspace_authority,
 )
 from ml_stack.keystore import ENV_NONINTERACTIVE
+from ml_stack.serve.process import kill_process_tree
 from ml_stack.workspace import harness_remote, notification_reader, tokens, worktree_lifecycle
 from ml_stack.workspace.identity import BoardUnavailable, Denied
 from ml_stack.workspace.service import Workspace
@@ -43,7 +45,8 @@ from ml_stack.workspace.service import Workspace
 __all__ = ["FAILURES", "WAIT_S", "Rail", "nudge", "post", "pre", "run"]
 
 WAIT_S = 300.0
-NUDGE_S = 5.0
+CLEANUP_RESERVE_S = 1.5
+NUDGE_S = hook_bootstrap.POST_SECONDS - CLEANUP_RESERVE_S
 NUDGE_MOST = 500
 FAILURES = (OSError, ValueError, TypeError, KeyError, AttributeError, LookupError, RuntimeError)
 HOOK_EVENTS = {"pre": "PreToolUse", "post": "PostToolUse", "stop": "Stop"}
@@ -133,54 +136,53 @@ def _owned_answer(payload, rail, event, reason):
     return _answer(event, 'allow', reason)
 
 
-def nudge(label: str, rail: Rail | None = None, *, canonical=None) -> str:
-    """Return workspace context or a redacted notification failure reference."""
+def _reader_run(command, **kwargs):
+    """Run the owned notification group under its wall-clock deadline."""
+    process = platform.start_process(command, stdin=kwargs['stdin'], stdout=subprocess.PIPE,
+                                     stderr=subprocess.PIPE, text=True)
     try:
-        if canonical is not None:
-            return notification_reader.read(label, Path(rail.roots[0]), rail.session_id,
-                                            canonical=canonical)[:NUDGE_MOST]
-        done = subprocess.run([sys.executable, "-m", notification_reader.__name__, label,
-                               str(rail.roots[0] if rail and rail.roots else Path.cwd()),
-                               rail.session_id if rail else ""], capture_output=True,
-                              text=True, timeout=min(NUDGE_S, hook_bootstrap.remaining()),
-                              check=False, stdin=subprocess.DEVNULL)
+        output, errors = process.communicate(timeout=kwargs['timeout'])
+    except subprocess.TimeoutExpired:
+        kill_process_tree(process.pid, grace_s=0.1)
+        with suppress(ProcessLookupError):
+            platform.terminate_process_group(process, force=True)
+        output, errors = process.communicate(timeout=1)
+        raise subprocess.TimeoutExpired(command, kwargs['timeout'], output=output, stderr=errors) from None
+    return subprocess.CompletedProcess(command, process.returncode, output, errors)
+
+
+def nudge(label: str, rail: Rail | None = None, *, canonical=None) -> str:
+    """Return unread metadata and redacted advisory failure references."""
+    try:
+        timeout = min(NUDGE_S, max(0.05, hook_bootstrap.remaining() - CLEANUP_RESERVE_S))
+        done = _reader_run([sys.executable, "-m", notification_reader.__name__, label,
+                            str(rail.roots[0] if rail and rail.roots else Path.cwd()),
+                            rail.session_id if rail else ""], capture_output=True, text=True,
+                           timeout=timeout, check=False, stdin=subprocess.DEVNULL)
+    except subprocess.TimeoutExpired as error:
+        partial = error.stdout or ""
+        if isinstance(partial, bytes):
+            partial = partial.decode("utf-8", errors="replace")
+        warning = f"workspace notification unavailable: {hook_diagnostics.record(error, 'post', 'reader-timeout', metadata=hook_bootstrap.timings())}"
+        sys.stderr.write(warning + "\n")
+        return "\n".join(part for part in (partial.strip()[:NUDGE_MOST], warning) if part)
     except (OSError, subprocess.SubprocessError, Denied, ValueError, RuntimeError) as error:
-        warning = f"workspace nudge unavailable: {hook_diagnostics.record(error, 'post', 'nudge', metadata=hook_bootstrap.timings())}"
+        warning = f"workspace notification unavailable: {hook_diagnostics.record(error, 'post', 'reader', metadata=hook_bootstrap.timings())}"
         sys.stderr.write(warning + "\n")
         return warning
+    text = done.stdout.strip()[:NUDGE_MOST]
     if done.returncode != 0:
-        error = RuntimeError(done.stderr.strip() or f"workspace nudge exited {done.returncode}")
-        warning = f"workspace nudge unavailable: {hook_diagnostics.record(error, 'post', 'nudge', metadata=hook_bootstrap.timings())}"
+        error = RuntimeError(done.stderr.strip() or f"notification reader exited {done.returncode}")
+        warning = f"workspace notification unavailable: {hook_diagnostics.record(error, 'post', 'reader', metadata=hook_bootstrap.timings())}"
         sys.stderr.write(warning + "\n")
-        return warning
-    return done.stdout.strip()[:NUDGE_MOST]
+        return "\n".join(part for part in (text, warning) if part)
+    return text
 
 
 def post(label: str, rail: Rail | None = None) -> dict[str, Any]:
-    """The PostToolUse answer: the nudge as context, or nothing."""
-    warning = ""
-    canonical = None
-    try:
-        if rail is not None and rail.roots:
-            hook_bootstrap.stage("checkpoint-authentication")
-            canonical = harness_remote.context(label, rail.roots[0], rail.roots, require_claim=False)
-            if canonical:
-                remote, who = canonical
-                hook_bootstrap.stage("checkpoint-write")
-                worktree_lifecycle.checkpoint(remote.base, who.id)
-            else:
-                ws = Workspace()
-                who = ws.auth(tokens.load(ws.base, label))
-                if who.id != label:
-                    raise Denied('checkpoint requires the launcher-bound identity')
-                hook_bootstrap.stage("checkpoint-write")
-                worktree_lifecycle.checkpoint(ws.base, who.id)
-    except FAILURES as error:
-        warning = f"workspace checkpoint unavailable: {hook_diagnostics.record(error, 'post', 'checkpoint', metadata=hook_bootstrap.timings())}"
-        sys.stderr.write(warning + "\n")
-    hook_bootstrap.stage("nudge")
-    notice = nudge(label, rail, canonical=canonical) if canonical is not None else nudge(label, rail)
-    text = "\n".join(part for part in (warning, notice) if part)
+    """Return bounded unread-message metadata and checkpoint diagnostics."""
+    hook_bootstrap.stage("notification-reader")
+    text = nudge(label, rail)
     if not text:
         return {}
     return {"hookSpecificOutput": {"hookEventName": HOOK_EVENTS["post"],

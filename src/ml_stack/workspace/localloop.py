@@ -28,6 +28,8 @@ from ml_stack.workspace import (
     plain,
     tokens,
     work_reputation,
+    worker_completion,
+    worker_reconnect,
 )
 from ml_stack.workspace.identity import Denied
 from ml_stack.workspace.rates import RateLimited
@@ -173,6 +175,11 @@ class Loop:
                       else tokens.load(ws.base, agent.identity or agent.name))
         self.steps = self.tasks = self.ignored = 0
         self.effort = agent.effort
+        self.completion = None
+        if hasattr(type(ws), "worker_token"):
+            transport = ws.remote.transport if isinstance(ws.remote, worker_reconnect.Recovering) else ws.remote
+            ws.remote = worker_reconnect.Recovering(transport, self.stopped, self.status)
+            self.completion = worker_completion.Journal(ws)
 
     def agent_orders(self, row: dict[str, Any]) -> str:
         return la.obeys(self.ws, self.agent, row)
@@ -192,7 +199,13 @@ class Loop:
             return
         self.status.update(state="working", detail=f"task {row['seq']} from {seen['from']}",
                            last_message=seen)
-        kind, text, rounds = self.perform(row, why)
+        saved = self.completion.begin(row) if self.completion else None
+        if saved:
+            kind, text, rounds = saved["kind"], saved["body"], saved["rounds"]
+        else:
+            kind, text, rounds = self.perform(row, why)
+            if self.completion:
+                self.completion.finish(row, kind, text, rounds)
         self.reply(row, kind, text)
         self.steps += rounds
         self.tasks += 1
@@ -248,6 +261,9 @@ class Loop:
 
     def reply(self, row: dict[str, Any], kind: str, text: str) -> None:
         """Send the result on the thread it came on: to the board, or to the sender."""
+        if self.completion:
+            self.completion.deliver(self.ws, self.token, row)
+            return
         to = row["to"] if str(row["to"]).startswith("#") else row["from"]
         body, _ = plain.text(text, REPLY_CHARS)
         if len(text) > REPLY_CHARS:
@@ -268,6 +284,13 @@ class Loop:
 
     def serve(self, idle: list[bool]) -> None:
         """Wait for messages and handle each, until stopped."""
+        if self.completion and (pending := self.completion.record()):
+            if pending["state"] == "executing":
+                raise worker_completion.Interrupted("task execution was interrupted; review its side effects")
+            if pending["state"] != "sent":
+                self.handle(pending["row"])
+            self.ws.ack(self.token, pending["seq"])
+            self.completion.acknowledged(pending["row"])
         while not self.stopped():
             if la.pause_file(self.ws, self.agent.name).exists():
                 self.status.update(state="paused", detail="Queued tasks wait until resumed")
@@ -286,6 +309,8 @@ class Loop:
                     break
                 self.handle(row)
                 self.ws.ack(self.token, row["seq"])
+                if self.completion:
+                    self.completion.acknowledged(row)
 
 
 def run(ws: Workspace, name: str, settings: Settings | None = None) -> int:
@@ -318,8 +343,11 @@ def run(ws: Workspace, name: str, settings: Settings | None = None) -> int:
     code = 0
     try:
         Loop(ws, agent, held, settings, (stopped, status)).serve(idle)
-    except _Wake:
+    except (_Wake, worker_reconnect.Cancelled):
         pass
+    except (worker_reconnect.Unavailable, worker_completion.Interrupted) as err:
+        status.update(state="failed", detail=plain.line(err, 300))
+        code = 1
     except Denied as err:
         status.update(state="failed", detail=f"its workspace token stopped working: {plain.line(err, 120)}")
         code = 1

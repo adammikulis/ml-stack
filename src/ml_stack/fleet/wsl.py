@@ -119,7 +119,7 @@ print(json.dumps(dict(kernel=platform.release(), python=list(sys.version_info[:2
     return python
 
 
-def replace_running(arguments: list[str], port: int, running: dict, expected: str) -> None:
+def replace_running(arguments: list[str], port: int, running: dict, expected: str, *, restart: str = 'idle') -> None:
     """Request replacement through the owned WSL daemon's loopback control."""
     executable = _read("python3", "-c", "import os; print(os.path.expanduser('~/.local/share/ml-stack/runtime/bin/python'))")
     root = ""
@@ -134,14 +134,14 @@ def replace_running(arguments: list[str], port: int, running: dict, expected: st
 from ml_stack.fleet.daemon_control import request_replacement
 from ml_stack.fleet.runtime_paths import default_root
 root = pathlib.Path(sys.argv[1]) if sys.argv[1] else default_root()
-request_replacement(root, int(sys.argv[2]), json.loads(sys.argv[3]), sys.argv[4])
+request_replacement(root, int(sys.argv[2]), json.loads(sys.argv[3]), sys.argv[4], restart=sys.argv[5])
 """
     environment = []
     for key in ("ML_STACK_HOME", "ML_STACK_CACHE"):
         if value := os.environ.get(key):
             translated = _read("wslpath", "-a", "-u", str(Path(value).expanduser().resolve()))
             environment.append(key + "=" + translated)
-    _read("env", *environment, executable, "-c", script, root, str(port), json.dumps(running), expected)
+    _read("env", *environment, executable, "-c", script, root, str(port), json.dumps(running), expected, restart)
 
 
 def _port(arguments: list[str]) -> int:

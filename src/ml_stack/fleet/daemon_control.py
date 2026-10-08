@@ -74,7 +74,7 @@ def _record(root: Path, port: int) -> dict:
     return value
 
 
-def request_replacement(root: Path, port: int, running: dict, expected: str) -> dict:
+def request_replacement(root: Path, port: int, running: dict, expected: str, *, restart: str = 'idle') -> dict:
     """Ask the owned older daemon to stop at its maintained idle boundary."""
     record = _record(root, port)
     instance = running.get('launcher_control')
@@ -90,7 +90,9 @@ def request_replacement(root: Path, port: int, running: dict, expected: str) -> 
             raise ControlError('Daemon replacement cannot leave its owned loopback endpoint.')
         return url
 
-    body = json.dumps({'version': 1, 'instance': instance, 'expected': expected}).encode()
+    if restart not in {'idle', 'preserve'}:
+        raise ControlError('Unknown daemon restart mode.')
+    body = json.dumps({'version': 1, 'instance': instance, 'expected': expected, 'restart': restart}).encode()
     with open_stream(endpoint, method='POST', data=body, token=capability, timeout=10,
                      headers={'Content-Type': 'application/json', sealing.HEADER: '2'}, guard=guard) as response:
         if response.headers.get(sealing.HEADER) != '1':
@@ -113,6 +115,21 @@ def request_replacement(root: Path, port: int, running: dict, expected: str) -> 
     return answer
 
 
+def _restart_mode(request):
+    if set(request) - {'version', 'instance', 'expected', 'restart'}:
+        raise ControlError('Unknown daemon replacement fields.')
+    if 'version' in request and (type(request['version']) is not int or request['version'] != 1):
+        raise ControlError('Unknown daemon replacement version.')
+    restart = request.get('restart', 'idle')
+    if type(restart) is not str or restart not in {'idle', 'preserve'}:
+        raise ControlError('Unknown daemon restart mode.')
+    if restart != 'idle' and request.get('version') != 1:
+        raise ControlError('Job-preserving restart requires version 1.')
+    if 'expected' in request and (type(request['expected']) is not str or len(request['expected']) > 128):
+        raise ControlError('Invalid expected daemon commit.')
+    return restart
+
+
 class Control:
     def __init__(self, root: Path, port: int, idle, admission, shutdown):
         self.path = _directory(root) / f'{port}.json'
@@ -120,6 +137,7 @@ class Control:
         self.capability = macauth.PREFIX + secrets.token_urlsafe(32)
         self.auth = macauth.Authenticator(lambda: [self.capability])
         self.idle, self.admission, self.shutdown = idle, admission, shutdown
+        self.restart_safe = None
         self.lock = threading.Lock()
         self.held = contextlib.ExitStack()
         self.stopping = False
@@ -154,20 +172,27 @@ class Control:
             request = json.loads(body)
             if not isinstance(request, dict) or request.get('instance') != self.instance:
                 raise ControlError('Daemon replacement instance does not match.')
+            restart = _restart_mode(request)
+            preserved = {}
             with self.lock:
                 if self.stopping or self.active:
                     raise ControlError('Daemon has requests in progress; retry when it is idle.')
                 with contextlib.ExitStack() as admitted:
                     admitted.enter_context(self.admission())
-                    if not self.idle():
-                        raise ControlError('Daemon has active work, downloads or setup; retry when it is idle.')
+                    if restart == 'idle':
+                        if not self.idle():
+                            raise ControlError('Daemon has active work, downloads or setup; retry when it is idle.')
+                    else:
+                        if self.restart_safe is None:
+                            raise ControlError('Daemon cannot preserve jobs across restart.')
+                        preserved = self.restart_safe()
                     self.held = admitted.pop_all()
                     self.stopping = True
         except (ControlError, Busy, ValueError, OSError, sealing.SealError) as exc:
             handler._send(409, {'error': str(exc)})
             return True
         try:
-            handler._send(202, {'instance': self.instance, 'stopping': True})
+            handler._send(202, {'instance': self.instance, 'stopping': True, 'preserved': preserved})
             handler.wfile.flush()
         finally:
             threading.Thread(target=self.shutdown, name='launcher-daemon-stop', daemon=True).start()
@@ -232,5 +257,16 @@ def create(runtime):
         measuring=lambda: bool(runtime.bench_host.measuring()),
         leases=models_busy,
     )
-    return Control(runtime.root, runtime.port, idle,
-                   runtime.update_admission, lambda: runtime.httpd.shutdown())
+    control = Control(runtime.root, runtime.port, idle,
+                      runtime.update_admission, lambda: runtime.httpd.shutdown())
+    control.restart_safe = lambda: _preserve(runtime)
+    return control
+
+
+def _preserve(runtime):
+    if (bool(runtime.web and runtime.initial_setup and not runtime.settings.setup_done)
+            or any(row.state == 'getting' for row in runtime.downloads.active())
+            or bool(runtime.interface and runtime.interface.setup_jobs and runtime.interface.setup_jobs.active())
+            or bool(runtime.bench_host and runtime.bench_host.measuring())):
+        raise ControlError('Restart waits for setup, downloads or benchmark measurement; jobs and independent models are preserved.')
+    return runtime.runner.checkpoint_restart()

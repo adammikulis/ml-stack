@@ -126,7 +126,7 @@ class RemoteWorkspace:
         with held(lock):
             token = tokens.load(self.base, agent)
             result = self._request("renew", {"agent_token": token, "cluster": self.cluster,
-                                             "cluster_id": self.cluster_id})
+                                             "cluster_id": self.cluster_id, "device": device_metadata.current()})
             if (result.get("id") != agent or result.get("project_id") != self.project_id
                     or result.get("cluster_id") != self.cluster_id):
                 raise Denied("agent renewal returned another identity or project cluster")
@@ -222,7 +222,8 @@ class RemoteWorkspace:
             raise Denied("delegated project identities need a live parent-authorized credential")
         result = self._request("ensure", {"name": str(session.get("name", name)),
                                          "model": "", "harness": "",
-                                         "project": {"key": self.project_id}, "agent_token": saved})
+                                         "project": {"key": self.project_id}, "agent_token": saved,
+                                         "device": device_metadata.current()})
         ident, token = str(result["id"]), str(result["token"])
         tokens.store(self.base, ident, token)
         with GraphStore(path) as graph:

@@ -13,6 +13,7 @@ from ml_stack.workspace import (
     agent_display,
     agent_invites,
     coordination_access,
+    execution_profile,
     limits as limits_mod,
     mesh_fold,
     reports,
@@ -277,6 +278,19 @@ class Workspace:
             self.registry.record_device_claim(token, device)
         self.registry.register_session(token, harness)
         return agent_display.metadata(self.registry, self.auth(token).id)
+
+    def record_profile(self, token: str, device: dict | None = None, harness: str = '') -> dict:
+        """Update own reported profile facts without registering a main session."""
+        self._may(self.auth(token), 'claim')
+        return self.registry.record_profile(token, device, harness)
+
+    def record_execution_profile(self, token: str, document: dict) -> dict:
+        """Record the authenticated actor's reported execution metadata."""
+        return execution_profile.record(self, token, document)
+
+    def execution_profiles(self, token: str) -> list[dict]:
+        """Return the authenticated actor's execution observations."""
+        return execution_profile.read(self, token)
 
     def claim_model(self, token: str, model: str, harness: str = "", label: str = "") -> dict[str, Any]:
         """The caller's own model as the caller says it (``claimed``); with ``label`` the model of

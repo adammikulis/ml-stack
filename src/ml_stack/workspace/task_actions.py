@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from uuid import uuid4
 
 from ml_stack.graph.store import GraphStore
-from ml_stack.workspace import task_worktrees, testruns
+from ml_stack.workspace import task_provenance, task_worktrees, testruns
 from ml_stack.workspace.chain import held
 from ml_stack.workspace.family_accounts import bind_resource
 from ml_stack.workspace.identity import HUMAN, Denied
@@ -111,10 +111,8 @@ def submit(board, token, ident, value):
         proposal = {'id': f'proposal:{uuid4().hex}', 'task': ident, 'worker': task['worker'],
                     'at': board.ws.clock(), 'lease_id': lease['id'], **value}
         proposal['claimed_provenance'] = proposal['provenance']
-        proposal['provenance'] = {**proposal['provenance'], 'model': lease['resource']['model'],
-                                  'allocation_id': lease['allocation_id'],
-                                  'device_id': lease['resource'].get('device_id'),
-                                  'runtime': lease['resource'].get('harness') or lease['resource'].get('profile', '')}
+        proposal['provenance'] = {**proposal['provenance'],
+                                  **task_provenance.snapshot(task['worker'], lease['resource'])}
         proposal['family_account'] = bind_resource(graph, task, task['worker'], lease['resource'], proposal['at'])
         proposal['proposal_hash'] = fingerprint(proposal)
         save(graph, 'proposal', proposal)

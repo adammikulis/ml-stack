@@ -127,7 +127,7 @@ def test_nudge_subprocess_is_bounded_and_session_explicit(monkeypatch):
     def run(command, **kwargs):
         captured.append((command, kwargs))
         return SimpleNamespace(returncode=0, stdout='one unread', stderr='')
-    monkeypatch.setattr(harnesshook.subprocess, 'run', run)
+    monkeypatch.setattr(harnesshook, '_reader_run', run)
     rail = harnesshook.Rail('read-only', 'codex', ['/fixture'], session_id='root-one')
     assert harnesshook.nudge('codex', rail) == 'one unread'
     command, options = captured[0]
@@ -141,7 +141,7 @@ def test_unbound_notification_does_not_block_completed_tools(saved, monkeypatch,
     monkeypatch.setattr(harnesshook, 'Workspace', lambda: SimpleNamespace(base=saved[0], auth=lambda token: SimpleNamespace(id='codex')))
     monkeypatch.setattr(harnesshook.tokens, 'load', lambda *a: 'fixture-existing')
     monkeypatch.setattr(harnesshook.worktree_lifecycle, 'checkpoint', lambda *a: None)
-    monkeypatch.setattr(harnesshook.subprocess, 'run', lambda *a, **kw:
+    monkeypatch.setattr(harnesshook, '_reader_run', lambda *a, **kw:
                         SimpleNamespace(returncode=1, stdout='', stderr='notification session has no authenticated saved binding'))
     assert harnesshook.run(['post', '--label', 'codex'], io.StringIO('{"session_id":"child-thread"}'), io.StringIO()) == 0
     assert 'no authenticated saved binding' in capsys.readouterr().err

@@ -126,28 +126,36 @@ def _open_when_ready(port: int, browser: bool, stopped: threading.Event,
         stopped.wait(0.15)
 
 
-def main(argv: list[str] | None = None, *,
-         daemon_main: Callable[[list[str]], int] | None = None) -> int:
-    daemon_main is None and runtime.forward("ml_stack.fleet.launch", list(sys.argv[1:] if argv is None else argv))
+def _arguments(argv):
     ap = argparse.ArgumentParser(
         prog="ml-stack",
         description="Start ml-stack on this machine and open it in your browser.")
     ap.add_argument("--port", type=int, default=HTTP_PORT)
     ap.add_argument("--no-browser", action="store_true",
                     help="start the daemon but do not open a browser")
-    known, rest = ap.parse_known_args(argv)
+    ap.add_argument('--restart', action='store_true',
+                    help='restart the daemon while preserving jobs and independent model workers')
+    return ap.parse_known_args(argv)
+
+
+def main(argv: list[str] | None = None, *,
+         daemon_main: Callable[[list[str]], int] | None = None) -> int:
+    daemon_main is None and runtime.forward("ml_stack.fleet.launch", list(sys.argv[1:] if argv is None else argv))
+    known, rest = _arguments(argv)
 
     url = f"http://127.0.0.1:{known.port}/ui/"
 
     linux_executable = None
     running = already_running(known.port)
     expected = str(state().get("commit") or "")
-    if running is not None and not same_commit(str(running.get("commit") or ""), expected):
+    if running is not None and (known.restart or not same_commit(str(running.get("commit") or ""), expected)):
         try:
             if sys.platform == "win32":
-                replace_running(rest, known.port, running, expected)
+                replace_running(rest, known.port, running, expected, restart="preserve")
             else:
-                request_replacement(_root(rest), known.port, running, expected)
+                answer = request_replacement(_root(rest), known.port, running, expected, restart="preserve")
+                if isinstance(answer, dict) and answer.get("preserved"):
+                    say(f"Restart preserves jobs: {answer['preserved']}")
             if not _wait_for_exit(known.port):
                 raise ControlError("The previous daemon is still exiting; retry shortly.")
             running = None

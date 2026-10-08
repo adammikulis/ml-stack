@@ -515,7 +515,7 @@ def restart(*, run: Callable[[list[str]], int] | None = None,
     """
     chosen = runtime.available() if run is None and reexec is None else None
     if chosen is not None and (getattr(sys, "frozen", False) or Path(sys.prefix) != chosen.prefix):
-        args = [arg for arg in sys.argv[1:] if arg not in {"--restart", "--force-restart", "--no-browser"}]
+        args = [arg for arg in sys.argv[1:] if arg not in {"--restart", "--no-browser"}]
         jobs.detach("ml_stack.fleet.launch", ["--restart", "--no-browser", *args],
                     log=runtime.directory() / "restart.log")
         return "launcher"

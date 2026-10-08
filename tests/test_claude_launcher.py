@@ -106,7 +106,7 @@ def test_slots_asked_for_reach_the_lease(monkeypatch, tmp_path):
     binary = tmp_path / "claude"
     binary.write_text("#!/bin/sh\nexit 0\n")
     binary.chmod(0o755)
-    started = ["kestrel", "--port", "8899", "--claude", str(binary)]
+    started = ["kestrel", "--ctx", "262144", "--port", "8899", "--claude", str(binary)]
 
     claude.launch(started, say=lambda _: None, run_claude=lambda command, env: 0)
     assert (seen["lease"]["parallel"], seen["lease"]["context"]) == (1, 262144), \
@@ -162,7 +162,7 @@ class TestServingWithTheHead:
         binary.write_text("#!/bin/sh\nexit 0\n")
         binary.chmod(0o755)
         said: list[str] = []
-        claude.launch([*argv, "--claude", str(binary)], say=said.append,
+        claude.launch([*argv, "--ctx", "262144", "--claude", str(binary)], say=said.append,
                       run_claude=lambda cmd, env: 0)
         return seen, said
 
@@ -255,6 +255,6 @@ class TestJoiningAServerAlreadyUp:
         binary = tmp_path / "claude"
         binary.write_text("#!/bin/sh\nexit 0\n")
         binary.chmod(0o755)
-        claude.launch(["quince-2b", "--claude", str(binary)], say=lambda _: None,
+        claude.launch(["quince-2b", "--ctx", "262144", "--claude", str(binary)], say=lambda _: None,
                       run_claude=lambda cmd, env: 0)
         assert "lease" in seen

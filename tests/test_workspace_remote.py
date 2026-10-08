@@ -644,3 +644,19 @@ def test_inbox_reads_all_pending_messages_with_cli_defaults(host, limit, widen, 
     assert all('<untrusted ' in row['text'] for row in inbox['result'])
     code, waiting = call(host, reader, 'nudge')
     assert code == 200 and '3 waiting for you' in waiting['result']
+
+
+def test_remote_execution_profiles_are_reported_own_identity_and_project_scoped(host):
+    first, second = joined(host, name='observer'), joined(host, name='other')
+    document = {'session': 'session-1', 'event_id': 'event-1', 'event': 'SessionStart',
+                'fields': {'model': 'qwen', 'effective_effort': 'high'}}
+    code, result = call(host, first, 'record_execution_profile', document)
+    assert code == 200, result
+    observation = result['result']
+    assert observation['actor'] == 'observer'
+    assert observation['fields']['effective_effort'] == {'value': 'high', 'source': 'reported'}
+    assert call(host, second, 'execution_profiles')[1]['result'] == []
+    assert call(host, first, 'execution_profiles')[1]['result'] == [observation]
+    assert call(host, first, 'record_execution_profile', document, project=OTHER)[0] == 403
+    assert call(host, first, 'record_execution_profile', {**document, 'source': 'verified'})[0] == 400
+    assert call(host, first, 'record_execution_profile', {**document, 'actor': 'other'})[0] == 400

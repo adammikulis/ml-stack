@@ -449,3 +449,57 @@ def test_restart_admission_refuses_serving_storage_that_cannot_be_read(restart_r
         assert runtime.serving.path.is_dir()
     finally:
         control.close()
+
+
+@pytest.mark.parametrize('restart', ['preserve'])
+def test_restart_checkpoints_jobs_without_using_idle_predicate(device, restart):
+    root, port, control, busy, stopped, _active, _release = device
+    busy[0] = True
+    calls = []
+    control.restart_safe = lambda: calls.append('checkpoint') or {'queued': 2, 'running': 1}
+    answer = request_replacement(root, port, {'launcher_control': control.instance}, 'new', restart=restart)
+    assert answer['preserved'] == {'queued': 2, 'running': 1}
+    assert calls == ['checkpoint'] and stopped.wait(2)
+
+
+def test_failed_restart_checkpoint_preserves_admission_and_allows_retry(device):
+    root, port, control, _busy, stopped, _active, _release = device
+    def fail():
+        raise OSError('checkpoint unavailable')
+    control.restart_safe = fail
+    with pytest.raises(ServerError):
+        request_replacement(root, port, {'launcher_control': control.instance}, 'new', restart='preserve')
+    assert not control.stopping and not stopped.is_set()
+    control.restart_safe = lambda: {'queued': 1, 'running': 1}
+    assert request_replacement(root, port, {'launcher_control': control.instance}, 'new', restart='preserve')['stopping']
+
+
+@pytest.mark.parametrize('payload', [
+    {'version': True}, {'version': 2}, {'restart': True}, {'restart': 'kill'},
+    {'restart': 'force'}, {'version': 1, 'unexpected': 1}, {'expected': 2},
+])
+def test_restart_control_rejects_unknown_version_flags_and_fields(device, payload):
+    from types import SimpleNamespace
+    _root, port, control, _busy, stopped, _active, _release = device
+    body = json.dumps({'instance': control.instance, **payload}).encode()
+    endpoint = f'http://127.0.0.1:{port}{ROUTE}'
+    replies = []
+    handler = SimpleNamespace(path=ROUTE, client_address=('127.0.0.1', 1234),
+                              headers={'Host': f'127.0.0.1:{port}', **macauth.sign(control.capability, 'POST', endpoint, body)},
+                              _body=lambda _limit: body, _send=lambda *args: replies.append(args))
+    assert control.route(handler)
+    assert replies[0][0] == 409 and not stopped.is_set()
+
+
+@pytest.mark.parametrize('busy', ['setup', 'download', 'measurement'])
+def test_preserving_restart_keeps_unsafe_background_work_running(busy):
+    from types import SimpleNamespace
+
+    from ml_stack.fleet.daemon_control import _preserve
+    runtime = SimpleNamespace(web=busy == 'setup', initial_setup=True,
+        settings=SimpleNamespace(setup_done=False), interface=None,
+        downloads=SimpleNamespace(active=lambda: [SimpleNamespace(state='getting')] if busy == 'download' else []),
+        bench_host=SimpleNamespace(measuring=lambda: busy == 'measurement'),
+        runner=SimpleNamespace(checkpoint_restart=lambda: pytest.fail('froze jobs during unsafe background work')))
+    with pytest.raises(ControlError):
+        _preserve(runtime)

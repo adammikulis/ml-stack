@@ -146,7 +146,9 @@ def test_remote_renewal_uses_existing_capability_without_recovery(tmp_path, monk
         return {"id": "worker", "project_id": PROJECT, "cluster_id": CURRENT}
     monkeypatch.setattr(remote, "_request", request)
     assert remote.renew("worker")["id"] == "worker"
-    assert requests == [("renew", {"agent_token": token, "cluster": "fresh-dev", "cluster_id": CURRENT})]
+    assert [(action, {key: value for key, value in body.items() if key != "device"}) for action, body in requests] == [
+        ("renew", {"agent_token": token, "cluster": "fresh-dev", "cluster_id": CURRENT})]
+    assert requests[0][1]["device"]["verification"] == "local-observed"
     assert tokens.load(remote.base, "worker") == token
 
 

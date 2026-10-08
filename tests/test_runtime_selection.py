@@ -147,10 +147,10 @@ def test_launcher_forward_preserves_arguments_and_removes_source_paths(isolated,
     monkeypatch.setenv("PYTHONPATH", str(isolated / "source"))
     calls = []
     monkeypatch.setattr(os, "execve", lambda *args: calls.append(args))
-    assert runtime.forward("ml_stack.fleet.launch", ["--root", "studio", "--force-restart"])
+    assert runtime.forward("ml_stack.fleet.launch", ["--root", "studio", "--restart"])
     python, argv, environment = calls[0]
     assert python == str(chosen.python)
-    assert argv == [python, "-I", "-m", "ml_stack.fleet.launch", "--root", "studio", "--force-restart"]
+    assert argv == [python, "-I", "-m", "ml_stack.fleet.launch", "--root", "studio", "--restart"]
     assert "PYTHONPATH" not in environment
 
 
@@ -165,7 +165,11 @@ def test_selected_restart_uses_a_separate_authenticated_launcher(isolated, monke
     calls = []
     monkeypatch.setattr(jobs, "detach", lambda *args, **kwargs: calls.append((args, kwargs)))
     assert autostart.restart() == "launcher"
-    assert calls[0][0] == ("ml_stack.fleet.launch", ["--restart", "--no-browser", "--root", "studio", "--port", "8771"])
+    module, argv = calls[0][0]
+    assert (module, argv) == ("ml_stack.fleet.launch", ["--restart", "--no-browser", "--root", "studio", "--port", "8771"])
+    from ml_stack.fleet import launch
+    known, rest = launch._arguments(argv)
+    assert known.restart and known.port == 8771 and rest == ["--root", "studio"]
 
 
 @pytest.mark.slow
