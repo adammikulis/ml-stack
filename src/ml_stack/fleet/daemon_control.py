@@ -91,14 +91,14 @@ def request_replacement(root: Path, port: int, running: dict, expected: str) -> 
             raise ControlError('Daemon replacement cannot leave its owned loopback endpoint.')
         return url
 
-    body = json.dumps({'version': 1, 'instance': instance, 'expected': expected}).encode()
+    request = {'version': 1, 'instance': instance, 'expected': expected}
     deadline = time.monotonic() + 10
     while True:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise ControlError('Daemon replacement did not reach its idle boundary.')
         try:
-            return _acknowledge(endpoint, body, capability, guard, instance, remaining)
+            return _acknowledge(endpoint, request, capability, guard, remaining)
         except ServerError as exc:
             if exc.status != 409:
                 raise
@@ -111,7 +111,9 @@ def request_replacement(root: Path, port: int, running: dict, expected: str) -> 
             time.sleep(min(0.1, max(0, deadline - time.monotonic())))
 
 
-def _acknowledge(endpoint, body, capability, guard, instance, timeout):
+def _acknowledge(endpoint, request, capability, guard, timeout):
+    body = json.dumps(request).encode()
+    instance = request['instance']
     with open_stream(endpoint, method='POST', data=body, token=capability, timeout=timeout,
                      headers={'Content-Type': 'application/json', sealing.HEADER: '2'}, guard=guard) as response:
         if response.headers.get(sealing.HEADER) != '1':

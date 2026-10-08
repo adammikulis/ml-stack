@@ -111,7 +111,7 @@ def test_request_in_progress_cannot_race_idle_replacement(device):
         try:
             replacements.append(request_replacement(
                 root, port, {'launcher_control': control.instance}, 'a' * 40))
-        except Exception as exc:
+        except (ServerError, ControlError, OSError) as exc:
             errors.append(exc)
     replacement = threading.Thread(target=replace)
     replacement.start()
