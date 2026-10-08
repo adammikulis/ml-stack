@@ -174,7 +174,12 @@ def test_actual_hooks_record_claimed_metadata_and_authenticated_subagent_brief(t
     brief = invoke('claude-subagent-start', {'agent_type': 'Explore', 'agent_id': 'abcdef12345', 'cwd': str(repository)})
     assert brief.returncode == 0 and not brief.stderr
     context = json.loads(brief.stdout)['hookSpecificOutput']['additionalContext']
-    assert 'hello-model' in context and '--agent claude' in context and 'explore-abcdef' in context
+    assert '--agent claude --label explore-abcdef' in context
+    assert 'Your registration, model and the joined and done announcements are recorded for you' in context
+    assert 'Keep the main session claude as central coordinator' in context
+    assert 'Labels never grant rights' in context
+    assert ws.model_of('claude', 'explore-abcdef') == ('claude-sonnet-4-6', 'inherited')
+    assert not ws.registry.role_of('claude/explore-abcdef')
     assert 'Acquire authenticated claims before mutation' in context
 
 
