@@ -67,10 +67,13 @@ def wheel(stage, commit_id):
     return path
 
 
-def builder(hook_code=0, log=None):
+def builder(hook_code=0, log=None, epoch=0):
     def build(plan, stage):
         source = stage / "source" / "scripts" / "hooks"
         source.mkdir(parents=True)
+        if epoch:
+            (stage / "source" / "packaging").mkdir()
+            (stage / "source" / "packaging" / "runtime-floor").write_text(f"{epoch}\n")
         for name in runtime_deploy.HOOKS:
             (source / name).write_text(f"import sys\nsys.exit({hook_code})\n")
         built = wheel(stage, plan.commit)
@@ -178,19 +181,24 @@ def test_rollback_selects_the_earlier_runtime_and_holds_the_commit_until_head_mo
 def test_runtimes_below_the_floor_are_replaced_and_rejected(world):
     repo, launchers, _ = world
     old = commit(repo, "a")
-    runtime_deploy.ensure(plan_for(repo, launchers), builder=builder())
+    runtime_deploy.ensure(plan_for(repo, launchers), builder=builder(epoch=1))
+    assert runtime_store.epoch_of(runtime_store.candidates()[0].prefix) == 1
     (repo / "packaging").mkdir()
-    floor = commit(repo, "packaging/runtime-floor", old + "\n")
-    assert runtime_deploy.floor_of(repo, floor) == old
-    unrelated = subprocess.run(["git", "-C", str(repo), "commit-tree", "-m", "x", "HEAD^{tree}"],
-                               capture_output=True, text=True, check=True).stdout.strip()
-    assert runtime_deploy.meets(repo, old, floor) and not runtime_deploy.meets(repo, floor, old)
-    assert not runtime_deploy.meets(repo, floor, unrelated)
-    plan = runtime_deploy.Plan(repo, floor, launchers, floor=floor, wait_s=2)
+    head = commit(repo, "packaging/runtime-floor", "2\n")
+    assert runtime_deploy.floor_of(repo, head) == 2 and runtime_deploy.floor_of(repo, old) == 0
+    plan = runtime_deploy.Plan(repo, head, launchers, floor=2, wait_s=2)
     assert runtime_deploy.healthy(plan) is None
-    outcome = runtime_deploy.ensure(plan, builder=builder())
-    assert outcome.action == "switched" and runtime_store.selection()["commit"] == floor
-    assert [c.commit for c in runtime_store.candidates()] == [floor]
+    outcome = runtime_deploy.ensure(plan, builder=builder(epoch=2))
+    assert outcome.action == "switched" and runtime_store.selection()["commit"] == head
+    assert [c.commit for c in runtime_store.candidates()] == [head]
+
+
+def test_a_floor_that_is_not_an_integer_is_an_error(world):
+    repo, _, _ = world
+    (repo / "packaging").mkdir()
+    head = commit(repo, "packaging/runtime-floor", "5967b960\n")
+    with pytest.raises(runtime_deploy.DeployError, match="runtime-floor"):
+        runtime_deploy.floor_of(repo, head)
 
 
 def test_collection_keeps_the_newest_verified_and_never_a_tree_a_process_runs_in(world):
@@ -340,3 +348,228 @@ def test_a_current_runtime_answers_without_taking_the_build_lock(world):
     runtime_deploy.ensure(plan_for(repo, launchers), builder=builder())
     with only_one(runtime.directory() / "deploy.lock", note="other build"):
         assert runtime_deploy.ensure(plan_for(repo, launchers), builder=builder()).action == "current"
+
+
+def fake_tree(root, commit_id, verified_at, name, *, importable=True):
+    prefix = root / commit_id / f"{len(name):032x}"
+    (prefix / "bin").mkdir(parents=True)
+    python = prefix / "bin" / "python"
+    python.write_text(f"#!/bin/sh\necho {name}\n")
+    python.chmod(0o700)
+    if importable:
+        (prefix / "lib" / "python3.13" / "site-packages" / "ml_stack").mkdir(parents=True)
+        (prefix / "lib" / "python3.13" / "site-packages" / "ml_stack" / "__init__.py").write_text("")
+    (prefix / "verified.json").write_text(json.dumps({"commit": commit_id, "version": "0", "identity": "x",
+                                                      "verified_at": verified_at}))
+    return prefix
+
+
+def render_launcher(tmp_path, root, python="/nonexistent/bin/python"):
+    path = tmp_path / "ml-stack-probe"
+    path.write_text(runtime.LAUNCHER.format(root=str(root), python=python, arguments="['-c', 'pass']", name=path.name))
+    path.chmod(0o700)
+    return path
+
+
+def run_launcher(path, cwd=None):
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    return subprocess.run([sys.executable, str(path)], capture_output=True, text=True, timeout=60, cwd=cwd, env=env)
+
+
+def test_launcher_fallback_prefers_the_selection_honours_the_hold_and_survives_a_bad_timestamp(tmp_path):
+    root = tmp_path / "root"
+    a, b, c = "a" * 40, "b" * 40, "c" * 40
+    fake_tree(root, a, "garbage", "tree-a")
+    chosen = fake_tree(root, b, 100.0, "tree-b")
+    fake_tree(root, c, 200.0, "tree-c")
+    launcher = render_launcher(tmp_path, root)
+    (root / "selected.json").write_text(json.dumps({"prefix": str(chosen), "commit": b}))
+    assert run_launcher(launcher).stdout.strip() == "tree-b"
+    (root / "deploy.json").write_text(json.dumps({"held": {"commit": b, "reason": "rolled back"}}))
+    assert run_launcher(launcher).stdout.strip() == "tree-c"
+
+
+def test_launcher_recovery_spawn_is_validated_logged_rate_limited_and_ignores_the_working_directory(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    source = tmp_path / "source"
+    (source / "src" / "ml_stack").mkdir(parents=True)
+    (source / "src" / "ml_stack" / "__init__.py").write_text("")
+    marker, shadow_marker = tmp_path / "marker", tmp_path / "shadow"
+    (source / "src" / "ml_stack" / "runtime_cli.py").write_text(
+        f"import pathlib\npathlib.Path({str(marker)!r}).open('a').write('ran\\n')\nprint('recovery output')\n")
+    shadow = tmp_path / "shadow-cwd" / "ml_stack"
+    shadow.mkdir(parents=True)
+    (shadow / "__init__.py").write_text("")
+    (shadow / "runtime_cli.py").write_text(f"import pathlib\npathlib.Path({str(shadow_marker)!r}).write_text('x')\n")
+    launcher = render_launcher(tmp_path, root)
+    (root / "deploy.json").write_text(json.dumps({"checkout": 5}))
+    done = run_launcher(launcher, cwd=shadow.parent)
+    assert done.returncode != 0 and "Traceback" not in done.stderr and not marker.exists()
+    (root / "deploy.json").write_text(json.dumps({"checkout": str(tmp_path / "elsewhere")}))
+    run_launcher(launcher, cwd=shadow.parent)
+    assert not marker.exists()
+    (root / "deploy.json").write_text(json.dumps({"checkout": str(source)}))
+    run_launcher(launcher, cwd=shadow.parent)
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline and not (root / "ensure.log").exists():
+        time.sleep(0.1)
+    time.sleep(1)
+    run_launcher(launcher, cwd=shadow.parent)
+    time.sleep(1)
+    assert marker.read_text() == "ran\n" and not shadow_marker.exists()
+    assert "recovery output" in (root / "ensure.log").read_text()
+
+
+def test_launcher_directories_are_absolute_and_a_relative_recorded_one_is_refused(world, monkeypatch, tmp_path):
+    runtime_deploy._prepare_root()
+    runtime_store.write_state({"launchers": "relative/bin"})
+    with pytest.raises(runtime_deploy.DeployError, match="absolute"):
+        runtime_cli._launchers("")
+    monkeypatch.chdir(tmp_path)
+    assert runtime_cli._launchers("bin") == tmp_path.resolve() / "bin"
+
+
+def test_a_checkout_comes_only_from_the_flag_or_the_record_and_must_be_an_ml_stack_source(world, monkeypatch, tmp_path):
+    repo, _, _ = world
+    commit(repo, "a")
+    monkeypatch.chdir(repo)
+    with pytest.raises(runtime_deploy.DeployError):
+        runtime_cli._checkout("")
+    with pytest.raises(runtime_deploy.DeployError, match="ml-stack"):
+        runtime_cli._checkout(str(repo))
+    (repo / "src" / "ml_stack").mkdir(parents=True)
+    (repo / "src" / "ml_stack" / "__init__.py").write_text("")
+    assert runtime_cli._checkout(str(repo)) == repo.resolve()
+    runtime_deploy._prepare_root()
+    runtime_store.write_state({"checkout": str(tmp_path)})
+    with pytest.raises(runtime_deploy.DeployError):
+        runtime_cli._checkout("")
+
+
+def test_a_failure_recording_state_after_the_selection_is_published_keeps_the_tree(world, monkeypatch):
+    repo, launchers, _ = world
+    head = commit(repo, "a")
+
+    def refuse(update, root=None):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(runtime_store, "write_state", refuse)
+    built = runtime_deploy.build_and_switch(plan_for(repo, launchers), builder())
+    assert built.prefix.is_dir() and runtime_store.selection()["commit"] == head
+    assert launcher_output(launchers) == f"help {head[:7]}"
+
+
+def test_a_failure_before_the_selection_restores_the_previous_launchers_and_discards_the_tree(world, monkeypatch):
+    repo, launchers, _ = world
+    first = commit(repo, "a")
+    runtime_deploy.ensure(plan_for(repo, launchers), builder=builder())
+    commit(repo, "b")
+
+    def refuse(chosen):
+        raise OSError("cannot publish")
+
+    monkeypatch.setattr(runtime, "publish", refuse)
+    outcome = runtime_deploy.ensure(plan_for(repo, launchers), builder=builder())
+    assert outcome.action == "failed"
+    assert launcher_output(launchers) == f"help {first[:7]}"
+
+
+def test_an_unusable_selection_never_stops_the_callers_that_would_forward_to_it(world, tmp_path):
+    from ml_stack import jobs
+    runtime_deploy._prepare_root()
+    (runtime.directory() / "selected.json").write_text("{not json")
+    assert runtime.available() is None
+    assert runtime.forward("json.tool", []) is False
+    started = jobs.detach("calendar", ["2001"], log=tmp_path / "out.log")
+    assert started.command[0] == sys.executable
+
+
+def test_forward_does_not_verify_when_this_process_runs_from_the_selected_prefix(world, monkeypatch):
+    runtime_deploy._prepare_root()
+    (runtime.directory() / "selected.json").write_text(json.dumps({"prefix": sys.prefix, "commit": "a" * 40}))
+    monkeypatch.setattr(runtime, "verify", lambda row: pytest.fail("verified"))
+    assert runtime.forward("json.tool", []) is False
+
+
+def test_a_rollback_hold_does_not_block_recovery_and_background_does_not_spawn_when_held(world, capsys, monkeypatch):
+    repo, launchers, _ = world
+    commit(repo, "a")
+    runtime_deploy.ensure(plan_for(repo, launchers), builder=builder())
+    second = commit(repo, "b")
+    runtime_deploy.ensure(plan_for(repo, launchers), builder=builder())
+    runtime_deploy.rollback(plan_for(repo, launchers))
+    monkeypatch.setattr(runtime_cli, "_start_background", lambda argv: pytest.fail("spawned while held"))
+    argv = ["ensure", "--background", "--checkout", str(repo), "--launchers", str(launchers)]
+    monkeypatch.setattr(runtime_cli, "_checkout", lambda named: repo)
+    assert runtime_cli.main(argv) == 0 and "held" in capsys.readouterr().out
+    assert runtime_cli.main(["status", "--launchers", str(launchers)]) == 0
+    assert f"held" in capsys.readouterr().out
+    import shutil
+    shutil.rmtree(runtime_store.selection()["prefix"])
+    outcome = runtime_deploy.ensure(plan_for(repo, launchers), builder=builder(hook_code=3))
+    assert outcome.action in {"recovered", "held"} and runtime_deploy.healthy(plan_for(repo, launchers)) is not None
+    assert runtime_store.selection()["commit"] != second
+
+
+def test_discarding_a_tree_unlaunches_it_even_when_deletion_fails(world, monkeypatch):
+    import shutil
+    runtime_deploy._prepare_root()
+    prefix = fake_tree(runtime.directory(), "d" * 40, 5.0, "tree-d")
+    monkeypatch.setattr(shutil, "rmtree", lambda *a, **k: None)
+    runtime_store.discard(prefix)
+    assert prefix.exists() and not (prefix / "verified.json").exists() and runtime_store.rejected(prefix)
+
+
+def test_board_text_carries_only_full_hex_commits(world, monkeypatch):
+    posted = []
+    monkeypatch.setattr(runtime_board.cli, "main", lambda argv: posted.append(argv) or 0)
+    good = runtime_deploy.Outcome("switched", "a" * 40)
+    assert runtime_board.announce(good, "x; rm -rf /", agent="someone")
+    assert "none" in posted[-1][2] and "rm" not in posted[-1][2]
+    assert not runtime_board.announce(runtime_deploy.Outcome("switched", "z" * 40), "", agent="someone")
+
+
+def test_the_session_start_refresh_is_bounded_and_the_smoke_environment_disables_it(monkeypatch):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("workspace_hook_under_test", Path(__file__).resolve().parents[1] / "scripts/hooks/workspace_hook.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    seen = []
+    monkeypatch.delenv("ML_STACK_RUNTIME_ENSURE", raising=False)
+    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: seen.append(k.get("timeout")) or subprocess.CompletedProcess(a, 0, "", ""))
+    module.refresh_runtime("SessionStart")
+    assert seen and all(t is not None and t <= 6 for t in seen) and len(seen) == 1
+    env = runtime_deploy._clean_environment(Path("/tmp/x"), Path("/tmp/y"))
+    assert env["ML_STACK_RUNTIME_ENSURE"] == "off"
+
+
+def test_a_claim_whose_pid_was_reused_by_another_process_is_released(tmp_path):
+    from ml_stack.workspace.claims import Claims
+    store = Claims(tmp_path, 600)
+    target = tmp_path / "t"
+    target.mkdir()
+    store.claim(Identity("old", AGENT), "install", str(target), {"pid": os.getpid(), "ttl_s": 600, "pid_started": 1.0})
+    assert store.who("install", str(target)) is None
+    store.claim(Identity("live", AGENT), "install", str(target), {"pid": os.getpid(), "ttl_s": 600})
+    assert store.who("install", str(target))["owner"] == "live"
+
+
+def test_status_and_a_tracker_ensure_need_no_recorded_launcher_directory(world, capsys):
+    repo, launchers, _ = world
+    head = commit(repo, "a")
+    (repo / "src" / "ml_stack").mkdir(parents=True)
+    (repo / "src" / "ml_stack" / "__init__.py").write_text("")
+    assert runtime_cli.main(["status", "--checkout", str(repo)]) == 0
+    assert not runtime.directory().exists()
+    outcome = runtime_deploy.ensure(runtime_deploy.Plan(repo, head, None, wait_s=2), builder=builder())
+    assert outcome.action == "switched" and runtime_store.selection()["commit"] == head
+    assert not list(launchers.iterdir())
+
+
+def test_tests_cannot_write_launchers_outside_the_state_root_or_the_temporary_directory(world):
+    from ml_stack import runtime_launchers
+    fake = runtime.Runtime(Path("/nonexistent"), "a" * 40, "0", runtime.identity())
+    with pytest.raises(OSError, match="test"):
+        runtime.write_launcher(Path.home() / "ml-stack-never", "ml_stack.cli", "main", fake)
+    assert not (Path.home() / "ml-stack-never").exists() and runtime_launchers
