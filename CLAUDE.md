@@ -54,6 +54,11 @@ End git commit messages with the attribution trailer the session's system remind
 end pull request descriptions with the line it gives. The commit message rules in AGENTS.md
 apply to the subject and body above the trailer.
 
+## Pushing
+
+I push `0.2dev` myself after every landing (AGENTS.md, "The agents push; the owner does not"). I
+never report a commit as "unpushed, the owner's to push" and never ask whether to push it.
+
 ## Browsers
 
 Never drive the owner's own browser through the `claude-in-chrome` tools to test this project's

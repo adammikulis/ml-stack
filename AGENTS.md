@@ -257,6 +257,12 @@ Do not accumulate ready branches or local-only commits until the end of a sessio
 worker to finish, or defer publication behind cleanup, unrelated work or background full suites.
 After publication, promptly complete the merged branch's maintained worktree cleanup.
 
+**The agents push; the owner does not.** Pushing the development branch is part of landing, done by
+whoever landed it, immediately and without asking. Never leave a landed commit for the owner to push,
+never ask the owner whether to push it, and never answer another agent's question about who publishes
+with "the owner"; the agent that landed it is the publisher. The owner should never have to check a
+device for unpushed work. Only `main` waits on the owner's explicit instruction.
+
 **Pull and push as work lands.** Every landed batch is followed at once by `git fetch`, a
 reconcile of anything the remote gained, and a normal push of the development branch. Every agent
 that starts a task, finishes a task or returns from a wait fetches and fast-forwards the
