@@ -210,13 +210,6 @@ class RemoteWorkspace:
         if saved:
             try:
                 self.call("whoami", saved)
-                if "/" not in ident and self.mode == "dev":
-                    result = self._request("renew", {"agent_token": saved, "cluster": self.cluster,
-                                                    "cluster_id": self.cluster_id,
-                                                    "device": device_metadata.current()})
-                    if (result.get("id") != ident or result.get("project_id") != self.project_id
-                            or result.get("cluster_id") != self.cluster_id):
-                        raise Denied("agent renewal returned another identity or project cluster")
                 return saved
             except Denied as error:
                 if not isinstance(error.__cause__, ServerError) or error.__cause__.status != 403:

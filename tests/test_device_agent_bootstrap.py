@@ -430,22 +430,3 @@ def test_cached_delegated_token_returns_without_root_registration(enrolled, mode
         pytest.fail('a delegated token must not register or renew its root')
     remote._request = refused
     assert remote.token(agent=child['id']) == cached
-
-
-def test_cached_dev_token_refreshes_device_without_reacquiring_session_lock(enrolled):
-    from ml_stack.workspace.remote import RemoteWorkspace
-    kit, device, projects, document = enrolled
-    name, token = device_sessions.ensure(kit.ws, device, projects, document)
-    remote = object.__new__(RemoteWorkspace)
-    remote.base, remote.mode = kit.base, 'dev'
-    remote.cluster, remote.cluster_id = 'example', 'c' * 32
-    remote.project_id = 'b' * 32
-    remote.call = lambda operation, presented: kit.ws.auth(presented)
-    captured = []
-    def request(action, payload):
-        assert action == 'renew' and payload['agent_token'] == token
-        captured.append(payload)
-        return {'id': name, 'project_id': remote.project_id, 'cluster_id': remote.cluster_id}
-    remote._request = request
-    assert remote.token(agent=name) == token
-    assert captured[0]['device']['machine_id']
