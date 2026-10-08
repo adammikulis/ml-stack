@@ -146,8 +146,9 @@ generates output over 30% faster (Opus 5.5 page).
 
 ## 3. What to launch when
 
-Cheapest adequate tier, using the repo order: Haiku 5.5 default, Sonnet 5.5 for more complicated work, Opus 5.5
-only after Sonnet fails, Fable only when the owner asks.
+Cheapest adequate tier, using the repo order: Haiku 5.5 for read-only lookup and for ratchet-lowering with a named
+metric and test selector, Sonnet 5.5 for anything else that writes or reviews code, Opus 5.5 only after Sonnet
+fails, Fable only when the owner asks.
 
 | Work | Launch | Evidence |
 |---|---|---|
@@ -165,9 +166,10 @@ FrontierCode than at xhigh, so max is not a default.
 
 ### Where the evidence argues against a rule
 
-- "Default to Haiku 5.5 for most subagent work" (CLAUDE.md): holds for lookup, summarising and narrow edits. For
-  implementation with tests the Terminal-Bench 4.0 gap (39.2% vs 70.6%, vendor) argues for choosing by task
-  kind; a failed Haiku attempt costs a full rerun at Sonnet price.
+- "Default to Haiku 5.5 for most subagent work" (former CLAUDE.md rule): replaced. Haiku 5.5 holds for lookup,
+  summarising and narrow edits, and the in-repo run below shows it matching Sonnet 5.5 on ratchet-lowering with a
+  named metric. For open-ended implementation the Terminal-Bench 4.0 gap (39.2% vs 70.6%, vendor) argues for
+  Sonnet; a failed Haiku attempt costs a full rerun at Sonnet price.
 - "Opus only after Sonnet fails": consistent. Sonnet 5.5 matches Opus 5.5 on Terminal-Bench 4.0 (70.6 vs 66.4
   vendor; 64.14 vs 65.15 Vals) at half the price.
 - "Fable only when the owner asks": consistent.
@@ -184,3 +186,29 @@ FrontierCode than at xhigh, so max is not a default.
 - Prices change; the vendor pages cited are the source, not this table.
 - Repository measurements (JevBench, decider sets, `docs/bench.md`) override this file. Re-collect it when a
   tier ships or a vendor retires an id.
+
+## 5. In-repo run: ratchet-lowering, Haiku 5.5 against Sonnet 5.5
+
+Run 2026-10-08 by the lead session. One attempt per model per task, each in its own throwaway worktree cut
+from `0.2dev` at `b9f28265`, identical brief per pair, no branch landed. Models `claude-haiku-5-5` and
+`claude-sonnet-5-5`. Source of the targets: `scripts/budgets --show ruff-other` on that commit. Checks the
+lead re-ran in each worktree (not the workers' reports): `ruff check <files> --output-format concise` and
+`scripts/test all -n 1 <test files>`. A blind Sonnet reviewer (model labels shuffled, commit messages hidden)
+scored the diffs and ran a differential test of old against new code.
+
+| Task | Target | Haiku 5.5 | Sonnet 5.5 |
+|---|---|---|---|
+| T1 | 11 `RUF059` in `tests/test_graph_cache.py`, `tests/test_graph_bench_standard.py` | 11 fixed, 30 tests pass, 10+/10-, 123 s, 59k tokens | 11 fixed, 30 tests pass, 10+/10-, 101 s, 55k tokens |
+| T2 | 10 `RUF012`/`RUF007` in `tests/test_fleet_work.py` | 10 fixed, 34 tests pass, 19+/14- (reflowed lines), 145 s, 62k | 10 fixed, 34 tests pass, 12+/10-, 168 s, 58k |
+| T4 | `PLR0915` (58 > 50 statements), `UP035`, `RUF046` in `src/ml_stack/bench/history.py` | all fixed, 16 tests pass, 71+/42-, largest function 26 statements, 157 s, 68k | all fixed, 16 tests pass, 51+/36-, largest function 32 statements, 104 s, 57k |
+
+- Objective checks tie: every target finding fixed, no new finding, every test file passes, the same
+  out-of-scope findings remain (3 in T1, 2 in T2, 1 in T4).
+- T4 differential test, 316 inputs: 0 differences against the original for both models.
+- Blind review, with the labels resolved afterwards: T1 prefers Haiku moderately (keeps the discarded names,
+  `_calls`); T2 prefers Haiku strongly; T4 prefers Sonnet weakly (smaller diff; Haiku's decomposition read
+  better but added docstrings and renamed `exit`). The reviewer's T2 and T4 line-length penalties do not
+  apply to the repo's gates: `pyproject.toml` sets `line-length = 100` but does not select `E501`.
+- Haiku's diffs carried more unrequested churn on T2 and T4 (reflowed continuation lines, docstrings, one
+  rename). Price at the vendor's figures is about twenty times lower for Haiku.
+- Limits: three tasks, one attempt each, one reviewer. Not a measurement of design-heavy refactors.
