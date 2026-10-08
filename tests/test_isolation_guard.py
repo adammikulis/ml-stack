@@ -140,10 +140,14 @@ class TestCacheGuard:
                 where.parent.mkdir(parents=True, exist_ok=True)
                 where.write_text("[]")
         """
-        env = {**os.environ, "ML_STACK_HOME": str(fake_home), "REAL_STATE_ROOT": str(fake_home)}
+        env = {**os.environ, "ML_STACK_HOME": str(fake_home), "REAL_STATE_ROOT": str(fake_home),
+               "ML_STACK_TEST_OTHER_WRITERS": "[]"}
         code, out = _run_generated(tmp_path, body, env=env)
         assert code != 0, out
         assert "traind/serving.json" in out, out
+        live = {**env, "ML_STACK_TEST_OTHER_WRITERS": '[[4242, "ml-stack-bench prepare"]]'}
+        code, out = _run_generated(tmp_path, body, env=live)
+        assert code == 0 and "4242 ml-stack-bench prepare" in out, out
 
     def test_a_test_sees_neither_the_real_home_nor_the_real_state_root(self, tmp_path):
         fake_home = tmp_path / "impersonated-real-home"
