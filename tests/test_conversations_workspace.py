@@ -202,6 +202,7 @@ def test_unshared_canonical_workspace_is_selected_and_team_messages_render(chat_
     board = page.locator('chat-view ml-board')
     assert board.get_attribute('endpoint') == f'/ui/projects/{project}/board'
     expect(page.locator('#conversation-channels').get_by_role('button', name='Join workspace as person')).to_be_visible()
+    expect(page.locator('#conversation-direct')).to_have_text('Agents and direct messages appear here.')
     page.locator('#conversation-channels').get_by_role('button', name='Join workspace as person').click()
     expect(board.get_by_role('button', name='Join workspace as person')).to_be_visible()
     assert all('person_project' not in row for row in ws.registry._load().values())
