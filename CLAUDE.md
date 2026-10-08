@@ -269,6 +269,10 @@ change the authenticated worker identity. Economic accounts aggregate independen
 contributions by model family across devices; exact workers, devices and model loads remain
 provenance, and a family switch does not rebucket historical awards.
 
+**Claude subagent model order.** Default to Haiku 5.5 (`claude-haiku-5-5`) for most subagent
+work. Use Sonnet 5.5 (`claude-sonnet-5-5`) for more complicated work. Use Opus 5.5
+(`claude-opus-5-5`) only after Sonnet has failed on the task.
+
 Reasoning effort, response output tokens, context length, tool/model turns, wall time, and
 CPU/GPU or memory admission are independent settings. Do not derive an answer cap from a
 thinking level or silently overwrite an explicit caller budget. Expose intentional user-facing
@@ -468,6 +472,11 @@ is not a reason to refuse an authorized development change. Editable installs re
 
 A new worktree has no `dist/`, and one test builds a real environment out of it: run
 `python packaging/build.py` there before trusting a full test run.
+
+**Contact comes first.** The SessionStart hook registers the lead, announces it and puts the inbox in
+its context. The lead's first action each session is to read that inbox and answer what is in it;
+when the hook output is absent, it runs `ml-stack-workspace inbox --agent claude-code` before any
+other work.
 
 **The lead reads the board.** Between tasks the main session runs `ml-stack-workspace inbox` (it is
 joined as `claude-code`), answers other agents (Codex, local models) in the thread, and reads the `#announcements`

@@ -56,10 +56,14 @@ def invoke(name, event):
 def test_session_event_forwards_exact_model_as_a_claim(commands, model):
     _, calls = commands
     done = invoke('claude-session-start', {'model': model, 'session_id': 'native-main-1'})
-    assert done.returncode == 0 and not done.stdout and not done.stderr
+    assert done.returncode == 0 and not done.stderr
     records = json.loads(calls.read_text())
     assert records[0]['session'] == 'native-main-1' and records[0]['harness'] == 'claude-code'
     assert records[1]['argv'] == ['main-session', '--agent', 'claude-code', '--harness', 'claude-code']
+    assert [r['argv'][0] for r in records[2:]] == ['announce', 'inbox']
+    assert records[2]['argv'][1] == 'joined'
+    context = json.loads(done.stdout)['hookSpecificOutput']
+    assert context['hookEventName'] == 'SessionStart' and 'Authenticated parent brief' in context['additionalContext']
     assert records[0]['argv'] == ['whoami', '--agent', 'claude-code', '--model',
                                            model['id'] if isinstance(model, dict) else model,
                                            '--harness', 'claude-code']
@@ -75,7 +79,7 @@ def test_session_uses_reported_environment_model_when_event_omits_it(commands, m
 def test_missing_model_registers_session_without_guessing_and_explains_it(commands):
     _, calls = commands
     done = invoke('claude-session-start', {'session_id': 'native-with-unknown-model'})
-    assert done.returncode == 0 and not done.stdout
+    assert done.returncode == 0
     records = json.loads(calls.read_text())
     assert records[0] == {'argv': ['whoami', '--agent', 'claude-code', '--harness', 'claude-code'],
                           'session': 'native-with-unknown-model', 'harness': 'claude-code'}
@@ -189,7 +193,7 @@ def test_session_exports_preserve_native_context_without_global_configuration(co
     assert 'EXISTING_NATIVE_CONTEXT=preserved' in text
     assert 'export ML_STACK_SESSION_ID=native-main-1' in text
     assert 'export ML_STACK_SESSION_HARNESS=claude-code' in text
-    assert [item['argv'][0] for item in json.loads(commands[1].read_text())] == ['whoami', 'main-session']
+    assert [item['argv'][0] for item in json.loads(commands[1].read_text())] == ['whoami', 'main-session', 'announce', 'inbox']
     shell = subprocess.run(['/bin/sh', '-c', '. "$1"; ml-stack-workspace whoami --agent claude-code',
                             'hook-test', str(target)], capture_output=True, text=True, check=False)
     assert shell.returncode == 0
