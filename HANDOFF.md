@@ -7,6 +7,15 @@
 - Triage the remaining failures from the October 6 macOS background full red-team run at `920cf217`: 130 failed, 30 errors, 13,729 passed, 364 skipped. Re-run the remaining Board latency, serving, training, gym and fixture failures after scoped setup, pairing and installer repairs. Evidence: `/private/tmp/dev-final-background-full.log`, `/private/tmp/dev-full-failures.txt` and `/private/tmp/ml-stack-full-lifecycle-project-diagnosis.md`. Linux testing remains owner-paused.
 - Verify an authenticated connection and a Board message/reply with the other physical device after separate Dev profile activation. Local discovery and browser checks do not establish this roundtrip.
 
+## Open from the claude session (2026-10-08)
+
+- **Broker branches 2-5 of the one-thing-computing rule are not started** (branch 1, the device field, is landed). `broker-purpose-not-exclusive`: `Broker._decide` in `src/ml_stack/serve/broker.py` still serialises same-purpose asks behind a held server (`busy`, `_first_for_purpose`); a different model under one purpose must get its own resident server when memory admits. Then `gate-compute-lease-per-device` (`serve/gate.py`), `workspace-allocation-device`, and `rule-docs-and-bench-profiles` (measure a CPU model beside a GPU one for memory-bandwidth cost; per-platform setting, default allowed). Rule: `AGENTS.md`, "One thing computing on the GPU at a time".
+- **Old GPU-rule wording remains** in `HANDOFF.md` (the serving section), `docs/experiments/iq-vs-kquant-metal.md:53`, `src/ml_stack/ingest/serving.py:87`, `src/ml_stack/bench/queue.py:21` and `tests/workspace_screen_corpus.py:35`; each states "one model on the GPU" and needs rewording or a decision.
+- **Hooks are not verified end to end on the restored runtime.** SessionStart, SubagentStart/Stop and the nudge push (message text shown in the TUI) have only run from source; the nudge canonical-board fix needs a Board host restart. The installed `ml-stack-workspace` was down for a time during another agent's runtime deploy.
+- **`authority_machine` removal (`4ee616e7`) is unverified on two real machines**: discovery, certificate pinning and the host-address path are covered by fakes and in-process TLS only. The Projects and Tasks pages were not driven in a browser (browser tests fail on this machine). `board_host` is self-declared and tied to a device only by the pinned certificate.
+- **Owner has not reviewed the `AGENTS.md` rules changes** (authority registry, GPU rule, "The agents push; the owner does not").
+- **Not built, discussed:** attested instructions (one-time hash on UserPromptSubmit, taint tracking for delegated gates) and decision-model screening of board messages at ingest.
+
 ## Active work (2026-10-06)
 
 - **Speed up checks without reducing coverage.** `scripts/gates/_floors.py` now reuses the gate's
