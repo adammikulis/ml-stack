@@ -74,3 +74,15 @@ def test_released_allocation_and_unrelated_parent_file_claim_remain_refused(nati
     assert edit(board, board.worker_id) == 'deny'
     assert board.ws.claims.who('worktree', str(board.project))['owner'] == 'lead'
     assert (board.project / 'code.py').read_text() == 'ORIGINAL = True\n'
+
+
+def test_unassigned_task_is_open_to_any_registered_worker_and_assignment_closes_it(board):
+    from ml_stack.workspace import task_scope
+
+    peer = board.ws.auth(board.agent('peer'))
+    open_task = board.board.create(board.parent, {**board.spec, 'source_key': 'open-task'})
+    assert task_scope.eligible(board.ws, peer, open_task)
+    assigned = board.board.create(board.parent, {**board.spec, 'source_key': 'assigned-task',
+                                                 'assignees': [board.worker_id]})
+    assert not task_scope.eligible(board.ws, peer, assigned)
+    assert task_scope.eligible(board.ws, board.ws.auth(board.child), assigned)
