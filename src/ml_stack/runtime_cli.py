@@ -9,12 +9,13 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
-from ml_stack import jobs, runtime, runtime_board, runtime_deploy, runtime_store
+from ml_stack import jobs, runtime, runtime_board, runtime_deploy, runtime_store, runtime_trust
 from ml_stack.command import Group, flag
 from ml_stack.fleet import runtime_wheel
 from ml_stack.home import expand
 from ml_stack.lock import held_by
 from ml_stack.log import say, warn
+from ml_stack.sentinel import human
 
 
 def _source(path: Path) -> Path:
@@ -43,12 +44,14 @@ def _launchers(named: str) -> Path | None:
     return path.resolve()
 
 
-def plan_from(args: argparse.Namespace) -> runtime_deploy.Plan:
-    """The deploy plan an ensure, status or rollback command names."""
-    checkout = _checkout(args.checkout)
-    commit = runtime_deploy.resolve_commit(checkout, getattr(args, "ref", "HEAD"))
-    return runtime_deploy.Plan(checkout, commit, _launchers(args.launchers),
-                               runtime_deploy.floor_of(checkout, commit), args.timeout, args.wait, args.agent)
+def plan_from(args: argparse.Namespace, *, deploying: bool = True) -> runtime_deploy.Plan:
+    """The deploy plan an ensure, status or rollback command names, built from the recorded primary checkout."""
+    primary = runtime_trust.primary_for(_checkout(args.checkout), deploying=deploying)
+    commit = runtime_deploy.resolve_commit(primary, getattr(args, "ref", "HEAD"))
+    if deploying:
+        runtime_trust.admit(primary, commit, allow_unmerged=getattr(args, "allow_unmerged", False))
+    return runtime_deploy.Plan(primary, commit, _launchers(args.launchers),
+                               runtime_trust.floor(primary), args.timeout, args.wait, args.agent)
 
 
 def _start_background(argv: list[str]) -> None:
@@ -72,20 +75,33 @@ def _again(args: argparse.Namespace) -> list[str]:
     return words + [f"--{name.replace('_', '-')}" for name in ("force", "force_build") if getattr(args, name)]
 
 
+def _audited(args: argparse.Namespace, command: str, plan: runtime_deploy.Plan, result: str, detail: str = "") -> None:
+    verb = f"{command} --force-build" if getattr(args, "force_build", False) else command
+    runtime_trust.audit(verb, plan.commit, result, agent=args.agent, detail=detail)
+
+
 def _ensure(args: argparse.Namespace) -> int:
+    if args.allow_unmerged:
+        if args.background:
+            raise runtime_deploy.DeployError("--allow-unmerged builds in the foreground, at a terminal")
+        human.mint("deploy an unmerged commit", args.ref)
     plan = plan_from(args)
     if args.background:
         settled = runtime_deploy.settled(plan)
         if settled:
             say(f"runtime {plan.commit[:7]} is {settled}")
         elif _building():
+            settled = "building"
             say("runtime build already running")
         else:
+            settled = "started"
             _start_background(_again(args))
             say(f"runtime {plan.commit[:7]} is building in the background; log: {runtime.directory() / 'ensure.log'}")
+        _audited(args, "ensure --background", plan, settled)
         return 0
     previous = str(runtime_store.selection().get("commit", ""))
     outcome = runtime_deploy.ensure(plan, force=args.force, force_build=args.force_build)
+    _audited(args, "ensure", plan, outcome.action, outcome.detail)
     runtime_board.announce(outcome, previous, verb="ensure", agent=args.agent, label=args.label)
     say(f"{outcome.action} {outcome.commit[:7]} {outcome.detail}".strip())
     return 0 if outcome.ok else 1
@@ -93,24 +109,30 @@ def _ensure(args: argparse.Namespace) -> int:
 
 def _rollback(args: argparse.Namespace) -> int:
     previous = str(runtime_store.selection().get("commit", ""))
-    outcome = runtime_deploy.rollback(plan_from(args), args.to)
+    plan = plan_from(args)
+    outcome = runtime_deploy.rollback(plan, args.to)
+    _audited(args, "rollback", plan, outcome.action, outcome.detail)
     runtime_board.announce(outcome, previous, verb="rollback to", agent=args.agent, label=args.label)
     say(f"{outcome.action} {outcome.commit[:7]} {outcome.detail}".strip())
     return 0 if outcome.ok else 1
 
 
 def _status(args: argparse.Namespace) -> int:
-    plan = plan_from(args)
+    plan = plan_from(args, deploying=False)
     say(json.dumps(status_record(plan), indent=2) if args.json else "\n".join(status_lines(plan)))
     return 0
 
 
 def _reported(run: Callable[[argparse.Namespace], int]) -> Callable[[argparse.Namespace], int]:
     def wrapped(args: argparse.Namespace) -> int:
+        for name in runtime_trust.ignore_redirects():
+            warn(f"ml-stack runtime: ignoring {name}: this process was started by an agent")
         try:
             return run(args)
         except (runtime_deploy.DeployError, OSError, ValueError) as exc:
             warn(f"ml-stack runtime: {exc}")
+            if args.cmd != "status":
+                runtime_trust.audit(args.cmd, getattr(args, "ref", ""), "refused", agent=args.agent, detail=str(exc))
             return 1
     return wrapped
 
@@ -172,6 +194,7 @@ GROUP = Group("ml-stack runtime", "Build, verify and select the installed runtim
 GROUP.add("ensure", _reported(_ensure), help="make the checkout's commit the selected runtime", options=[
     *COMMON, flag("--ref", default="HEAD"),
     flag("--force", action="store_true", help="rebuild even when held or current"),
+    flag("--allow-unmerged", action="store_true", help="deploy a commit that is not on the development branch (a person at a terminal only)"),
     flag("--force-build", action="store_true", help="build again at once after a failed build (needs an agent)"),
     flag("--background", action="store_true", help="return at once; build in a detached process")])
 GROUP.add("status", _reported(_status), help="show the selected runtime, the fallbacks kept and unmanaged trees",

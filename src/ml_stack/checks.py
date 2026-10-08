@@ -7,15 +7,16 @@ each and offers its fix, never reading a password -- a fix that needs root runs 
 
 from __future__ import annotations
 
+import shlex
 import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from ml_stack import home
 from ml_stack.log import say
 
-__all__ = ["Finding", "ask", "checkout", "tilde"]
+__all__ = ["Finding", "ask", "checkout", "line", "tilde"]
 
 
 @dataclass
@@ -25,8 +26,9 @@ class Finding:
     name: str
     good: bool
     said: str
-    fix: str = ""            # a shell line the reader may run
-    root: bool = False       # whether that line needs sudo
+    fix: list[str] = field(default_factory=list)  # the command that repairs it, as an argument vector
+    cwd: str = ""            # the directory that command runs in
+    root: bool = False       # whether that command needs sudo
     note: str = ""
 
 
@@ -36,6 +38,12 @@ def tilde(path: Path) -> str:
         return "~/" + str(Path(path).relative_to(home.user_home()))
     except ValueError:
         return str(path)
+
+
+def line(fix: list[str], cwd: str = "") -> str:
+    """The command a fix runs, written as a shell line for display."""
+    text = shlex.join(fix)
+    return f"cd {shlex.quote(cwd)} && {text}" if cwd else text
 
 
 def checkout() -> Path | None:
@@ -55,12 +63,12 @@ def ask(findings: list[Finding], *, yes: bool = False) -> int:
         if one.good or not one.fix:
             continue
         worst = 1
-        say(f"      fix: {one.fix}")
+        say(f"      fix: {line(one.fix, one.cwd)}")
         if not yes and not sys.stdin.isatty():
             continue
         answer = "y" if yes else input("      run it now? [y/N] ").strip().lower()
         if answer != "y":
             continue
-        # a sudo in the line prompts on this terminal; nothing here reads the password
-        subprocess.run(one.fix, shell=True, check=False)  # noqa: S602 - the shell line just shown and confirmed
+        # a sudo in the command prompts on this terminal; nothing here reads the password
+        subprocess.run(one.fix, cwd=one.cwd or None, check=False)
     return worst

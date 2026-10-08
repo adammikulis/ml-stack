@@ -1,7 +1,7 @@
 {
- "surfaces": 816,
+ "surfaces": 820,
  "by_status": {
-  "covered": 492,
+  "covered": 496,
   "partial": 197,
   "uncovered": 53,
   "n/a": 74,
@@ -51,7 +51,7 @@
    "unmapped": 0
   },
   "human": {
-   "covered": 112,
+   "covered": 113,
    "partial": 0,
    "uncovered": 0,
    "n/a": 0,
@@ -100,7 +100,7 @@
    "unmapped": 0
   },
   "spawn": {
-   "covered": 57,
+   "covered": 60,
    "partial": 60,
    "uncovered": 0,
    "n/a": 2,
@@ -3402,6 +3402,26 @@
    "id": "human:runtime.py:write_launcher",
    "kind": "human",
    "source": "runtime.py:write_launcher",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item",
+    "tests/test_requests_floor.py::test_the_request_commands_refuse_a_process_an_agent_started",
+    "tests/test_redteam_requests.py::test_a_model_cannot_answer_its_own_request_by_any_tool_name_or_command_text",
+    "tests/test_workspace_model.py::test_only_a_person_or_launcher_process_records_a_verified_model",
+    "tests/test_workspace_model.py::test_an_agent_cannot_verify_itself_or_overwrite_a_verified_model_or_set_anothers",
+    "tests/test_workspace_model.py::test_a_claimed_model_changes_no_right"
+   ],
+   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+  },
+  {
+   "id": "human:runtime_cli.py:_ensure",
+   "kind": "human",
+   "source": "runtime_cli.py:_ensure",
    "trust": "an agent process or a peer",
    "attacker": "an agent or a forged grant takes an action only a person may take",
    "status": "covered",
@@ -11039,6 +11059,42 @@
    "note": "the harness is spawned with argv only; its hook sits in a settings file the model cannot write, decides from the classifier and a role fixed on the command line, denies when the request store or the hook fails, and a hostile label is one argument"
   },
   {
+   "id": "spawn:hookcheck.py:_entries",
+   "kind": "spawn",
+   "source": "hookcheck.py:_entries",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_runtime_trust.py::test_a_checkout_path_with_shell_punctuation_reaches_git_as_one_argument",
+    "tests/test_runtime_trust.py::test_a_ref_that_is_an_option_or_a_command_names_no_commit",
+    "tests/test_runtime_trust.py::test_a_forged_state_root_naming_a_hostile_clone_is_ignored_by_an_agent",
+    "tests/test_runtime_trust.py::test_an_agent_cannot_name_another_repository",
+    "tests/test_hookcheck.py::test_a_malformed_repository_config_is_a_problem_and_not_a_crash",
+    "tests/test_hookcheck.py::test_a_config_value_with_a_newline_and_shell_punctuation_is_reported_and_its_repair_is_inert",
+    "tests/test_hookcheck.py::test_a_repository_path_with_shell_punctuation_is_inspected_and_repaired_as_one_argument"
+   ],
+   "note": "git runs with an argument list; hostile paths, refs and settings stay one argument or inert data, and no repair or fix goes through a shell"
+  },
+  {
+   "id": "spawn:hookcheck.py:_git",
+   "kind": "spawn",
+   "source": "hookcheck.py:_git",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_runtime_trust.py::test_a_checkout_path_with_shell_punctuation_reaches_git_as_one_argument",
+    "tests/test_runtime_trust.py::test_a_ref_that_is_an_option_or_a_command_names_no_commit",
+    "tests/test_runtime_trust.py::test_a_forged_state_root_naming_a_hostile_clone_is_ignored_by_an_agent",
+    "tests/test_runtime_trust.py::test_an_agent_cannot_name_another_repository",
+    "tests/test_hookcheck.py::test_a_malformed_repository_config_is_a_problem_and_not_a_crash",
+    "tests/test_hookcheck.py::test_a_config_value_with_a_newline_and_shell_punctuation_is_reported_and_its_repair_is_inert",
+    "tests/test_hookcheck.py::test_a_repository_path_with_shell_punctuation_is_inspected_and_repaired_as_one_argument"
+   ],
+   "note": "git runs with an argument list; hostile paths, refs and settings stay one argument or inert data, and no repair or fix goes through a shell"
+  },
+  {
    "id": "spawn:hub/memory.py:machine_room",
    "kind": "spawn",
    "source": "hub/memory.py:machine_room",
@@ -11360,6 +11416,24 @@
     "tests/test_redteam_runtime_deploy.py::test_the_tracker_hands_a_hostile_checkout_path_to_the_runtime_command_as_one_argument"
    ],
    "note": "Checkout paths, refs, state roots, launcher directories and forwarded arguments are single argv items with no shell; a ref starting with a dash names no commit; module and function names in launchers are matched against a pattern"
+  },
+  {
+   "id": "spawn:runtime_trust.py:_git",
+   "kind": "spawn",
+   "source": "runtime_trust.py:_git",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_runtime_trust.py::test_a_checkout_path_with_shell_punctuation_reaches_git_as_one_argument",
+    "tests/test_runtime_trust.py::test_a_ref_that_is_an_option_or_a_command_names_no_commit",
+    "tests/test_runtime_trust.py::test_a_forged_state_root_naming_a_hostile_clone_is_ignored_by_an_agent",
+    "tests/test_runtime_trust.py::test_an_agent_cannot_name_another_repository",
+    "tests/test_hookcheck.py::test_a_malformed_repository_config_is_a_problem_and_not_a_crash",
+    "tests/test_hookcheck.py::test_a_config_value_with_a_newline_and_shell_punctuation_is_reported_and_its_repair_is_inert",
+    "tests/test_hookcheck.py::test_a_repository_path_with_shell_punctuation_is_inspected_and_repaired_as_one_argument"
+   ],
+   "note": "git runs with an argument list; hostile paths, refs and settings stay one argument or inert data, and no repair or fix goes through a shell"
   },
   {
    "id": "spawn:sandbox/bubblewrap.py:_probe",

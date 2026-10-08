@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack import home
+from ml_stack.checks import line as fix_line
 from ml_stack.files import UNVERSIONED, read_json, version_of, versioned, write_json
 from ml_stack.http import ServerError, ServerUnreachable, json_body, request_bytes
 from ml_stack.jobs import detach
@@ -173,7 +174,7 @@ def checks(root: Path | str, *, ensure: Callable[[Path], Path] | None = None,
     for one in _machine_findings():
         if one.name.startswith("memory") or one.name.startswith("architecture") \
                 or one.name.startswith("flags"):
-            out.append(Check(one.name, bool(one.good), one.said, one.fix))
+            out.append(Check(one.name, bool(one.good), one.said, fix_line(one.fix, one.cwd)))
     binary = _server_here()
     if binary:
         out.append(Check("llama-server", True, binary))

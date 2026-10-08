@@ -59,6 +59,8 @@ def commands(tmp_path: Path) -> list[tuple[str, str, str, list[str], str]]:
         ("workspace hello", "ml_stack.workspace.cli", "main", ["hello", "codex"], ""),
         ("workspace agent start", "ml_stack.workspace.cli", "main", ["agent", "start"], ""),
         ("workspace agent stop", "ml_stack.workspace.cli", "main", ["agent", "stop", "local-x"], ""),
+        ("runtime ensure unmerged", "ml_stack.runtime_cli", "main",
+         ["ensure", "--ref", "HEAD", "--allow-unmerged"], "HEAD"),
         ("activity export", "ml_stack.activity.cli", "main",
          ["export", "--json", str(tmp_path / "activity-export.json")], "yes"),
         ("autostart install", "ml_stack.fleet.autostart", "main",
@@ -68,10 +70,10 @@ def commands(tmp_path: Path) -> list[tuple[str, str, str, list[str], str]]:
 
 
 def snapshot(root: Path) -> dict[str, bytes]:
-    """Every file under the state directory except the logs a refusal is allowed to write."""
+    """Every file under the state directory except the logs and the activity trail a refusal is allowed to write."""
     out = {}
     for path in sorted(root.rglob("*")):
-        if path.is_file() and path.suffix not in (".log", ".jsonl", ".lock"):
+        if path.is_file() and path.suffix not in (".log", ".jsonl", ".lock") and "activity" not in path.relative_to(root).parts:
             out[path.relative_to(root).as_posix()] = path.read_bytes()
     return out
 
@@ -110,7 +112,7 @@ def run_command(tmp_path: Path, target: tuple[str, str, list[str]], *,
     return subprocess.CompletedProcess(child.args, child.returncode, heard.decode(errors="replace"), "")
 
 
-@pytest.mark.parametrize("index", range(19))
+@pytest.mark.parametrize("index", range(20))
 @pytest.mark.skipif(sys.platform == "win32", reason="requires a POSIX pseudoterminal")
 def test_every_human_only_command_refuses_a_process_started_by_an_agent(tmp_path, index):
     label, module, function, argv, typed = commands(tmp_path)[index]
@@ -120,7 +122,7 @@ def test_every_human_only_command_refuses_a_process_started_by_an_agent(tmp_path
     assert snapshot(tmp_path / "home") == before, f"{label} changed state for an agent"
 
 
-@pytest.mark.parametrize("index", range(19))
+@pytest.mark.parametrize("index", range(20))
 def test_every_human_only_command_refuses_a_process_with_no_terminal(tmp_path, index):
     label, module, function, argv, _ = commands(tmp_path)[index]
     before = snapshot(tmp_path / "home")

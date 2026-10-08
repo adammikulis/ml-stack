@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import platform
 import re
+import shlex
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, requires, version as installed_version
 
@@ -35,8 +36,8 @@ class Capability:
     module: str
 
     @property
-    def fix(self) -> str:
-        return f"pip install 'ml-stack[{self.extra}]'"
+    def fix(self) -> list[str]:
+        return ["pip", "install", f"ml-stack[{self.extra}]"]
 
     def present(self) -> bool:
         """Whether the module behind this extra can be imported on this machine."""
@@ -157,7 +158,7 @@ def report() -> int:
     gone = missing()
     for one in gone:
         say(f"  ! {one.name}: not installed -- {one.does}")
-        say(f"    fix: {one.fix}")
+        say(f"    fix: {shlex.join(one.fix)}")
     old = behind()
     for _, name, have, wanted in old:
         say(f"  ! {name} {have} is installed, and {wanted} is asked for")
