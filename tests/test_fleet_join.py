@@ -18,6 +18,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -70,10 +71,10 @@ class FakeDaemon:
     `join` started would do, without the daemon."""
 
     def __init__(self, port: int, key: bytes, udp: int, name: str = "larch",
-                 machine: str = "") -> None:
+                 **beacon: Any) -> None:
         self.name = name
-        machine = machine or f"id-{name}"
-        device = dict(DEVICE)
+        machine = beacon.get("machine") or f"id-{name}"
+        device = dict(beacon.get("device") or DEVICE)
 
         class H(BaseHTTPRequestHandler):
             def do_GET(self_) -> None:
