@@ -61,4 +61,16 @@ if bad:
     print("            describe what changed, not who.", file=sys.stderr)
     sys.exit(1)
 PY
+
+self=$0
+while [ -L "$self" ]; do
+    link=$(readlink "$self")
+    case "$link" in
+        /*) self=$link ;;
+        *) self=$(dirname "$self")/$link ;;
+    esac
+done
+here=$(cd "$(dirname "$self")" && pwd)
+# a guard, authority or red-team test may not lose strength without a Reviewed-by-second: line
+"$PY" "$here/weakened-assertions" --staged --message "$MSG" || exit 1
 exit 0

@@ -270,6 +270,15 @@ jobs:
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
 
+      - name: no guard test weakened without a second reviewer
+        if: github.event_name == 'pull_request'
+        run: |
+          # The base commit's hooks are in place; the first pull request that adds the check has none to run.
+          [ -f scripts/hooks/weakened-assertions ] || { echo "the base commit has no weakened-assertions check"; exit 0; }
+          python scripts/hooks/weakened-assertions --against "$BASE"
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+
   # scripts/hooks/no-real-names and commit-msg, over a pushed range rather than a commit
   # being made, on a machine that always has the [privacy] extra.
   privacy:

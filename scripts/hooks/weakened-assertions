@@ -1,0 +1,113 @@
+#!/usr/bin/env python3
+"""Report a diff that weakens a guard, authority or red-team test, unless a second reviewer signed.
+
+    weakened-assertions --staged --message FILE   the staged diff (commit-msg)
+    weakened-assertions --against REV             REV..HEAD and its messages (CI)
+
+Covers tests/ files named test_redteam_*, test_*guard* or test_*auth*, and files that use the
+redteam marker. Weakening is fewer assertions than before, a removed test function, or an added
+skip, skipif or xfail. A `Reviewed-by-second:` line in the commit message accepts the diff.
+"""
+
+from __future__ import annotations
+
+import argparse
+import fnmatch
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+NAMES = ("test_redteam_*", "test_*guard*", "test_*auth*")
+SIGN = re.compile(r"^Reviewed-by-second:\s*\S", re.M)
+ASSERT = re.compile(r"^\s*(assert\b|self\.assert\w*\(|with pytest\.raises\b|pytest\.raises\()")
+DEF = re.compile(r"^\s*(?:async\s+)?def (test\w*)\(")
+SKIP = re.compile(r"pytest\.(mark\.(skip|skipif|xfail)\b|skip\(|xfail\(|importorskip\()")
+MARK = re.compile(r"mark\.redteam\b|^pytestmark\b.*redteam", re.M)
+
+
+def guarded(path: str, text: str) -> bool:
+    """Whether a test file is one whose assertions this check protects."""
+    if not path.startswith("tests/") or not path.endswith(".py"):
+        return False
+    return any(fnmatch.fnmatch(Path(path).name, n) for n in NAMES) or bool(MARK.search(text))
+
+
+def split(diff: str) -> dict[str, tuple[list[str], list[str]]]:
+    """Removed and added lines of a zero-context diff, by new path."""
+    files: dict[str, tuple[list[str], list[str]]] = {}
+    current = None
+    for line in diff.splitlines():
+        if line.startswith("diff --git "):
+            current = line.rpartition(" b/")[2]
+            files[current] = ([], [])
+        elif current is None or line.startswith(("---", "+++")):
+            continue
+        elif line.startswith("-"):
+            files[current][0].append(line[1:])
+        elif line.startswith("+"):
+            files[current][1].append(line[1:])
+    return files
+
+
+def check(path: str, removed: list[str], added: list[str]) -> list[str]:
+    """The ways this file's change weakens it."""
+    out = []
+    gone = sum(bool(ASSERT.match(x)) for x in removed)
+    came = sum(bool(ASSERT.match(x)) for x in added)
+    if gone > came:
+        passed = any(x.strip() == "pass" for x in added)
+        out.append(f"{path}: {gone - came} fewer assertions"
+                   + (" (replaced by pass)" if passed else ""))
+    old = {m.group(1) for x in removed if (m := DEF.match(x))}
+    new = {m.group(1) for x in added if (m := DEF.match(x))}
+    for name in sorted(old - new):
+        out.append(f"{path}: test function {name} removed")
+    for line in added:
+        if SKIP.search(line):
+            out.append(f"{path}: added {SKIP.search(line).group(0).rstrip('(')}")
+    return out
+
+
+def run(*args: str) -> str:
+    """Standard output of a git command."""
+    done = subprocess.run(["git", *args], capture_output=True, text=True, check=False)
+    return done.stdout
+
+
+def weakened(diff: str, read) -> list[str]:
+    """Every weakening in a zero-context diff; read(path) is the file as it was before."""
+    out = []
+    for path, (removed, added) in split(diff).items():
+        if guarded(path, read(path) + "\n".join(added)):
+            out.extend(check(path, removed, added))
+    return out
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--staged", action="store_true")
+    parser.add_argument("--message", default="")
+    parser.add_argument("--against", default="")
+    args = parser.parse_args(argv)
+    if args.against:
+        diff = run("diff", "-U0", "--no-renames", f"{args.against}...HEAD", "--", "tests")
+        message = run("log", "--format=%B", f"{args.against}..HEAD")
+        base = args.against
+    else:
+        diff = run("diff", "--cached", "-U0", "--no-renames", "--", "tests")
+        message = Path(args.message).read_text(encoding="utf-8") if args.message else ""
+        base = "HEAD"
+    found = weakened(diff, lambda p: run("show", f"{base}:{p}"))
+    if not found or SIGN.search(message):
+        return 0
+    print("weakened-assertions: a guard, authority or red-team test lost strength", file=sys.stderr)
+    for line in found:
+        print(f"  {line}", file=sys.stderr)
+    print("  add a `Reviewed-by-second: <name>` line once a second reviewer has read it.",
+          file=sys.stderr)
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
