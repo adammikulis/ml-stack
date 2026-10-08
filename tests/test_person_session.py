@@ -116,3 +116,15 @@ def test_task_write_revalidates_person_and_preserves_independent_review(bound):
     request.ui.sessions.close(session.sid)
     with pytest.raises(Denied):
         board.create(ws._actor, {'title': 'Revoked', 'acceptance': ['Denied']})
+
+
+def test_session_person_preserves_existing_capability_restrictions(bound):
+    host, request, _, _ = bound
+    ws = SessionWorkspace(host, request, PROJECT)
+    ws.connect()
+    agents = ws.registry._load()
+    agents['local-person']['can'] = ['read']
+    ws.registry._save(agents)
+    assert ws.auth(ws._actor).can == ('read',)
+    with pytest.raises(Denied):
+        ws.send(ws._actor, '#general', 'note', 'restricted')

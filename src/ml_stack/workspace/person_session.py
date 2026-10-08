@@ -55,7 +55,8 @@ class SessionWorkspace(Workspace):
             raise SetupRequired('Join this workspace as person to use conversations and tasks.')
         if binding != self._project_id:
             raise Denied('the person belongs to another project')
-        return Identity(name, HUMAN, str(entry.get('parent', '')), ('read', 'send'))
+        return Identity(name, HUMAN, str(entry.get('parent', '')),
+                        tuple(cap for cap in ('read', 'send') if cap in entry.get('can', ('read', 'send'))))
 
     def connect(self):
         self._validate()
