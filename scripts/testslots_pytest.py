@@ -70,5 +70,5 @@ def pytest_collection_finish(session):
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_protocol(item, nextitem):
     heavy = Path(str(item.path)).stem in testslots.HEAVY_MODULES
-    with testslots_rpc.request("acquire", label=item.nodeid, heavy=heavy):
+    with testslots_rpc.request("acquire", label=item.nodeid[-256:], heavy=heavy):
         yield
