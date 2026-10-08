@@ -17,6 +17,8 @@ import testreuse_key as keys
 from ml_stack.activity import reuse
 from ml_stack.activity.reuse import SCHEMA, entry_hash, row_hash
 
+PENDING_S = 10.0
+
 
 @dataclass(frozen=True)
 class Hit:
@@ -37,7 +39,7 @@ def process_start(pid: int) -> float:
 
 def alive(pid: int, started: float) -> bool:
     """Whether ``pid`` is the process that started at ``started``."""
-    return pid > 0 and abs(process_start(pid) - started) < 1.0
+    return pid > 0 and started > 0 and abs(process_start(pid) - started) < 1.0
 
 
 def write_atomic(path: Path, text: str) -> None:
@@ -68,6 +70,9 @@ class Store:
 
     def append(self, kind: str, entry: dict) -> dict:
         """Append a chain row for ``entry`` and write the entry; the caller holds the lock."""
+        text = self.chain.read_text(encoding="utf-8") if self.chain.is_file() else ""
+        if text and not text.endswith("\n"):
+            self.chain.write_text(text[:text.rfind("\n") + 1], encoding="utf-8")
         rows = reuse.rows(self.folder)
         row = {"seq": len(rows), "kind": kind, "lookup": entry["lookup"], "id": entry["entry_sha256"][:20],
                "entry_sha256": entry["entry_sha256"], "prev": rows[-1]["row_sha256"] if rows else "",
@@ -152,6 +157,8 @@ class Store:
             return None
         except (OSError, ValueError):
             record = {}
+            if time.time() - path.stat().st_mtime < PENDING_S:
+                return {"pid": 0, "agent": {}, "pending": True}
         if record and alive(int(record.get("pid", 0)), float(record.get("started", 0))):
             return record
         path.unlink(missing_ok=True)

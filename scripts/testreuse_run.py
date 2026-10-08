@@ -6,6 +6,7 @@ import json
 import os
 import random
 import shutil
+import subprocess
 import tempfile
 import time
 import xml.etree.ElementTree as ET
@@ -84,6 +85,8 @@ class Ran:
     command: list[str]
     store: bool
     hit: storage.Hit | None = None
+    problem: str = ""
+    status: int = 0
 
 
 @dataclass
@@ -92,6 +95,7 @@ class Report:
 
     outcomes: list[Outcome] = field(default_factory=list)
     status: int = 0
+    canary: float = CANARY_RATE
 
     def counts(self) -> tuple[int, int]:
         """Files that ran and files that were reused."""
@@ -102,7 +106,8 @@ class Report:
         """One line per file and a summary that counts both kinds."""
         rows = [f"  {o.how}  {o.file}  key {o.key[:12]}" + (f"  {o.detail}" if o.detail else "") for o in self.outcomes]
         ran, reused = self.counts()
-        return [*rows, f"test: {ran} file(s) ran, {reused} reused"]
+        sampling = "canary off" if self.canary <= 0 else f"canary {self.canary:.0%}"
+        return [*rows, f"test: {ran} file(s) ran, {reused} reused ({sampling})"]
 
 
 def selectors(command: list[str], root: Path) -> list[str] | None:
@@ -139,17 +144,51 @@ def results(junit: Path, root: Path) -> dict[str, dict[str, int]]:
     return rows
 
 
-def recorded(folder: Path) -> dict[str, dict]:
-    """The plugin's per-file records from every process, merged."""
+def recorded(folder: Path) -> tuple[dict[str, dict], str]:
+    """The plugin's per-file records from every process, merged, and why they cannot be trusted, if so."""
     merged: dict[str, dict] = {}
+    nodes: set[str] = set()
+    workers: set[str] = set()
+    died: list[str] = []
     for path in sorted(folder.glob("*.json")):
-        for rel, row in json.loads(path.read_text(encoding="utf-8")).items():
-            into = merged.setdefault(rel, {"reads": set(), "dirs": set(), "marks": set(),
-                                           "violations": set(), "skipped": False})
-            for name in ("reads", "dirs", "marks", "violations"):
+        data = json.loads(path.read_text(encoding="utf-8"))
+        meta = data["meta"]
+        if meta.get("worker"):
+            workers.add(meta["worker"])
+        else:
+            nodes |= set(meta.get("nodes", ()))
+            died += meta.get("died", ())
+        for rel, row in data["files"].items():
+            into = merged.setdefault(rel, {"reads": set(), "dirs": set(), "stats": set(), "links": {}, "marks": set(),
+                                           "violations": set(), "skipped": False, "collected": 0})
+            for name in ("reads", "dirs", "stats", "marks", "violations"):
                 into[name] |= set(row[name])
+            into["links"].update(row["links"])
             into["skipped"] = into["skipped"] or row["skipped"]
-    return merged
+            into["collected"] = max(into["collected"], row["collected"])
+    shared = merged.pop("*", None)
+    for row in merged.values():
+        for name in ("reads", "dirs", "stats", "violations"):
+            row[name] |= shared[name] if shared else set()
+        row["links"].update(shared["links"] if shared else {})
+    problem = f"worker {died[0]} died" if died else (
+        f"worker {sorted(nodes - workers)[0]} did not report" if nodes - workers else "")
+    return merged, problem
+
+
+def canary_rate() -> float:
+    """The sampling rate from ``DEV_TEST_REUSE_CANARY``, the default when it is absent or not a number in [0, 1]."""
+    try:
+        rate = float(os.environ.get("DEV_TEST_REUSE_CANARY", CANARY_RATE))
+    except ValueError:
+        return CANARY_RATE
+    return rate if 0.0 <= rate <= 1.0 else CANARY_RATE
+
+
+def head(root: Path) -> str:
+    """The commit the checkout is on, or empty."""
+    done = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"], capture_output=True, text=True, check=False)
+    return done.stdout.strip() if done.returncode == 0 else ""
 
 
 def age(seconds: float) -> str:
@@ -166,10 +205,12 @@ class Session:
         self.root, self.command, self.files, self.store = root, command, files, store
         self.events = events or Events()
         self.closures = keys.Closures(root)
-        self.rate = float(os.environ.get("DEV_TEST_REUSE_CANARY", CANARY_RATE))
+        self.rate = canary_rate()
+        self.commit = head(root)
+        self.tree_of: Callable[[], str] = lambda: ""
         self.draw: Callable[[], float] = random.random
         self.tree, self.refresh = "", False
-        self.report = Report()
+        self.report = Report(canary=self.rate)
         self.junit_sha = ""
         self.outcomes: dict[str, Outcome] = {}
         self.looked: dict[str, keys.Lookup] = {}
@@ -184,9 +225,13 @@ class Session:
         """The outcome record for ``file``."""
         return self.outcomes.setdefault(file, Outcome(file, key=self.lookup(file).key))
 
-    def run(self, launch: Launch, tree: str, reuse: bool = True) -> Report:
-        """Reuse what can be reused, execute the rest through ``launch``, record what passed."""
-        self.tree, self.refresh = tree, not reuse
+    def run(self, launch: Launch, tree: str | Callable[[], str], reuse: bool = True) -> Report:
+        """Reuse what can be reused, execute the rest through ``launch``, record what passed.
+
+        ``tree`` is the tree hash, or a function returning it; it is read before and after each launch.
+        """
+        self.tree_of = tree if callable(tree) else (lambda: tree)
+        self.refresh = not reuse
         plan = Plan(run=list(self.files or []))
         if reuse and self.files:
             plan.run = []
@@ -254,13 +299,19 @@ class Session:
         os.environ["DEV_TEST_REUSE_ROOT"] = str(self.root)
         command = [*[w for w in self.command if w not in (self.files or [])], *run, f"--junitxml={junit}"]
         try:
-            self.report.status = max(self.report.status, launch(command))
+            self.tree = self.tree_of()
+            status = launch(command)
+            moved = self.tree_of() != self.tree
+            self.report.status = max(self.report.status, 4 if moved else 0 if status == 5 else status)
             counts = results(junit, self.root) if junit.is_file() else {}
-            seen = recorded(scratch / "record") if (scratch / "record").is_dir() else {}
+            seen, trouble = recorded(scratch / "record") if (scratch / "record").is_dir() else ({}, "")
             self.junit_sha = keys.sha(junit.read_bytes()) if junit.is_file() else ""
+            problem = "the tree changed during the run" if moved else (
+                f"pytest exited {status}" if status not in (0, 1, 5) else trouble)
             for file in run or sorted(counts):
                 keep = self.refresh or not run or file in plan.claimed or file in plan.canary
-                self.settle(file, Ran(counts.get(file), seen.get(file), command, keep, plan.canary.get(file)))
+                self.settle(file, Ran(counts.get(file), seen.get(file), command, keep, plan.canary.get(file),
+                                      problem, status))
         finally:
             os.environ.pop("DEV_TEST_REUSE_RECORD", None)
             os.environ.pop("DEV_TEST_REUSE_ROOT", None)
@@ -269,7 +320,15 @@ class Session:
     def settle(self, file: str, ran: Ran) -> None:
         """Record one executed file's outcome, store a clean pass, and compare it with a canary."""
         outcome, look, count, hit = self.outcome(file), self.lookup(file), ran.count, ran.hit
-        outcome.passed = bool(count) and not count["failed"]
+        outcome.passed = (bool(count) and not count["failed"]) or (
+            count is None and ran.status in (0, 5) and not ran.problem)
+        if count is None and outcome.passed:
+            outcome.detail = f"{outcome.detail} (no tests ran: not stored)".strip()
+            return
+        if ran.problem:
+            outcome.passed = outcome.passed and not ran.problem.startswith(("the tree", "pytest exited"))
+            outcome.detail = f"{outcome.detail} (not stored: {ran.problem})".strip()
+            return
         if hit is not None and not outcome.passed:
             detail = f"cached pass from {hit.id} but a fresh run failed"
             self.store.disable(look.key, hit.entry, detail)
@@ -301,16 +360,18 @@ class Session:
             return sorted(seen["violations"])[0]
         if seen["skipped"] or count["skipped"]:
             return "a test was skipped"
+        if seen["collected"] != count["tests"]:
+            return f"{count['tests']} of {seen['collected']} collected tests ran"
         return f"marked {sorted(seen['marks'] & keys.NEVER_MARKS)[0]}" if seen["marks"] & keys.NEVER_MARKS else ""
 
     def store_entry(self, file: str, ran: Ran, kind: str) -> str:
         """Write the entry for an executed file."""
-        seen, count, command = ran.seen or {"reads": set(), "dirs": set()}, ran.count, ran.command
-        manifest = keys.build_manifest(self.root, file, set(seen["reads"]), set(seen["dirs"]), self.closures)
+        seen, count, command = ran.seen or {}, ran.count, ran.command
+        manifest = keys.build_manifest(self.root, file, seen, self.closures, tuple(self.command))
         return self.store.put({
             "lookup": self.lookup(file).key, "file": file, "outcome": kind, "manifest": manifest,
             "manifest_digest": keys.manifest_digest(manifest), "command": command,
-            "junit_sha256": self.junit_sha, "counts": count, "tree": self.tree,
+            "junit_sha256": self.junit_sha, "counts": count, "tree": self.tree, "commit": self.commit,
             "runner": {"pid": os.getpid(), "started": storage.process_start(os.getpid())},
             "agent": self.events.agent}, kind)
 

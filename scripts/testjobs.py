@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import json
 import os
 import secrets
@@ -10,6 +12,7 @@ import subprocess
 import sys
 import time
 import xml.etree.ElementTree as ET
+from collections.abc import Iterator
 from pathlib import Path
 
 import testreuse_store as storage
@@ -17,11 +20,15 @@ import testreuse_store as storage
 KEEP_S = 3 * 86400.0
 POLL_S = 0.4
 TERMINAL = ("done", "failed", "cancelled")
-FULL_TIERS = ("fast", "full", "slow", "all", "quick")
+FULL_TIERS = ("fast", "full", "slow", "all", "quick", "gate")
 
 
 class Refused(Exception):
     """A request the job table will not take."""
+
+
+class Busy(Refused):
+    """A whole-tier job is requested while another is live."""
 
 
 def is_full(argv: list[str], root: Path) -> bool:
@@ -30,11 +37,32 @@ def is_full(argv: list[str], root: Path) -> bool:
         not a.startswith("-") and (root / a.split("::")[0]).exists() for a in argv[1:])
 
 
+def node_id(classname: str, name: str, root: Path) -> str:
+    """The pytest node id of a junit test case: file, then any classes, then the test name."""
+    parts = classname.split(".")
+    for size in range(len(parts), 0, -1):
+        path = "/".join(parts[:size]) + ".py"
+        if (root / path).is_file():
+            return "::".join([path, *parts[size:], name])
+    return "::".join([classname.replace(".", "/") + ".py", name])
+
+
 class Jobs:
     """The jobs of one project, under ``folder``."""
 
     def __init__(self, folder: Path) -> None:
         self.folder = folder / "jobs"
+
+    @contextlib.contextmanager
+    def locked(self) -> Iterator[None]:
+        """Hold the job table's lock."""
+        self.folder.mkdir(parents=True, exist_ok=True)
+        with (self.folder / "lock").open("a") as handle:
+            fcntl.flock(handle, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle, fcntl.LOCK_UN)
 
     def path(self, job: str) -> Path:
         """The directory of ``job``."""
@@ -81,15 +109,21 @@ class Jobs:
                 self.path(job).rmdir()
 
     def submit(self, argv: list[str], owner: dict, root: Path, script: Path, extra: dict) -> str:
-        """Record a job and start its detached runner; returns the id."""
+        """Record a job and start its detached runner; returns the id.
+
+        A whole-tier job (``extra['exclusive']``, true unless given) is refused while another whole-tier job is live; the check and the
+        record are made under one lock. A foreground run is not exclusive and queues in the broker.
+        """
         self.prune()
-        held = self.live_full(root) if is_full(argv, root) else []
-        if held:
-            who = self.read(held[0], "spec.json").get("owner", {}).get("id") or "unknown"
-            raise Refused(f"job {held[0]} ({who}) already runs a whole tier; wait for it or cancel it")
         job = f"{time.strftime('%Y%m%d-%H%M%S')}-{secrets.token_hex(2)}"
-        self.write(job, "spec.json", {"id": job, "argv": argv, "owner": owner, "created": time.time(), **extra})
-        self.write(job, "status.json", {"state": "queued", "at": time.time()})
+        with self.locked():
+            held = self.live_full(root) if extra.get("exclusive", True) and is_full(argv, root) else []
+            if held:
+                who = self.read(held[0], "spec.json").get("owner", {}).get("id") or "unknown"
+                raise Busy(f"job {held[0]} ({who}) already runs a whole tier; wait for it or cancel it")
+            self.write(job, "spec.json", {"id": job, "argv": argv, "owner": owner, "created": time.time(),
+                                          "secret": secrets.token_hex(16), **extra})
+            self.write(job, "status.json", {"state": "queued", "at": time.time()})
         log = (self.path(job) / "log").open("ab")
         child = subprocess.Popen([sys.executable, str(script), "_job", job, *self.passthrough(extra)], cwd=root,
                                  stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
@@ -124,13 +158,14 @@ class Jobs:
         sys.stdout.flush()
         return len(data)
 
-    def cancel(self, job: str, who: str) -> str:
-        """Stop a job owned by ``who``; returns what happened."""
+    def cancel(self, job: str, who: str, secret: str = "") -> str:
+        """Stop a job owned by ``who`` (or whose ``secret`` the caller holds); returns what happened."""
         spec, status = self.read(job, "spec.json"), self.state(job)
         if not spec:
             raise Refused(f"no job {job}")
-        if spec["owner"].get("id", "") != who:
-            raise Refused(f"job {job} belongs to {spec['owner'].get('id') or 'another run'}")
+        owner = spec["owner"].get("id", "")
+        if not (owner and owner == who) and not (secret and secret == spec.get("secret")):
+            raise Refused(f"job {job} belongs to {owner or 'a run with no workspace agent'}")
         if status.get("state") in TERMINAL:
             return f"job {job} already {status['state']}"
         with_pid = int(status.get("pid", 0))
@@ -147,5 +182,5 @@ class Jobs:
         for junit in junits:
             for case in ET.parse(junit).getroot().iter("testcase"):  # noqa: S314 - written by pytest
                 if any(child.tag in ("failure", "error") for child in case):
-                    failing.append(f"{case.get('classname', '').replace('.', '/')}.py::{case.get('name')}")
+                    failing.append(node_id(case.get("classname", ""), case.get("name", ""), root))
         return {**status, "failing": failing, "junit": [str(j) for j in junits]}

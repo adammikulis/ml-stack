@@ -13,30 +13,41 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import pytest
+
+# ruff: noqa: F811
+import testjobs
+import testreuse_key as keys
+import testreuse_plugin as plugin
+import testreuse_run as run
+import testreuse_store as storage
 from taskboard_kit import board  # noqa: F401  (fixture)
-from test_testreuse import AGENT, FILE, SCRIPTS, Recorder, hows, launcher, project  # noqa: F401  (fixture)
+from test_testreuse import (  # noqa: F401  (fixture)
+    AGENT,
+    FILE,
+    SCRIPTS,
+    Recorder,
+    hows,
+    launcher,
+    project,
+)
 
-import testjobs  # noqa: E402
-import testreuse_key as keys  # noqa: E402
-import testreuse_plugin as plugin  # noqa: E402
-import testreuse_run as run  # noqa: E402
-import testreuse_store as storage  # noqa: E402
-
-from ml_stack.activity import reuse  # noqa: E402
-from ml_stack.workspace import testboard, testruns  # noqa: E402
+from ml_stack.activity import reuse
+from ml_stack.graph.store import GraphStore
+from ml_stack.workspace import testboard, testruns
 
 pytestmark = pytest.mark.slow
 
 
-def attempt(root, store, *files, launch=None, tree="treehash0001", extra=(), events=None):
-    """Run files through a Session with an optional replacement for the pytest launcher."""
+def attempt(root, store, *files, **options):
+    """Run files through a Session; options: ``launch`` (wraps the pytest launcher), ``tree``, ``extra``, ``events``."""
     named = list(files or (FILE,))
-    command = [sys.executable, "-m", "pytest", "-q", *extra, *named]
-    session = run.Session(root, command, named, store, events or Recorder())
+    command = [sys.executable, "-m", "pytest", "-q", *options.get("extra", ()), *named]
+    session = run.Session(root, command, named, store, options.get("events") or Recorder())
     session.draw = lambda: 1.0
     runs: list = []
     base = launcher(root, runs)
-    report = session.run(launch(base) if launch else base, tree, True)
+    wrap = options.get("launch")
+    report = session.run(wrap(base) if wrap else base, options.get("tree", "treehash0001"), True)
     return report, runs
 
 
@@ -59,14 +70,14 @@ def test_a_junit_with_fewer_tests_than_were_collected_stores_no_pass(project, tm
         def launch(command):
             status = real(command)
             junit = Path(next(w.split("=", 1)[1] for w in command if w.startswith("--junitxml=")))
-            tree = ET.parse(junit)
+            tree = ET.parse(junit)  # noqa: S314 - the file pytest just wrote
             suite = next(tree.getroot().iter("testsuite"))
             suite.remove(next(suite.iter("testcase")))
             tree.write(junit)
             return status
         return launch
 
-    report, _ = attempt(project, store, launch=drop_one)
+    attempt(project, store, launch=drop_one)
     assert "pass" not in kinds(store)
     assert hows(attempt(project, store)[0]) == ["ran"]
 
@@ -127,9 +138,9 @@ def test_documents_and_packaging_are_part_of_a_spawning_files_manifest(project):
     (project / "docs").mkdir()
     (project / "docs/guide.md").write_text("one")
     closures = keys.Closures(project)
-    before = keys.build_manifest(project, FILE, set(), set(), closures)
+    before = keys.build_manifest(project, FILE, {}, closures)
     (project / "docs/guide.md").write_text("two")
-    after = keys.build_manifest(project, FILE, set(), set(), keys.Closures(project))
+    after = keys.build_manifest(project, FILE, {}, keys.Closures(project))
     assert before["tree"] != after["tree"]
 
 
@@ -183,7 +194,7 @@ def test_a_missing_worker_record_stores_nothing(project, tmp_path):
         def launch(command):
             status = real(command)
             folder = Path(os.environ["DEV_TEST_REUSE_RECORD"])
-            workers = [p for p in folder.glob("*.json") if "worker" in json.loads(p.read_text())]
+            workers = [p for p in folder.glob("*.json") if "worker" in json.loads(p.read_text())["meta"]]
             workers[0].unlink()
             return status
         return launch
@@ -214,14 +225,15 @@ def put_entry(base: Path, scope: str, **over) -> str:
 
 
 def worktree_scope(kit) -> str:
-    return testruns.scope(kit.source)
+    with GraphStore(kit.ws.base / "coordination.db") as graph:
+        return testruns.task_scope(graph, kit.task["id"])
 
 
 def claim(kit):
     kit.board.claim(kit.child, kit.task["id"], kit.allocation["allocation_id"])
 
 
-def test_the_project_is_the_tasks_checkout_not_the_working_directory(board, tmp_path, monkeypatch):  # noqa: F811
+def test_the_project_is_the_tasks_checkout_not_the_working_directory(board, tmp_path, monkeypatch):
     base = tmp_path / "reuse"
     monkeypatch.setattr(testruns, "STORE_BASE", base, raising=False)
     entry = put_entry(base, worktree_scope(board))
@@ -231,7 +243,7 @@ def test_the_project_is_the_tasks_checkout_not_the_working_directory(board, tmp_
     assert [f["id"] for f in saved["test_evidence"]] == [entry]
 
 
-def test_an_entry_from_the_working_directorys_project_is_not_accepted_for_the_task(board, tmp_path, monkeypatch):  # noqa: F811
+def test_an_entry_from_the_working_directorys_project_is_not_accepted_for_the_task(board, tmp_path, monkeypatch):
     base = tmp_path / "reuse"
     monkeypatch.setattr(testruns, "STORE_BASE", base, raising=False)
     monkeypatch.chdir(tmp_path)
@@ -241,7 +253,7 @@ def test_an_entry_from_the_working_directorys_project_is_not_accepted_for_the_ta
         board.board.checkpoint(board.child, board.task["id"], {"summary": "ok", "test_entry": entry})
 
 
-def test_a_failing_entry_is_not_evidence_of_passing(board, tmp_path, monkeypatch):  # noqa: F811
+def test_a_failing_entry_is_not_evidence_of_passing(board, tmp_path, monkeypatch):
     base = tmp_path / "reuse"
     monkeypatch.setattr(testruns, "STORE_BASE", base, raising=False)
     entry = put_entry(base, worktree_scope(board), outcome="fail")
@@ -250,7 +262,7 @@ def test_a_failing_entry_is_not_evidence_of_passing(board, tmp_path, monkeypatch
         board.board.checkpoint(board.child, board.task["id"], {"summary": "ok", "test_entry": entry})
 
 
-def test_an_entry_for_another_commit_is_not_evidence_for_the_proposal(board, tmp_path, monkeypatch):  # noqa: F811
+def test_an_entry_for_another_commit_is_not_evidence_for_the_proposal(board, tmp_path, monkeypatch):
     base = tmp_path / "reuse"
     monkeypatch.setattr(testruns, "STORE_BASE", base, raising=False)
     entry = put_entry(base, worktree_scope(board))
@@ -262,7 +274,7 @@ def test_an_entry_for_another_commit_is_not_evidence_for_the_proposal(board, tmp
         board.board.submit(board.child, board.task["id"], submission)
 
 
-def test_the_services_environment_does_not_choose_the_store(board, tmp_path, monkeypatch):  # noqa: F811
+def test_the_services_environment_does_not_choose_the_store(board, tmp_path, monkeypatch):
     forged = tmp_path / "forged"
     entry = put_entry(forged, worktree_scope(board))
     monkeypatch.setenv("DEV_TEST_REUSE_DIR", str(forged))
@@ -315,7 +327,7 @@ def table(tmp_path, monkeypatch):
 def test_a_foreground_run_is_not_refused_by_a_live_whole_tier_job(table):
     jobs, fake, root = table
     first = jobs.submit(["full"], {"id": "alice"}, root, fake, {})
-    second = jobs.submit(["fast"], {"id": "bob"}, root, fake, {}, exclusive=False)
+    second = jobs.submit(["fast"], {"id": "bob"}, root, fake, {"exclusive": False})
     assert second != first
     for job in (first, second):
         jobs.cancel(job, "alice" if job == first else "bob")
@@ -434,23 +446,3 @@ def test_unregistered_checkouts_do_not_share_a_scope(tmp_path):
     one.mkdir()
     two.mkdir()
     assert testruns.scope(one) != testruns.scope(two)
-
-
-def test_the_delegate_is_announced_the_first_time_it_is_made(tmp_path, capsys, monkeypatch):
-    class Quiet:
-        base = tmp_path
-
-        def delegate(self, token, name, can=()):
-            return {"id": "alice/test-runner", "token_file": str(tmp_path / "tok")}
-
-        def auth(self, token):
-            raise testboard.Denied("none")
-
-    def missing(base, name):
-        raise testboard.Denied("no token yet")
-
-    monkeypatch.setattr(testboard.tokens, "load", missing)
-    monkeypatch.setattr(testboard.tokens, "read_file", lambda path: "mlws1.alice/test-runner.x")
-    events = testboard.BoardEvents(testboard.Acting(Quiet(), "mlws1.alice.x", {"id": "alice", "parent": ""}))
-    assert events._sender_token() == "mlws1.alice/test-runner.x"
-    assert "alice/test-runner" in capsys.readouterr().err

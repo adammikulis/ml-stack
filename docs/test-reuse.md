@@ -25,22 +25,32 @@ Each file has a lookup key and a manifest. The lookup key is a sha256 over:
 1. the bytes of the test file, every applicable `conftest.py`, `pyproject.toml` (and `pytest.ini`,
    `tox.ini`, `setup.cfg`) and `tests/heavy-modules.txt`;
 2. the Python version and implementation, platform and machine;
-3. `name==version` of every installed distribution that registers a pytest plugin;
+3. `name==version` of every installed distribution that registers a pytest plugin, the pytest and Python
+   versions of the interpreter the command runs, and the bytes of the runner's own code
+   (`scripts/testreuse_*.py`, `testslots_pytest.py`, `testslots_rpc.py`);
 4. the pytest arguments that can change a result (markers, `-k`, `-m`, `--slow`, options), with file
-   selectors, `-n`, `-q`, `--junitxml` and runner plugins removed;
+   selectors, `-n`, `-q`, `--junitxml` and the runner's own plugins removed (other `-p` names and the
+   values of `-c`, `--rootdir`, `--confcutdir` and `--ignore` stay);
 5. the values of the environment variables named in the test file or its conftests, plus a fixed list
    (`PATH` without temporary entries and with the checkout root masked, `CI`, `TZ`, `LANG`, `LC_ALL`,
    `CLAUDECODE`, `ML_STACK_NOTIFY`, `ML_STACK_LIVE_API`, `ML_STACK_LIVE_NET`, `DEV_TEST_SLOTS`);
 6. the installed `ml-stack` distribution and how it was installed.
 
-The manifest is what the run depended on: the first-party files in the test file's static import
-closure (imports at any depth, including inside functions and packages' `__init__`), every file the
+The manifest is what the run depended on: the first-party files in the static import closure of the
+test file, its conftests, their `pytest_plugins` and the `-p` modules (imports at any depth, including
+inside functions and packages' `__init__`), every path the tests probed with `os.stat`, `lstat` or
+`access` (a file by content, a directory by listing, a missing path by staying missing), symlink targets on
+the way to a recorded path, reads made while a session, package or module fixture was set up (attributed to
+every file in the run), every file the
 test's collection or tests opened under the checkout, every module they imported, the names in each
 directory they listed, the `name==version` of the third-party packages those files import, the
-values of the environment variables those files name, and a digest of every file under `src/`,
-`scripts/` and the non-test `tests/` helpers when the test file or a helper spawns a process
-(`subprocess`, `Popen`, `os.system`, `os.exec*`, `multiprocessing`, `pexpect`), because a child's
-reads are not seen. The pytest plugin in `scripts/testreuse_plugin.py` records the opened files and
+values of the environment variables those files name, and a digest of the code, documents and packaging
+(`src/`, `scripts/`, non-test `tests/` files, `docs/`, `packaging/`, `budgets.json`, `AGENTS.md`,
+`CLAUDE.md`, `pyproject.toml`, `HANDOFF.md`) and of the HEAD commit when any file in the closure spawns a
+process (`subprocess`, `Popen`, `os.system`, `os.exec*`, `os.fork`, `multiprocessing`, `pty`,
+`create_subprocess_*`, `ProcessPoolExecutor`, `runpytest_subprocess`, `playwright`) or imports by machinery
+the closure cannot follow (`import_module`, `__import__`, `importlib.util`, `runpy`, `pkgutil`,
+`entry_points`, `importorskip`), because a child's reads and a computed import are not seen. The pytest plugin in `scripts/testreuse_plugin.py` records the opened files and
 listings with an audit hook and attributes them to the test file whose collection or test was
 running; modules imported at collection are attributed from `sys.modules`.
 
@@ -68,7 +78,12 @@ A file is executed and no passing entry is written for it when any of the follow
   `tests/conftest.py` reads real state to check it is untouched; those reads are ignored);
 - the run emitted a warning that mentions an isolation violation;
 - any test in it was skipped or xfailed, because a skip depends on conditions the key lacks;
-- the source tree changed during the run.
+- the source tree changed during the run (the tree hash is read before and after; the run fails with
+  status 4);
+- pytest exited with a status other than 0 or 1 (interrupted, internal error), the junit file holds
+  fewer tests than were collected for the file, or an xdist worker died or did not write its record.
+
+A file whose tests all skip at module level, or that collects no tests, counts as passed and is not stored.
 
 ## Integrity
 
@@ -89,7 +104,7 @@ operating system user as the agent. That user can rewrite an entry and the whole
 consistently, delete the chain, edit the runner or the plugin, or set `DEV_TEST_REUSE_DIR` to a store
 it made. The chain detects corruption, a partial write and an edited entry; it does not stop a
 deliberate forger. A forged hit is caught only by the canary on its sample and by the tier and gate
-runs, which execute. The store sits under a per-project directory (a hash of the project key), and
+runs, which execute. Entries also hold the commit they ran on. The store sits under a per-project directory (a hash of the project key), and
 board verification reads only the asking agent's project directory.
 
 ## Single flight
@@ -120,7 +135,8 @@ no second queue), and prints the job id. `status [JOB]`, `wait JOB [--timeout S]
 submitting agent; only that agent cancels it. A job survives the shell, keeps its output in `log`,
 and is pruned three days after it finishes. `scripts/test <tier>` is submit plus follow; Ctrl-C
 cancels. One whole-tier job (a tier with no test path) may be live at a time; a second submit is
-refused and names the owner.
+refused with exit status 6 and names the owner. A foreground tier run is not exclusive: it queues in
+the broker. A job without a workspace agent can be cancelled only by the process that submitted it.
 
 ## Workspace integration
 
@@ -129,18 +145,22 @@ refused and names the owner.
   which says whether the workspace has that identity.
 - Entries, in-flight claims and jobs sit under a per-project directory. `task-checkpoint`/`task-submit`
   verification and board threads are project-scoped by the board's own membership.
-- Notices go out under the agent's `<agent>/test-runner` delegate, because a message never reaches
-  its sender's inbox. A run that takes a key opens a thread on the project board and replies when it
-  ends; a job opens a thread when it starts and replies when it ends. A finishing job also sends one
-  direct message to the submitter and to the watchers of the task it was attached to (`--task`),
-  except those already subscribed to the thread. Waiters follow the owner's thread and are told when
-  the run failed.
+- Notices go out under the submitting agent's own authenticated identity (`--agent`, or the session
+  already in use). Running tests creates no identity, token file or credential; without a workspace
+  agent the runner posts nothing. A run that takes a key opens a thread on the project board and
+  replies when it ends; a job opens a thread when it starts and replies when it ends. A finishing job
+  also sends one direct message to each watcher of the task it was attached to (`--task`) that is not
+  already on the thread. A message never reaches its sender's inbox, so the submitter learns through
+  `scripts/test wait|result|status`, which read the job's status file; `wait` returns when the job
+  ends. Waiters follow the owner's thread and are told when the run failed.
 - Following uses the board's subscriptions: `scripts/test subscribe JOB`, `subscribe --key PREFIX`
   (a reuse key prefix from the report) subscribe to the thread; `subscribe --task ID` is the task
   board's `task-subscribe`.
 - `task-checkpoint` takes `test_entry` and `task-submit` takes `test_entries`: runner entry ids. The
-  board verifies each in the asker's project store and records its file, key, tree, junit hash,
-  outcome, counts and executing agent with the checkpoint or proposal.
+  board verifies each in the store of the project of the task's assigned checkout (not the caller's
+  working directory, and never a store chosen by the service's environment), requires `outcome == pass`
+  and, when the checkpoint or provenance names a commit, the same commit, and records the entry's file,
+  key, tree, commit, junit hash, counts and executing agent with the checkpoint or proposal.
 - Board text is data. The thread number in a claim record is used only to subscribe, which the board
   checks against membership; nothing read from the board enters a key, a hit or a verification.
   Notice failures are printed and never fail a run.

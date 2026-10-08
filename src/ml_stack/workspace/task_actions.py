@@ -88,8 +88,9 @@ def checkpoint(board, token, ident, value):
     fields = {key: text(item, key, 2000) for key, item in value.items() if key != 'test_entry'}
     if not fields.get('summary'):
         raise ValueError('a checkpoint summary is required')
-    evidence = testruns.evidence([value['test_entry']] if 'test_entry' in value else [])
     with working(board, token, ident) as (graph, task, lease):
+        evidence = testruns.evidence([value['test_entry']] if 'test_entry' in value else [], graph, ident,
+                                     fields.get('commit', ''))
         checkpoint = {'id': f'checkpoint:{uuid4().hex}', 'task': ident, 'worker': task['worker'],
                       'at': board.ws.clock(), 'lease_id': lease['id'], **fields,
                       **({'test_evidence': evidence} if evidence else {})}
@@ -102,9 +103,10 @@ def submit(board, token, ident, value):
     entries = value.get('test_entries', []) if type(value) is dict else []
     value = submission({key: item for key, item in value.items() if key != 'test_entries'}
                        if type(value) is dict else value)
-    if entries:
-        value['test_evidence'] = testruns.evidence(entries)
     with working(board, token, ident) as (graph, task, lease):
+        if entries:
+            value['test_evidence'] = testruns.evidence(
+                entries, graph, ident, value['provenance'].get('commit', ''))
         previous_state = task['state']
         proposal = {'id': f'proposal:{uuid4().hex}', 'task': ident, 'worker': task['worker'],
                     'at': board.ws.clock(), 'lease_id': lease['id'], **value}

@@ -67,6 +67,7 @@ HEAVY_FILE = ROOT / "tests" / "heavy-modules.txt"
 FULL: list[str] = []
 RECORD_WORKERS = 3
 FOREGROUND = ("quick", "fast", "full", "slow", "all", "gate")
+BUSY_EXIT = 6
 JOB_COMMANDS = ("submit", "status", "wait", "result", "cancel", "subscribe", "_job")
 REUSE: dict = {"on": True, "seat": None, "agent": {"id": "", "source": "none"}, "events": testreuse_run.Events()}
 
@@ -369,6 +370,9 @@ def job_command(args: argparse.Namespace, rest: list[str], argv: list[str]) -> i
             print(show(job, status, jobs.read(job, "spec.json")))
         return int(status.get("exit", 3)) if args.tier == "wait" and status.get("state") in testjobs.TERMINAL else (
             3 if args.tier == "wait" else 0)
+    except testjobs.Busy as error:
+        print(f"test: {error}", file=sys.stderr)
+        return BUSY_EXIT
     except (testjobs.Refused, ValueError, OSError) as error:
         print(f"test: {error}", file=sys.stderr)
         return 4
@@ -404,7 +408,9 @@ def run_job(jobs: testjobs.Jobs, job: str, args: argparse.Namespace) -> int:
         code = main([*spec["argv"], *flags])
     except KeyboardInterrupt:
         state, code = "cancelled", 130
-    except Exception:  # noqa: BLE001 - the job records any failure of its own run
+    except SystemExit as stop:
+        code = stop.code if isinstance(stop.code, int) else 1
+    except BaseException:  # noqa: BLE001 - the job records any end of its own run
         traceback.print_exc()
         state = "failed"
     report = REUSE.get("report")
@@ -421,14 +427,14 @@ def follow(argv: list[str], args: argparse.Namespace) -> int:
     jobs, me = jobs_store(), REUSE["agent"].get("id", "")
     try:
         job = jobs.submit(argv, REUSE["agent"], ROOT, Path(__file__).resolve(),
-                          {"agent": args.agent, "label": args.label, "task": args.task})
+                          {"agent": args.agent, "label": args.label, "task": args.task, "exclusive": False})
     except testjobs.Refused as error:
         print(f"test: {error}", file=sys.stderr)
         return 4
     try:
         status = jobs.wait(job, float("inf"), tail=True)
     except KeyboardInterrupt:
-        print(f"\n{jobs.cancel(job, me)}")
+        print(f"\n{jobs.cancel(job, me, jobs.read(job, 'spec.json').get('secret', ''))}")
         return 130
     return int(status.get("exit", 1))
 

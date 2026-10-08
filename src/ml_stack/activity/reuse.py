@@ -14,7 +14,7 @@ __all__ = ["FIELDS", "SCHEMA", "chain_ok", "entry", "entry_hash", "find", "reuse
 
 SCHEMA = 1
 FIELDS = frozenset({"schema", "lookup", "file", "outcome", "manifest", "manifest_digest", "command",
-                    "junit_sha256", "counts", "tree", "runner", "agent", "created", "prev", "entry_sha256"})
+                    "junit_sha256", "counts", "tree", "commit", "runner", "agent", "created", "prev", "entry_sha256"})
 _verified: dict[str, tuple[int, int]] = {}
 
 
@@ -41,12 +41,26 @@ def reuse_base() -> Path:
     return (home.expand(slots).resolve().parent if slots else home.user_home() / ".cache") / "test-reuse"
 
 
-def rows(folder: Path) -> list[dict[str, Any]]:
-    """The chain rows of a store, oldest first; empty when the chain is missing or unreadable."""
+def _parsed(folder: Path) -> tuple[list[dict[str, Any]], bool]:
+    """The readable chain rows and whether the whole file parsed; a torn last line is dropped, not an error."""
     try:
-        return [json.loads(line) for line in (folder / "chain.jsonl").read_text(encoding="utf-8").splitlines() if line]
-    except (OSError, ValueError):
-        return []
+        lines = (folder / "chain.jsonl").read_text(encoding="utf-8").split("\n")
+    except OSError:
+        return [], True
+    found: list[dict[str, Any]] = []
+    for number, line in enumerate(lines):
+        if not line:
+            continue
+        try:
+            found.append(json.loads(line))
+        except ValueError:
+            return found, number == len(lines) - 1
+    return found, True
+
+
+def rows(folder: Path) -> list[dict[str, Any]]:
+    """The chain rows of a store, oldest first, up to the first unreadable one."""
+    return _parsed(folder)[0]
 
 
 def chain_ok(folder: Path) -> bool:
@@ -58,7 +72,10 @@ def chain_ok(folder: Path) -> bool:
     stamp = (stat.st_size, stat.st_mtime_ns)
     if _verified.get(str(folder)) != stamp:
         previous = ""
-        for index, row in enumerate(rows(folder)):
+        found, whole = _parsed(folder)
+        if not whole:
+            return False
+        for index, row in enumerate(found):
             if row.get("seq") != index or row.get("prev") != previous or row.get("row_sha256") != row_hash(row):
                 return False
             previous = row["row_sha256"]

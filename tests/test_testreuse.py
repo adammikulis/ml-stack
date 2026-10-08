@@ -99,7 +99,7 @@ def test_an_unchanged_passing_file_is_reused_and_reported_as_reused(project, tmp
     assert hows(second) == ["reused"] and second.status == 0 and launches == []
     line = second.lines()[0]
     assert "reused from " in line and "tree treehash00" in line and second.counts() == (0, 1)
-    assert second.lines()[-1] == "test: 0 file(s) ran, 1 reused"
+    assert second.lines()[-1].startswith("test: 0 file(s) ran, 1 reused")
 
 
 def test_a_changed_module_in_the_import_closure_invalidates_the_hit(project, tmp_path):

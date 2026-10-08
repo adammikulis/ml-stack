@@ -18,6 +18,7 @@ sys.path.insert(0, str(SCRIPTS))
 import testreuse_store as storage  # noqa: E402
 
 from ml_stack.activity import reuse  # noqa: E402
+from ml_stack.graph.store import GraphStore  # noqa: E402
 from ml_stack.workspace import onboard, slots, testboard, testruns, tokens  # noqa: E402
 from ml_stack.workspace.taskboard import TaskBoard  # noqa: E402
 
@@ -56,7 +57,7 @@ def test_a_subscriber_to_a_runs_thread_is_told_exactly_once_when_it_lands(team):
     owner.finished(FILE, KEY, "pass", "entry0123456789abcdef")
     [message] = inbox(team, "bob")
     assert "test-result" in message["text"] and "outcome=pass" in message["text"]
-    assert "entry=entry0123456789abcdef" in message["text"] and message["from"] == "alice/test-runner"
+    assert "entry=entry0123456789abcdef" in message["text"] and message["from"] == "alice"
     assert inbox(team, "bob") == []
 
 
@@ -69,7 +70,7 @@ def test_waiters_are_told_when_the_run_they_waited_on_failed(team):
     assert "outcome=fail" in message["text"] and "run it yourself" in message["text"]
 
 
-def test_a_job_ending_reaches_the_submitter_a_thread_follower_and_a_task_watcher_once_each(team):
+def test_a_job_ending_reaches_each_follower_and_task_watcher_once_and_not_its_own_submitter(team):
     lead = team.agent("lead", "lead")
     tasks = TaskBoard(team.ws)
     task = tasks.create(lead, {"title": "Inspect", "description": "Look.", "acceptance": ["ok"],
@@ -83,14 +84,24 @@ def test_a_job_ending_reaches_the_submitter_a_thread_follower_and_a_task_watcher
     testboard.follow_thread(team.seats["bob"], thread)
     events.job_done("j1", {"argv": ["all", FILE]}, {"exit": 0, "state": "done",
                                                    "summary": {"ran": 1, "reused": 2}}, thread)
-    for name in ("alice", "bob"):
-        [message] = inbox(team, name)
-        assert "outcome=pass" in message["text"] and "ran=1 reused=2" in message["text"]
-        assert "result=scripts/test result j1" in message["text"]
+    [message] = inbox(team, "bob")
+    assert "outcome=pass" in message["text"] and "ran=1 reused=2" in message["text"]
+    assert "result=scripts/test result j1" in message["text"]
     [carols] = team.ws.inbox(seat.token, ack=True, limit=50)
     assert "test-job job=j1" in carols["text"]
-    for name in ("alice", "bob"):
-        assert inbox(team, name) == []
+    assert inbox(team, "alice") == [] and inbox(team, "bob") == []
+
+
+def test_running_a_job_creates_no_identity_and_no_token_file(team):
+    before = (sorted(a["id"] for a in team.ws.registered()), sorted(p.name for p in tokens.directory(team.ws.base).iterdir()))
+    events = testboard.BoardEvents(team.seats["alice"])
+    thread = events.job_started("j2", {"argv": ["fast"]})
+    key = events.claimed(FILE, KEY)
+    events.finished(FILE, KEY, "pass", "entry1")
+    events.canary_mismatch(FILE, "detail")
+    events.job_done("j2", {"argv": ["fast"]}, {"exit": 1, "state": "done"}, thread)
+    after = (sorted(a["id"] for a in team.ws.registered()), sorted(p.name for p in tokens.directory(team.ws.base).iterdir()))
+    assert key > 0 and after == before
 
 
 def test_a_canary_mismatch_posts_one_announcement_line(team):
@@ -136,7 +147,7 @@ def put_entry(base: Path, scope: str, **over) -> str:
     store = storage.Store(base / scope)
     fields = {"lookup": KEY, "file": FILE, "outcome": "pass", "manifest": {"files": {}, "dirs": {}, "dists": [],
               "env": {}, "tree": ""}, "manifest_digest": "d" * 64, "command": ["pytest", FILE],
-              "junit_sha256": "e" * 64, "counts": {"tests": 3, "failed": 0, "skipped": 0}, "tree": "t" * 40,
+              "junit_sha256": "e" * 64, "counts": {"tests": 3, "failed": 0, "skipped": 0}, "tree": "t" * 40, "commit": "c" * 40,
               "runner": {"pid": 1, "started": 1.0}, "agent": {"id": "alice"}, **over}
     return store.put(fields)
 
@@ -159,11 +170,13 @@ def test_a_runner_entry_is_verified_for_its_own_project_only(team, tmp_path):
 
 def test_task_checkpoint_and_submit_carry_verified_runner_entries(board, tmp_path, monkeypatch):  # noqa: F811
     base = tmp_path / "reuse"
-    monkeypatch.setenv("DEV_TEST_REUSE_DIR", str(base))
-    entry = put_entry(base, testruns.scope(Path.cwd()))
+    monkeypatch.setattr(testruns, "STORE_BASE", base)
+    with GraphStore(board.ws.base / "coordination.db") as graph:
+        entry = put_entry(base, testruns.task_scope(graph, board.task["id"]))
     kit = board
     submission = {"artifacts": {"replay.json": "a" * 64}, "checks": [{"name": "Worker claims tests", "passed": True}],
-                  "summary": "done", "provenance": {"commit": "abc", "environment": "x", "model": "qwen", "runtime": "r"}}
+                  "summary": "done", "provenance": {"commit": "c" * 40, "environment": "x", "model": "qwen",
+                                                    "runtime": "r"}}
     kit.board.claim(kit.child, kit.task["id"], kit.allocation["allocation_id"])
     saved = kit.board.checkpoint(kit.child, kit.task["id"], {"summary": "tests pass", "test_entry": entry})
     [fact] = saved["test_evidence"]

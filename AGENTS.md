@@ -474,7 +474,8 @@ file, and `--no-reuse` forces execution. Say "reused" in a report only for files
 as reused. Tier runs, `gate`, `quick` and the coordinator's combined-tree checks always execute.
 `scripts/test submit <tier|paths>` returns a job id; `status`, `wait`, `result`, `cancel` and
 `subscribe` follow it, and only one whole-tier job runs at a time. `task-checkpoint` and
-`task-submit` accept runner entry ids (`test_entry`, `test_entries`) that the board verifies.
+`task-submit` accept runner entry ids (`test_entry`, `test_entries`) that the board verifies. Running tests creates no identity, token or credential: board notices go out under the submitting
+agent's own session, and nothing is posted when no agent is configured.
 
 The maintained tiers are `fast` (neither slow nor heavy), `full` (not slow), `slow` (only slow)
 and `all` (including slow). `tests/README.md` describes their mechanics; the policy above

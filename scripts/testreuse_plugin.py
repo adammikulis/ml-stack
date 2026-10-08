@@ -1,4 +1,4 @@
-"""Pytest plugin: records, per test file, what a run read, imported, wrote and warned about."""
+"""Pytest plugin: records, per test file, what a run read, listed, probed, imported, wrote and warned about."""
 from __future__ import annotations
 
 import json
@@ -11,20 +11,34 @@ import pytest
 
 ROOT = Path(os.environ.get("DEV_TEST_REUSE_ROOT", ".")).resolve()
 RECORD = Path(os.environ.get("DEV_TEST_REUSE_RECORD", ""))
-HOME = Path.home()
-REAL_STATE = tuple(str(HOME / part) for part in (".ml-stack", "Library/Keychains", ".ssh", ".gnupg",
-                                                   ".cache/huggingface", ".config"))
+REAL_STATE = tuple(Path.home() / part for part in (".ml-stack", "Library/Keychains", ".ssh", ".gnupg",
+                                                     ".cache/huggingface", ".config"))
 IGNORED = (".git", ".pytest_cache", ".testmondata", "__pycache__", ".ruff_cache", ".mypy_cache")
-WRITABLE = tuple({str(Path(tempfile.gettempdir()).resolve()), tempfile.gettempdir(), "/dev"})
+WRITABLE = tuple({Path(tempfile.gettempdir()), Path(tempfile.gettempdir()).resolve(), Path("/dev")})
 ALLOWED_ROOT_WRITES = (".pytest_cache", "__pycache__", ".testmondata", ".coverage")
+MUTATING = {"os.mkdir": (0,), "os.rmdir": (0,), "os.remove": (0,), "os.rename": (0, 1), "os.symlink": (1,),
+            "os.link": (1,), "os.truncate": (0,), "os.chmod": (0,), "shutil.rmtree": (0,),
+            "shutil.copyfile": (1,), "shutil.move": (1,)}
+SHARED = "*"
 FILES: dict[str, dict] = {}
 CURRENT: list[str] = []
+NODES: set[str] = set()
+DIED: list[str] = []
 ENABLED = bool(os.environ.get("DEV_TEST_REUSE_RECORD"))
+BUSY: list[bool] = []
 
 
 def _entry(rel: str) -> dict:
-    return FILES.setdefault(rel, {"reads": set(), "dirs": set(), "marks": set(), "violations": set(),
-                                  "skipped": False})
+    return FILES.setdefault(rel, {"reads": set(), "dirs": set(), "stats": set(), "links": {}, "marks": set(),
+                                  "violations": set(), "skipped": False, "collected": 0})
+
+
+def _under(path: Path, base: Path) -> bool:
+    return path == base or base in path.parents
+
+
+def _text(path: object) -> str:
+    return os.fsdecode(os.fspath(path))
 
 
 def _source_of(path: str) -> str:
@@ -48,10 +62,12 @@ def _writing(mode: object, flags: object) -> bool:
 def _write_ok(absolute: str) -> bool:
     """Whether a write may happen: inside the checkout only to its cache directories, elsewhere only to temp."""
     try:
-        rel = Path(absolute).resolve().relative_to(ROOT)
-    except (ValueError, OSError):
-        return absolute.startswith(WRITABLE)
-    return any(part.startswith(ALLOWED_ROOT_WRITES) for part in rel.parts)
+        target = Path(absolute).resolve()
+    except OSError:
+        return False
+    if _under(target, ROOT):
+        return any(part.startswith(ALLOWED_ROOT_WRITES) for part in target.relative_to(ROOT).parts)
+    return any(_under(target, base) or _under(Path(absolute), base) for base in WRITABLE)
 
 
 def _from_conftest() -> bool:
@@ -65,30 +81,68 @@ def _from_conftest() -> bool:
     return False
 
 
-def _audit(event: str, args: tuple) -> None:
-    if not CURRENT:
+def _note_path(bucket: dict, absolute: str, kind: str) -> None:
+    """Record a path the test read or probed, and the target of a symlink on the way to it."""
+    lexical = Path(absolute)
+    rel = _source_of(absolute)
+    if not rel:
         return
-    if event == "open" and isinstance(args[0], (str, os.PathLike)):
-        path = os.fspath(args[0])
+    bucket[kind].add(rel)
+    try:
+        relative = lexical.relative_to(ROOT)
+    except ValueError:
+        return
+    here = ROOT
+    for part in relative.parts:
+        here = here / part
+        if here.is_symlink():
+            bucket["links"][here.relative_to(ROOT).as_posix()] = str(here.readlink())
+
+
+def _audit(event: str, args: tuple) -> None:
+    if not CURRENT or BUSY:
+        return
+    BUSY.append(True)
+    try:
         bucket = _entry(CURRENT[-1])
-        absolute = str(Path(path).absolute())
-        if _writing(args[1], args[2]):
-            if not _write_ok(absolute):
+        if event == "open" and isinstance(args[0], (str, bytes, os.PathLike)):
+            absolute = str(Path(_text(args[0])).absolute())
+            writing = _writing(args[1], args[2])
+            if writing and not _write_ok(absolute):
                 bucket["violations"].add(f"wrote {absolute}")
-        else:
-            rel = _source_of(absolute)
+            elif not writing:
+                _note_path(bucket, absolute, "reads")
+            if any(_under(Path(absolute), base) for base in REAL_STATE) and (writing or not _from_conftest()):
+                bucket["violations"].add(f"touched {absolute}")
+        elif event in ("os.listdir", "os.scandir") and args and isinstance(args[0], (str, bytes, os.PathLike)):
+            rel = _source_of(str(Path(_text(args[0])).absolute()) + "/x")
             if rel:
-                bucket["reads"].add(rel)
-        if absolute.startswith(REAL_STATE) and (_writing(args[1], args[2]) or not _from_conftest()):
-            bucket["violations"].add(f"touched {absolute}")
-    elif event in ("os.listdir", "os.scandir") and args and isinstance(args[0], (str, os.PathLike)):
-        rel = _source_of(str(Path(os.fspath(args[0])).absolute()) + "/x")
-        if rel:
-            _entry(CURRENT[-1])["dirs"].add(str(Path(rel).parent.as_posix()))
+                bucket["dirs"].add(Path(rel).parent.as_posix())
+        elif event in MUTATING:
+            for index in MUTATING[event]:
+                if len(args) > index and isinstance(args[index], (str, bytes, os.PathLike)):
+                    absolute = str(Path(_text(args[index])).absolute())
+                    if not _write_ok(absolute):
+                        bucket["violations"].add(f"{event.split('.')[-1]} {absolute}")
+    finally:
+        BUSY.pop()
+
+
+def _probe(original):
+    def wrapper(path, *args, **kwargs):
+        if CURRENT and not BUSY and isinstance(path, (str, bytes, os.PathLike)):
+            BUSY.append(True)
+            try:
+                _note_path(_entry(CURRENT[-1]), str(Path(_text(path)).absolute()), "stats")
+            finally:
+                BUSY.pop()
+        return original(path, *args, **kwargs)
+    return wrapper
 
 
 if ENABLED:
     sys.addaudithook(_audit)
+    os.stat, os.lstat, os.access = _probe(os.stat), _probe(os.lstat), _probe(os.access)
 
 
 def _loaded() -> set[str]:
@@ -123,6 +177,17 @@ def pytest_make_collect_report(collector):
 
 
 @pytest.hookimpl(hookwrapper=True)
+def pytest_fixture_setup(fixturedef, request):
+    shared = ENABLED and fixturedef.scope != "function"
+    before = _enter(SHARED) if shared else set()
+    try:
+        yield
+    finally:
+        if shared:
+            _leave(SHARED, before)
+
+
+@pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_protocol(item, nextitem):
     rel = _source_of(str(item.path)) if ENABLED else ""
     if rel:
@@ -135,6 +200,14 @@ def pytest_runtest_protocol(item, nextitem):
             _leave(rel, before)
 
 
+def pytest_collection_finish(session):
+    if ENABLED:
+        for item in session.items:
+            rel = _source_of(str(item.path))
+            if rel:
+                _entry(rel)["collected"] += 1
+
+
 def pytest_runtest_logreport(report):
     if ENABLED and report.skipped:
         _entry(report.nodeid.split("::")[0])["skipped"] = True
@@ -145,10 +218,22 @@ def pytest_warning_recorded(warning_message, when, nodeid, location):
         _entry(nodeid.split("::")[0] or "?")["violations"].add(f"warning: {warning_message.message}")
 
 
-def pytest_sessionfinish(session, exitstatus):
+@pytest.hookimpl(optionalhook=True)
+def pytest_testnodeready(node):
+    NODES.add(node.gateway.id)
+
+
+@pytest.hookimpl(optionalhook=True)
+def pytest_testnodedown(node, error):
+    if error:
+        DIED.append(node.gateway.id)
+
+
+def pytest_sessionfinish(session):
     if not ENABLED:
         return
     RECORD.mkdir(parents=True, exist_ok=True)
-    data = {rel: {k: sorted(v) if isinstance(v, set) else v for k, v in row.items()}
-            for rel, row in FILES.items()}
-    (RECORD / f"{os.getpid()}.json").write_text(json.dumps(data), encoding="utf-8")
+    worker = getattr(session.config, "workerinput", {}).get("workerid", "")
+    meta = {"worker": worker} if worker else {"nodes": sorted(NODES), "died": DIED}
+    files = {rel: {k: sorted(v) if isinstance(v, set) else v for k, v in row.items()} for rel, row in FILES.items()}
+    (RECORD / f"{os.getpid()}.json").write_text(json.dumps({"meta": meta, "files": files}), encoding="utf-8")
