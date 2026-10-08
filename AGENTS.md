@@ -467,11 +467,11 @@ fixture. Anything whose cost scales with the machine's state (files under the ho
 runtimes, queue depth) and not with the change is a bug. Measure with `--durations` before blaming
 the tests, and never leave a state walk unbounded.
 
-**Long suites run off-hours.** A suite that takes more than a few minutes (`full`, `slow`, `all`
-without file selectors, anything with `--redteam`, the full run `scripts/land` starts) is held by the
-test queue during normal hours (weekdays 08:00 to 19:00, machine-local; configurable) and starts
-when they end. Scoped runs are never held. Only a person may pass `--now` to run a long suite
-during the day; an agent that needs a result now runs the affected files instead.
+**The queue runs shorter suites first.** The test queue orders runs by their estimated length, taken
+from timings it records itself on every run, so many short runs finish before one long one and agents
+get the most done. A long suite is never refused or held: it ages up the queue and is always granted
+after a bounded wait. During normal hours (weekdays 08:00 to 21:00, machine-local) long runs together
+hold at most half the budget while shorter ones are waiting; outside them they may use all of it.
 
 The maintained tiers are `fast` (neither slow nor heavy), `full` (not slow), `slow` (only slow)
 and `all` (including slow). `tests/README.md` describes their mechanics; the policy above
