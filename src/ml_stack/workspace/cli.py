@@ -25,6 +25,7 @@ from ml_stack.workspace import (
     chat,
     coordinator_client,
     coordinator_config,
+    enforcement_cli,
     filecli,
     guide,
     harness_remote,
@@ -261,15 +262,6 @@ def _invite(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
     made = ws.invite(token, args.name, _ttl(args.ttl), args.uses)
     return {"block": onboard.snippet("", made["code"], args.name, made["project"],
                                      (made["uses"], int(made["ttl_s"] // 60))), "uses": made["uses"]}
-
-
-def _whoami(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
-    who = ws.auth(token)
-    if args.model:
-        ws.claim_model(token, args.model, args.harness)
-    model, state = ws.model_of(who.id)
-    return {"id": who.id, "role": who.role, "project": ws.registry.info(who.id)["project"],
-            "model": model or "unknown", "model_state": state, "harness": ws.registry.info(who.id)["harness"]}
 
 
 def _hello_model(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
@@ -600,9 +592,10 @@ TABLE: tuple[tuple[str, str, list[Any], Handler], ...] = (
         flag("--name", default="", help="a suggested id for the new agent"),
         flag("--ttl", default="10m", help="how long the code works, e.g. 10m (at most 30m)"),
         flag("--uses", type=int, default=1, help="how many agents may join with it (at most 3)")], _invite),
-    ("whoami", "who the token says you are; --model records your own model id as claimed", [
-        flag("--model", default="", help="the exact model id you run as (a label, never a right)"),
-        flag("--harness", default="", help="your harness, e.g. claude-code or codex")], _whoami),
+    ("whoami", "who the token says you are and your project's enforcement mode; --model records your own model id as claimed",
+     enforcement_cli.WHOAMI, enforcement_cli.whoami),
+    ("enforcement", "show, check, set, promote or demote a project's task enforcement mode (open or strict)",
+     enforcement_cli.OPTIONS, enforcement_cli.run),
     ("main-session", "register main-session presentation; grants no rights", [flag("--harness", default="")],
      lambda args, ws, token: ws.register_session(token, onboard.device_metadata.current(), args.harness)),
     ("hello-model", "record the model a helper LABEL of yours runs (claimed)", [

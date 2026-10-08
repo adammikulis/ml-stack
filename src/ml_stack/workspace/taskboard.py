@@ -8,7 +8,7 @@ from typing import Any
 from uuid import uuid4
 
 from ml_stack.graph.store import GraphStore
-from ml_stack.workspace import integration_view, task_actions, task_scope, task_summary
+from ml_stack.workspace import enforcement, integration_view, task_actions, task_scope, task_summary
 from ml_stack.workspace.chain import held
 from ml_stack.workspace.coordination import workspace_id
 from ml_stack.workspace.device_accounts import account_for
@@ -47,14 +47,26 @@ class TaskBoard:
             raise ValueError('the task specification changed after creation')
         return task
 
-    def _project_grant(self, identity: str, task: dict[str, Any]) -> bool:
+    def _project_grant(self, identity: str, task: dict[str, Any], mode: str = '') -> bool:
         info = self.ws.registry.info(identity)
-        return bool(self.ws.registry.role_of(identity)
-                    and (not task['project'] or info.get('project') == task['project']))
+        registered = bool(self.ws.registry.role_of(identity))
+        if (mode or enforcement.mode(self.ws, task['project'])) == 'strict':
+            return bool(registered and task['project'] and info.get('project') == task['project'])
+        return bool(registered and (not task['project'] or info.get('project') == task['project']))
 
     def _scope(self, who, task: dict[str, Any]) -> None:
         if not task_scope.eligible(self.ws, who, task):
             raise Denied('the task requires an authorized registered worker')
+
+    def _qualifies(self, identity: str, role: str, task: dict[str, Any], mode: str) -> bool:
+        worker = task.get('worker')
+        if identity == worker:
+            return False
+        member = self._project_grant(identity, task, mode)
+        if role == HUMAN or mode == 'open':
+            return bool(role == HUMAN or member)
+        parent = self.ws.registry.info(worker).get('parent', '') if worker else ''
+        return bool(identity in task['reviewers'] and member or identity == task['created_by'] == parent)
 
     def _reviewer(self, who, task: dict[str, Any], *, economic: bool = True) -> None:
         self.ws._may(who, 'read')
@@ -64,9 +76,11 @@ class TaskBoard:
         if economic and who.role != HUMAN and reviewer_account and worker_account \
                 and reviewer_account['base_id'] == worker_account['base_id']:
             raise Denied('independent economic review requires a different enrolled device account')
-        member = self._project_grant(who.id, task)
-        if who.id == worker or not (who.role == HUMAN or member):
-            raise Denied('independent review requires a person or a registered project member other than the worker')
+        mode = enforcement.mode(self.ws, task['project']) if task['state'] == 'review' else 'open'
+        if not self._qualifies(who.id, who.role, task, mode):
+            raise Denied('independent review requires person or existing delegated project authority'
+                         if mode == 'strict' else
+                         'independent review requires a person or a registered project member other than the worker')
 
     def assert_reviewer(self, token: str, ident: str) -> dict[str, Any]:
         """Recheck live reviewer authority independently of stored review claims."""

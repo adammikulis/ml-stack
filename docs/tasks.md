@@ -28,6 +28,21 @@ need existing project permissions, cannot review their own work, and nonhuman re
 cannot grade another worker from their own physical-device account. Rejected work and
 infrastructure blockage are separate outcomes.
 
+Each project runs in one of two enforcement modes. In `open` mode, the default, a task with no
+assignees is claimable by any registered non-human worker in its project, assignees and reviewers
+need only be registered in the task's project, and any registered project member other than the
+worker may review. In `strict` mode an unassigned task is open only when a person created it,
+assignees and reviewers must belong to the task's project, and a reviewer must be a person, a
+designated reviewer or the creator of the worker's parent. `ml-stack-workspace enforcement`
+shows the mode (`show`, readable by anyone) and a lead identity changes it: `check` lists the
+tasks that strict mode would strand, `promote` switches to strict and `demote` to open in one
+step, and `set open|strict` does the same by name. A helper identity cannot change it. The mode
+is stored per project key in `enforcement.db`, outside the project record that tasks carry, and
+every change writes an `enforcement.set` audit entry with the identity, time, previous and new
+mode. A change applies to new claims, assignments and reviews; leases, submitted work and
+accepted reviews continue under the rules they started with. `whoami` reports the mode of the
+caller's project.
+
 Expired working leases require **Recover expired lease**. Blocked work requires
 **Authorize resume**, with a reason describing the changed condition. These actions preserve
 checkpoint history and do not grant resources; the next worker claim still validates a live
