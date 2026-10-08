@@ -36,11 +36,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 import affected
+import testreuse_run
+import testreuse_store
 import testselectors
+import testslots
 import testslots_runner
 import testtime
 
 from ml_stack.activity.gate import Run, record_run, tree_hash
+from ml_stack.workspace import testruns
 
 ROOT = Path(__file__).resolve().parent.parent
 BASE = "0.2dev"
@@ -51,6 +55,7 @@ CASE = re.compile(r'<testcase classname="([^"]+)" name="[^"]*" time="([^"]+)"')
 HEAVY_FILE = ROOT / "tests" / "heavy-modules.txt"
 FULL: list[str] = []
 RECORD_WORKERS = 3
+REUSE: dict = {"on": True, "agent": {"id": "", "source": "none"}, "events": testreuse_run.Events()}
 
 
 def pytest_command(workers: int, *rest: str) -> list[str]:
@@ -59,11 +64,34 @@ def pytest_command(workers: int, *rest: str) -> list[str]:
 
 
 def run(command: list[str], env: dict[str, str] | None = None, tier: str = "") -> int:
+    """Run pytest, reusing earlier passes of explicitly named test files when allowed."""
+    files = testreuse_run.selectors(command, ROOT) if REUSE["on"] and env is None \
+        and tier in testreuse_run.TIERS else None
+    if files is None:
+        return launch(command, env, tier)
+    session = testreuse_run.Session(ROOT, command, files, reuse_store(), REUSE["agent"], REUSE["events"])
+    report = session.run(lambda shown: launch(shown, env, tier), tree_hash(ROOT))
+    print("\n".join(report.lines()), flush=True)
+    return report.status
+
+
+def reuse_store() -> testreuse_store.Store:
+    """This project's reuse store."""
+    named = os.environ.get("DEV_TEST_REUSE_DIR")
+    base = Path(named) if named else testslots.slots_dir().resolve().parent / "test-reuse"
+    return testreuse_store.Store(base / testruns.scope(ROOT))
+
+
+def launch(command: list[str], env: dict[str, str] | None = None, tier: str = "") -> int:
     """Run pytest in the repository and write its local evidence artifact."""
-    descriptor, name = tempfile.mkstemp(suffix=".xml")
-    os.close(descriptor)
-    junit = Path(name)
-    shown = [*command, f"--junitxml={junit}"]
+    given = next((a.split("=", 1)[1] for a in command if a.startswith("--junitxml=")), "")
+    if given:
+        junit, shown = Path(given), list(command)
+    else:
+        descriptor, name = tempfile.mkstemp(suffix=".xml")
+        os.close(descriptor)
+        junit = Path(name)
+        shown = [*command, f"--junitxml={junit}"]
     print("+", " ".join(command), flush=True)
     environment = dict(os.environ if env is None else env)
     environment["PYTHONPATH"] = os.pathsep.join(
@@ -72,6 +100,8 @@ def run(command: list[str], env: dict[str, str] | None = None, tier: str = "") -
     want = int(shown[index + 1])
     shown[index + 1] = "{workers}"
     shown.extend(["-p", "testslots_pytest"])
+    if environment.get("DEV_TEST_REUSE_RECORD"):
+        shown.extend(["-p", "testreuse_plugin"])
     executed_tree = tree_hash(ROOT)
     began = time.monotonic()
     load = os.getloadavg()[0] if hasattr(os, "getloadavg") else 0.0
@@ -83,14 +113,13 @@ def run(command: list[str], env: dict[str, str] | None = None, tier: str = "") -
         print("test: source tree changed during the run", file=sys.stderr)
         status = 4
     wall = time.monotonic() - began
-    if junit is not None and tier in ("full", "all") and not [a for a in command if a.startswith("tests/") or a == "-k"]:
+    if tier in ("full", "all") and not [a for a in command if a.startswith("tests/") or a == "-k"]:
         measured(command, junit, wall, load)
-    if junit is not None:
-        artifact_fd, artifact_name = tempfile.mkstemp(suffix=".result.json")
-        os.close(artifact_fd)
-        artifact = Path(artifact_name)
-        record_run(Run(ROOT, tier, command, junit, status, wall, executed_tree), artifact)
-        print(f"test: evidence {artifact}", flush=True)
+    artifact_fd, artifact_name = tempfile.mkstemp(suffix=".result.json")
+    os.close(artifact_fd)
+    record_run(Run(ROOT, tier, command, junit, status, wall, executed_tree), Path(artifact_name))
+    print(f"test: evidence {artifact_name}", flush=True)
+    if not given:
         junit.unlink(missing_ok=True)
     return status
 
@@ -288,10 +317,17 @@ def main() -> int:
     parser.add_argument("--over", type=float, default=12.0, help="heavy: seconds per module")
     parser.add_argument("-n", "--workers", type=int, default=1,
                         help="xdist worker ceiling (default: 1); explicit 0 = automatic pool up to broker capacity")
+    parser.add_argument("--no-reuse", action="store_true", help="execute every named test file")
+    parser.add_argument("--agent", default="", help="the workspace agent this run is for")
+    parser.add_argument("--label", default="", help="the helper label under that agent")
     parser.add_argument("--base", default=BASE, help="branch quick diffs against")
     parser.add_argument("--slow", action="store_true", help="quick: include slow tests")
     parser.add_argument("--explain", action="store_true", help="quick: say what selected what")
     args, rest = parser.parse_known_args()
+    REUSE["on"] = not args.no_reuse
+    seat = testruns.acting(args.agent, args.label)
+    if seat is not None:
+        REUSE["agent"] = seat.identity
     if args.tier == "heavy":
         return heavy(args.junit, args.over)
     if args.tier == "ratchet":
