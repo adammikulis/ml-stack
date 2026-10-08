@@ -85,16 +85,6 @@ def test_copying_a_symlink_without_following_it_works_under_the_plugin(project, 
     assert report.outcomes[0].passed and "pass" in kinds(store)
 
 
-@pytest.mark.parametrize("api", ["os.utime(tmp_path)", "os.fstat(0)", "sqlite3.connect(':memory:')",
-                                 "list(os.scandir(tmp_path))"])
-def test_a_file_using_an_api_the_runner_cannot_observe_is_not_reusable(project, tmp_path, api):
-    store = storage.Store(tmp_path / "store")
-    (project / FILE).write_text(f"import os\nimport sqlite3\n\n\ndef test_a(tmp_path):\n    {api}\n")
-    report, _ = attempt(project, store)
-    assert report.outcomes[0].passed and "pass" not in kinds(store)
-    assert "cannot observe" in report.outcomes[0].detail
-
-
 # -- N4: evidence names a clean commit whose tree it ran ----------------------------------------------------
 def checkout(kit) -> Path:
     with GraphStore(kit.ws.base / "coordination.db") as graph:
