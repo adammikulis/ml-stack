@@ -6,9 +6,11 @@ import getpass
 import json
 import re
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from ml_stack.workspace import nudge_fence
 
 URGENT = ("question", "task", "handoff", "blocked")
 UNCHANGING = frozenset({"status", "blocked", "done"})
@@ -22,21 +24,24 @@ SAFE = re.compile(r"[^A-Za-z0-9._/-]")
 
 @dataclass(frozen=True, slots=True)
 class Waiting:
-    """The unread rows for one reader at one moment; only kinds, senders and times are read."""
+    """The unread rows for one reader at one moment, and the text of those from senders it may be pushed for."""
 
     me: str
     rows: list[dict[str, Any]]
     now: float
+    messages: list[dict[str, Any]] = field(default_factory=list)
 
     def summary(self) -> dict[str, Any]:
-        """The reader, the time and each unread row's sequence, sender, label, kind and time; no text."""
+        """The reader, the time and each unread row's sequence, sender, label, kind and time, and the pushable messages."""
         keys = ("seq", "to", "from", "label", "type", "ts")
-        return {"me": self.me, "now": self.now, "rows": [{k: r.get(k) for k in keys} for r in self.rows]}
+        return {"me": self.me, "now": self.now, "rows": [{k: r.get(k) for k in keys} for r in self.rows],
+                "messages": self.messages}
 
     @classmethod
     def of(cls, summary: dict[str, Any]) -> Waiting:
         """The `Waiting` a `summary` describes."""
-        return cls(str(summary["me"]), list(summary["rows"]), float(summary["now"]))
+        return cls(str(summary["me"]), list(summary["rows"]), float(summary["now"]),
+                   list(summary.get("messages", [])))
 
     def urgent(self) -> list[dict[str, Any]]:
         """Direct questions, tasks, handoffs and blocked notices addressed to the reader."""
@@ -101,22 +106,59 @@ def _write(path: Path, value: float) -> None:
         return
 
 
+def _seen_file(me: str) -> Path:
+    return _stamp(f"ml-stack-nudge-seen.{me}")
+
+
+def _delivery(waiting: Waiting, rows: list[dict[str, Any]], seen: int) -> tuple[str, int]:
+    """The text pushed for ``rows``: the summary line, the pushable messages inside one nonce fence
+    within the caps, a count with the sequence numbers of the rest, and the standing notice; with
+    the highest sequence number covered. Rows at or below ``seen`` were delivered before."""
+    pushable = {int(m["seq"]): m for m in waiting.messages}
+    fresh = [r for r in rows if int(r["seq"]) > seen]
+    blocks, shown, used = [], set(), 0
+    for row in fresh:
+        message = pushable.get(int(row["seq"]))
+        if message is None or len(blocks) == nudge_fence.MESSAGES:
+            continue
+        text = nudge_fence.block(message)
+        if blocks and used + len(text) > nudge_fence.DELIVERY_CHARS:
+            break
+        blocks.append(text)
+        shown.add(int(row["seq"]))
+        used += len(text)
+    rest = [int(r["seq"]) for r in fresh if int(r["seq"]) not in shown]
+    parts = [waiting.line(), *([nudge_fence.fenced(blocks)] if blocks else [])]
+    if rest:
+        listed = ", ".join(str(n) for n in rest[:nudge_fence.SEQS_LISTED])
+        more = ", ..." if len(rest) > nudge_fence.SEQS_LISTED else ""
+        parts.append(f"{len(rest)} more not shown (seq {listed}{more}); run ml-stack-workspace inbox")
+    parts.append(nudge_fence.NOTICE)
+    return "\n".join(parts), max(int(r["seq"]) for r in rows)
+
+
 def output(event: str, waiting: Waiting, stdin: str) -> str:
-    """The JSON a Claude Code ``event`` hook prints ("post", "stop" or "prompt"), or ""."""
+    """The JSON a Claude Code ``event`` hook prints ("post", "stop" or "prompt"), or "". Messages not
+    delivered before go to the model as `additionalContext` and to the person as `systemMessage`;
+    a delivered message is not delivered again."""
     if event == "post":
         stamp = _stamp("ml-stack-nudge")
         if waiting.now - _read_int(stamp) < POST_EVERY_S:
             return ""
         _write(stamp, int(waiting.now))
-    line = waiting.line()
-    if not line:
-        return ""
+    seen = _read_int(_seen_file(waiting.me))
     if event == "stop":
-        return _stop(waiting, line, stdin)
-    return json.dumps({"hookSpecificOutput": {"hookEventName": NAMES[event], "additionalContext": line}})
+        return _stop(waiting, stdin, seen)
+    rows = [r for r in waiting.rows if int(r["seq"]) > seen]
+    if not rows:
+        return ""
+    text, top = _delivery(waiting, rows, seen)
+    _write(_seen_file(waiting.me), top)
+    return json.dumps({"hookSpecificOutput": {"hookEventName": NAMES[event], "additionalContext": text},
+                       "systemMessage": text})
 
 
-def _stop(waiting: Waiting, line: str, stdin: str) -> str:
+def _stop(waiting: Waiting, stdin: str, seen: int) -> str:
     try:
         active = bool(json.loads(stdin or "{}").get("stop_hook_active"))
     except (ValueError, AttributeError):
@@ -128,4 +170,6 @@ def _stop(waiting: Waiting, line: str, stdin: str) -> str:
     if active or not old or top <= _read_int(state):
         return ""
     _write(state, top)
-    return json.dumps({"decision": "block", "reason": line})
+    text, last = _delivery(waiting, urgent, seen)
+    _write(_seen_file(waiting.me), max(seen, last))
+    return json.dumps({"decision": "block", "reason": text, "systemMessage": text})

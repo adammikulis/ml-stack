@@ -8,6 +8,7 @@ import time
 import pytest
 from workspace_kit import Kit, clean_env, cli
 
+from ml_stack.workspace import nudge
 from ml_stack.workspace.remote_protocol import METHODS
 
 LONG_AGO = 3 * 3600 + 12 * 60 + 20
@@ -28,7 +29,7 @@ def hook(kit, event, stdin="", tmp="state"):
                input=stdin)
 
 
-def test_the_line_counts_kinds_names_senders_and_gives_the_age_without_a_body(kit):
+def test_the_plain_line_counts_kinds_names_senders_and_gives_the_age_without_a_body(kit):
     ws, t = kit.ws, kit.t
     ws.send(t["alice"], "bob", "question", "SECRET-BODY which port?", label="local-qwen")
     ws.send(t["alice"], "bob", "question", "SECRET-BODY and the lease?")
@@ -54,8 +55,10 @@ def test_prompt_hook_injects_the_line_as_context_and_stays_silent_when_empty(kit
     kit.ws.send(kit.t["alice"], "bob", "status", "x")
     shape = json.loads(hook(kit, "prompt").stdout)
     text = shape["hookSpecificOutput"]["additionalContext"]
-    assert shape == {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": text}}
+    assert shape == {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": text},
+                     "systemMessage": text}
     assert text.startswith("workspace: 1 waiting for you")
+    assert hook(kit, "prompt").stdout == ""
 
 
 def test_post_hook_is_rate_limited_to_one_check_in_twenty_seconds(kit):
@@ -72,11 +75,12 @@ def test_stop_hook_blocks_once_per_set_of_unread_urgent_messages(kit):
     first = hook(kit, "stop", "{}")
     verdict = json.loads(first.stdout)
     assert verdict["decision"] == "block" and "1 question" in verdict["reason"]
-    assert "SECRET" not in first.stdout
+    assert "SECRET-BODY ready?" in verdict["reason"] and verdict["systemMessage"] == verdict["reason"]
     assert hook(kit, "stop", "{}").stdout == ""
     ws.send(t["carol"], "bob", "handoff", "SECRET-BODY yours")
     again = json.loads(hook(kit, "stop", "{}").stdout)
-    assert again["decision"] == "block" and "1 handoff" in again["reason"]
+    assert again["decision"] == "block" and "2 urgent" not in again["reason"]
+    assert "SECRET-BODY yours" in again["reason"] and "SECRET-BODY ready?" not in again["reason"]
 
 
 def test_stop_hook_allows_when_continuing_or_when_only_routine_kinds_wait(kit):
@@ -135,6 +139,7 @@ def test_prompt_hook_on_a_canonical_board_injects_the_waiting_line(kit, monkeypa
 
     from ml_stack.workspace import cli as ws_cli, project_connection as connection
     monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(nudge.tempfile, "gettempdir", lambda: str(tmp_path))
     root = tmp_path / "project"
     root.mkdir()
     board = _Board(kit)
@@ -148,7 +153,7 @@ def test_prompt_hook_on_a_canonical_board_injects_the_waiting_line(kit, monkeypa
     text = shape["hookSpecificOutput"]["additionalContext"]
     assert shape["hookSpecificOutput"]["hookEventName"] == "UserPromptSubmit"
     assert text.startswith("workspace: 1 waiting for you (1 question; from alice;")
-    assert "SECRET" not in text
+    assert "SECRET-BODY which port?" in text and shape["systemMessage"] == text
     assert "waiting_summary" in board.calls
 
 

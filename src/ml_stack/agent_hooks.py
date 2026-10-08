@@ -94,7 +94,7 @@ def _codex_block(agent: str, with_post: bool, with_features: bool) -> str:
             continue
         out += [f"[[hooks.{event}]]", *([f'matcher = "{matcher}"'] if matcher else []), "",
                 f"[[hooks.{event}.hooks]]", 'type = "command"', f'command = "{command(agent, hook)}"',
-                "timeout = 30", ""]
+                "timeout = 30", *(["additionalContextLimit = 4000"] if hook == "post" else []), ""]
     return "\n".join([*out[:-1], END]) + "\n"
 
 

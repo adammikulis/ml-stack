@@ -500,8 +500,19 @@ class Workspace:
         return Waiting(who.id, self._unread(who, 1 << 30), self.clock())
 
     def waiting_summary(self, token: str) -> dict[str, Any]:
-        """The kinds, senders and times of what waits unread for the token's owner, never text."""
-        return self.waiting(token).summary()
+        """What waits unread for the token's owner: each row's kind, sender and time, and the text
+        of up to 50 clear messages from registered senders in the reader's project; nothing is
+        marked read."""
+        who = self.auth(token)
+        waiting = self.waiting(token)
+        mine = self.registry.info(who.id).get("project", {}).get("key", "")
+        sent = [r for r in waiting.rows if not r["held"] and not r.get("flags") and self.registry.role_of(r["from"])
+                and self.registry.info(r["from"]).get("project", {}).get("key", "") == mine]
+        texts = [{"seq": r["seq"], "type": r["type"], "from": r["from"],
+                  "from_label": agent_display.metadata(self.registry, r["from"], r.get("label", ""))["display_name"],
+                  "text": f"{r['subject']}: {r['body'][:600]}" if r["subject"] else r["body"][:600]}
+                 for r in sent[:50]]
+        return {**waiting.summary(), "messages": texts}
 
     def nudge(self, token: str) -> str:
         """One line giving kinds, senders and age of what waits for the token's owner, never
