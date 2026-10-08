@@ -13,9 +13,9 @@ from pathlib import Path
 from . import Finding, _imports, _pins, _store
 from ._util import rel
 
-BATCH = 100
-"""Files named to one pyright run, so the command line stays short."""
-FULL_ABOVE = 0.5
+LINE_LIMIT = 24000
+"""Characters of file names one pyright command line may carry."""
+FULL_ABOVE = 0.8
 """Past this share of files stale, one whole-project run is cheaper than naming them."""
 UNSUPPORTED = {"exclude", "ignore", "extends", "executionEnvironments", "extraPaths",
                "stubPath", "venvPath", "venv", "pythonPath", "strict"}
@@ -132,11 +132,11 @@ def findings(root: Path, run: Run) -> list[Finding]:
     stale = [names[p] for p in files if stored.get(names[p], {}).get("key") != keys[p]]
     changed = set(stale)
     rows = {n: stored[n]["rows"] for n in names.values() if n not in changed}
-    whole = bool(stale) and len(stale) > len(files) * FULL_ABOVE
+    whole = bool(stale) and (len(stale) > len(files) * FULL_ABOVE
+                             or sum(len(n) + 1 for n in stale) > LINE_LIMIT)
     if stale:
         wanted = list(names.values()) if whole else stale
-        found = run(None) if whole else [f for at in range(0, len(stale), BATCH)
-                                         for f in run(stale[at:at + BATCH])]
+        found = run(None if whole else stale)
         grouped = by_file(found)
         if set(grouped) - set(wanted):
             return found if whole else run(None)
