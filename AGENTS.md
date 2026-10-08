@@ -729,6 +729,12 @@ README. A measurement lives in a document that names its date, the command that 
 the store it read and the model it ran on, so a reader can repeat it; the README points at that
 document and quotes no figure. A number without those four is not a measurement, it is a claim.
 
+### Vocabulary
+
+The group of paired devices is a **pool**, from a pool of one device to a pool of N. New code, flags,
+identifiers, files, interface text and docs say pool and never cluster for it. The word cluster is
+kept only where it means something else, such as clustering in data.
+
 ### HANDOFF.md
 
 It lists what is still pending. Nothing else.
