@@ -898,6 +898,19 @@ tests = ["tests/test_redteam_startup_arguments.py"]
 note = "hostile executable and label text stays in literal argv or JSON fields; service commands and information flags remain fixed without a shell"
 
 [[group]]
+match = ["spawn:runtime_trust.py:_git", "spawn:hookcheck.py:_git", "spawn:hookcheck.py:_entries"]
+status = "covered"
+count = 3
+tests = ["tests/test_runtime_trust.py::test_a_checkout_path_with_shell_punctuation_reaches_git_as_one_argument",
+         "tests/test_runtime_trust.py::test_a_ref_that_is_an_option_or_a_command_names_no_commit",
+         "tests/test_runtime_trust.py::test_a_forged_state_root_naming_a_hostile_clone_is_ignored_by_an_agent",
+         "tests/test_runtime_trust.py::test_an_agent_cannot_name_another_repository",
+         "tests/test_hookcheck.py::test_a_malformed_repository_config_is_a_problem_and_not_a_crash",
+         "tests/test_hookcheck.py::test_a_config_value_with_a_newline_and_shell_punctuation_is_reported_and_its_repair_is_inert",
+         "tests/test_hookcheck.py::test_a_repository_path_with_shell_punctuation_is_inspected_and_repaired_as_one_argument"]
+note = "git runs with an argument list; hostile paths, refs and settings stay one argument or inert data, and no repair or fix goes through a shell"
+
+[[group]]
 match = ["spawn:fleet/runtime_wheel.py:_run", "spawn:runtime.py:forward", "spawn:runtime.py:verify",
          "spawn:runtime_deploy.py:git", "spawn:runtime_deploy.py:smoke", "spawn:runtime_launchers.py:install",
          "spawn:fleet/updates.py:pip_install"]

@@ -216,3 +216,25 @@ def test_broken_hooks_are_announced_once_and_shown_to_the_agent_every_time(sessi
     assert len(announced()) == 2
     recorded = json.loads(next((tmp_path / "state" / "hookcheck").glob("*.json")).read_text())
     assert recorded["version"] == 1
+
+
+def test_a_malformed_repository_config_is_a_problem_and_not_a_crash(repo):
+    (repo / ".git" / "config").write_text("[core\n\tbare = = \n")
+    assert hookcheck.inspect(repo)[0].kind == "config"
+
+
+def test_a_config_value_with_a_newline_and_shell_punctuation_is_reported_and_its_repair_is_inert(repo):
+    git(repo, "config", "alias.x", "!sh -c 'touch pwn'\ntouch pwn2")
+    found = [p for p in hookcheck.inspect(repo) if p.kind == "config"]
+    assert len(found) == 1
+    subprocess.run(shlex.split(found[0].repair), check=True)
+    assert hookcheck.inspect(repo) == [] and not list(repo.rglob("pwn*"))
+
+
+def test_a_repository_path_with_shell_punctuation_is_inspected_and_repaired_as_one_argument(tmp_path):
+    odd = make_repo(tmp_path / "r; touch pwn; $(touch pwn)")
+    subprocess.run(["sh", "scripts/install-hooks.sh"], cwd=odd, check=True, capture_output=True)
+    git(odd, "config", "core.sshCommand", "x")
+    [problem] = hookcheck.inspect(odd)
+    subprocess.run(shlex.split(problem.repair), check=True)
+    assert hookcheck.inspect(odd) == [] and not list(tmp_path.rglob("pwn"))

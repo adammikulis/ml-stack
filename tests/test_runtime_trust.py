@@ -194,3 +194,30 @@ def test_a_person_at_a_terminal_may_deploy_an_unmerged_commit_by_typing_its_ref(
     assert typed and b"not on the development branch" not in heard
     [entry] = world.audited()
     assert entry.subject == world.evil and entry.outcome != "refused" and entry.meta["person"] is True
+
+
+def test_a_checkout_path_with_shell_punctuation_reaches_git_as_one_argument(world):
+    hostile = world.tmp / "w; touch pwn; $(touch pwn) `touch pwn`"
+    git(world.repo, "worktree", "add", "-q", "-b", "odd", str(hostile), world.base)
+    for argv in (("status", "--json"), ("ensure", "--ref", world.evil)):
+        done = world.cli(*argv, "--checkout", str(hostile))
+        assert "pwn" not in done.stdout.replace(str(hostile), "")
+    assert not list(world.tmp.rglob("pwn")) and not (hostile / "pwn").exists()
+
+
+@pytest.mark.parametrize("ref", ["--output=pwn", "-h", "dev; touch pwn", "$(touch pwn)", "`touch pwn`", "dev\ntouch pwn"])
+def test_a_ref_that_is_an_option_or_a_command_names_no_commit(world, ref):
+    done = world.cli("ensure", f"--ref={ref}")
+    assert done.returncode == 1 and not list(world.tmp.rglob("pwn"))
+    assert not (runtime.directory() / "selected.json").exists()
+
+
+def test_a_forged_state_root_naming_a_hostile_clone_is_ignored_by_an_agent(world):
+    clone = world.tmp / "clone"
+    subprocess.run(["git", "clone", "-q", str(world.repo), str(clone)], check=True, capture_output=True)
+    forged = world.tmp / "forged" / "runtimes"
+    forged.mkdir(parents=True)
+    (world.tmp / "forged").joinpath("marker").write_text("x")
+    done = world.cli("ensure", "--checkout", str(clone), ML_STACK_HOME=str(world.tmp / "forged"))
+    assert done.returncode == 1 and "ignoring ML_STACK_HOME" in done.stderr and "recorded repository" in done.stderr
+    assert sorted(p.name for p in (world.tmp / "forged").iterdir()) == ["marker", "runtimes"]
