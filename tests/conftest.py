@@ -665,6 +665,24 @@ def _no_machine_binary(monkeypatch):
     monkeypatch.setattr(binary_module, "machine_binary", withheld)
 
 
+@pytest.fixture(autouse=True)
+def _pages_open_with_a_launch_ticket(monkeypatch):
+    """A Playwright page that opens a test daemon's ``/ui`` carries the launch ticket the app's
+    own window would; `launch_support.hand_typed` opens one without."""
+    try:
+        from playwright.sync_api import Page
+    except ImportError:
+        return
+    import launch_support
+
+    opened = Page.goto
+
+    def goto(self, url, **options):
+        return opened(self, launch_support.with_ticket(url), **options)
+
+    monkeypatch.setattr(Page, "goto", goto)
+
+
 # -- the fixtures above are trusted; these fail the run if that trust is misplaced ------
 
 _GUARDED_PORTS = range(8080, 8100)

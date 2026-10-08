@@ -199,6 +199,7 @@ cluster-view, chat-view, models-view, settings-view, fit-view, data-view, traini
   M.group = "";
   M.inCluster = false;
   M.signInMessage = "";
+  M.launchOnly = false;
 
   /** Show one screen by name, and tell every component that is watching. */
   M.go = function (name, remember = true) {
@@ -238,7 +239,7 @@ cluster-view, chat-view, models-view, settings-view, fit-view, data-view, traini
   /** Ask for the passphrase, saying why. */
   M.signIn = function (message) {
     M.signInMessage = message || "";
-    M.go("sign-in");
+    M.go(M.launchOnly && document.querySelector("launch-needed") ? "launch-needed" : "sign-in");
   };
 
   /** True when the route refused for want of a session, and the screen has been changed. */
@@ -278,11 +279,13 @@ cluster-view, chat-view, models-view, settings-view, fit-view, data-view, traini
       const setup = await request("/ui/setup");
       M.group = setup.group || "";
       M.inCluster = !!setup.needs_password;
+      const launched = (await request("/ui/session")).signed_in;
+      M.launchOnly = !!document.querySelector("launch-needed")
+        && ["127.0.0.1", "localhost", "[::1]"].includes(location.hostname)
+        && (!setup.in_cluster || setup.cluster_mode === "dev");
+      if (!launched && M.launchOnly) { releaseBoot(); return M.go("launch-needed"); }
       if (setup.needs_setup && document.querySelector("first-run")) { releaseBoot(); return M.go("first-run"); }
       if (!setup.needs_password) { await M.loadPreferences(); releaseBoot(); return M.go(opened); }
-      if (setup.cluster_mode === "dev" && ["127.0.0.1", "localhost", "[::1]"].includes(location.hostname)) {
-        await request("/ui/setup/local-session", { method: "POST" });
-      }
       const s = await request("/ui/session");
       if (s.signed_in) await M.loadPreferences();
       releaseBoot();

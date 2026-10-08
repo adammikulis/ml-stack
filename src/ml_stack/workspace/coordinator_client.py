@@ -5,7 +5,7 @@ import json
 from urllib.parse import urlsplit
 from uuid import uuid4
 
-from ml_stack import home, http, macauth
+from ml_stack import home, http, macauth, private_path
 from ml_stack.fleet import tls
 from ml_stack.fleet.discovery import DiscoveryError, load_cluster_key
 from ml_stack.fleet.onboard.requests import Devices
@@ -52,7 +52,7 @@ class Remote:
             row = next((row['attrs'] for row in rows if row['id'] == key), {})
             agent = row.get('agent', name)
             credential = ''
-            problem = tokens.problem(tokens.directory(base) / agent.replace('/', '~'))
+            problem = private_path.problem(tokens.directory(base) / agent.replace('/', '~'))
             if problem and problem != 'missing':
                 raise Denied('the agent credential file is unsafe')
             if not problem:

@@ -18,7 +18,7 @@ from types import SimpleNamespace
 import pytest
 from workspace_kit import SRC, STRIPPED, clean_env
 
-from ml_stack import authority
+from ml_stack import authority, private_path
 from ml_stack.briefing import REQUIRED_BRIEFING
 from ml_stack.workspace import Workspace, coordinator_config, guide, onboard, project, tokens
 from ml_stack.workspace.identity import Denied
@@ -142,7 +142,7 @@ def everything_outside_tokens(base: Path) -> str:
 
 
 def assert_private(path: Path, mode: int) -> None:
-    assert tokens.problem(path) == ""
+    assert private_path.problem(path) == ""
     if PTY:
         assert stat.S_IMODE(path.stat().st_mode) == mode
     else:

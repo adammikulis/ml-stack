@@ -366,7 +366,7 @@ def route(kit):
 
     def call(path, method="GET", headers=None):
         conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
-        conn.request(method, path, headers=headers or {})
+        conn.request(method, path, headers={"Cookie": f"ml_session={server.session}", **(headers or {})})
         r = conn.getresponse()
         body = r.read()
         conn.close()

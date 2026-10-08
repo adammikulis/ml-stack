@@ -3,6 +3,7 @@
 from importlib.metadata import entry_points
 
 import pytest
+from launch_support import signed
 from test_fleet_ui import Serving
 
 from ml_stack.activity import writer
@@ -22,7 +23,7 @@ def history(tmp_path, person, monkeypatch):
                   meta={'model': 'qwen', 'arguments': 'private prompt',
                         'issue_url': 'https://github.com/example/repo/issues/42'})
     assert writer.record('workspace.claim', actor='agent:builder', subject='file:demo.py', outcome='claimed')
-    server = Serving(tmp_path)
+    server = signed(Serving(tmp_path))
     server.ui.settings.setup_done = True
     try:
         yield server
@@ -46,8 +47,8 @@ def test_installed_history_extension_reads_redacted_actions(history):
 def test_history_requires_ui_header_and_joined_session(history, monkeypatch):
     assert history.call('/ui/history/events', ui_header=False)[0] == 403
     monkeypatch.setattr(routes, 'in_cluster', lambda _: True)
-    assert history.call('/ui/history/events')[0] == 401
-    cookie = history.ui.sessions.cookie_header(history.ui.sessions.open('person'))
+    assert history.call('/ui/history/events', cookie='')[0] == 401
+    cookie = history.ui.sessions.cookie_header(history.ui.sessions.open('person', 'launch-ticket'))
     assert history.call('/ui/history/events', cookie=cookie)[0] == 200
 
 

@@ -74,8 +74,8 @@ def route(request):
             if request.client_ip not in ('127.0.0.1', '::1') or request.header('Authorization'):
                 raise Denied('coordinator selection is made in this device browser')
             session = request.ui.sessions.get(parse_cookie(request.cookie))
-            if session and session.who == 'token':
-                raise Denied('an access-token session cannot select the coordinator')
+            if session is None or not session.credentialed:
+                raise Denied('selecting the coordinator needs a session opened from the app window or with a passphrase')
             headers = {key.lower(): value for key, value in request.handler.headers.items()}
             refused = localroute._post_refusal(Request('POST', request.path, headers,
                                                      request.handler.server.server_address[1], True))

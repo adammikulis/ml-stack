@@ -18,6 +18,7 @@ import urllib.error
 from pathlib import Path
 
 import pytest
+from launch_support import arm, disarm
 
 from ml_stack.fleet import tls
 from ml_stack.fleet.api import Daemon, make_handler
@@ -94,6 +95,7 @@ class Serving:
         self.ui.settings_path = tmp_path / "settings.json"
         self.ui.report = lambda: {"cpus": 8, "accelerator": False}
         self.port = _free_port()
+        self.rows = arm(self)
         from ml_stack.fleet import invite_client, invite_routes
         from ml_stack.fleet.discovery import memberships
         from ml_stack.fleet.invites import Invitations
@@ -149,6 +151,7 @@ class Serving:
             conn.close()
 
     def close(self):
+        disarm(self)
         self.runner.shutdown()
         self.httpd.shutdown()
         self.httpd.server_close()

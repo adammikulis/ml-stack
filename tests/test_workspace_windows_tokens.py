@@ -5,7 +5,7 @@ import subprocess
 
 import pytest
 
-from ml_stack import windows_private
+from ml_stack import private_path, windows_private
 from ml_stack.workspace import tokens
 from ml_stack.workspace.identity import PREFIX, Denied
 
@@ -16,9 +16,9 @@ if os.name == "nt":
 
 def test_workspace_token_directory_rejects_windows_mount(tmp_path, monkeypatch):
     base = tmp_path / "workspace"
-    monkeypatch.setattr(tokens, "_windows_mount", lambda path: True)
+    monkeypatch.setattr(private_path, "windows_mount", lambda path: True)
     base.mkdir()
-    assert "Windows-mounted filesystem" in tokens.problem(base)
+    assert "Windows-mounted filesystem" in private_path.problem(base)
     with pytest.raises(ValueError, match="Windows-mounted filesystem"):
         tokens.prepare(base)
     assert not (base / "tokens").exists()
@@ -28,8 +28,8 @@ def test_workspace_token_directory_rejects_windows_mount(tmp_path, monkeypatch):
 def test_created_token_and_directory_are_private(tmp_path):
     held = f"{PREFIX}fixture-agent.private-token"
     target = tokens.store(tmp_path, "fixture-agent", held)
-    assert tokens.problem(target.parent) == ""
-    assert tokens.problem(target) == ""
+    assert private_path.problem(target.parent) == ""
+    assert private_path.problem(target) == ""
     assert tokens.load(tmp_path, "fixture-agent") == held
 
 
@@ -71,7 +71,7 @@ def test_junction_token_directory_is_refused_without_changing_target_acl(tmp_pat
                              capture_output=True, check=False)
     assert created.returncode == 0, created.stderr
     try:
-        assert "reparse point" in tokens.problem(junction)
+        assert "reparse point" in private_path.problem(junction)
         with pytest.raises(ValueError, match="reparse point"):
             tokens.prepare(base)
         after = win32security.ConvertSecurityDescriptorToStringSecurityDescriptor(

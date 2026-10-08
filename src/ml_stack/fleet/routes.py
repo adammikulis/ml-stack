@@ -261,10 +261,12 @@ class SetupRoutes:
         try:
             if not isinstance(req.get("existing", False), bool):
                 raise DiscoveryError("existing cluster selection must be true or false")
+            held = ui.sessions.get(parse_cookie(self.cookie))
             state, sid = ui.join(str(req.get("passphrase") or ""),
                                  require_name(req.get("group")), self.client_ip,
                                  options=JoinOptions(action=req.get("mode"), existing=req.get("existing") is True,
-                                                     mode=req.get("cluster_mode")))
+                                                     mode=req.get("cluster_mode")),
+                                 origin=held.origin if held is not None and held.credentialed else "")
         except DiscoveryError as exc:
             self.send(429 if "attempts" in str(exc) or "busy" in str(exc) else 400,
                       {"error": str(exc)})

@@ -24,7 +24,7 @@ def kit(monkeypatch, tmp_path):
 
 def test_the_page_is_served_with_a_policy_that_forbids_eval_and_other_origins(kit, served):
     import http.client
-    conn = http.client.HTTPConnection("127.0.0.1", served, timeout=10)
+    conn = http.client.HTTPConnection("127.0.0.1", int(served), timeout=10)
     conn.request("GET", "/")
     policy = conn.getresponse().getheader("Content-Security-Policy")
     assert "default-src 'none'" in policy and "unsafe-eval" not in policy
@@ -44,11 +44,17 @@ def test_the_element_is_loaded_by_ml_ui_and_builds_nothing_from_markup():
     assert "PUT" not in source and "DELETE" not in source
 
 
+class Port(int):
+    session = ""
+
+
 @pytest.fixture
 def served(kit):
     server = boardroute.serve(kit.ws)
     server.start()
-    yield server.port
+    port = Port(server.port)
+    port.session = server.session
+    yield port
     server.stop()
 
 
@@ -77,7 +83,7 @@ def test_hostile_text_is_shown_as_text_and_the_page_runs_nothing_and_holds_no_to
     page.on("pageerror", lambda e: errors.append(str(e)))
     seen = []
     page.on("request", lambda r: seen.append((r.method, r.url)))
-    page.goto(f"http://127.0.0.1:{served}/")
+    page.goto(f"http://127.0.0.1:{served}/?session={served.session}")
     page.wait_for_selector("ml-board", state="attached")
     page.wait_for_function("document.querySelector('ml-board')?.shadowRoot?.querySelector('nav button')")
     page.get_by_role("button", name="#ops").click()
@@ -108,7 +114,7 @@ def test_the_live_feed_picks_up_a_new_message_and_backs_off_when_the_route_fails
     ws, t = kit.ws, kit.tokens
     ws.board.create(t["alice"], "#ops")
     page = browser.new_context(bypass_csp=True).new_page()
-    page.goto(f"http://127.0.0.1:{served}/")
+    page.goto(f"http://127.0.0.1:{served}/?session={served.session}")
     page.wait_for_function("document.querySelector('ml-board')?.shadowRoot?.querySelector('nav button')")
     page.get_by_role("button", name="#ops").click()
     page.wait_for_timeout(500)
@@ -134,7 +140,7 @@ def test_the_person_chats_from_the_page_and_an_agent_reads_it_fenced(kit, served
     page.on("request", lambda r: posts.append((r.method, r.url)) if r.method != "GET" else None)
     errors = []
     page.on("pageerror", lambda e: errors.append(str(e)))
-    page.goto(f"http://127.0.0.1:{served}/")
+    page.goto(f"http://127.0.0.1:{served}/?session={served.session}")
     page.wait_for_function("document.querySelector('ml-board')?.shadowRoot?.querySelector('nav button')")
     page.get_by_role("button", name="#ops").click()
     page.wait_for_function("document.querySelector('ml-board')?.shadowRoot?.querySelector('.composer textarea')")
@@ -170,7 +176,7 @@ def test_drafts_are_scoped_to_channel_and_survive_reload_without_posting(kit, se
     page = context.new_page()
     posts = []
     page.on('request', lambda request: posts.append(request.url) if request.method == 'POST' else None)
-    page.goto(f'http://127.0.0.1:{served}/')
+    page.goto(f'http://127.0.0.1:{served}/?session={served.session}')
     page.get_by_role('button', name='#ops', exact=True).click()
     editor = page.locator('ml-board textarea')
     editor.fill('Unsent operations draft')
@@ -197,7 +203,7 @@ def test_readable_sessions_and_authenticated_child_keep_exact_dm_and_message_ids
     ws.board.create(first, '#sessions')
     ws.send(child, '#sessions', 'note', 'child message', subject='Readable child')
     page = browser.new_context(bypass_csp=True).new_page()
-    page.goto(f'http://127.0.0.1:{served}/')
+    page.goto(f'http://127.0.0.1:{served}/?session={served.session}')
     first_name = 'Codex · Mac · session 1'
     second_name = 'Codex · Mac · session 2'
     page.get_by_role('button', name=first_name, exact=True).wait_for()
@@ -225,7 +231,7 @@ def test_maximum_length_authenticated_child_dm_survives_reload(kit, served, brow
     assert len(identity) == 97
     context = browser.new_context()
     page = context.new_page()
-    page.goto(f'http://127.0.0.1:{served}/')
+    page.goto(f'http://127.0.0.1:{served}/?session={served.session}')
     chooser = page.get_by_role('combobox', name='Message an agent')
     chooser.select_option(identity)
     page.get_by_role('button', name='Open', exact=True).click()

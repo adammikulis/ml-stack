@@ -66,6 +66,7 @@ def commands(tmp_path: Path) -> list[tuple[str, str, str, list[str], str]]:
         ("autostart install", "ml_stack.fleet.autostart", "main",
          ["install", "--manifest", str(tmp_path / "manifest.json")], "yes"),
         ("autostart rollback", "ml_stack.fleet.autostart", "main", ["rollback"], "yes"),
+        ("peers open", "ml_stack.fleet.peers", "main", ["open", "--print"], ""),
     ]
 
 

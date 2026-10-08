@@ -59,6 +59,7 @@ from .files import Fetcher
 from .framing import LimitedServer
 from .invites import Invitations
 from .jobs import JobRunner
+from .launch_secret import LaunchSecret
 from .measuring import BenchHost, bench_home as bench_home_beside
 from .models import Downloads, Models
 from .onboard.joining import PLAIN, Joining
@@ -280,6 +281,7 @@ class DaemonRuntime:
                 peer_port=self.port,
                 setup_token=self.setup_token,
             )
+            self.interface.launch = LaunchSecret(self.root, self.port)
         self.base_report = self.device_report or partial(default_report, environment=self.environment)
         self.labels = sorted({s.strip() for s in self.labels if s and s.strip()})
         self.heard: list[str] = []

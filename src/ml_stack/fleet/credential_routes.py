@@ -16,7 +16,7 @@ def route(request) -> bool:
     session = request.ui.sessions.get(parse_cookie(request.cookie))
     if (request.client_ip != LOOPBACK or not request.ui.host_ok(request.host_header)
             or request.header("Authorization") or request.header("X-ML-Stack-Token")
-            or (session is not None and session.who == "token")):
+            or session is None or not session.credentialed):
         request.send(403, {"error": "credential changes require a person in this machine's browser"})
         return True
     if not _origin_ok(request.header("Origin"), request.host_header):

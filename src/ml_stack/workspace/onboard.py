@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ml_stack import agent_hooks, authority
+from ml_stack import agent_hooks, authority, private_path
 from ml_stack.briefing import REQUIRED_BRIEFING
 from ml_stack.workspace import agent_invites, device_metadata, tokens
 from ml_stack.workspace.identity import AGENT, HUMAN, LEAD, Denied, Identity, valid_name
@@ -265,7 +265,7 @@ def replied(ws: Workspace, name: str, after: int) -> bool:
 
 def _agent_checks(ws: Workspace, name: str) -> list[Finding]:
     fix = f"ml-stack-workspace setup --rotate {name}"
-    if tokens.problem(tokens.directory(ws.base) / name) == "missing":
+    if private_path.problem(tokens.directory(ws.base) / name) == "missing":
         return [Finding(False, f"{name}: no token file", fix)]
     try:
         who = ws.auth(tokens.load(ws.base, name))
@@ -306,7 +306,7 @@ def doctor(ws: Workspace) -> list[Finding]:
     found = [Finding(True, "the workspace is initialised")]
     folder = tokens.directory(ws.base)
     for label, path in (("state directory", ws.base), ("token directory", folder)):
-        why = tokens.problem(path)
+        why = private_path.problem(path)
         if why == "missing" or os.name == "nt":
             fix = "ml-stack-workspace setup"
         elif "Windows-mounted filesystem" in why:

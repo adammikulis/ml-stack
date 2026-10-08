@@ -59,18 +59,41 @@ def test_frozen_daemon_keeps_graph_conversations_after_restart(tmp_path):
     assert json.loads((root / "chats" / "saved.json").read_text()) == legacy
 
 
-def call(port, method, path, body=None):
+COOKIES: dict[int, str] = {}
+"""The session cookie of each running daemon, opened the way the app's window opens one."""
+
+
+def call(port, method, path, body=None, headers=None):
     connection = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
     try:
         connection.request(method, path, None if body is None else json.dumps(body),
                            {"X-ML-Stack-UI": "1", "Content-Type": "application/json",
-                            "Origin": f"http://127.0.0.1:{port}", "Sec-Fetch-Site": "same-origin"})
+                            "Origin": f"http://127.0.0.1:{port}", "Sec-Fetch-Site": "same-origin",
+                            **({"Cookie": COOKIES[port]} if port in COOKIES else {}), **(headers or {})})
         response = connection.getresponse()
-        payload = json.loads(response.read())
+        raw = response.read()
+        payload = json.loads(raw)
         assert response.status < 400, payload
+        if response.getheader("Set-Cookie"):
+            COOKIES[port] = response.getheader("Set-Cookie").split(";", 1)[0]
         return payload
     finally:
         connection.close()
+
+
+def sign_in(port, root):
+    """Open a session with a launch ticket from the daemon's recorded secret."""
+    record = json.loads((root / "launch" / "secret.json").read_text())
+    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    try:
+        connection.request("POST", "/ui/launch/ticket", b"{}",
+                           {"X-ML-Stack-UI": "1", "X-ML-Stack-Launch": record["secret"],
+                            "Content-Type": "application/json"})
+        ticket = json.loads(connection.getresponse().read())["ticket"]
+    finally:
+        connection.close()
+    COOKIES.pop(port, None)
+    call(port, "POST", "/ui/session", {"ticket": ticket})
 
 
 @contextlib.contextmanager
@@ -86,6 +109,7 @@ def running(binary, root, port, environment, log_path):
                     pytest.fail(log_path.read_text())
                 try:
                     call(port, "GET", "/health")
+                    sign_in(port, root)
                     break
                 except (OSError, TimeoutError):
                     if time.monotonic() >= deadline:
@@ -93,6 +117,7 @@ def running(binary, root, port, environment, log_path):
                     time.sleep(.05)
             yield
         finally:
+            COOKIES.pop(port, None)
             process.terminate()
             try:
                 process.wait(timeout=10)

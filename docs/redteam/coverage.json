@@ -1,7 +1,7 @@
 {
- "surfaces": 823,
+ "surfaces": 826,
  "by_status": {
-  "covered": 499,
+  "covered": 502,
   "partial": 197,
   "uncovered": 53,
   "n/a": 74,
@@ -37,7 +37,7 @@
    "unmapped": 0
   },
   "egress": {
-   "covered": 47,
+   "covered": 48,
    "partial": 48,
    "uncovered": 0,
    "n/a": 0,
@@ -51,7 +51,7 @@
    "unmapped": 0
   },
   "human": {
-   "covered": 113,
+   "covered": 115,
    "partial": 0,
    "uncovered": 0,
    "n/a": 0,
@@ -1907,6 +1907,19 @@
    "note": "a fixed loopback TCP probe treats timeouts and unhealthy listeners as live; only connection refusal authorizes starting the replacement"
   },
   {
+   "id": "egress:fleet/launch_open.py:ticket_url",
+   "kind": "egress",
+   "source": "fleet/launch_open.py:ticket_url",
+   "trust": "addresses and redirects named by pages, repositories and peers",
+   "attacker": "a redirect or address sends the request somewhere the person did not choose",
+   "status": "covered",
+   "tests": [
+    "tests/test_launch_secret.py::test_a_daemon_that_answers_badly_gives_the_window_the_bare_page",
+    "tests/test_launch_secret.py::test_a_redirected_or_shared_secret_is_never_read_or_written"
+   ],
+   "note": "The loopback ticket request reads the recorded port and secret only from an owner-only, non-symlink record; a daemon that answers with errors, non-JSON or no ticket yields the bare page"
+  },
+  {
    "id": "egress:fleet/models.py:<module>",
    "kind": "egress",
    "source": "fleet/models.py:<module>",
@@ -3019,6 +3032,26 @@
    "note": "install and rollback refuse any agent marker or missing terminal before reading the manifest; an expired, replayed, other-device, tampered or redirected manifest writes nothing"
   },
   {
+   "id": "human:fleet/launch_secret.py:_private_directory",
+   "kind": "human",
+   "source": "fleet/launch_secret.py:_private_directory",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item",
+    "tests/test_requests_floor.py::test_the_request_commands_refuse_a_process_an_agent_started",
+    "tests/test_redteam_requests.py::test_a_model_cannot_answer_its_own_request_by_any_tool_name_or_command_text",
+    "tests/test_workspace_model.py::test_only_a_person_or_launcher_process_records_a_verified_model",
+    "tests/test_workspace_model.py::test_an_agent_cannot_verify_itself_or_overwrite_a_verified_model_or_set_anothers",
+    "tests/test_workspace_model.py::test_a_claimed_model_changes_no_right"
+   ],
+   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+  },
+  {
    "id": "human:fleet/onboard/share_cli.py:_confirm_licences",
    "kind": "human",
    "source": "fleet/onboard/share_cli.py:_confirm_licences",
@@ -3057,6 +3090,20 @@
     "tests/test_workspace_model.py::test_a_claimed_model_changes_no_right"
    ],
    "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+  },
+  {
+   "id": "human:fleet/peers.py:cmd_open",
+   "kind": "human",
+   "source": "fleet/peers.py:cmd_open",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_person_session.py::test_the_open_command_hands_an_agent_or_a_pipe_nothing",
+    "tests/test_redteam_person_session.py::test_the_open_command_hands_a_person_at_a_terminal_a_one_use_address",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent"
+   ],
+   "note": "A process an agent started and a process with no terminal get no ticket from a live daemon; a person at a terminal gets an address that signs in once"
   },
   {
    "id": "human:fleet/recovery.py:run",
@@ -8532,31 +8579,14 @@
    "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
    "status": "covered",
    "tests": [
-    "tests/test_fleet_initial_setup.py::test_owner_admission_routes_refuse_foreign_and_agent_requests",
-    "tests/test_fleet_initial_setup.py::test_owner_admission_routes_refuse_lan_and_missing_ui_header",
+    "tests/test_fleet_initial_setup.py::test_owner_admission_refuses_foreign_and_agent_requests_even_with_a_launch_session",
+    "tests/test_fleet_initial_setup.py::test_owner_admission_refuses_lan_and_missing_ui_header",
     "tests/test_fleet_initial_setup.py::test_initial_rejects_hostile_body_without_identity_or_membership_changes",
-    "tests/test_fleet_initial_setup.py::test_local_session_cannot_upgrade_agent_cookie_or_prod_membership",
-    "tests/test_fleet_initial_setup.py::test_completed_prod_cannot_open_initial_session_anonymously",
-    "tests/test_fleet_initial_setup.py::test_initial_never_drops_manual_dev_membership"
+    "tests/test_fleet_initial_setup.py::test_completed_prod_hands_no_launch_session_and_refuses_initial",
+    "tests/test_fleet_initial_setup.py::test_initial_never_drops_manual_dev_membership",
+    "tests/test_redteam_person_session.py::test_forged_page_headers_without_a_ticket_open_no_session_and_make_no_person"
    ],
-   "note": "Real sockets refuse foreign origins, DNS rebinding, LAN ownership, missing UI headers and agent credentials; malformed or oversized setup bodies cannot mutate names or memberships, token sessions cannot mint person sessions, and completed Production setup requires sign-in"
-  },
-  {
-   "id": "route:fleet/initial_setup_routes.py:/ui/setup/local-session",
-   "kind": "route",
-   "source": "fleet/initial_setup_routes.py:InitialSetupRoutes.public_route",
-   "trust": "network peer or local browser",
-   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
-   "status": "covered",
-   "tests": [
-    "tests/test_fleet_initial_setup.py::test_owner_admission_routes_refuse_foreign_and_agent_requests",
-    "tests/test_fleet_initial_setup.py::test_owner_admission_routes_refuse_lan_and_missing_ui_header",
-    "tests/test_fleet_initial_setup.py::test_initial_rejects_hostile_body_without_identity_or_membership_changes",
-    "tests/test_fleet_initial_setup.py::test_local_session_cannot_upgrade_agent_cookie_or_prod_membership",
-    "tests/test_fleet_initial_setup.py::test_completed_prod_cannot_open_initial_session_anonymously",
-    "tests/test_fleet_initial_setup.py::test_initial_never_drops_manual_dev_membership"
-   ],
-   "note": "Real sockets refuse foreign origins, DNS rebinding, LAN ownership, missing UI headers and agent credentials; malformed or oversized setup bodies cannot mutate names or memberships, token sessions cannot mint person sessions, and completed Production setup requires sign-in"
+   "note": "Real sockets refuse a request with no launch-ticket session however its Host, Origin and Sec-Fetch-Site are forged, and refuse foreign origins, DNS rebinding, LAN ownership, missing UI headers and agent credentials; malformed or oversized setup bodies cannot mutate names or memberships, token sessions cannot mint person sessions, and a Production machine hands out no launch session"
   },
   {
    "id": "route:fleet/invite_routes.py:/join/invite/challenge",
@@ -8697,9 +8727,29 @@
    "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
    "status": "covered",
    "tests": [
-    "tests/test_fleet_ui.py::TestSignIn::test_launch_ticket_requires_session_and_is_consumed_once"
+    "tests/test_fleet_ui.py::TestSignIn::test_launch_ticket_requires_session_and_is_consumed_once",
+    "tests/test_redteam_person_session.py::test_a_ticket_is_asked_for_only_by_the_machine_itself_with_its_secret",
+    "tests/test_redteam_person_session.py::test_guessing_the_secret_is_held_off_even_for_the_right_secret",
+    "tests/test_redteam_person_session.py::test_only_a_few_tickets_wait_at_once",
+    "tests/test_redteam_person_session.py::test_an_uncredentialed_session_cannot_hand_out_a_ticket"
    ],
-   "note": "Actual Fleet socket checks require a signed-in session and UI header, reject foreign addressed hosts and unsupported methods, and reject replay after the one-use session handoff"
+   "note": "Actual Fleet sockets give a ticket only to a request carrying the daemon's launch secret with no browser Origin, or to a credentialed session; wrong secrets back off, tickets are capped, spent once, expire, and an uncredentialed session cannot hand one out"
+  },
+  {
+   "id": "route:fleet/launch_routes.py:/ui/launch/ticket",
+   "kind": "route",
+   "source": "fleet/launch_routes.py:LaunchRoutes.public_route",
+   "trust": "network peer or local browser",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "covered",
+   "tests": [
+    "tests/test_fleet_ui.py::TestSignIn::test_launch_ticket_requires_session_and_is_consumed_once",
+    "tests/test_redteam_person_session.py::test_a_ticket_is_asked_for_only_by_the_machine_itself_with_its_secret",
+    "tests/test_redteam_person_session.py::test_guessing_the_secret_is_held_off_even_for_the_right_secret",
+    "tests/test_redteam_person_session.py::test_only_a_few_tickets_wait_at_once",
+    "tests/test_redteam_person_session.py::test_an_uncredentialed_session_cannot_hand_out_a_ticket"
+   ],
+   "note": "Actual Fleet sockets give a ticket only to a request carrying the daemon's launch secret with no browser Origin, or to a credentialed session; wrong secrets back off, tickets are capped, spent once, expire, and an uncredentialed session cannot hand one out"
   },
   {
    "id": "route:fleet/onboard/bootstrap.py:manifest",

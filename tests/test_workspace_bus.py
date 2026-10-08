@@ -11,8 +11,9 @@ import time
 import pytest
 from workspace_kit import SRC, STRIPPED, Kit, clean_env, cli, run_python
 
+from ml_stack import private_path
 from ml_stack.platform import process_group_kwargs
-from ml_stack.workspace import ChainBroken, Denied, RateLimited, Refused, Workspace, tokens
+from ml_stack.workspace import ChainBroken, Denied, RateLimited, Refused, Workspace
 from ml_stack.workspace.chain import ChainLog
 
 
@@ -119,8 +120,8 @@ def test_the_registry_stores_a_hash_so_reading_it_does_not_give_an_identity(kit)
     worker = kit.agent("worker")
     stored = (kit.base / "agents.json").read_text()
     assert worker.rsplit(".", 1)[1] not in stored
-    assert tokens.problem(kit.base / "agents.json") == ""
-    assert tokens.problem(kit.base) == ""
+    assert private_path.problem(kit.base / "agents.json") == ""
+    assert private_path.problem(kit.base) == ""
 
 
 def test_only_a_person_mints_and_revokes_others(kit):

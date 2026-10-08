@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pytest
+from launch_support import sign_in, ticket
 from test_fleet_ui import Serving
 
 from ml_stack import credentials
@@ -22,20 +23,21 @@ def server(tmp_path, monkeypatch):
 
 def test_ui_saves_multiple_named_credentials_without_returning_values(server):
     values = {"HF_TOKEN": "hf-test-one-value", "ANTHROPIC_API_KEY": "sk-test-two-value"}
+    cookie = sign_in(server)
     for name, value in values.items():
-        status, result, _ = server.call("/ui/credentials", method="POST",
+        status, result, _ = server.call("/ui/credentials", method="POST", cookie=cookie,
                                         body={"name": name, "value": value})
         assert status == 200 and result["saved"] == name
         assert value not in str(result)
 
-    status, result, _ = server.call("/ui/credentials")
+    status, result, _ = server.call("/ui/credentials", cookie=cookie)
     assert status == 200 and {row["name"] for row in result["credentials"]} >= set(values)
     assert not any(value in str(result) for value in values.values())
     assert credentials.get("HF_TOKEN") == values["HF_TOKEN"]
     path = credentials.file_path()
     assert Path(path).stat().st_mode & 0o077 == 0
 
-    status, result, _ = server.call("/ui/credentials", method="DELETE", body={"name": "HF_TOKEN"})
+    status, result, _ = server.call("/ui/credentials", method="DELETE", cookie=cookie, body={"name": "HF_TOKEN"})
     assert status == 200 and result == {"removed": True, "name": "HF_TOKEN"}
     assert credentials.get("HF_TOKEN") is None
     assert credentials.get("ANTHROPIC_API_KEY") == values["ANTHROPIC_API_KEY"]
@@ -62,10 +64,11 @@ def test_joined_credential_management_requires_a_signed_in_session(server):
 @pytest.mark.redteam
 @pytest.mark.parametrize("body", [None, [], {"name": "HF_TOKEN", "value": []}, {"name": "HF_TOKEN"}])
 def test_credential_schema_and_origin_fail_before_persistence(server, body):
-    status, result, _ = server.call("/ui/credentials", method="POST", body=body)
+    cookie = sign_in(server)
+    status, result, _ = server.call("/ui/credentials", method="POST", body=body, cookie=cookie)
     assert status == 400 and "error" in result
     assert not credentials.file_path().exists()
-    status, _, _ = server.call("/ui/credentials", method="POST",
+    status, _, _ = server.call("/ui/credentials", method="POST", cookie=cookie,
         body={"name": "HF_TOKEN", "value": "isolated"}, headers={"Origin": "https://foreign.example"})
     assert status == 403 and not credentials.file_path().exists()
 
@@ -77,7 +80,8 @@ def test_person_saves_and_removes_a_credential_in_settings(server, playwright):
     server.ui.settings.setup_done = True
     with playwright.chromium.launch(headless=True) as browser:
         page = browser.new_page()
-        page.goto(f"http://127.0.0.1:{server.port}/ui/#settings")
+        page.goto(f"http://127.0.0.1:{server.port}/ui/?launch_ticket={ticket(server)[1]['ticket']}#settings")
+        page.get_by_role("tab", name="Credentials", exact=True).click()
         panel = page.locator("#settings-credentials")
         panel.get_by_label("Credential name", exact=True).fill("OPENAI_API_KEY")
         panel.get_by_label("Token or API key", exact=True).fill("isolated-browser-secret")
@@ -100,7 +104,7 @@ def test_agent_access_cannot_change_person_credentials(server, method, access):
     cookie = ""
     headers = {}
     if access == "token-session":
-        session = server.ui.sessions.open("token")
+        session = server.ui.sessions.open("token", "token")
         cookie = server.ui.sessions.cookie_header(session).split(";", 1)[0]
     elif access == "authorization":
         headers["Authorization"] = "Bearer isolated-agent-token"

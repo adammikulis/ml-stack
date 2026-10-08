@@ -3,17 +3,16 @@
 from __future__ import annotations
 
 import os
-import stat
-import sys
 from collections.abc import Mapping
 from pathlib import Path
 
 from ml_stack.files import writing
+from ml_stack.private_path import problem, redirected, windows_mount
 from ml_stack.sentinel import human
-from ml_stack.windows_private import problem as windows_problem, restrict, validate
+from ml_stack.windows_private import restrict, validate
 from ml_stack.workspace.identity import PREFIX, TOKEN_ENV, Denied, valid_id
 
-__all__ = ["AGENT_ENV", "OWNER_FILE", "directory", "inside_repo", "load", "prepare", "problem",
+__all__ = ["AGENT_ENV", "OWNER_FILE", "directory", "inside_repo", "load", "prepare",
            "read_file", "resolve", "store"]
 
 AGENT_ENV = "ML_STACK_WORKSPACE_AGENT"
@@ -45,13 +44,13 @@ def prepare(base: Path) -> Path:
     except FileNotFoundError:
         pass
     else:
-        if _redirected(info):
+        if redirected(info):
             raise ValueError(f"{path} is a symlink or Windows reparse point")
     repo = inside_repo(path)
     if repo is not None:
         raise ValueError(f"{path} resolves into the git work tree {repo}; "
                          f"move ML_STACK_HOME out of it")
-    if _windows_mount(path):
+    if windows_mount(path):
         raise ValueError(f"{path} is on a Windows-mounted filesystem; keep workspace tokens "
                          "under the WSL home directory")
     if os.name != "nt":
@@ -61,70 +60,13 @@ def prepare(base: Path) -> Path:
     base.mkdir(parents=True, exist_ok=True, mode=0o700)
     path.mkdir(parents=True, exist_ok=True, mode=0o700)
     if os.name == "nt":
-        if _redirected(base.lstat()):
+        if redirected(base.lstat()):
             raise ValueError(f"{base} is a symlink or Windows reparse point")
         restrict(base)
         restrict(path)
     else:
         path.chmod(0o700)
     return path
-
-
-def _redirected(info) -> bool:
-    return (stat.S_ISLNK(info.st_mode) or (os.name == "nt"
-            and bool(info.st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT)))
-
-
-def problem(path: Path) -> str:
-    """Why ``path`` may not hold a token (or be the directory of them), or an empty string."""
-    try:
-        info = path.lstat()
-    except FileNotFoundError:
-        return "missing"
-    if _redirected(info):
-        return "is a symlink or Windows reparse point"
-    if not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode)):
-        return "is not a plain file"
-    if _windows_mount(path):
-        return ("is on a Windows-mounted filesystem; keep workspace tokens under the WSL "
-                "home directory")
-    if os.name == "nt":
-        return windows_problem(path)
-    if info.st_uid != os.getuid():
-        return "belongs to another user"
-    if info.st_mode & 0o077:
-        return f"mode {info.st_mode & 0o777:o} lets others read it; chmod {'700' if stat.S_ISDIR(info.st_mode) else '600'}"
-    return ""
-
-
-def _windows_mount(path: Path) -> bool:
-    """Whether a WSL path is backed by a Windows filesystem."""
-    if sys.platform == "win32":
-        return False
-    try:
-        release = Path("/proc/sys/kernel/osrelease").read_text(encoding="utf-8").lower()
-    except OSError:
-        return False
-    if "microsoft" not in release:
-        return False
-    target = path.resolve()
-    try:
-        mounts = Path("/proc/mounts").read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return False
-    best = (0, False)
-    for line in mounts:
-        fields = line.split()
-        if len(fields) < 3 or fields[2] not in ("9p", "drvfs"):
-            continue
-        mountpoint = Path(fields[1].replace("\\040", " "))
-        try:
-            target.relative_to(mountpoint)
-        except ValueError:
-            continue
-        if len(mountpoint.parts) > best[0]:
-            best = (len(mountpoint.parts), True)
-    return best[1]
 
 
 def store(base: Path, name: str, token: str) -> Path:

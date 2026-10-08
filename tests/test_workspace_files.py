@@ -531,7 +531,7 @@ def page(kit):
 
     def call(path):
         conn = http.client.HTTPConnection("127.0.0.1", server.port, timeout=10)
-        conn.request("GET", path)
+        conn.request("GET", path, headers={"Cookie": f"ml_session={server.session}"})
         r = conn.getresponse()
         body = r.read()
         conn.close()

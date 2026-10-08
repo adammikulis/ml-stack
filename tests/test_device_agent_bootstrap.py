@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 from workspace_kit import Kit, clean_env
 
+from ml_stack import private_path
 from ml_stack.fleet import device_auth
 from ml_stack.fleet.api import Daemon, make_handler
 from ml_stack.fleet.jobs import JobRunner
@@ -361,7 +362,7 @@ def test_saved_standard_project_session_preserves_identity_scope_and_storage(sav
         saved.unlink()
         saved.symlink_to(copied)
     elif attack == 'owner':
-        real = tokens.problem
+        real = private_path.problem
         monkeypatch.setattr(tokens, 'problem', lambda path: 'belongs to another user'
                             if path == kit.ws.registry.path else real(path))
     before = kit.ws.registry.path.read_bytes()

@@ -54,7 +54,7 @@ def test_local_ui_relay_preserves_bytes_and_actual_loopback_peer(monkeypatch):
         try:
             listener = relay.listeners[0].getsockname()
             assert listener[0] == "127.0.0.1"
-            payload = b"POST /ui/setup/local-session HTTP/1.1\r\nHost: localhost\r\n\r\n\x00\xff; $(touch injected)" * 1000
+            payload = b"POST /ui/setup/initial HTTP/1.1\r\nHost: localhost\r\n\r\n\x00\xff; $(touch injected)" * 1000
             with socket.create_connection(listener, timeout=10) as client:
                 client.sendall(payload)
                 client.shutdown(socket.SHUT_WR)

@@ -7,9 +7,7 @@ browser marks same-origin and a JSON body; a token in a header is not read at al
 
 from __future__ import annotations
 
-import hmac
 import json
-import secrets
 from collections.abc import Mapping
 from dataclasses import asdict
 from typing import Any
@@ -29,26 +27,16 @@ from ml_stack.workspace import (
     localstart as ls,
     plain,
 )
-from ml_stack.workspace.boardroute import Reply, Request, _checked, _json
+from ml_stack.workspace.boardroute import COOKIE, Reply, Request, _checked, _json, session_ok
 from ml_stack.workspace.identity import Denied
 from ml_stack.workspace.service import Workspace
 
-__all__ = ["COOKIE", "PREFIX", "respond", "serve", "session_ok"]
+__all__ = ["PREFIX", "respond", "serve"]
 
 PREFIX = "/agents/"
-COOKIE = "ml_session"
 BODY_MAX = 4096
 START_KEYS = {"model": str, "name": str, "role": str, "effort": str, "max_effort": str, "profile": str, "ctx": str, "project": str, "repo": str, "harness": str, "max_output_tokens": (int, type(None)), "task_caps": dict}
 STOP_WAIT_S = 10.0
-
-
-def session_ok(headers: Mapping[str, str], secret: str) -> bool:
-    """Whether the request's cookie holds the page server's session secret."""
-    for part in headers.get("cookie", "").split(";"):
-        key, _, value = part.strip().partition("=")
-        if key == COOKIE and secret and hmac.compare_digest(value, secret):
-            return True
-    return False
 
 
 def _post_refusal(req: Request) -> Reply | None:
@@ -157,12 +145,8 @@ AGENTS_PAGE = """<!doctype html><meta charset="utf-8"><title>Agents</title>
 
 
 class _Route(boardroute._Route):
-    """The Board's route with the Agents routes and page added. The person's browser session is a
-    secret made here; only a browser that opened the page with it holds the cookie."""
-
-    def __init__(self, ws: Workspace) -> None:
-        super().__init__(ws)
-        self.session = secrets.token_urlsafe(24)
+    """The Board's route with the Agents routes and page added; its start and stop routes need the
+    same session cookie as the Board route."""
 
     def __call__(self, call: Call) -> WebReply:
         headers = {k.lower(): v for k, v in call.headers.items()}
@@ -178,7 +162,7 @@ class _Route(boardroute._Route):
 
     def _page(self, call: Call, headers: dict[str, str]) -> WebReply:
         status, out, _ = boardroute._page(Request(call.method, "/", headers, self.port))
-        if status == 200 and f"session={self.session}" in urlsplit(call.path).query:
+        if status == 200 and self.opened_with_session(call):
             out["Set-Cookie"] = f"{COOKIE}={self.session}; HttpOnly; SameSite=Strict; Path=/"
         blob = AGENTS_PAGE.encode() if status == 200 else b""
         return WebReply(status, blob, out, out.pop("Content-Type", "text/html; charset=utf-8"))
@@ -187,8 +171,4 @@ class _Route(boardroute._Route):
 def serve(ws: Workspace, port: int = 0) -> Listener:
     """A loopback listener for the Board and Agents pages and routes; ``listener.session`` is the
     secret the person's browser presents (open ``/agents?session=...`` once)."""
-    route = _Route(ws)
-    listener = Listener(route, ("127.0.0.1", port))
-    route.port = listener.port
-    listener.session = route.session  # type: ignore[attr-defined]
-    return listener
+    return boardroute.serve(ws, port, routes=_Route)

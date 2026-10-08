@@ -2,6 +2,7 @@
 //! A native window on the ml-stack interface, and the daemon that serves it.
 
 mod daemon;
+mod launch;
 mod settings;
 #[cfg(test)]
 mod security_tests;
@@ -26,6 +27,8 @@ const ROOT: &str = ".ml-stack/traind";
 /// What the window holds: where the settings are, and the daemon it started.
 struct Shell {
     settings: PathBuf,
+    root: PathBuf,
+    port: u16,
     daemon: Mutex<Option<CommandChild>>,
     quitting: Mutex<bool>,
 }
@@ -48,6 +51,18 @@ fn close_choice(
     }
     act(&app, &state, &mode);
     serde_json::json!({ "ok": true, "mode": mode, "remembered": remember })
+}
+
+/// Reloads the window with a fresh sign-in ticket from its own daemon.
+#[tauri::command]
+fn reopen_page(app: AppHandle, state: State<'_, Shell>) -> bool {
+    let Some(window) = app.get_webview_window("main") else {
+        return false;
+    };
+    let Ok(target) = serde_json::to_string(&launch::page_url(&state.root, state.port)) else {
+        return false;
+    };
+    window.eval(&format!("location.replace({target})")).is_ok()
 }
 
 /// Whether the window may close now, raising the question when nothing is saved.
@@ -117,7 +132,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_shell::init())
-        .invoke_handler(tauri::generate_handler![close_choice, on_closing])
+        .invoke_handler(tauri::generate_handler![close_choice, on_closing, reopen_page])
         .setup(|app| {
             let handle = app.handle().clone();
             let home = app.path().home_dir()?;
@@ -130,11 +145,13 @@ fn main() {
             };
             app.manage(Shell {
                 settings: settings::path(&root),
+                root: root.clone(),
+                port,
                 daemon: Mutex::new(started),
                 quitting: Mutex::new(false),
             });
 
-            let url = format!("http://127.0.0.1:{port}/ui/");
+            let url = launch::page_url(&root, port);
             let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url.parse()?))
                 .title(TITLE)
                 .inner_size(WIDTH, HEIGHT)

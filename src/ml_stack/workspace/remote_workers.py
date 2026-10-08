@@ -10,7 +10,7 @@ import time
 from dataclasses import asdict
 from pathlib import Path
 
-from ml_stack import home, jobs
+from ml_stack import home, jobs, private_path
 from ml_stack.command import flag, option
 from ml_stack.files import read_json, writing
 from ml_stack.fleet.discovery import memberships
@@ -53,7 +53,7 @@ OPTIONS = [option('json'), flag('--device', default='', help='discovered target 
 
 
 def _save_connection(path, value):
-    why = tokens.problem(path)
+    why = private_path.problem(path)
     if why not in {"", "missing"}:
         raise Denied(f"worker connection storage: {why}")
     with writing(path) as temporary:
@@ -84,7 +84,7 @@ def credential(remote, name, model, harness="ml-stack-agent"):
         try:
             token = tokens.load(remote.base, alias)
         except Denied:
-            if tokens.problem(tokens.directory(remote.base) / alias.replace('/', '~')) != 'missing':
+            if private_path.problem(tokens.directory(remote.base) / alias.replace('/', '~')) != 'missing':
                 raise
             token = ''
         if token:

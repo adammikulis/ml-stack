@@ -161,11 +161,32 @@ tests = ["tests/test_redteam_device_transport.py::test_coordinator_peer_rejects_
 note = "Saved origins reject plaintext, credentials and foreign URL components; revoked, missing, ambiguous, unpaired and certificate-mismatched device rows cannot install a pin or open transport; remote clients refuse local fallback"
 
 [[group]]
-match = ["route:fleet/launch_routes.py:/ui/launch-ticket"]
+match = ["route:fleet/launch_routes.py:/ui/launch-ticket", "route:fleet/launch_routes.py:/ui/launch/ticket"]
 status = "covered"
-tests = ["tests/test_fleet_ui.py::TestSignIn::test_launch_ticket_requires_session_and_is_consumed_once"]
+tests = ["tests/test_fleet_ui.py::TestSignIn::test_launch_ticket_requires_session_and_is_consumed_once",
+         "tests/test_redteam_person_session.py::test_a_ticket_is_asked_for_only_by_the_machine_itself_with_its_secret",
+         "tests/test_redteam_person_session.py::test_guessing_the_secret_is_held_off_even_for_the_right_secret",
+         "tests/test_redteam_person_session.py::test_only_a_few_tickets_wait_at_once",
+         "tests/test_redteam_person_session.py::test_an_uncredentialed_session_cannot_hand_out_a_ticket"]
+count = 2
+note = "Actual Fleet sockets give a ticket only to a request carrying the daemon's launch secret with no browser Origin, or to a credentialed session; wrong secrets back off, tickets are capped, spent once, expire, and an uncredentialed session cannot hand one out"
+
+[[group]]
+match = ["egress:fleet/launch_open.py:ticket_url"]
+status = "covered"
+tests = ["tests/test_launch_secret.py::test_a_daemon_that_answers_badly_gives_the_window_the_bare_page",
+         "tests/test_launch_secret.py::test_a_redirected_or_shared_secret_is_never_read_or_written"]
 count = 1
-note = "Actual Fleet socket checks require a signed-in session and UI header, reject foreign addressed hosts and unsupported methods, and reject replay after the one-use session handoff"
+note = "The loopback ticket request reads the recorded port and secret only from an owner-only, non-symlink record; a daemon that answers with errors, non-JSON or no ticket yields the bare page"
+
+[[group]]
+match = ["human:fleet/peers.py:cmd_open"]
+status = "covered"
+tests = ["tests/test_redteam_person_session.py::test_the_open_command_hands_an_agent_or_a_pipe_nothing",
+         "tests/test_redteam_person_session.py::test_the_open_command_hands_a_person_at_a_terminal_a_one_use_address",
+         "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent"]
+count = 1
+note = "A process an agent started and a process with no terminal get no ticket from a live daemon; a person at a terminal gets an address that signs in once"
 
 [[group]]
 match = ["human:workspace/backlog.py:resume"]
@@ -667,18 +688,17 @@ tests = ["tests/test_fleet_credentials.py::test_ui_saves_multiple_named_credenti
 note = "credential values are saved without being returned; joined credential management requires a signed-in session"
 
 [[group]]
-match = ["route:fleet/initial_setup_routes.py:/ui/setup/initial",
-         "route:fleet/initial_setup_routes.py:/ui/setup/local-session"]
+match = ["route:fleet/initial_setup_routes.py:/ui/setup/initial"]
 status = "covered"
 tests = [
-  "tests/test_fleet_initial_setup.py::test_owner_admission_routes_refuse_foreign_and_agent_requests",
-  "tests/test_fleet_initial_setup.py::test_owner_admission_routes_refuse_lan_and_missing_ui_header",
+  "tests/test_fleet_initial_setup.py::test_owner_admission_refuses_foreign_and_agent_requests_even_with_a_launch_session",
+  "tests/test_fleet_initial_setup.py::test_owner_admission_refuses_lan_and_missing_ui_header",
   "tests/test_fleet_initial_setup.py::test_initial_rejects_hostile_body_without_identity_or_membership_changes",
-  "tests/test_fleet_initial_setup.py::test_local_session_cannot_upgrade_agent_cookie_or_prod_membership",
-  "tests/test_fleet_initial_setup.py::test_completed_prod_cannot_open_initial_session_anonymously",
+  "tests/test_fleet_initial_setup.py::test_completed_prod_hands_no_launch_session_and_refuses_initial",
   "tests/test_fleet_initial_setup.py::test_initial_never_drops_manual_dev_membership",
+  "tests/test_redteam_person_session.py::test_forged_page_headers_without_a_ticket_open_no_session_and_make_no_person",
 ]
-note = "Real sockets refuse foreign origins, DNS rebinding, LAN ownership, missing UI headers and agent credentials; malformed or oversized setup bodies cannot mutate names or memberships, token sessions cannot mint person sessions, and completed Production setup requires sign-in"
+note = "Real sockets refuse a request with no launch-ticket session however its Host, Origin and Sec-Fetch-Site are forged, and refuse foreign origins, DNS rebinding, LAN ownership, missing UI headers and agent credentials; malformed or oversized setup bodies cannot mutate names or memberships, token sessions cannot mint person sessions, and a Production machine hands out no launch session"
 
 [[group]]
 match = ["route:fleet/routes.py:/ui/setup/jobs"]

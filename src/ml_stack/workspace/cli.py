@@ -484,7 +484,8 @@ def _hook(args: argparse.Namespace) -> int:
 
 def _board_serve(args: argparse.Namespace, ws: Workspace) -> int:
     listener = localroute.serve(ws, args.port)
-    say(f"the Board, read-only, for the person: http://127.0.0.1:{listener.port}/")
+    say(f"the Board for the person (this browser session): "
+        f"http://127.0.0.1:{listener.port}/?session={listener.session}")
     say(f"the Agents panel (start and stop need this browser session): "
         f"http://127.0.0.1:{listener.port}/agents?session={listener.session}")
     listener.start()

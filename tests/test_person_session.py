@@ -22,9 +22,9 @@ def bound(tmp_path):
                                workspace_base=lambda ident: tmp_path / ident)
     host = WorkspaceHost(projects)
     sessions = Sessions()
-    session = sessions.open('fixture-person')
+    session = sessions.open('fixture-person', 'launch-ticket')
     cookie = f'ml_stack_ui={session.sid}'
-    ui = SimpleNamespace(sessions=sessions, projects=projects, workspaces=host,
+    ui = SimpleNamespace(sessions=sessions, projects=projects, workspaces=host, record=lambda *a, **k: None,
                          authed=lambda value: sessions.get(value.split('=', 1)[-1]) is not None,
                          host_ok=lambda value: value == '127.0.0.1:8770')
     request = SimpleNamespace(ui=ui, cookie=cookie, client_ip='127.0.0.1',
@@ -128,3 +128,25 @@ def test_session_person_preserves_existing_capability_restrictions(bound):
     assert ws.auth(ws._actor).can == ('read',)
     with pytest.raises(Denied):
         ws.send(ws._actor, '#general', 'note', 'restricted')
+
+
+def test_connect_and_every_person_request_refuse_a_session_with_no_credentialed_origin(bound):
+    host, request, _, session = bound
+    ws = SessionWorkspace(host, request, PROJECT)
+    assert ws.connect()['me'] == 'local-person'
+    session.origin = ''
+    with pytest.raises(Denied, match='credential'):
+        SessionWorkspace(host, request, PROJECT)
+    with pytest.raises(Denied, match='credential'):
+        ws.auth(ws._actor)
+    session.origin = 'token'
+    with pytest.raises(Denied, match='credential'):
+        ws.connect()
+
+
+def test_a_first_connect_is_refused_for_a_session_with_no_credentialed_origin(bound):
+    host, request, _, session = bound
+    session.origin = ''
+    with pytest.raises(Denied, match='credential'):
+        SessionWorkspace(host, request, PROJECT).connect()
+    assert Workspace(host.projects.workspace_base(PROJECT)).registry.ids() == []

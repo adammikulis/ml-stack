@@ -96,6 +96,7 @@ def test_concurrent_historical_record_import_is_idempotent(work):
 
 @pytest.mark.redteam
 def test_person_reputation_route_is_read_only_and_session_guarded(work, tmp_path, monkeypatch):
+    from launch_support import signed
     from test_fleet_ui import Serving
 
     from ml_stack.fleet import routes
@@ -103,12 +104,12 @@ def test_person_reputation_route_is_read_only_and_session_guarded(work, tmp_path
 
     tokens.store(work.base, tokens.OWNER_FILE, work.owner)
     monkeypatch.setattr(work_reputation, 'WorkLedger', lambda: work.ledger)
-    server = Serving(tmp_path)
+    server = signed(Serving(tmp_path))
     try:
         assert server.call('/ui/work-reputation/standings', ui_header=False)[0] == 403
         monkeypatch.setattr(routes, 'in_cluster', lambda _: True)
-        assert server.call('/ui/work-reputation/standings')[0] == 401
-        cookie = server.ui.sessions.cookie_header(server.ui.sessions.open('person'))
+        assert server.call('/ui/work-reputation/standings', cookie='')[0] == 401
+        cookie = server.ui.sessions.cookie_header(server.ui.sessions.open('person', 'launch-ticket'))
         assert server.call('/ui/work-reputation/standings', method='POST', body={}, cookie=cookie)[0] == 405
         assert server.call('/ui/work-reputation/standings?offset=-1', cookie=cookie)[0] == 400
         assert server.call('/ui/work-reputation/standings?agent=../../owner', cookie=cookie)[0] == 400

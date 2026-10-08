@@ -4,6 +4,7 @@ import http.client
 import json
 
 import pytest
+from launch_support import signed
 from test_fleet_ui import Serving
 from workspace_kit import Kit, clean_env
 
@@ -18,7 +19,7 @@ def board(tmp_path, monkeypatch):
     kit = Kit(clean_env(monkeypatch, tmp_path))
     kit.worker = kit.agent("builder")
     tokens.store(kit.base, tokens.OWNER_FILE, kit.owner)
-    server = Serving(tmp_path)
+    server = signed(Serving(tmp_path))
     try:
         yield server, kit
     finally:
@@ -51,8 +52,8 @@ def test_local_person_posts_dm_and_thread_without_exposing_credentials(board):
 def test_joined_session_is_required_before_owner_identity_is_used(board, monkeypatch):
     server, kit = board
     monkeypatch.setattr(routes, 'in_cluster', lambda _: True)
-    assert post(server, {'to': 'builder', 'body': 'Unsigned'})[0] == 401
-    cookie = server.ui.sessions.cookie_header(server.ui.sessions.open('person'))
+    assert post(server, {'to': 'builder', 'body': 'Unsigned'}, cookie='')[0] == 401
+    cookie = server.ui.sessions.cookie_header(server.ui.sessions.open('person', 'launch-ticket'))
     assert post(server, {'to': 'builder', 'body': 'Signed'}, cookie=cookie)[0] == 200
     assert len(kit.ws.inbox(kit.worker)) == 1
 
@@ -64,7 +65,7 @@ def test_joined_session_is_required_before_owner_identity_is_used(board, monkeyp
 ])
 def test_foreign_browser_cannot_send_as_person(board, attack):
     server, kit = board
-    assert post(server, {'to': 'builder', 'body': 'Hostile'}, **attack)[0] == 403
+    assert post(server, {'to': 'builder', 'body': 'Hostile'}, **attack)[0] in (403, 421)
     assert kit.ws.inbox(kit.worker) == []
 
 
@@ -91,7 +92,7 @@ def test_oversized_post_and_unsupported_methods_do_not_mutate(board):
     conn = http.client.HTTPConnection('127.0.0.1', server.port, timeout=5)
     try:
         conn.request('POST', '/ui/board/post', body=b'\xff', headers={
-            'X-ML-Stack-UI': '1', 'Content-Type': 'application/json',
+            'X-ML-Stack-UI': '1', 'Content-Type': 'application/json', 'Cookie': server.cookie,
             'Origin': f'http://127.0.0.1:{server.port}'})
         assert conn.getresponse().status == 400
     finally:
