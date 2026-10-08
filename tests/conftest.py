@@ -1105,7 +1105,9 @@ def _real_home(tmp_path_factory):
     from ml_stack import home
 
     real = types.SimpleNamespace(state=home.home(), cache=home.cache())
-    before = file_mtimes(real.state, attribute_external=False)
+    from state_attribution import Watch
+
+    watch = Watch(real.state, lambda r: file_mtimes(r, attribute_external=False), lambda b, a: real_state_changes(real.state, b, a))
     away = tmp_path_factory.mktemp("home")
     account = home.user_home()
     browsers = account / ("Library/Caches" if sys.platform == "darwin" else ".cache")
@@ -1120,10 +1122,8 @@ def _real_home(tmp_path_factory):
         mp.setenv("ML_STACK_HOME", str(away / ".ml-stack"))
         mp.setenv("ML_STACK_CACHE", str(away / ".cache" / "ml_stack"))
         yield real
-    written = real_state_changes(real.state, before, file_mtimes(real.state, attribute_external=False))
-    if written:
-        pytest.fail(f"the real state root {real.state} was written during the run: "
-                    + ", ".join(written[:20]), pytrace=False)
+    if failure := watch.settle():
+        pytest.fail(failure, pytrace=False)
 
 
 @pytest.fixture(scope="session", autouse=True)
