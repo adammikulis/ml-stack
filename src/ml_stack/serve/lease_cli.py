@@ -73,7 +73,8 @@ def cmd_leases(args: argparse.Namespace) -> int:
     for held in held_now["servers"]:
         joined = [(hold.id, row) for hold in holding.holds() if hold.port == held["port"]
                   for row in holding.joined(hold.id)]
-        say(f":{held['port']}  {Path(held['model']).name}  {len(held['holders']) + len(joined)} holder(s)")
+        say(f":{held['port']}  {Path(held['model']).name}  {held.get('device') or '-'}  "
+            f"{len(held['holders']) + len(joined)} holder(s)")
         for holder in held["holders"]:
             say(f"  lease {holder['lease'][:8]}")
             for line in provenance.lines(holder, indent="    "):

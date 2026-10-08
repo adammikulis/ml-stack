@@ -1,6 +1,6 @@
-"""One generation at a time per accelerator pool, across every process on this machine.
+"""One generation at a time per accelerator device, across every process on this machine.
 
-The line for a pool is a directory of ticket files under ``<state>/gate/<pool>``. A request
+The line for a device is a directory of ticket files under ``<state>/gate/<device>``. A request
 takes a ticket named by the time it was taken and holds an exclusive lock on it while it
 runs; the oldest live ticket runs. The kernel drops the lock when a process dies, so a
 crashed holder frees the line. `ml_stack.http` calls `turn` for every generation or
@@ -28,8 +28,8 @@ from typing import Any
 from ml_stack import home
 from ml_stack.lock import release, take
 
-__all__ = ["DEFAULT_WAIT_S", "ENV_PARALLEL", "ENV_WAIT", "QueueTimeout", "is_generation",
-           "parallel", "pool_of", "snapshot", "turn"]
+__all__ = ["DEFAULT_WAIT_S", "ENV_PARALLEL", "ENV_WAIT", "QueueTimeout", "device_of", "is_generation",
+           "parallel", "snapshot", "turn"]
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,7 @@ ENV_WAIT = "ML_STACK_REQUEST_WAIT_S"
 """Seconds a request waits for its turn before it gives up."""
 
 ENV_PARALLEL = "ML_STACK_PARALLEL_REQUESTS"
-"""Set to ``1`` to let requests to one pool run at the same time."""
+"""Set to ``1`` to let requests to one device run at the same time."""
 
 DEFAULT_WAIT_S = 600.0
 LOOPBACK = frozenset({"127.0.0.1", "localhost", "::1"})
@@ -69,8 +69,8 @@ def _registry() -> dict[str, Any]:
     return parsed if isinstance(parsed, dict) else {}
 
 
-def pool_of(url: str) -> str:
-    """The pool a request to ``url`` queues in, or "" when it is not queued: the host is
+def device_of(url: str) -> str:
+    """The device a request to ``url`` queues in, or "" when it is not queued: the host is
     not this machine, or no server in the lease registry listens on that port."""
     parts = urllib.parse.urlsplit(url)
     if (parts.hostname or "").lower() not in LOOPBACK or not parts.port:
@@ -83,7 +83,7 @@ def pool_of(url: str) -> str:
         except (TypeError, ValueError):
             continue
         if port == parts.port:
-            return str(entry.get("pool") or "gpu")
+            return str(entry.get("device") or "gpu")
     return ""
 
 
@@ -106,7 +106,7 @@ def _allowed_parallel() -> str:
 
 @contextmanager
 def parallel(reason: str) -> Iterator[None]:
-    """Let requests sent inside the block run beside other requests to the same pool.
+    """Let requests sent inside the block run beside other requests to the same device.
 
     ``reason`` names the caller and is logged the first time it is used.
     """
@@ -117,8 +117,8 @@ def parallel(reason: str) -> Iterator[None]:
         _parallel.reset(token)
 
 
-def _dir(pool: str) -> Path:
-    path = home.state("gate", pool)
+def _dir(device: str) -> Path:
+    path = home.state("gate", device)
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -203,30 +203,30 @@ def _drop(path: Path, name: str, fd: int) -> None:
 
 @contextmanager
 def turn(url: str, *, wait_s: float | None = None, cancelled=None) -> Iterator[None]:
-    """Hold the front of the line for the pool ``url`` is in while the block runs.
+    """Hold the front of the line for the device ``url`` is in while the block runs.
 
-    A URL that is not queued, a thread that already holds the pool, and a caller inside
+    A URL that is not queued, a thread that already holds the device, and a caller inside
     `parallel` run at once. Raises `QueueTimeout` after ``wait_s`` (else ``ML_STACK_REQUEST_WAIT_S``,
     else ten minutes) naming the request that held the front.
     """
-    pool = pool_of(url)
-    if not pool:
+    device = device_of(url)
+    if not device:
         yield
         return
     reason = _allowed_parallel()
     if reason:
         if reason not in _told:
             _told.add(reason)
-            logger.warning("requests to the %s pool run in parallel (%s); they are not queued",
-                           pool, reason)
+            logger.warning("requests to the %s device run in parallel (%s); they are not queued",
+                           device, reason)
         yield
         return
-    mine: set[str] = _held.__dict__.setdefault("pools", set())
-    if pool in mine:
+    mine: set[str] = _held.__dict__.setdefault("devices", set())
+    if device in mine:
         yield
         return
 
-    path = _dir(pool)
+    path = _dir(device)
     name, fd = _take_ticket(path, url)
     allowance = _wait_s(wait_s)
     began = time.monotonic()
@@ -242,39 +242,39 @@ def turn(url: str, *, wait_s: float | None = None, cancelled=None) -> Iterator[N
             waited = time.monotonic() - began
             if waited >= allowance:
                 raise QueueTimeout(
-                    f"waited {waited:.1f}s for its turn on the {pool} pool; {len(ahead)} "
+                    f"waited {waited:.1f}s for its turn on the {device} device; {len(ahead)} "
                     f"request(s) ahead, the front is {_describe(path, ahead[0])}. "
                     f"{ENV_WAIT} sets how long to wait; {ENV_PARALLEL}=1 sends in parallel")
             time.sleep(_POLL_S[min(step, len(_POLL_S) - 1)])
             step += 1
-        mine.add(pool)
+        mine.add(device)
         try:
             yield
         finally:
-            mine.discard(pool)
+            mine.discard(device)
     finally:
         _drop(path, name, fd)
 
 
 def snapshot() -> dict[str, list[dict[str, Any]]]:
-    """Each pool's line, oldest first; the first entry with ``running`` true holds the turn."""
+    """Each device's line, oldest first; the first entry with ``running`` true holds the turn."""
     root = home.state("gate")
     out: dict[str, list[dict[str, Any]]] = {}
     if not root.is_dir():
         return out
-    for pool in sorted(p for p in root.iterdir() if p.is_dir()):
+    for lane in sorted(p for p in root.iterdir() if p.is_dir()):
         rows: list[dict[str, Any]] = []
-        with _directory_lock(pool):
-            for name in _tickets(pool):
+        with _directory_lock(lane):
+            for name in _tickets(lane):
                 try:
-                    fd = os.open(pool / name, os.O_RDWR)
+                    fd = os.open(lane / name, os.O_RDWR)
                 except OSError:
                     continue
                 try:
                     if take(fd):
                         release(fd)
                         continue
-                    info = json.loads((pool / name).read_text(encoding="utf-8") or "{}")
+                    info = json.loads((lane / name).read_text(encoding="utf-8") or "{}")
                 except (OSError, ValueError):
                     info = {}
                 finally:
@@ -282,5 +282,5 @@ def snapshot() -> dict[str, list[dict[str, Any]]]:
                 rows.append({**info, "ticket": name})
         if rows:
             rows[0]["running"] = True
-            out[pool.name] = rows
+            out[lane.name] = rows
     return out

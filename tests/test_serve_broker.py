@@ -331,7 +331,7 @@ def test_processes_lease_through_the_broker_they_start(tmp_path, llama_binary, m
            "PYTHONPATH": os.pathsep.join(p for p in (src, os.environ.get("PYTHONPATH")) if p)}
     client = ("import json, sys, time\n"
               "from ml_stack.serve import broker_wire\n"
-              "g = broker_wire.lease('chat', [sys.argv[1]], spec={'context': 512}, timeout=60)\n"
+              "g = broker_wire.lease('chat', [sys.argv[1]], reason='test', spec={'context': 512}, timeout=60)\n"
               "print(json.dumps(g.as_dict()), flush=True)\n"
               "time.sleep(float(sys.argv[2]))\n")
 

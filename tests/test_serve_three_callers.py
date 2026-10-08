@@ -118,7 +118,7 @@ def test_three_callers_three_models_one_broker_holding_every_lease(tmp_path, mac
         assert sorted(records) == sorted(one["port"] for one in got)
         assert {entry["owner_pid"] for entry in records.values()} == {daemon}, (
             "every server is the broker's, whoever asked for it")
-        assert {entry["pool"] for entry in records.values()} == {"gpu"}
+        assert {entry["device"] for entry in records.values()} == {"gpu"}
 
         seen = {s["port"]: s for s in broker_wire.status()["servers"]}
         for proc, one in zip(procs, got, strict=True):
@@ -127,7 +127,7 @@ def test_three_callers_three_models_one_broker_holding_every_lease(tmp_path, mac
         assert len(held) == 3, "broker-leases.json lists all three"
 
         for one in got:
-            assert gate.pool_of(f"http://127.0.0.1:{one['port']}/v1/chat/completions") == "gpu"
+            assert gate.device_of(f"http://127.0.0.1:{one['port']}/v1/chat/completions") == "gpu"
             assert request_json(f"http://127.0.0.1:{one['port']}/v1/chat/completions",
                                 payload={"messages": [{"role": "user", "content": "hi"}]},
                                 timeout=30)

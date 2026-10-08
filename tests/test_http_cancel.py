@@ -112,7 +112,7 @@ def test_cancelling_queued_request_removes_its_resource_ticket(tmp_path, monkeyp
 
     path = tmp_path / 'admission'
     path.mkdir()
-    monkeypatch.setattr(gate, 'pool_of', lambda _url: 'cancel-test')
+    monkeypatch.setattr(gate, 'device_of', lambda _url: 'cancel-test')
     monkeypatch.setattr(gate, '_dir', lambda _pool: path)
     control, errors = Cancellation(), []
     def work():

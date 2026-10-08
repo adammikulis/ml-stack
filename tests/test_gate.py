@@ -1,4 +1,4 @@
-"""Requests to servers ml-stack started are served one at a time per pool, across processes.
+"""Requests to servers ml-stack started are served one at a time per device, across processes.
 
 The servers here are real HTTP servers in this process that record the window in which each
 generation was running; the callers are separate Python processes sending through
@@ -76,10 +76,10 @@ class Recorder:
         self.httpd.server_close()
 
 
-def register(*servers: Recorder, pool: str = "gpu") -> None:
+def register(*servers: Recorder, device: str = "gpu") -> None:
     path = home.state("servers.json")
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({str(s.port): {"port": s.port, "pid": os.getpid(), "pool": pool,
+    path.write_text(json.dumps({str(s.port): {"port": s.port, "pid": os.getpid(), "device": device,
                                               "owner_pid": os.getpid()} for s in servers}))
 
 
@@ -257,10 +257,10 @@ def test_only_generation_on_registered_local_servers_is_queued(servers):
         held.process.wait(timeout=10)
 
 
-def test_pools_queue_apart(servers):
+def test_devices_queue_apart(servers):
     first, second = servers(2)
     entries = json.loads(home.state("servers.json").read_text())
-    entries[str(second.port)]["pool"] = "cpu"
+    entries[str(second.port)]["device"] = "cpu"
     home.state("servers.json").write_text(json.dumps(entries))
     held = holder(first.url)
     try:
@@ -271,7 +271,7 @@ def test_pools_queue_apart(servers):
         held.process.wait(timeout=10)
 
 
-def test_a_thread_holding_the_pool_can_send_a_nested_request(servers):
+def test_a_thread_holding_the_device_can_send_a_nested_request(servers):
     (one,) = servers(1, hold_s=0.01)
     with gate.turn(one.url):
         request_json(one.url, payload={}, timeout=5)

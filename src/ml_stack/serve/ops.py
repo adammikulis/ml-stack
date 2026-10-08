@@ -106,6 +106,7 @@ class Snapshot:
     reason: str = ""
     log: str | None = None
     iq_warning: str | None = None
+    device: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -237,6 +238,7 @@ def look(port: int, records: dict[int, dict], served: Mapping[int, Any] | None =
         owner_pid=owner,
         holder_running=pid_exists(owner),
         recorded=bool(entry),
+        device=str(entry.get("device") or ""),
         load_s=_float_or_none(entry.get("load_s")),
         warmup_s=_float_or_none(entry.get("warmup_s")),
         log=str(entry["log"]) if entry.get("log") else None,

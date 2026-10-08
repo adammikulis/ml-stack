@@ -77,7 +77,7 @@ def test_a_real_server_is_leased_queued_and_stopped(real, monkeypatch):
     try:
         assert info.pid and pid_exists(info.pid) and info.lease
         url = f"{info.base_url}/v1/chat/completions"
-        assert gate.pool_of(url) == "gpu"
+        assert gate.device_of(url) == "gpu"
 
         seen: list[list[int]] = []
         stop = threading.Event()
