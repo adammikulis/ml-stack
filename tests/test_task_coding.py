@@ -1,4 +1,4 @@
-"""Canonical native coding uses bounded turns and cancels its owned process."""
+"""Native coding uses bounded turns and cancels its owned process."""
 
 import json
 import threading

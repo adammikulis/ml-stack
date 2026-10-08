@@ -1,4 +1,4 @@
-"""Dev worker launches retain local runtime state and one sealed canonical Board."""
+"""Dev worker launches retain local runtime state and one sealed Board."""
 
 import base64
 import hashlib

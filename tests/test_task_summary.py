@@ -1,4 +1,4 @@
-"""Task overview derives counts and activity from canonical evidence."""
+"""Task overview derives counts and activity from evidence."""
 
 from ml_stack.workspace.task_summary import inspection, overview
 

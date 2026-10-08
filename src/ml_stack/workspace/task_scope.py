@@ -1,4 +1,4 @@
-"""Canonical worker eligibility follows registry parentage, assignment and project membership."""
+"""Worker eligibility follows registry parentage, assignment and project membership."""
 
 from ml_stack.workspace import enforcement
 from ml_stack.workspace.identity import HUMAN

@@ -1,4 +1,4 @@
-"""Typed canonical task calls from parsed workspace commands."""
+"""Typed task calls from parsed workspace commands."""
 
 import json
 import sys
@@ -12,7 +12,7 @@ VALUES = frozenset({'task-checkpoint', 'task-submit', 'task-review'})
 
 
 def command(remote, token: str, args):
-    """Dispatch an authenticated typed canonical task command."""
+    """Dispatch an authenticated typed task command."""
     action = args.cmd
     if action not in ACTIONS:
         raise Denied('this task operation is unavailable on the canonical board')

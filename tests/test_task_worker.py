@@ -1,4 +1,4 @@
-"""Canonical workers select queued allocations and persist proposals in the graph."""
+"""Workers select queued allocations and persist proposals in the graph."""
 
 from dataclasses import replace
 

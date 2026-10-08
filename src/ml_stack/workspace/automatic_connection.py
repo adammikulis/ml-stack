@@ -1,4 +1,4 @@
-"""Automatic Dev project discovery and canonical Board attachment."""
+"""Automatic Dev project discovery and Board attachment."""
 
 import hashlib
 import os
@@ -187,7 +187,7 @@ def _register(root, member, project_id):
 
 
 def discover(root: Path, *, cluster_key=None, cluster="", port=None):
-    """Select one authenticated canonical host for this local Git project."""
+    """Select one authenticated host for this local Git project."""
     project_id = identity(root.resolve())
     rows = memberships(cluster_key)
     members = rows[:1] if rows and getattr(rows[0], "mode", "prod") == "dev" else []
@@ -237,7 +237,7 @@ def discover(root: Path, *, cluster_key=None, cluster="", port=None):
 
 
 def local_project(cwd: Path | None = None):
-    """Discover the canonical Dev Board for the checkout containing this directory."""
+    """Discover the Dev Board for the checkout containing this directory."""
     checkout = worktreerules.checkouts(cwd or Path.cwd())
     if checkout is None:
         return None
@@ -283,7 +283,7 @@ def _attach(root: Path, name: str, choice: dict, *, claim):
 
 
 def startup(root: Path, name: str, parent: str = "", *, claim=("", "")) -> Seat | None:
-    """Acquire a canonical project seat once when a native harness starts."""
+    """Acquire a project seat once when a native harness starts."""
     if not worktreerules.checkouts(root):
         return None
     prior = selected(root)

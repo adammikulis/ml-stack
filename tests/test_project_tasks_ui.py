@@ -1,4 +1,4 @@
-"""Human-authorized task controls use the selected canonical project store."""
+"""Human-authorized task controls use the selected project store."""
 
 import pytest
 import test_project_board_ui as board_ui

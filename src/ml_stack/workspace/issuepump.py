@@ -136,7 +136,7 @@ def _deliver_assignment(ws, token, agent, row, task):
 
 
 def step(ws, token, name):
-    """Project repository intake into canonical tasks and schedule eligible queued work."""
+    """Project repository intake into tasks and schedule eligible queued work."""
     agent = la.load(ws, name)
     if agent is None:
         raise ValueError('the coding worker no longer exists')

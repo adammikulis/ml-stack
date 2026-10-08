@@ -1,4 +1,4 @@
-"""Dev device worker launches and canonical Board message loops."""
+"""Dev device worker launches and Board message loops."""
 
 import hashlib
 import json
@@ -255,7 +255,7 @@ class WorkerRemote:
 
 
 class BoardWorker(CanonicalWorkspace):
-    """Keep runtime files local while using the selected canonical agent capability."""
+    """Keep runtime files local while using the selected agent capability."""
 
     def __init__(self, local, record, name=""):
         cluster_key = Path(record['cluster_key']) if record['cluster_key'] else None

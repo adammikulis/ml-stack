@@ -18,7 +18,7 @@ from ml_stack.workspace.task_schema import TASK_ID
 
 
 def prepare(ws, token: str, worker: str, task: str) -> dict:
-    """Reserve a claimed checkout and committed baseline for one canonical task."""
+    """Reserve a claimed checkout and committed baseline for one task."""
     caller, child = ws.auth(token), ws.auth(tokens.load(ws.base, worker))
     if caller.role != HUMAN and child.parent != caller.id:
         task_authority.authorize(ws, token, worker, task)

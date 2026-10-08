@@ -37,7 +37,7 @@ def work(tmp_path, monkeypatch):
 
 
 def _historical(work, evidence=None, *, ledger=None):
-    """Seed already-verified historical graph evidence without inventing canonical task state."""
+    """Seed already-verified historical graph evidence without inventing task state."""
     raw = dict(work.evidence if evidence is None else evidence)
     return (ledger or work.ledger).record({**raw, 'award': economy.assessment(raw),
                                          'agent': raw.get('agent', work.agent_id), 'verifier': 'lead',

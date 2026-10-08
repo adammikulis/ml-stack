@@ -1,4 +1,4 @@
-"""Credits require canonical independent review evidence and stable coordinator scope."""
+"""Credits require independent review evidence and stable coordinator scope."""
 
 import hashlib
 import shutil

@@ -1,4 +1,4 @@
-"""Parent-authorized recovery of unchanged inactive canonical task checkouts."""
+"""Parent-authorized recovery of unchanged inactive task checkouts."""
 
 from pathlib import Path
 from uuid import uuid4

@@ -1,4 +1,4 @@
-"""Authenticated agent interfaces operate on canonical tasks without granting authority."""
+"""Authenticated agent interfaces operate on tasks without granting authority."""
 
 import json
 

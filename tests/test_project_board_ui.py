@@ -1,4 +1,4 @@
-"""Authenticated local person access to canonical project conversations."""
+"""Authenticated local person access to project conversations."""
 
 import io
 import json

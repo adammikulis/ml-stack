@@ -1,4 +1,4 @@
-"""Bounded native coding turns execute canonical task worktrees."""
+"""Bounded native coding turns execute task worktrees."""
 
 import hashlib
 import json

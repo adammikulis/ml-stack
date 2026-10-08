@@ -1,4 +1,4 @@
-"""Project-scoped typed canonical task commands over sealed workspace transport."""
+"""Project-scoped typed task commands over sealed workspace transport."""
 
 import json
 from collections import Counter

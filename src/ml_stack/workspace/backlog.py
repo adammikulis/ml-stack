@@ -259,7 +259,7 @@ def pick(ws, agent, *, fetcher=fetch, clock=time.time, exclude=frozenset()):
 
 
 def finish(ws, issue, agent, result, *, clock=time.time):
-    """Project a proposed or blocked canonical outcome without completion credit."""
+    """Project a proposed or blocked outcome without completion credit."""
     kind, text = result
     with held(ws.base / "issue-backlog.lock"), _store(ws) as graph:
         record = _record(graph, issue["key"])

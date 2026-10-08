@@ -1,4 +1,4 @@
-"""Canonical native mutation identities and physical checkout scopes."""
+"""Native mutation identities and physical checkout scopes."""
 
 import hashlib
 import os
@@ -20,7 +20,7 @@ from ml_stack.workspace.identity import AGENT, Denied, Identity
 
 
 def context(actor, cwd, roots, *, require_claim=True):
-    """Authenticate a canonical worker and the launcher's fixed project roots."""
+    """Authenticate a worker and the launcher's fixed project roots."""
     selected = project_connection.selected(Path(cwd))
     if selected is None:
         return None
@@ -41,7 +41,7 @@ def context(actor, cwd, roots, *, require_claim=True):
 
 
 def physical_owner(remote, who):
-    """Namespace the authenticated canonical identity in the shared physical claim store."""
+    """Namespace the authenticated identity in the shared physical claim store."""
     authority = hashlib.sha256(f'{remote.host}/{remote.project_id}'.encode()).hexdigest()[:32]
     return Identity(f'canonical:{authority}:{who.id}', AGENT, can=who.can)
 
@@ -53,7 +53,7 @@ def claims():
 
 
 def source_resources(remote, required, *, branch_only=False):
-    """Map authenticated local targets to canonical repository-relative source claims."""
+    """Map authenticated local targets to repository-relative source claims."""
     source = []
     for kind, key in required:
         if kind == 'branch':
@@ -80,7 +80,7 @@ def source_resources(remote, required, *, branch_only=False):
 
 
 def require_clean(remote, who):
-    """Inspect this canonical worker's local durable checkout namespace."""
+    """Inspect this worker's local durable checkout namespace."""
     worktree_lifecycle.require_clean(remote.base, who.id)
 
 
@@ -110,7 +110,7 @@ def inspect_shell(name, args):
 
 
 def reserve(remote, who, required, fields, *, branch_only=False):
-    """Reserve physical targets and canonical source areas before a mutation."""
+    """Reserve physical targets and source areas before a mutation."""
     physical = physical_resources(required)
     source = source_resources(remote, required, branch_only=branch_only)
     store = claims()
@@ -130,7 +130,7 @@ def reserve(remote, who, required, fields, *, branch_only=False):
 
 
 def conflict(remote, who, required):
-    """Return a foreign physical claim before canonical admission runs."""
+    """Return a foreign physical claim before admission runs."""
     store = claims()
     principal = physical_owner(remote, who)
     for kind, key in physical_resources(required):
@@ -163,7 +163,7 @@ def staging_only(name, args):
 
 
 def revocation_snapshot(remote, identity):
-    """Capture exact physical claim records before requesting canonical self revocation."""
+    """Capture exact physical claim records before requesting self revocation."""
     store = claims()
     principal = physical_owner(remote, Identity(identity, AGENT))
     with held(store.lock):
@@ -171,7 +171,7 @@ def revocation_snapshot(remote, identity):
 
 
 def release_revoked(remote, identity, snapshot):
-    """Remove unchanged physical claims after canonical self revocation succeeds."""
+    """Remove unchanged physical claims after self revocation succeeds."""
     store = claims()
     principal = physical_owner(remote, Identity(identity, AGENT))
     with held(store.lock):
@@ -203,7 +203,7 @@ def local_command(remote, who, args):
 
 
 def cli_command(remote, token, args):
-    """Dispatch project-confined canonical claim operations under the exact CLI identity."""
+    """Dispatch project-confined claim operations under the exact CLI identity."""
     info = remote.call('whoami', token)
     selected = project_connection.selected()
     expected = args.agent or (selected or {}).get('agent', '')

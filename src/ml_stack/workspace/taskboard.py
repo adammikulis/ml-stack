@@ -1,4 +1,4 @@
-"""Canonical structured tasks and linked outcomes in the workspace coordination graph."""
+"""Structured tasks and linked outcomes in the workspace coordination graph."""
 
 from __future__ import annotations
 

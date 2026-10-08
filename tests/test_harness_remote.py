@@ -1,4 +1,4 @@
-"""Canonical native ownership keeps physical claims and cleanup local."""
+"""Native ownership keeps physical claims and cleanup local."""
 
 from types import SimpleNamespace
 

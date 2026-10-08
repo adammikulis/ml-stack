@@ -1,4 +1,4 @@
-"""Execute claimed canonical tasks with renewable authentication and lease heartbeats."""
+"""Execute claimed tasks with renewable authentication and lease heartbeats."""
 
 from __future__ import annotations
 

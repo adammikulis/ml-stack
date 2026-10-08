@@ -113,7 +113,7 @@ tests = ["tests/test_workspace_backlog.py::test_parent_resume_preserves_failed_a
          "tests/test_workspace_backlog.py::test_issue_resume_refuses_unblocked_foreign_and_child_requests",
          "tests/test_workspace_backlog.py::test_issue_resume_cannot_bypass_canonical_task_retry_budget"]
 count = 1
-note = "Authenticated person or actual parent recovery preserves the failed projection and grants one intake attempt; child, foreign parent, unblocked projections and canonical budget bypasses are refused"
+note = "Authenticated person or actual parent recovery preserves the failed projection and grants one intake attempt; child, foreign parent, unblocked projections and budget bypasses are refused"
 
 [[group]]
 match = ["human:workspace/backlog.py:supersede"]
@@ -470,7 +470,7 @@ tests = [
   "tests/test_workspace_model.py::test_a_hostile_model_or_harness_is_refused_everywhere",
   "tests/test_redteam_board.py::test_following_and_the_live_route_give_an_agent_nothing_it_could_not_already_read",
 ]
-note = "Fleet and exact registered local canonical projects delegate to the maintained person-only Board parser; HTTP and HTTPS exact browser origins, membership, visible acknowledgements, malformed and oversized bodies, missing UI authority, foreign projects and agent owner credentials are exercised without identity creation"
+note = "Fleet and exact registered local projects delegate to the maintained person-only Board parser; HTTP and HTTPS exact browser origins, membership, visible acknowledgements, malformed and oversized bodies, missing UI authority, foreign projects and agent owner credentials are exercised without identity creation"
 
 [[group]]
 match = ["route:fleet/api.py:/companion/*", "route:fleet/companion_routes.py:/companion/*",
@@ -493,7 +493,7 @@ tests = ["tests/test_redteam_device_transport.py::test_daemon_project_dispatch_r
          "tests/test_device_agent_bootstrap.py::test_canonical_project_bootstrap_has_same_device_boundary",
          "tests/test_device_agent_bootstrap.py::test_http_device_session_recovery_and_revocation",
          "tests/test_workspace_remote.py::test_signed_sealed_fleet_and_agent_capabilities_both_required"]
-note = "Real daemon project requests reject missing, revoked and cluster-only device proof, unsealed bodies and malformed JSON before host dispatch; canonical project operations require both paired-device and agent authority"
+note = "Real daemon project requests reject missing, revoked and cluster-only device proof, unsealed bodies and malformed JSON before host dispatch; project operations require both paired-device and agent authority"
 
 [[group]]
 match = ["route:fleet/invite_routes.py:/ui/fleet/android-devices"]

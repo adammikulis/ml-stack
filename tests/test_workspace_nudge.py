@@ -113,7 +113,7 @@ def test_the_installer_is_for_a_person(tmp_path):
 
 
 class _Board:
-    """A canonical board that answers each operation from a real workspace."""
+    """A board that answers each operation from a real workspace."""
 
     host = "http://127.0.0.1:8770"
     project_id = "a" * 32

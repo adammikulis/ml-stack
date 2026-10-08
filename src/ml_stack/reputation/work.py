@@ -41,7 +41,7 @@ class WorkLedger:
         return self.sealed.edit(change)
 
     def record_contribution(self, evidence: dict[str, Any]) -> dict[str, Any]:
-        """Persist one independently reviewed canonical attempt, with infrastructure excluded from ratings."""
+        """Persist one independently reviewed attempt, with infrastructure excluded from ratings."""
         ident = 'contribution:' + hashlib.sha256(
             f"{evidence['workspace']}:{evidence['completion']}".encode()).hexdigest()
         def change(graph):

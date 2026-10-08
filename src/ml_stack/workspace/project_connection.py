@@ -1,4 +1,4 @@
-"""Private project connections and canonical workspace dispatch."""
+"""Private project connections and workspace dispatch."""
 
 import json
 import os
@@ -34,7 +34,7 @@ def _saved() -> dict:
 
 
 def bind(remote: RemoteWorkspace, root: Path, agent: str, cluster: str = "", **options: str) -> dict:
-    """Bind a local project root to an authenticated canonical board identity."""
+    """Bind a local project root to an authenticated board identity."""
     if set(options) - {"local_agent", "agent_token"}:
         raise TypeError("unsupported project binding option")
     local_agent, agent_token = options.get("local_agent", ""), options.get("agent_token", "")

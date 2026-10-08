@@ -1,4 +1,4 @@
-"""Authenticated relocation of inactive canonical task source bindings."""
+"""Authenticated relocation of inactive task source bindings."""
 
 from contextlib import ExitStack
 from dataclasses import dataclass, replace

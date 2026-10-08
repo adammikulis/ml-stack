@@ -115,7 +115,7 @@ class WorkspaceHost:
         return self._person_request(request, project_id, dispatch)
 
     def person_tasks(self, request, project_id: str, *, project: dict) -> bool:
-        """Dispatch canonical project task requests from authenticated people."""
+        """Dispatch project task requests from authenticated people."""
         def dispatch(ws):
             ws.auth(ws._actor)
             return task_routes.route(request, workspace=ws, actor=ws._actor,

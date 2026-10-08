@@ -1,4 +1,4 @@
-"""The maintained detached coding entry point runs canonical task assignments."""
+"""The maintained detached coding entry point runs task assignments."""
 
 import os
 import sys
@@ -10,7 +10,7 @@ __all__ = ['run_detached']
 
 
 def run_detached(argv=None):
-    """Run one saved coding worker against the canonical TaskBoard."""
+    """Run one saved coding worker against the TaskBoard."""
     args = list(sys.argv[1:] if argv is None else argv)
     if len(args) != 1:
         sys.stderr.write('usage: python -m ml_stack.workspace.localcoding NAME\n')

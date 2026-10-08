@@ -1,4 +1,4 @@
-"""Credit canonical task outcomes using their independently authenticated review."""
+"""Credit task outcomes using their independently authenticated review."""
 
 from ml_stack import activity
 from ml_stack.reputation import economy
@@ -8,7 +8,7 @@ from ml_stack.workspace.taskboard import TaskBoard
 
 
 def verify_task(ws, token, task_id, *, ledger=None):
-    """Award an accepted canonical task once; worker claims never supply verification checks."""
+    """Award an accepted task once; worker claims never supply verification checks."""
     who = ws.auth(token)
     board = TaskBoard(ws)
     board.assert_reviewer(token, task_id)

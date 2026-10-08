@@ -1,4 +1,4 @@
-"""Canonical task branches exclude prior uncommitted worker changes."""
+"""Task branches exclude prior uncommitted worker changes."""
 
 import pytest
 from workspace_kit import Kit

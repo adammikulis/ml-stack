@@ -1,4 +1,4 @@
-"""Canonical project CLI dispatch without device-local fallback."""
+"""Project CLI dispatch without device-local fallback."""
 
 from types import SimpleNamespace
 

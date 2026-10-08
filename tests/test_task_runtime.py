@@ -1,4 +1,4 @@
-"""Canonical execution renews tokens, preserves leases and stops blocked work."""
+"""Execution renews tokens, preserves leases and stops blocked work."""
 
 import threading
 from types import SimpleNamespace
