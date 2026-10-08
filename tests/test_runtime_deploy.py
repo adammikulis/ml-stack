@@ -332,3 +332,11 @@ def test_a_command_without_a_recorded_or_named_launcher_directory_or_checkout_wr
     assert runtime_cli.main(["ensure", "--checkout", str(tmp_path), "--launchers", str(launchers)]) == 1
     assert "not a git checkout" in capsys.readouterr().err
     assert not list(launchers.iterdir()) and not runtime.directory().exists()
+
+
+def test_a_current_runtime_answers_without_taking_the_build_lock(world):
+    repo, launchers, _ = world
+    commit(repo, "a")
+    runtime_deploy.ensure(plan_for(repo, launchers), builder=builder())
+    with only_one(runtime.directory() / "deploy.lock", note="other build"):
+        assert runtime_deploy.ensure(plan_for(repo, launchers), builder=builder()).action == "current"
