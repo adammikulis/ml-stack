@@ -5,6 +5,7 @@ import time
 
 import pytest
 from coding_kit import SESSION, fixture_worker
+from launch_support import signed
 from test_fleet_ui import Serving
 from workspace_kit import Kit
 
@@ -17,7 +18,7 @@ def coding_api(tmp_path, monkeypatch):
     monkeypatch.setenv("ML_STACK_WORKSPACE_HOME", str(tmp_path / "workspace"))
     kit = Kit(tmp_path / "workspace")
     monkeypatch.setattr(coding_turns, "worker", fixture_worker)
-    server = Serving(tmp_path)
+    server = signed(Serving(tmp_path))
     server.ui.settings.setup_done = True
     server.ui.conversations = Conversations(tmp_path / "chats")
     folder = tmp_path / "project"
@@ -33,8 +34,8 @@ def coding_api(tmp_path, monkeypatch):
         server.close()
 
 
-def post(server, cid, operation, body):
-    return server.call(f"/ui/coding/{cid}/{operation}", method="POST", body=body,
+def post(server, cid, operation, body, **options):
+    return server.call(f"/ui/coding/{cid}/{operation}", method="POST", body=body, **options,
                        headers={"Origin": f"http://127.0.0.1:{server.port}", "Sec-Fetch-Site": "same-origin"})
 
 
@@ -125,9 +126,9 @@ def test_joined_coding_session_is_required_before_starting_a_worker(coding_api, 
 
     server, conversation, _kit = coding_api
     monkeypatch.setattr(routes, "in_cluster", lambda _: True)
-    assert post(server, conversation.id, "start", {"message": "unsigned"})[0] == 401
+    assert post(server, conversation.id, "start", {"message": "unsigned"}, cookie="")[0] == 401
     assert server.ui.conversations.get(conversation.id).messages == []
-    cookie = server.ui.sessions.cookie_header(server.ui.sessions.open("person"))
+    cookie = server.ui.sessions.cookie_header(server.ui.sessions.open("person", "launch-ticket"))
     status, _result, _headers = server.call(f"/ui/coding/{conversation.id}/start", method="POST",
         body={"message": "signed"}, cookie=cookie,
         headers={"Origin": f"http://127.0.0.1:{server.port}", "Sec-Fetch-Site": "same-origin"})

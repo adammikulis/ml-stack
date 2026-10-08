@@ -42,9 +42,9 @@ def project_board(tmp_path):
     registry = SimpleNamespace(machine="local", hosts=lambda host: host == "http://127.0.0.1:8770", get=get,
                                workspace_base=lambda ident: workspaces[ident].base)
     sessions = Sessions()
-    session = sessions.open("fixture-person")
+    session = sessions.open("fixture-person", "launch-ticket")
     cookie_value = f"ml_stack_ui={session.sid}"
-    ui = SimpleNamespace(sessions=sessions, projects=registry,
+    ui = SimpleNamespace(sessions=sessions, projects=registry, record=lambda *a, **k: None,
                          workspaces=WorkspaceHost(registry),
                          authed=lambda cookie: cookie == cookie_value, host_ok=lambda host: host == "127.0.0.1:8770")
     def call(suffix, *, project=PROJECT, method="GET", body=None, **options):

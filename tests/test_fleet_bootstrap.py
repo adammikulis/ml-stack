@@ -27,7 +27,7 @@ DELAY_SESSION = """
   const request = window.fetch.bind(window);
   window.bootstrapRequests = [];
   window.fetch = async (path, options) => {
-    if (path === '/ui/setup/local-session') {
+    if (path === '/ui/session' && options && options.method === 'POST') {
       window.bootstrapPending = true;
       await new Promise(resolve => setTimeout(resolve, 800));
       const response = await request(path, options);
@@ -44,7 +44,7 @@ DELAY_SESSION = """
 
 
 @pytest.mark.slow
-def test_delayed_local_session_orders_eager_requests_and_expiry_still_signs_in(device, browser):
+def test_delayed_ticket_redemption_orders_eager_requests_and_expiry_asks_for_the_app(device, browser):
     assert initial(device)[0] == 200
     device.ui.setup_finished()
     page = browser.new_page()
@@ -73,8 +73,8 @@ def test_delayed_local_session_orders_eager_requests_and_expiry_still_signs_in(d
           return result.status;
         }""")
         assert status == 401
-        page.wait_for_function("fleetModel.route === 'sign-in'")
-        assert page.get_by_role("button", name="Sign in", exact=True).is_visible()
+        page.wait_for_function("fleetModel.route === 'launch-needed'")
+        assert page.locator("#launch-needed-command").is_visible()
     finally:
         page.close()
 

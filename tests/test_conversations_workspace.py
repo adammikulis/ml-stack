@@ -192,7 +192,7 @@ def test_unshared_workspace_is_selected_and_team_messages_render(chat_browser, m
     monkeypatch.setattr(project_source, 'build', lambda *args: pytest.fail('Board chooser published source'))
     served, page = chat_browser
     served.ui.projects, served.ui.workspaces = registry, host
-    session = served.ui.sessions.open('fixture-person')
+    session = served.ui.sessions.open('fixture-person', 'launch-ticket')
     page.context.add_cookies([{'name': 'ml_stack_ui', 'value': session.sid,
                               'url': f'http://127.0.0.1:{served.port}/ui', 'httpOnly': True}])
     assert registry.get(project).shared is False

@@ -79,7 +79,8 @@ def ui_route(route: Any) -> bool:
         elif route.method == "POST":
             with route.ui.join_guard():
                 result = route.ui.join_invitation(str(body.get("invite", "")))
-            session = route.ui.sessions.open("setup")
+            session = route.ui.sessions.open("setup", "invite")
+            route.ui.record("session.open", who="setup", origin="invite", source=route.client_ip)
             route.send(200, result, {"Set-Cookie": route.ui.sessions.cookie_header(session), "Cache-Control": "no-store"})
             return True
         else:

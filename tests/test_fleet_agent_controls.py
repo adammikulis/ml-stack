@@ -5,6 +5,7 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
+from launch_support import signed
 from test_fleet_ui import Serving
 from test_workspace_board_ui import browser
 from test_workspace_local_agent import PICK, sleeper
@@ -46,7 +47,7 @@ def served(tmp_path, monkeypatch):
     localagent.save(kit.ws, localagent.Agent('local-worker', PICK.ref, identity=child['id'],
                                            model_name=PICK.name, project=str(tmp_path),
                                            profile='coding', harness='claude', ctx=262144))
-    server = Serving(tmp_path, secure=False)
+    server = signed(Serving(tmp_path, secure=False))
     server.ui.settings.setup_done = True
     yield server, kit, children, child['id']
     server.close()

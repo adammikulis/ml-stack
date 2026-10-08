@@ -41,6 +41,7 @@ class SetupRecoveryRoutes:
         if ui.on_join is not None:
             with contextlib.suppress(Exception):
                 ui.on_join()
-        session = ui.sessions.open("setup")
+        session = ui.sessions.open("setup", "recovery-file")
+        ui.record("session.open", who="setup", origin="recovery-file", source=self.client_ip)
         self.send(200, ui.state(), {"Set-Cookie": ui.sessions.cookie_header(session)})
         return True

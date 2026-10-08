@@ -31,6 +31,10 @@ class SessionWorkspace(Workspace):
                 or request.client_ip not in {'127.0.0.1', '::1'}
                 or not ui.host_ok(request.host_header)):
             raise Denied('a live local person session is required')
+        if not self._session.credentialed:
+            ui.record('person.refused', reason='uncredentialed-session', source=request.client_ip)
+            raise Denied('this session was not opened with a credential; open ml-stack from its own '
+                         'window, or run: ml-stack peers open')
         headers = {key.lower(): value for key, value in request.handler.headers.items()}
         if boardroute._checked(request.method, headers,
                                request.handler.server.server_address[1], writes=True):
@@ -82,7 +86,9 @@ class SessionWorkspace(Workspace):
             else:
                 raise Denied('the workspace person binding is ambiguous')
             self.registry._save(agents)
-            return {'me': self._person(agents).id, 'project_id': self._project_id}
+            me = self._person(agents).id
+            self.audit('person.connect', me, origin=self._session.origin, project=self._project_id)
+            return {'me': me, 'project_id': self._project_id}
 
     def auth(self, token):
         if token is not self._actor:

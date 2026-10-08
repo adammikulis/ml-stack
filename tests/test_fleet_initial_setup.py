@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import pytest
+from launch_support import browser as browser_headers, sign_in
 from test_fleet_ui import Serving
 
 from ml_stack.fleet import automatic_clusters
@@ -20,12 +21,9 @@ def device(tmp_path, monkeypatch):
         served.close()
 
 
-def browser_headers(device):
-    return {"Origin": f"http://127.0.0.1:{device.port}", "Sec-Fetch-Site": "same-origin"}
-
-
-def initial(device, mode="dev", **extra):
+def initial(device, mode="dev", cookie=None, **extra):
     return device.call("/ui/setup/initial", method="POST", headers=browser_headers(device),
+                       cookie=sign_in(device) if cookie is None else cookie,
                        body={"name": "quillhaven", "cluster_mode": mode, **extra})
 
 
@@ -56,27 +54,17 @@ def test_prod_name_stays_unpaired_and_keeps_full_wizard(device):
 def test_initial_rejects_foreign_and_agent_requests(device, changes):
     headers = {**browser_headers(device), **changes}
     status, _, _ = device.call("/ui/setup/initial", method="POST", headers=headers,
-                               body={"name": "quillhaven", "cluster_mode": "dev"})
+                               cookie=sign_in(device), body={"name": "quillhaven", "cluster_mode": "dev"})
     assert status == 403
     assert not memberships(device.keyfile)
 
 
 def test_initial_rejects_mode_change_and_nonboolean_automatic(device):
+    cookie = sign_in(device)
     mint_cluster("private", device.keyfile, mode="prod")
-    assert initial(device)[0] == 400
-    assert initial(device, "prod", automatic="yes")[0] == 400
+    assert initial(device, cookie=cookie)[0] == 400
+    assert initial(device, "prod", cookie=cookie, automatic="yes")[0] == 400
     assert memberships(device.keyfile)[0].mode == "prod"
-
-
-def test_returning_dev_local_session_requires_completed_setup(device):
-    initial(device)
-    def request():
-        return device.call("/ui/setup/local-session", method="POST", headers=browser_headers(device))
-    assert request()[0] == 400
-    device.ui.setup_finished()
-    status, _, headers = request()
-    assert status == 200
-    assert device.ui.authed(headers["Set-Cookie"].split(";")[0])
 
 
 def test_fresh_browser_daemon_defers_admission(tmp_path, monkeypatch):
@@ -99,7 +87,7 @@ def test_saved_prod_daemon_stays_unpaired_on_restart(tmp_path):
 
 
 def test_token_browser_session_cannot_mint_owner_session(device):
-    token_session = device.ui.sessions.open("token")
+    token_session = device.ui.sessions.open("token", "token")
     cookie = device.ui.sessions.cookie_header(token_session).split(";")[0]
     status, _, _ = device.call("/ui/setup/initial", method="POST", headers=browser_headers(device),
                                cookie=cookie, body={"name": "quillhaven", "cluster_mode": "dev"})
@@ -125,13 +113,22 @@ def test_updater_waits_for_downloads_and_background_installations():
     assert runtime.background_busy() is False
 
 
-def test_completed_prod_cannot_open_initial_session_anonymously(device):
+def test_completed_prod_hands_no_launch_session_and_refuses_initial(device):
+    from launch_support import redeem, ticket
+
     mint_cluster("private", device.keyfile, mode="prod")
     device.ui.setup_finished()
-    status, body, _ = initial(device, "prod")
-    assert status == 400
-    assert "sign in" in body["error"]
+    status, issued, _ = ticket(device)
+    assert status == 200
+    status, _, headers = redeem(device, issued["ticket"])
+    assert status == 401
+    assert "Set-Cookie" not in headers
+    status, _, _ = device.call("/ui/setup/initial", method="POST", headers=browser_headers(device),
+                                  body={"name": "quillhaven", "cluster_mode": "prod"})
+    assert status == 403
     assert len(device.ui.sessions) == 0
+    assert {"event": "session.refused", "reason": "production-needs-passphrase",
+            "source": "127.0.0.1"} in device.rows
 
 
 def test_fresh_automatic_dev_can_choose_prod_explicitly(device):
@@ -153,32 +150,33 @@ def test_initial_never_drops_manual_dev_membership(device):
 
 
 @pytest.mark.redteam
-@pytest.mark.parametrize("path", ["/ui/setup/initial", "/ui/setup/local-session"])
 @pytest.mark.parametrize("changes", [
     {"Origin": "http://foreign.invalid"}, {"Sec-Fetch-Site": "cross-site"},
     {"Authorization": "Bearer agent"}, {"X-ML-Stack-Token": "agent"},
     {"X-ML-Stack-Agent": "helper"}, {"Host": "rebound.invalid"},
 ])
-def test_owner_admission_routes_refuse_foreign_and_agent_requests(device, path, changes):
-    status, _, headers = device.call(path, method="POST", headers={**browser_headers(device), **changes},
+def test_owner_admission_refuses_foreign_and_agent_requests_even_with_a_launch_session(device, changes):
+    status, _, headers = device.call("/ui/setup/initial", method="POST", cookie=sign_in(device),
+                                     headers={**browser_headers(device), **changes},
                                      body={"name": "quillhaven", "cluster_mode": "dev"})
     assert status == 403
     assert "Set-Cookie" not in headers
-    assert len(device.ui.sessions) == 0
+    assert len(device.ui.sessions) == 1
     assert not memberships(device.keyfile)
 
 
 @pytest.mark.redteam
-@pytest.mark.parametrize("path", ["/ui/setup/initial", "/ui/setup/local-session"])
-def test_owner_admission_routes_refuse_lan_and_missing_ui_header(device, path):
+def test_owner_admission_refuses_lan_and_missing_ui_header(device):
     from ml_stack.fleet.discovery import primary_ip
 
     body = {"name": "quillhaven", "cluster_mode": "dev"}
+    cookie = sign_in(device)
     for options in ({"host": primary_ip()}, {"ui_header": False}):
-        status, _, headers = device.call(path, method="POST", headers=browser_headers(device), body=body, **options)
+        status, _, headers = device.call("/ui/setup/initial", method="POST", cookie=cookie,
+                                         headers=browser_headers(device), body=body, **options)
         assert status == 403
         assert "Set-Cookie" not in headers
-    assert len(device.ui.sessions) == 0
+    assert len(device.ui.sessions) == 1
     assert not memberships(device.keyfile)
 
 
@@ -192,30 +190,13 @@ def test_owner_admission_routes_refuse_lan_and_missing_ui_header(device, path):
     ["quillhaven", "dev"],
 ])
 def test_initial_rejects_hostile_body_without_identity_or_membership_changes(device, body):
-    status, _, headers = device.call("/ui/setup/initial", method="POST", headers=browser_headers(device), body=body)
+    status, _, headers = device.call("/ui/setup/initial", method="POST", headers=browser_headers(device),
+                                     cookie=sign_in(device), body=body)
     assert status == 400
     assert "Set-Cookie" not in headers
-    assert len(device.ui.sessions) == 0
+    assert len(device.ui.sessions) == 1
     assert not memberships(device.keyfile)
     assert device.ui.name == "studio"
-
-
-@pytest.mark.redteam
-@pytest.mark.parametrize("mode", ["dev", "prod"])
-def test_local_session_cannot_upgrade_agent_cookie_or_prod_membership(device, mode):
-    mint_cluster("private", device.keyfile, mode=mode)
-    device.ui.setup_finished()
-    token_session = device.ui.sessions.open("token")
-    cookie = device.ui.sessions.cookie_header(token_session).split(";")[0]
-    status, _, headers = device.call("/ui/setup/local-session", method="POST", headers=browser_headers(device), cookie=cookie)
-    assert status == 403
-    assert "Set-Cookie" not in headers
-    assert len(device.ui.sessions) == 1
-    if mode == "prod":
-        status, _, headers = device.call("/ui/setup/local-session", method="POST", headers=browser_headers(device))
-        assert status == 400
-        assert "Set-Cookie" not in headers
-        assert len(device.ui.sessions) == 1
 
 
 @pytest.mark.redteam
@@ -232,7 +213,7 @@ def test_setup_jobs_refuses_untrusted_readers_and_ignores_external_paths(device,
         assert status == expected
     outside = tmp_path / "external.json"
     outside.write_text('{"secret":"external-job-store"}')
-    session = device.ui.sessions.open("setup")
+    session = device.ui.sessions.open("setup", "launch-ticket")
     cookie = device.ui.sessions.cookie_header(session).split(";")[0]
     status, body, _ = device.call("/ui/setup/jobs?root=../external.json&path=../external.json", cookie=cookie)
     assert status == 200

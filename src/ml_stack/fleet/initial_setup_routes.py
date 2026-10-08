@@ -1,4 +1,4 @@
-"""Local browser device identity, mode selection and Development sessions."""
+"""First-run device name and mode selection from the browser this daemon launched."""
 from __future__ import annotations
 
 import urllib.parse
@@ -10,22 +10,24 @@ from .session import parse_cookie
 
 class InitialSetupRoutes:
     def public_route(self) -> bool:
-        if self.path not in ("/ui/setup/initial", "/ui/setup/local-session"):
+        if self.path != "/ui/setup/initial":
             return super().public_route()
         if self.method != "POST":
             self.send(405, {"error": "use POST"})
             return True
         if not self._local_browser():
+            self.ui.record("session.refused", reason="setup-headers", source=self.client_ip)
             self.send(403, {"error": "open setup in this computer's browser"})
             return True
+        presented = self.ui.sessions.get(parse_cookie(self.cookie))
+        if presented is None or not presented.credentialed:
+            self.ui.record("session.refused", reason="setup-without-credential", source=self.client_ip)
+            self.send(403, {"error": "open ml-stack from its own window, or run: ml-stack peers open"})
+            return True
         try:
-            if self.path.endswith("local-session"):
-                state = self.ui.state()
-                if state["needs_setup"] or state["cluster_mode"] != "dev" or not state["in_cluster"]:
-                    raise DiscoveryError("local sessions require completed Development setup")
-            else:
-                self._initial_preferences()
-            session = self.ui.sessions.open("setup")
+            self._initial_preferences()
+            session = self.ui.sessions.open("setup", presented.origin)
+            self.ui.record("session.open", who="setup", origin=presented.origin, source=self.client_ip)
             self.send(200, {"ok": True, **self.ui.state()},
                       {"Set-Cookie": self.ui.sessions.cookie_header(session), "Cache-Control": "no-store"})
         except (DiscoveryError, ValueError, OSError) as error:

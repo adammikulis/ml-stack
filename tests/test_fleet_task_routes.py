@@ -3,6 +3,7 @@
 from types import SimpleNamespace
 
 import pytest
+from launch_support import signed
 from test_fleet_ui import Serving
 from workspace_kit import Kit, clean_env
 
@@ -19,7 +20,7 @@ def tasks(tmp_path, monkeypatch):
     tokens.store(kit.base, tokens.OWNER_FILE, kit.owner)
     entry = SimpleNamespace(name='tasks', load=lambda: task_routes.route)
     monkeypatch.setattr(extension_routes, 'entry_points', lambda **kw: [entry])
-    server = Serving(tmp_path)
+    server = signed(Serving(tmp_path))
     try:
         yield server, kit
     finally:
@@ -54,8 +55,8 @@ def test_foreign_page_cannot_create_tasks(tasks, options):
 def test_joined_unsigned_and_browser_claims_are_refused(tasks, monkeypatch):
     server, kit = tasks
     monkeypatch.setattr(routes, 'in_cluster', lambda _: True)
-    assert post(server, {'spec': {'title': 'x', 'acceptance': ['x']}})[0] == 401
-    cookie = server.ui.sessions.cookie_header(server.ui.sessions.open('person'))
+    assert post(server, {'spec': {'title': 'x', 'acceptance': ['x']}}, cookie='')[0] == 401
+    cookie = server.ui.sessions.cookie_header(server.ui.sessions.open('person', 'launch-ticket'))
     assert post(server, {'action': 'claim', 'token': 'worker', 'allocation_id': 'fake'}, cookie=cookie)[0] == 400
     assert TaskBoard(kit.ws).list(kit.owner)['tasks'] == []
 

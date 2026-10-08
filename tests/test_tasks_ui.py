@@ -172,7 +172,7 @@ def test_tasks_join_selected_person_workspace_with_real_backend(tmp_path, playwr
     server = Serving(tmp_path / 'ui')
     server.ui.settings.setup_done = True
     server.ui.projects, server.ui.workspaces = registry, host
-    session = server.ui.sessions.open('task-person')
+    session = server.ui.sessions.open('task-person', 'launch-ticket')
     posts = []
     try:
         with playwright.chromium.launch(headless=True) as browser:

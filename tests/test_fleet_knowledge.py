@@ -189,7 +189,7 @@ def test_registered_project_graph_requires_local_person(daemon, tmp_path):
         graph.upsert_node({'id': 'task:one', 'kind': 'task', 'label': 'Evaluate policy'})
     source = 'project:' + project_id + ':coordination'
     assert daemon.call('/ui/knowledge/nodes?' + urlencode({'store': source}))[0] == 403
-    session = daemon.ui.sessions.open()
+    session = daemon.ui.sessions.open('', 'launch-ticket')
     cookie = 'ml_stack_ui=' + session.sid
     code, data, _ = daemon.call('/ui/knowledge/stores', cookie=cookie)
     assert code == 200, data

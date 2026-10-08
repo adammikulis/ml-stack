@@ -14,6 +14,7 @@ from ml_stack.workspace import (
     device_metadata,
     device_sessions,
     fleet_routes,
+    limits,
     onboard,
     remote_tasks,
     remote_workers,
@@ -21,7 +22,7 @@ from ml_stack.workspace import (
     tokens,
 )
 from ml_stack.workspace.boards import ANNOUNCE
-from ml_stack.workspace.chain import held
+from ml_stack.workspace.chain import ChainLog, held
 from ml_stack.workspace.claims import Conflict, normal
 from ml_stack.workspace.identity import AGENT, Denied
 from ml_stack.workspace.integration_git import git
@@ -64,6 +65,7 @@ class WorkspaceHost:
 
     def __init__(self, projects: Any) -> None:
         self.projects = projects
+        self._audit_log: ChainLog | None = None
         self._presence: dict[tuple[str, str], float] = {}
         self._presence_lock = threading.Lock()
 
@@ -74,6 +76,12 @@ class WorkspaceHost:
             self._presence[(project_id, actor)] = now
             if len(self._presence) > 4096:
                 del self._presence[min(self._presence, key=self._presence.get)]
+
+    def audit(self, event: str, **fields: Any) -> None:
+        """Append a row to this machine's workspace audit chain."""
+        if self._audit_log is None:
+            self._audit_log = ChainLog(limits.root() / "audit.jsonl")
+        self._audit_log.append({"event": event, "who": "ui", **fields})
 
     def workspace(self, project_id: str) -> Workspace:
         return Workspace(self.projects.workspace_base(project_id))

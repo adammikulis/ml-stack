@@ -80,6 +80,8 @@ class RoomRoutes:
         session = ui.sessions.get(parse_cookie(self.cookie))
         if session is not None and session.who == "token":
             return "a session opened with an access token cannot change the wiring limit"
+        if session is not None and not session.credentialed:
+            return "this session was not opened with a credential; open ml-stack from its own window"
         if in_cluster(ui.cluster_key_path) and session is None:
             return "sign in first"
         return ""

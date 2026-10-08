@@ -6,7 +6,7 @@ import contextlib
 import json
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import replace
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
@@ -27,6 +27,7 @@ from .discovery import (
     named_apart,
     require_name,
 )
+from .launch_secret import LaunchSecret
 from .onboard.joining import (
     DEFAULT_JOIN_OPTIONS,
     JoinOptions,
@@ -118,6 +119,12 @@ class UI:
         self.setup_token = setup_token
         self.sessions = Sessions()
         self.throttle = Throttle()
+        self.launch_throttle = Throttle()
+        self.redeem_throttle = Throttle()
+        self.launch: LaunchSecret | None = None
+        """The secret that lets this machine's own window or owner terminal ask for a ticket."""
+        self.audit: Callable[..., None] | None = None
+        """``(event, **fields)``: appends a row to the audit chain."""
         self._join_lock = threading.Lock()
         self._peers: tuple[float, list[dict[str, Any]]] = (0.0, [])
         self.setup_jobs = None
@@ -145,6 +152,16 @@ class UI:
 
     def authed(self, cookie_header: str) -> bool:
         return self.sessions.get(parse_cookie(cookie_header)) is not None
+
+    def credentialed(self, cookie_header: str) -> bool:
+        """Whether the cookie names a session whose origin the server checked a credential for."""
+        session = self.sessions.get(parse_cookie(cookie_header))
+        return session is not None and session.credentialed
+
+    def record(self, event: str, **fields: Any) -> None:
+        """Append a session event to the audit chain; ticket and secret values are never passed."""
+        if self.audit is not None:
+            self.audit(event, **fields)
 
     # -- state -----------------------------------------------------------
     def state(self) -> dict[str, Any]:
@@ -237,8 +254,8 @@ class UI:
             self._join_lock.release()
 
     def join(self, passphrase: str, group: str, source: str, *,
-             options: JoinOptions = DEFAULT_JOIN_OPTIONS) -> tuple[dict[str, Any], str]:
-        """Join a cluster, and sign the person in. Returns ``(state, session id)``."""
+             options: JoinOptions = DEFAULT_JOIN_OPTIONS, origin: str = "") -> tuple[dict[str, Any], str]:
+        """Join a cluster and open a session carrying ``origin``. Returns ``(state, session id)``."""
         group = require_name(group)
         held = self.throttle.blocked_for(source)
         if held:
@@ -261,7 +278,9 @@ class UI:
         if self.on_join is not None:
             with contextlib.suppress(Exception):
                 self.on_join()
-        return self.state(), self.sessions.open("setup").sid
+        session = self.sessions.open("setup", origin)
+        self.record("session.open", who="setup", origin=origin, source=source)
+        return self.state(), session.sid
 
     def set_name(self, name: str) -> str:
         """Set the device name through the active advertiser."""
@@ -565,7 +584,7 @@ class UI:
               token: str = "", ticket: str = "") -> str | None:
         """A session id, or None. Raises ``DiscoveryError`` when held off or overloaded."""
         if ticket:
-            return self.sessions.open("ticket").sid if self.sessions.spend_ticket(ticket) else None
+            return self._redeem(source, ticket)
 
         key = load_cluster_key(self.cluster_key_path)
         if key is None:
@@ -574,8 +593,10 @@ class UI:
         if token:
             if _same(token, derive_token(key)):
                 self.throttle.succeeded(source)
-                return self.sessions.open("token").sid
+                self.record("session.open", who="token", origin="token", source=source)
+                return self.sessions.open("token", "token").sid
             self.throttle.failed(source)
+            self.record("session.refused", reason="token", source=source)
             return None
 
         held = self.throttle.blocked_for(source)
@@ -590,9 +611,28 @@ class UI:
             self.throttle.release()
         if not ok:
             self.throttle.failed(source)
+            self.record("session.refused", reason="passphrase", source=source)
             return None
         self.throttle.succeeded(source)
-        return self.sessions.open("passphrase").sid
+        self.record("session.open", who="passphrase", origin="passphrase", source=source)
+        return self.sessions.open("passphrase", "passphrase").sid
+
+    def _redeem(self, source: str, ticket: str) -> str | None:
+        held = self.redeem_throttle.blocked_for(source)
+        if held:
+            raise DiscoveryError(f"too many attempts -- wait {held:.0f}s")
+        kind = self.sessions.spend_ticket(ticket)
+        if not kind:
+            self.redeem_throttle.failed(source)
+            self.record("session.refused", reason="ticket", source=source)
+            return None
+        state = self.state()
+        if kind == "launch-secret" and state["in_cluster"] and state["cluster_mode"] == "prod":
+            self.record("session.refused", reason="production-needs-passphrase", source=source)
+            return None
+        self.redeem_throttle.succeeded(source)
+        self.record("session.open", who="ticket", origin="launch-ticket", source=source)
+        return self.sessions.open("ticket", "launch-ticket").sid
 
 
 def _same(a: str, b: str) -> bool:

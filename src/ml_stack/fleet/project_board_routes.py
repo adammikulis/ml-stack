@@ -17,7 +17,7 @@ class ProjectBoardRoutes:
         if projects is None or host is None:
             self.send(501, {"error": "project registry unavailable"})
             return True
-        if (self.client_ip not in {"127.0.0.1", "::1"} or not self.ui.authed(self.cookie)
+        if (self.client_ip not in {"127.0.0.1", "::1"} or not self.ui.credentialed(self.cookie)
                 or not self.ui.host_ok(self.host_header)):
             self.send(403, {"error": "project board controls require a signed-in local person"})
             return True
