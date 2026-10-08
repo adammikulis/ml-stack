@@ -2,6 +2,8 @@
 //! A native window on the ml-stack interface, and the daemon that serves it.
 
 mod daemon;
+mod identity;
+mod origin;
 mod settings;
 #[cfg(test)]
 mod security_tests;
@@ -11,6 +13,7 @@ use std::sync::Mutex;
 
 use tauri::utils::config::Color;
 use tauri::PhysicalPosition;
+use tauri::webview::NewWindowResponse;
 use tauri::{AppHandle, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_shell::process::CommandChild;
 
@@ -123,7 +126,10 @@ fn main() {
             let home = app.path().home_dir()?;
             let (port, root) = asked(&home);
 
-            let started = if daemon::healthy(port) {
+            if port != PORT {
+                app.add_capability(origin::capability(port))?;
+            }
+            let started = if daemon::healthy(port, &root) {
                 None
             } else {
                 Some(daemon::start(&handle, port, &root.to_string_lossy())?)
@@ -134,8 +140,11 @@ fn main() {
                 quitting: Mutex::new(false),
             });
 
-            let url = format!("http://127.0.0.1:{port}/ui/");
+            let url = origin::address(port);
             let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url.parse()?))
+                // what a model or a message writes into the page can ask to go elsewhere; it stays here
+                .on_navigation(move |to| origin::is_own(to, port))
+                .on_new_window(|_, _| NewWindowResponse::Deny)
                 .title(TITLE)
                 .inner_size(WIDTH, HEIGHT)
                 .min_inner_size(MIN_WIDTH, MIN_HEIGHT)

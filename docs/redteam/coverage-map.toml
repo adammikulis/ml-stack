@@ -447,7 +447,35 @@ match = ["desktop:app/src-tauri/capabilities/main.json"]
 status = "covered"
 count = 1
 tests = ["tests/test_redteam_desktop_capabilities.py"]
-note = "compiled Tauri authority rejects foreign origins and windows, shell execution and filesystem reads"
+note = "compiled Tauri authority grants only the daemon's own origin and port, rejects foreign origins, ports and windows, shell execution and filesystem reads; the window stays on its own origin; the daemon is recognised only by a proof from a secret its user alone can read"
+
+[[group]]
+match = ["route:fleet/runtime_repair_routes.py:/ui/agent-runtime/install", "route:fleet/runtime_repair_routes.py:/ui/agent-runtime/repair"]
+status = "covered"
+count = 2
+tests = ["tests/test_runtime_repair.py::test_install_requires_authenticated_local_browser", "tests/test_runtime_repair.py::test_install_never_accepts_browser_artifact_or_commands", "tests/test_runtime_repair.py::test_install_queues_fixed_action_with_server_person_provenance"]
+note = "Fixed actions require the authenticated local same-origin person browser; hostile headers, sources and caller-selected artifacts or commands are rejected before queueing."
+
+[[group]]
+match = ["route:fleet/runtime_repair_routes.py:/ui/agent-runtime/status"]
+status = "covered"
+count = 1
+tests = ["tests/test_runtime_repair.py::test_status_refuses_hostile_browser_before_resuming_jobs", "tests/test_runtime_repair.py::test_install_never_accepts_browser_artifact_or_commands", "tests/test_runtime_repair.py::test_status_does_not_expose_artifact_paths_or_person_provenance", "tests/test_runtime_repair.py::test_public_errors_redact_environment_credentials"]
+note = "Hostile browser requests cannot resume jobs; public status omits artifact paths and person provenance and redacts credential-bearing failures."
+
+[[group]]
+match = ["spawn:fleet/runtime_candidates.py:_verify"]
+status = "covered"
+count = 1
+tests = ["tests/test_runtime_candidates.py::test_registration_checks_expected_digest_before_execution", "tests/test_runtime_candidates.py::test_candidate_requires_full_hex_identity", "tests/test_runtime_candidates.py::test_signature_failure_never_executes_candidate", "tests/test_runtime_candidates.py::test_candidate_probe_refuses_unready_or_wrong_source", "tests/test_runtime_candidates.py::test_candidate_retains_exact_identity_and_rechecks_artifact"]
+note = "Both candidate verification subprocesses use fixed arguments after full reviewed digest and source validation; failed signature prevents probing, wrong-source or unready probes are rejected and changed artifacts fail revalidation. Actual signed hardware proof remains a deployment requirement."
+
+[[group]]
+match = ["spawn:fleet/runtime_repair.py:install"]
+status = "covered"
+count = 1
+tests = ["tests/test_runtime_repair.py::test_repair_rechecks_selected_artifact_before_admission", "tests/test_runtime_repair.py::test_permanent_control_denial_does_not_retry", "tests/test_runtime_repair.py::test_replacement_requires_exact_full_health_commit_and_preserves_recovery", "tests/test_runtime_repair.py::test_replacement_launch_uses_literal_paths_and_secret_free_environment", "tests/test_runtime_repair.py::test_central_daemon_protocol_rejects_hostile_job_ids_before_execution"]
+note = "Final artifact revalidation and exact-generation admission precede fixed readiness verification; denied admission is terminal, failed replacement restores the previous app, and hostile job identifiers or paths do not become commands."
 
 [[group]]
 match = ["spawn:scripts/test-on-linux"]

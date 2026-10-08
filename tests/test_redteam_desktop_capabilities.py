@@ -1,4 +1,4 @@
-"""Desktop origins cannot invoke native shell or filesystem commands."""
+"""Desktop origins cannot invoke native shell or filesystem commands, and the window stays on its daemon."""
 
 from __future__ import annotations
 
@@ -20,14 +20,15 @@ CARGO_HOME = os.environ.get("CARGO_HOME", str(Path.home() / ".cargo"))
 def test_desktop_grants_only_window_and_close_commands():
     capability = json.loads((ROOT / "app/src-tauri/capabilities/main.json").read_text())
     assert capability["windows"] == ["main"]
-    assert capability["remote"]["urls"] == ["http://127.0.0.1:*/*", "http://localhost:*/*"]
+    assert capability["remote"]["urls"] == ["http://127.0.0.1:8770/*"]
+    assert capability["local"] is False
     assert set(capability["permissions"]) == {
         "core:default", "window-state:default", "allow-close-choice", "allow-on-closing",
     }
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("selector", ["security_tests", "daemon::tests"])
+@pytest.mark.parametrize("selector", ["security_tests", "daemon::tests", "identity::tests"])
 def test_native_capability_authority_rejects_hostile_origins_and_commands(tmp_path, selector):
     if sys.platform != "darwin":
         pytest.skip("native desktop capability enforcement runs on macOS")
@@ -52,4 +53,5 @@ def test_native_capability_authority_rejects_hostile_origins_and_commands(tmp_pa
         capture_output=True, text=True, timeout=600,
     )
     assert done.returncode == 0, done.stdout + done.stderr
-    assert "1 passed" in done.stdout
+    assert "test result: ok" in done.stdout and " 0 failed" in done.stdout
+    assert "running 0 tests" not in done.stdout
