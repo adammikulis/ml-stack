@@ -3,19 +3,19 @@ who may ask. Every path here is for a person; an agent's process is refused firs
 
 from __future__ import annotations
 
-import os
 import platform
 import plistlib
 import shlex
 import subprocess
+import sys
 import threading
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from ml_stack import home
+from ml_stack import authority, home
 from ml_stack.files import read_json, write_json
-from ml_stack.sentinel.human import AGENT_MARKERS, HumanRequired, require_person
+from ml_stack.person import AGENT_MARKERS, HumanRequired, is_terminal
 from ml_stack.serve.wired import KEY, MIB, MIN_MB, SYSCTL, Hooks, max_mb
 
 __all__ = ["AGENT_MARKERS", "DAEMON", "LABEL", "Applied", "State", "argv_for", "checked", "original_mb",
@@ -120,12 +120,13 @@ def argv_for(script: str, via: str) -> list[str]:
     raise ValueError(f"unknown way to ask for administrator rights: {via!r}")
 
 
-def _refuse_agents(env: Mapping[str, str] | None) -> None:
-    env = os.environ if env is None else env
-    marked = [name for name in AGENT_MARKERS if env.get(name)]
-    if marked:
-        raise HumanRequired(f"changing the wiring limit is for a person; this process was "
-                            f"started by an agent ({marked[0]} is set)")
+def _authorise(action: str, via: str, hooks: Hooks) -> None:
+    """Pass the ``serve.wired-limit`` gate; the administrator prompt itself is macOS's dialog or sudo."""
+    sudo = via == "sudo"
+    authority.require("serve.wired-limit", action, hooks.terminal if sudo else (True, True), hooks.env)
+    terminal = hooks.terminal or (is_terminal(sys.stdin), is_terminal(sys.stdout))
+    if sudo and not all(terminal):
+        raise HumanRequired(f"{action} through sudo needs a terminal on stdin and stdout")
 
 
 def _run(argv: Sequence[str], capture: bool) -> tuple[int, str, str]:
@@ -165,9 +166,7 @@ def set_limit(mb: object, *, keep: bool | None = None, via: str,
     for a process an agent started or ``sudo`` with no terminal, `ValueError` for a bad ``mb``.
     """
     hooks = hooks or Hooks()
-    _refuse_agents(hooks.env)
-    if via == "sudo":
-        require_person("change the wiring limit", hooks.terminal, hooks.env)
+    _authorise("change the wiring limit", via, hooks)
     value = None if mb is None else checked(mb, hooks.total_bytes())
     if value is None and keep is not False:
         raise ValueError("nothing to change")
@@ -180,9 +179,7 @@ def reset(*, via: str, hooks: Hooks | None = None) -> Applied:
     """Put the limit back to what it was before the first change (0, the default share, when
     none was recorded) and remove the boot-time daemon."""
     hooks = hooks or Hooks()
-    _refuse_agents(hooks.env)
-    if via == "sudo":
-        require_person("reset the wiring limit", hooks.terminal, hooks.env)
+    _authorise("reset the wiring limit", via, hooks)
     target = original_mb() or 0
     if target and target > hooks.total_bytes() // MIB:
         raise ValueError("the recorded original limit is larger than installed memory")

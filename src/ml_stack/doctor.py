@@ -15,7 +15,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-from ml_stack import bench, checks, hook_diagnostics
+from ml_stack import agent_hooks, bench, checks, hook_diagnostics
 from ml_stack.bench.underway import measuring, measuring_file
 from ml_stack.checks import Finding, ask
 from ml_stack.command import Group, flag, option
@@ -393,7 +393,7 @@ def _findings(args) -> int:
     if args.action == "hooks":
         return hook_diagnostics.inspect(args)
     say("ml-stack: the repositories and the working state\n")
-    findings = look_checkouts(
+    findings = agent_hooks.findings() + look_checkouts(
         repositories(args.repo) if args.repo else None,
         bench_home=Path(args.bench_home).expanduser() if args.bench_home else None)
     ask(findings, yes=args.yes)

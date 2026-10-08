@@ -11,9 +11,9 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ml_stack import authority
 from ml_stack.files import read_json, write_json
 from ml_stack.log import say
-from ml_stack.sentinel import human
 from ml_stack.workspace import (
     coordinator_bootstrap,
     coordinator_client,
@@ -247,7 +247,7 @@ def connect(ws: Workspace, plan: Plan, talk: Talk | None = None) -> list[str]:
     """One command, no questions: copy a paste block with a one-time code, wait for an agent to
     join under its own name, check it answers. Repeats while the person wants another agent.
     Returns the agents that joined and answered. A person at a terminal only."""
-    human.require_person("workspace connect")
+    authority.require("workspace.setup", "workspace connect")
     talk = talk or Talk()
     _ensure(ws)
     answered: list[str] = []
@@ -263,7 +263,7 @@ def connect(ws: Workspace, plan: Plan, talk: Talk | None = None) -> list[str]:
 def walk(ws: Workspace, plan: Plan, talk: Talk | None = None) -> dict[str, list[str]]:
     """The multi-agent walkthrough, six steps; each agent joins with its own one-time code.
     Returns the agents that answered and the ones that did not."""
-    human.require_person("workspace setup")
+    authority.require("workspace.setup", "workspace setup")
     talk = talk or Talk()
     plan.shared = False
     total = 6

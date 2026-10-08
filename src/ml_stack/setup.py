@@ -20,7 +20,7 @@ from datetime import UTC, datetime
 from importlib.metadata import PackageNotFoundError, distribution
 from pathlib import Path
 
-from ml_stack import home
+from ml_stack import agent_hooks, home
 from ml_stack.checks import Finding, ask, checkout, tilde
 from ml_stack.installed import standard
 from ml_stack.log import say
@@ -187,6 +187,7 @@ def look() -> list[Finding]:
     out.append(_commands_finding())
     out.extend(_fleet_findings())
     out.append(_store_finding())
+    out.extend(agent_hooks.findings())
 
     if is_windows():
         out.append(_firewall_finding())
@@ -520,6 +521,8 @@ def main(argv: list[str] | None = None) -> int:
                          "still prompt for the password itself")
     args = ap.parse_args(argv)
     say("ml-stack: what this machine can do\n")
+    for line in agent_hooks.install_report():
+        say(line)
     findings = look()
     if args.checkouts:
         from ml_stack.doctor import look_checkouts, repositories

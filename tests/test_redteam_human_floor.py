@@ -281,7 +281,7 @@ def test_a_hostile_message_cannot_widen_a_delegate_or_leak_a_token_path(tmp_path
     monkeypatch.setenv("ML_STACK_WORKSPACE_HOME", str(tmp_path / "ws"))
     for marker in ("CLAUDECODE", "ML_STACK_AGENT", "ML_STACK_NONINTERACTIVE"):
         monkeypatch.delenv(marker, raising=False)
-    monkeypatch.setattr(onboard.human, "require_person", lambda *a, **k: None)
+    monkeypatch.setattr(onboard.authority, "require_person", lambda *a, **k: None)
     ws = Workspace()
     onboard.setup(ws, ["lead", "worker"], [], 86400.0)
     lead, worker = tokens.load(ws.base, "lead"), tokens.load(ws.base, "worker")
@@ -313,7 +313,7 @@ def test_the_one_thing_an_agent_may_mint_is_a_bounded_child_invite_and_never_a_p
                  lambda: kit.ws.revoke(worker, "owner"), lambda: kit.ws.gc(worker)):
         with pytest.raises(Denied):
             call()
-    with pytest.raises(onboard.human.HumanRequired):
+    with pytest.raises(onboard.authority.HumanRequired):
         guide.connect(kit.ws, guide.Plan(["codex"], 0.0, 0.0, True))
     made = kit.ws.invite(worker, "peer", 1800.0, 3)
     assert made["uses"] == 3 and made["ttl_s"] == 1800.0

@@ -10,13 +10,14 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+from ml_stack import authority
 from ml_stack.command import Group, flag, option
 from ml_stack.log import say, warn
 from ml_stack.memory.vault import KeyUnavailable
+from ml_stack.person import HumanRequired
 from ml_stack.reputation import model
 from ml_stack.reputation.sealed import Tampered
 from ml_stack.reputation.store import Ledger, Standing
-from ml_stack.sentinel.human import HumanRequired, require_person
 
 __all__ = ["COMMAND"]
 
@@ -42,8 +43,8 @@ def _guarded(fn: Handler, *, writes: bool) -> Callable[[argparse.Namespace], int
     also needs a terminal on stdin and stdout."""
     def run(args: argparse.Namespace) -> int:
         try:
-            require_person(f"ml-stack-reputation {args.cmd}",
-                           (sys.stdin.isatty(), True if not writes else sys.stdout.isatty()))
+            authority.require("reputation.admin", f"ml-stack-reputation {args.cmd}",
+                              (sys.stdin.isatty(), True if not writes else sys.stdout.isatty()))
         except HumanRequired as exc:
             warn(str(exc))
             return DENIED

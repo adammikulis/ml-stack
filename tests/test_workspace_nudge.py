@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import json
-import re
 import time
 
 import pytest
 from workspace_kit import Kit, clean_env, cli
 
-from ml_stack.sentinel import human
-from ml_stack.workspace import onboard
+from ml_stack.workspace import nudge
+from ml_stack.workspace.remote_protocol import METHODS
 
 LONG_AGO = 3 * 3600 + 12 * 60 + 20
 
@@ -30,7 +29,7 @@ def hook(kit, event, stdin="", tmp="state"):
                input=stdin)
 
 
-def test_the_line_counts_kinds_names_senders_and_gives_the_age_without_a_body(kit):
+def test_the_plain_line_counts_kinds_names_senders_and_gives_the_age_without_a_body(kit):
     ws, t = kit.ws, kit.t
     ws.send(t["alice"], "bob", "question", "SECRET-BODY which port?", label="local-qwen")
     ws.send(t["alice"], "bob", "question", "SECRET-BODY and the lease?")
@@ -56,8 +55,10 @@ def test_prompt_hook_injects_the_line_as_context_and_stays_silent_when_empty(kit
     kit.ws.send(kit.t["alice"], "bob", "status", "x")
     shape = json.loads(hook(kit, "prompt").stdout)
     text = shape["hookSpecificOutput"]["additionalContext"]
-    assert shape == {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": text}}
+    assert shape == {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": text},
+                     "systemMessage": text}
     assert text.startswith("workspace: 1 waiting for you")
+    assert hook(kit, "prompt").stdout == ""
 
 
 def test_post_hook_is_rate_limited_to_one_check_in_twenty_seconds(kit):
@@ -74,11 +75,12 @@ def test_stop_hook_blocks_once_per_set_of_unread_urgent_messages(kit):
     first = hook(kit, "stop", "{}")
     verdict = json.loads(first.stdout)
     assert verdict["decision"] == "block" and "1 question" in verdict["reason"]
-    assert "SECRET" not in first.stdout
+    assert "SECRET-BODY ready?" in verdict["reason"] and verdict["systemMessage"] == verdict["reason"]
     assert hook(kit, "stop", "{}").stdout == ""
     ws.send(t["carol"], "bob", "handoff", "SECRET-BODY yours")
     again = json.loads(hook(kit, "stop", "{}").stdout)
-    assert again["decision"] == "block" and "1 handoff" in again["reason"]
+    assert again["decision"] == "block" and "2 urgent" not in again["reason"]
+    assert "SECRET-BODY yours" in again["reason"] and "SECRET-BODY ready?" not in again["reason"]
 
 
 def test_stop_hook_allows_when_continuing_or_when_only_routine_kinds_wait(kit):
@@ -104,33 +106,55 @@ def test_hooks_print_nothing_and_exit_zero_when_the_workspace_is_unreachable(tmp
     assert out.returncode == 0 and out.stdout == "" and out.stderr == ""
 
 
-def test_the_installer_adds_the_three_hooks_idempotently_and_keeps_other_hooks(monkeypatch, tmp_path):
-    clean_env(monkeypatch, tmp_path)
-    real = human.require_person
-    monkeypatch.setattr(human, "require_person", lambda a, terminal=None, env=None: real(a, (True, True), env))
-    path = tmp_path / "settings.json"
-    path.write_text(json.dumps({"model": "x", "hooks": {
-        "PostToolUse": [
-            {"matcher": "Bash", "hooks": [{"type": "command", "command": "other-tool"}]},
-            {"matcher": "*", "hooks": [{"type": "command", "command": "sh ~/.ml-stack/hooks/claude-nudge.sh"}]}],
-        "Stop": [{"hooks": [{"type": "command", "command": "keep-me"}]}]}}))
-    assert onboard.install_hooks(path, "claude") == ["PostToolUse", "Stop", "UserPromptSubmit"]
-    first = path.read_text()
-    onboard.install_hooks(path, "claude")
-    assert path.read_text() == first
-    data = json.loads(first)
-    assert data["model"] == "x"
-    commands = {e: [h["command"] for g in groups for h in g["hooks"]] for e, groups in data["hooks"].items()}
-    assert commands["PostToolUse"] == ["other-tool", "ml-stack-workspace nudge --agent claude --hook post"]
-    assert commands["Stop"] == ["keep-me", "ml-stack-workspace nudge --agent claude --hook stop"]
-    assert commands["UserPromptSubmit"] == ["ml-stack-workspace nudge --agent claude --hook prompt"]
-    assert re.search(r'"matcher": "\*"', first)
-
-
 def test_the_installer_is_for_a_person(tmp_path):
     out = cli(tmp_path / "ws", "", "install-hooks", "--settings", str(tmp_path / "s.json"),
               env_extra={"CLAUDECODE": "1"})
     assert out.returncode == 3 and not (tmp_path / "s.json").exists()
+
+
+class _Board:
+    """A canonical board that answers each operation from a real workspace."""
+
+    host = "http://127.0.0.1:8770"
+    project_id = "a" * 32
+    cluster_key = ""
+
+    def __init__(self, kit):
+        self.kit = kit
+        self.calls = []
+
+    def token(self, **kwargs):
+        return "capability"
+
+    def call(self, operation, token, *args, **kwargs):
+        self.calls.append(operation)
+        if operation == "whoami":
+            return {"id": "bob", "role": "agent", "can": ["read"], "project": {"key": self.project_id}}
+        assert operation in METHODS
+        return getattr(self.kit.ws, operation)(self.kit.t["bob"], *args, **kwargs)
+
+
+def test_prompt_hook_on_a_canonical_board_injects_the_waiting_line(kit, monkeypatch, tmp_path, capsys):
+    from types import SimpleNamespace
+
+    from ml_stack.workspace import cli as ws_cli, project_connection as connection
+    monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(nudge.tempfile, "gettempdir", lambda: str(tmp_path))
+    root = tmp_path / "project"
+    root.mkdir()
+    board = _Board(kit)
+    connection.bind(board, root, "bob", "default")
+    monkeypatch.chdir(root)
+    monkeypatch.setattr(connection, "RemoteWorkspace", lambda *a, **k: board)
+    kit.ws.send(kit.t["alice"], "bob", "question", "SECRET-BODY which port?")
+    args = SimpleNamespace(cmd="nudge", hook="prompt", agent="", token_file="", label="", json=False)
+    assert ws_cli._nudging(args) == 0
+    shape = json.loads(capsys.readouterr().out)
+    text = shape["hookSpecificOutput"]["additionalContext"]
+    assert shape["hookSpecificOutput"]["hookEventName"] == "UserPromptSubmit"
+    assert text.startswith("workspace: 1 waiting for you (1 question; from alice;")
+    assert "SECRET-BODY which port?" in text and shape["systemMessage"] == text
+    assert "waiting_summary" in board.calls
 
 
 def test_the_stamp_file_name_needs_no_posix_uid(monkeypatch):

@@ -234,7 +234,7 @@ def test_no_function_of_the_module_answers_without_the_person_checks():
     import inspect
 
     src = inspect.getsource(requests.inbox)
-    assert src.count(".answer(") == 1 and "require_person" in src and "marked" in src
+    assert src.count(".answer(") == 1 and "authority.require(\"requests.answer\"" in src
 
 
 # -- the store -------------------------------------------------------------------------

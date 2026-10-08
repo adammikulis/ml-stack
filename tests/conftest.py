@@ -75,6 +75,8 @@ def _no_desktop_notifications() -> None:
 
 
 _no_desktop_notifications()
+os.environ["ML_STACK_AUTHORITY_FLOOR"] = "person"
+"""Every gate reads as a person's in the suite and its children; a test of delegation clears it."""
 os.environ["PYTHON_KEYRING_BACKEND"] = "keyring.backends.fail.Keyring"
 """A child process a test starts has no keyring that works, so it can never reach the person's own keystore."""
 

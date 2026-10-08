@@ -8,7 +8,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, TypedDict, Unpack
 
-from ml_stack.sentinel import human
+from ml_stack import authority
 from ml_stack.workspace import (
     agent_display,
     agent_invites,
@@ -261,7 +261,7 @@ class Workspace:
                   **process: Unpack[ProcessOptions]) -> None:
         """Record ``name``'s model from a launcher or a person at a terminal; ``verified`` says
         ml-stack itself started the agent and knows the model. Refused from an agent's process."""
-        human.require_person("recording an agent's model", process.get("terminal"), process.get("env"))
+        authority.require("workspace.model", "recording an agent's model", process.get("terminal"), process.get("env"))
         clean_model(model)
         self._record_model(name, model, harness, VERIFIED if verified else CLAIMED)
 
@@ -498,6 +498,21 @@ class Workspace:
         who = self.auth(token)
         self._may(who, "read")
         return Waiting(who.id, self._unread(who, 1 << 30), self.clock())
+
+    def waiting_summary(self, token: str) -> dict[str, Any]:
+        """What waits unread for the token's owner: each row's kind, sender and time, and the text
+        of up to 50 clear messages from registered senders in the reader's project; nothing is
+        marked read."""
+        who = self.auth(token)
+        waiting = self.waiting(token)
+        mine = self.registry.info(who.id).get("project", {}).get("key", "")
+        sent = [r for r in waiting.rows if not r["held"] and not r.get("flags") and self.registry.role_of(r["from"])
+                and self.registry.info(r["from"]).get("project", {}).get("key", "") == mine]
+        texts = [{"seq": r["seq"], "type": r["type"], "from": r["from"],
+                  "from_label": agent_display.metadata(self.registry, r["from"], r.get("label", ""))["display_name"],
+                  "text": f"{r['subject']}: {r['body'][:600]}" if r["subject"] else r["body"][:600]}
+                 for r in sent[:50]]
+        return {**waiting.summary(), "messages": texts}
 
     def nudge(self, token: str) -> str:
         """One line giving kinds, senders and age of what waits for the token's owner, never

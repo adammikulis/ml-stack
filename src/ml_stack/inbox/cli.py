@@ -9,7 +9,7 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from ml_stack import activity, person, requests
+from ml_stack import activity, authority, person, requests
 from ml_stack.command import Group, flag, option
 from ml_stack.log import say, warn
 from ml_stack.requests.model import PENDING, STATES, Request
@@ -100,7 +100,7 @@ def answer(args: argparse.Namespace, asked: Callable[[str], str] | None = None) 
     """Answer one request; refused when it changed since it was shown or was already answered."""
     activity.mirror_requests()
     try:
-        person.require_person("answering a request")
+        authority.require("requests.answer", "answering a request")
     except person.HumanRequired as exc:
         warn(f"ml-stack-requests: {exc}")
         return REFUSED

@@ -14,12 +14,14 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from ml_stack import agent_hooks, authority
 from ml_stack.command import Group, flag, option
 from ml_stack.http import ServerError
 from ml_stack.log import say, warn
 from ml_stack.sentinel import human
 from ml_stack.sentinel.human import HumanRequired
 from ml_stack.workspace import (
+    authority_cli,
     automatic_connection,
     backlog,
     chat,
@@ -29,6 +31,7 @@ from ml_stack.workspace import (
     filecli,
     guide,
     harness_remote,
+    hooks_cli,
     limits,
     localcli,
     localroute,
@@ -330,6 +333,8 @@ def _init(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
 
 
 def _setup(args: argparse.Namespace, ws: Workspace) -> int:
+    for line in agent_hooks.install_report():
+        say(line)
     if args.yes or args.rotate:
         done = onboard.setup(ws, args.agents or list(onboard.DEFAULT_AGENTS), args.rotate,
                              args.ttl_hours * 3600)
@@ -477,11 +482,6 @@ def _ttl(text: str) -> float:
     return float(text[:-1]) * units[text[-1]] if text and text[-1] in units else float(text or 0)
 
 
-def _hook_snippet(args: argparse.Namespace, ws: Workspace) -> int:
-    say(onboard.hook_snippet(args.tool, args.agent or "NAME"), end="")
-    return 0
-
-
 def _nudging(args: argparse.Namespace) -> int:
     if coordinator_config.load(limits.root()).get("mode") == "remote":
         raise Denied("this watcher is local-only; use coordinator inbox polling")
@@ -500,18 +500,11 @@ def _hook(args: argparse.Namespace) -> int:
     stdin = sys.stdin.read() if args.hook == "stop" and not sys.stdin.isatty() else ""
     try:
         ws, token = _context(args)
-        out = nudge.output(args.hook, ws.waiting(token), stdin)
+        out = nudge.output(args.hook, nudge.Waiting.of(ws.waiting_summary(token)), stdin)
     except tuple(kind for kind, _ in CODES):
         return 0
     if out:
         say(out)
-    return 0
-
-
-def _install_hooks(args: argparse.Namespace, ws: Workspace) -> int:
-    path = Path(args.settings).expanduser()
-    events = onboard.install_hooks(path, args.agent or "claude")
-    say(f"wrote {', '.join(events)} to {path}")
     return 0
 
 
@@ -571,10 +564,9 @@ BARE: tuple[tuple[str, str, list[Any], Callable[[argparse.Namespace, Workspace],
     ("snippet", "print the paste block for AGENT (no secret in it)", [flag("name")],
      lambda a, w: say(onboard.snippet(a.name), end="") or 0),
     ("hook-snippet", "print the setting that makes a tool run `nudge` after each step; writes nothing",
-     [flag("tool", choices=("claude-code", "codex"))], _hook_snippet),
-    ("install-hooks", "write the nudge hooks (PostToolUse, Stop, UserPromptSubmit) into Claude Code's "
-     "settings; at a terminal", [flag("--settings", default="~/.claude/settings.json",
-                                      help="the Claude Code settings file")], _install_hooks),
+     hooks_cli.SNIPPET, hooks_cli.snippet),
+    ("install-hooks", "write the nudge hooks (post tool, prompt, stop) into Claude Code's and Codex's settings",
+     hooks_cli.INSTALL, hooks_cli.install),
     ("brief", "print the short brief a parent pastes into a subagent's prompt",
      [flag("name"), flag("--registered", action="store_true", help="the parent's hooks register and announce the subagent")],
      _brief),
@@ -596,6 +588,8 @@ TABLE: tuple[tuple[str, str, list[Any], Handler], ...] = (
      enforcement_cli.WHOAMI, enforcement_cli.whoami),
     ("enforcement", "show, check, set, promote or demote a project's task enforcement mode (open or strict)",
      enforcement_cli.OPTIONS, enforcement_cli.run),
+    ("authority", "show, set or preset which gates a lead agent may pass instead of a person (preset dev|prod)",
+     authority_cli.OPTIONS, authority_cli.run),
     ("main-session", "register main-session presentation; grants no rights", [flag("--harness", default="")],
      lambda args, ws, token: ws.register_session(token, onboard.device_metadata.current(), args.harness)),
     ("hello-model", "record the model a helper LABEL of yours runs (claimed)", [
@@ -827,7 +821,7 @@ def _bare(handler: Callable[[argparse.Namespace, Workspace], int]) -> Callable[[
                 return handler(args, None)
             return handler(args, Workspace())
         if connection is not None:
-            if handler in {_brief, _hook_snippet}:
+            if handler in {_brief, hooks_cli.snippet, hooks_cli.install}:
                 return handler(args, None)
             raise Denied("this command is unavailable in a canonical project; use its shared board")
         if coordinator_client.client(limits.root()) and handler is not _join:
@@ -847,7 +841,7 @@ for _name, _help, _options, _handler in TABLE:
 def _coordinator(args):
     base = limits.root()
     if args.action == 'host':
-        human.require_person("choose the workspace coordinator")
+        authority.require("workspace.coordinator", "choose the workspace coordinator")
         ws = Workspace()
         if coordinator_config.load(base).get("mode") == "remote":
             raise Denied("this device follows another coordinator; hosting would split its authority")
