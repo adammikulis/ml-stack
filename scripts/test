@@ -180,7 +180,7 @@ def execute_run(command, environment, tier, record: OutputRecord):
     index = shown.index("-n")
     want = int(shown[index + 1])
     shown[index + 1] = "{workers}"
-    shown.extend(["-p", "testslots_pytest", "-p", "testdurations"])
+    shown.extend(["-p", "testslots_pytest", "-p", "testdurations", "-p", "testagentenv_pytest"])
     if environment.get("DEV_TEST_REUSE_RECORD"):
         shown.extend(["-p", "testreuse_plugin"])
     executed_tree = tree_hash(ROOT)
