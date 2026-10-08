@@ -81,7 +81,7 @@ def run(command: list[str], env: dict[str, str] | None = None, tier: str = "") -
         return launch(command, env, tier)
     files = testreuse_run.selectors(command, ROOT)
     reuse = REUSE["on"] and files is not None and tier != "gate"
-    session = testreuse_run.Session(ROOT, command, files, reuse_store(), REUSE["agent"], REUSE["events"])
+    session = testreuse_run.Session(ROOT, command, files, reuse_store(), REUSE["events"])
     report = session.run(lambda shown: launch(shown, env, tier), tree_hash(ROOT), reuse)
     REUSE["report"] = report
     print("\n".join(report.lines()), flush=True)

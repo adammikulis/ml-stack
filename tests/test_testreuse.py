@@ -45,6 +45,8 @@ def project(tmp_path, monkeypatch):
 
 class Recorder(run.Events):
     def __init__(self):
+        super().__init__()
+        self.agent = AGENT
         self.seen = []
 
     def waiting(self, file, owner):
@@ -70,15 +72,18 @@ def launcher(root: Path, runs: list):
     return launch
 
 
-def attempt(root: Path, store: storage.Store, *files: str, draw: float = 1.0, events=None, reuse_on=True,
-            extra: tuple[str, ...] = ()):
-    """Run ``files`` (default tests/test_a.py) through a Session; returns (report, pytest launches)."""
+def attempt(root: Path, store: storage.Store, *files: str, **options):
+    """Run ``files`` (default tests/test_a.py) through a Session; returns (report, pytest launches).
+
+    Options: ``draw`` (the canary draw, default no canary), ``events``, ``reuse_on`` and ``extra`` pytest flags.
+    """
     named = list(files or (FILE,))
-    command = [sys.executable, "-m", "pytest", "-q", *extra, *named]
-    session = run.Session(root, command, named, store, AGENT, events)
+    command = [sys.executable, "-m", "pytest", "-q", *options.get("extra", ()), *named]
+    session = run.Session(root, command, named, store, options.get("events") or Recorder())
+    draw = options.get("draw", 1.0)
     session.draw = lambda: draw
     launches: list = []
-    report = session.run(launcher(root, launches), "treehash0001", reuse_on)
+    report = session.run(launcher(root, launches), "treehash0001", options.get("reuse_on", True))
     return report, launches
 
 
@@ -171,7 +176,7 @@ def test_a_data_file_the_test_read_is_part_of_the_hit(project, tmp_path):
     attempt(project, store)
     assert hows(attempt(project, store)[0]) == ["reused"]
     (project / "tests/data.txt").write_text("two")
-    report, launches = attempt(project, store)
+    report, _launches = attempt(project, store)
     assert hows(report) == ["ran"] and "changed: tests/data.txt" in report.outcomes[0].detail
 
 
@@ -197,7 +202,7 @@ def test_an_edited_entry_is_a_miss(project, tmp_path):
     entry = json.loads(path.read_text())
     entry["counts"]["tests"] = 99
     path.write_text(json.dumps(entry))
-    report, launches = attempt(project, store)
+    report, _launches = attempt(project, store)
     assert hows(report) == ["ran"] and "failed verification" in report.outcomes[0].detail
 
 
@@ -334,7 +339,7 @@ def test_a_claim_from_a_dead_process_is_recovered(tmp_path):
 def test_a_run_with_no_named_files_refreshes_the_store_without_reusing(project, tmp_path):
     store = storage.Store(tmp_path / "store")
     command = [sys.executable, "-m", "pytest", "-q"]
-    session = run.Session(project, command, None, store, AGENT)
+    session = run.Session(project, command, None, store, Recorder())
     launches: list = []
     report = session.run(launcher(project, launches), "treehash0001", False)
     assert report.status == 0 and [o.file for o in report.outcomes] == [FILE]

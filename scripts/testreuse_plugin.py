@@ -15,8 +15,7 @@ HOME = Path.home()
 REAL_STATE = tuple(str(HOME / part) for part in (".ml-stack", "Library/Keychains", ".ssh", ".gnupg",
                                                    ".cache/huggingface", ".config"))
 IGNORED = (".git", ".pytest_cache", ".testmondata", "__pycache__", ".ruff_cache", ".mypy_cache")
-WRITABLE = tuple({*(str(Path(p).resolve()) for p in (tempfile.gettempdir(), "/tmp", "/var/folders")),
-                  tempfile.gettempdir(), "/tmp", "/var/folders", "/private/tmp", "/private/var/folders", "/dev"})
+WRITABLE = tuple({str(Path(tempfile.gettempdir()).resolve()), tempfile.gettempdir(), "/dev"})
 ALLOWED_ROOT_WRITES = (".pytest_cache", "__pycache__", ".testmondata", ".coverage")
 FILES: dict[str, dict] = {}
 CURRENT: list[str] = []
@@ -37,7 +36,7 @@ def _source_of(path: str) -> str:
         rel = target.resolve().relative_to(ROOT)
     except (ValueError, OSError):
         return ""
-    return "" if rel.parts and rel.parts[0] in IGNORED or any(p in IGNORED for p in rel.parts) else rel.as_posix()
+    return "" if any(p in IGNORED for p in rel.parts) else rel.as_posix()
 
 
 def _writing(mode: object, flags: object) -> bool:
@@ -72,7 +71,7 @@ def _audit(event: str, args: tuple) -> None:
     if event == "open" and isinstance(args[0], (str, os.PathLike)):
         path = os.fspath(args[0])
         bucket = _entry(CURRENT[-1])
-        absolute = os.path.abspath(path)
+        absolute = str(Path(path).absolute())
         if _writing(args[1], args[2]):
             if not _write_ok(absolute):
                 bucket["violations"].add(f"wrote {absolute}")
@@ -83,7 +82,7 @@ def _audit(event: str, args: tuple) -> None:
         if absolute.startswith(REAL_STATE) and (_writing(args[1], args[2]) or not _from_conftest()):
             bucket["violations"].add(f"touched {absolute}")
     elif event in ("os.listdir", "os.scandir") and args and isinstance(args[0], (str, os.PathLike)):
-        rel = _source_of(os.path.abspath(os.fspath(args[0])) + "/x")
+        rel = _source_of(str(Path(os.fspath(args[0])).absolute()) + "/x")
         if rel:
             _entry(CURRENT[-1])["dirs"].add(str(Path(rel).parent.as_posix()))
 

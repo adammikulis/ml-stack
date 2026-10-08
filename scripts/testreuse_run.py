@@ -24,7 +24,10 @@ Launch = Callable[[list[str]], int]
 
 
 class Events:
-    """The notifications a run raises; the default does nothing."""
+    """The notifications a run raises, and the agent that raises them; the default does nothing."""
+
+    def __init__(self) -> None:
+        self.agent: dict = {"id": "", "source": "none"}
 
     def waiting(self, file: str, owner: dict) -> None:
         """A request found its key in flight under ``owner``."""
@@ -60,6 +63,27 @@ class Outcome:
     passed: bool = False
     stored: str = ""
     key: str = ""
+
+
+@dataclass
+class Plan:
+    """What a run will do with its files: execute, claim, re-check as a canary or wait."""
+
+    run: list[str] = field(default_factory=list)
+    claimed: list[str] = field(default_factory=list)
+    canary: dict[str, storage.Hit] = field(default_factory=dict)
+    deferred: dict[str, dict] = field(default_factory=dict)
+
+
+@dataclass
+class Ran:
+    """One executed file's results: junit counts, the plugin's record, the command, whether to store, a canary hit."""
+
+    count: dict | None
+    seen: dict | None
+    command: list[str]
+    store: bool
+    hit: storage.Hit | None = None
 
 
 @dataclass
@@ -138,9 +162,9 @@ class Session:
     """One run of test files under reuse, or a run whose passes refresh the store."""
 
     def __init__(self, root: Path, command: list[str], files: list[str] | None, store: storage.Store,
-                 agent: dict, events: Events | None = None) -> None:
+                 events: Events | None = None) -> None:
         self.root, self.command, self.files, self.store = root, command, files, store
-        self.agent, self.events = agent, events or Events()
+        self.events = events or Events()
         self.closures = keys.Closures(root)
         self.rate = float(os.environ.get("DEV_TEST_REUSE_CANARY", CANARY_RATE))
         self.draw: Callable[[], float] = random.random
@@ -163,30 +187,30 @@ class Session:
     def run(self, launch: Launch, tree: str, reuse: bool = True) -> Report:
         """Reuse what can be reused, execute the rest through ``launch``, record what passed."""
         self.tree, self.refresh = tree, not reuse
-        run, claimed, canary, deferred = list(self.files or []), [], {}, {}
+        plan = Plan(run=list(self.files or []))
         if reuse and self.files:
-            run = []
+            plan.run = []
             for file in self.files:
-                self.consider(file, run, claimed, canary, deferred)
+                self.consider(file, plan)
         try:
-            self.execute(run, launch, canary, claimed, not self.files or bool(run))
+            self.execute(plan, launch)
         finally:
-            for file in claimed:
+            for file in plan.claimed:
                 self.store.release(self.lookup(file).key)
-        again = self.wait_for(deferred)
+        again = self.wait_for(plan.deferred)
         if again:
-            self.execute(again, launch, {}, again, True)
+            self.execute(Plan(run=again, claimed=again), launch)
         self.report.outcomes = [self.outcome(f) for f in (self.files or sorted(self.outcomes))]
         failed = any(not o.passed for o in self.report.outcomes)
         self.report.status = self.report.status or (1 if failed else 0)
         return self.report
 
-    def consider(self, file: str, run: list[str], claimed: list[str], canary: dict, deferred: dict) -> None:
+    def consider(self, file: str, plan: Plan) -> None:
         """Decide whether ``file`` is reused, executed, executed as a canary or waited for."""
         look, outcome = self.lookup(file), self.outcome(file)
         if look.barred:
             outcome.detail = f"(not reusable: {look.barred})"
-            run.append(file)
+            plan.run.append(file)
             return
         hit, why = self.store.hit(look.key, self.root, self.closures)
         if hit and self.draw() >= self.rate:
@@ -194,22 +218,22 @@ class Session:
                                      f"by {hit.entry['agent'].get('id') or '?'})")
             return
         if hit:
-            canary[file] = hit
+            plan.canary[file] = hit
             outcome.detail = f"(canary of {hit.id})"
         elif why != "no earlier run":
             outcome.detail = f"({why})"
-        owner = self.store.claim(look.key, {"agent": self.agent, "files": [file]})
+        owner = self.store.claim(look.key, {"agent": self.events.agent, "files": [file]})
         if owner is None:
             seq = self.events.claimed(file, look.key)
             if seq:
                 self.store.note_thread(look.key, seq)
-            claimed.append(file)
-            run.append(file)
+            plan.claimed.append(file)
+            plan.run.append(file)
         elif hit:
-            canary.pop(file)
+            plan.canary.pop(file)
             self.reuse(outcome, hit, f"(tree {hit.entry['tree'][:10]}, canary skipped: key in flight)")
         else:
-            deferred[file] = owner
+            plan.deferred[file] = owner
             print(f"test: {file} is being run by {owner.get('agent', {}).get('id') or 'another run'}; waiting", flush=True)
             self.events.waiting(file, owner)
             outcome.how = "waited"
@@ -219,9 +243,10 @@ class Session:
         """Mark ``outcome`` satisfied by a stored pass."""
         outcome.how, outcome.passed, outcome.detail = f"reused from {hit.id}", True, detail
 
-    def execute(self, run: list[str], launch: Launch, canary: dict, claimed: list[str], go: bool) -> None:
-        """Launch pytest for ``run`` (the whole command when ``run`` is empty) and store clean passes."""
-        if not go:
+    def execute(self, plan: Plan, launch: Launch) -> None:
+        """Launch pytest for the plan's files (the whole command when it names none) and store clean passes."""
+        run = plan.run
+        if self.files and not run:
             return
         scratch = Path(tempfile.mkdtemp(prefix="reuse-"))
         junit = scratch / "run.xml"
@@ -234,17 +259,16 @@ class Session:
             seen = recorded(scratch / "record") if (scratch / "record").is_dir() else {}
             self.junit_sha = keys.sha(junit.read_bytes()) if junit.is_file() else ""
             for file in run or sorted(counts):
-                self.settle(file, counts.get(file), seen.get(file), canary.get(file),
-                            self.refresh or not run or file in claimed or file in canary, command)
+                keep = self.refresh or not run or file in plan.claimed or file in plan.canary
+                self.settle(file, Ran(counts.get(file), seen.get(file), command, keep, plan.canary.get(file)))
         finally:
             os.environ.pop("DEV_TEST_REUSE_RECORD", None)
             os.environ.pop("DEV_TEST_REUSE_ROOT", None)
             shutil.rmtree(scratch, ignore_errors=True)
 
-    def settle(self, file: str, count: dict | None, seen: dict | None, hit: storage.Hit | None,
-               store: bool, command: list[str]) -> None:
+    def settle(self, file: str, ran: Ran) -> None:
         """Record one executed file's outcome, store a clean pass, and compare it with a canary."""
-        outcome, look = self.outcome(file), self.lookup(file)
+        outcome, look, count, hit = self.outcome(file), self.lookup(file), ran.count, ran.hit
         outcome.passed = bool(count) and not count["failed"]
         if hit is not None and not outcome.passed:
             detail = f"cached pass from {hit.id} but a fresh run failed"
@@ -255,17 +279,17 @@ class Session:
             return
         if hit is not None:
             outcome.how = "ran  canary agrees"
-        if not store or look.barred or not count:
+        if not ran.store or look.barred or not count:
             return
         if not outcome.passed:
-            self.events.finished(file, look.key, "fail", self.store_entry(file, count, seen, command, "fail"))
+            self.events.finished(file, look.key, "fail", self.store_entry(file, ran, "fail"))
             return
-        why = self.refusal(seen, count)
+        why = self.refusal(ran.seen, count)
         if why:
             outcome.detail = f"{outcome.detail} (result not stored: {why})".strip()
             self.events.finished(file, look.key, "pass-unstored", "")
         else:
-            outcome.stored = self.store_entry(file, count, seen, command, "pass")
+            outcome.stored = self.store_entry(file, ran, "pass")
             self.events.finished(file, look.key, "pass", outcome.stored)
 
     @staticmethod
@@ -279,16 +303,16 @@ class Session:
             return "a test was skipped"
         return f"marked {sorted(seen['marks'] & keys.NEVER_MARKS)[0]}" if seen["marks"] & keys.NEVER_MARKS else ""
 
-    def store_entry(self, file: str, count: dict, seen: dict | None, command: list[str], kind: str) -> str:
+    def store_entry(self, file: str, ran: Ran, kind: str) -> str:
         """Write the entry for an executed file."""
-        seen = seen or {"reads": set(), "dirs": set()}
+        seen, count, command = ran.seen or {"reads": set(), "dirs": set()}, ran.count, ran.command
         manifest = keys.build_manifest(self.root, file, set(seen["reads"]), set(seen["dirs"]), self.closures)
         return self.store.put({
             "lookup": self.lookup(file).key, "file": file, "outcome": kind, "manifest": manifest,
             "manifest_digest": keys.manifest_digest(manifest), "command": command,
             "junit_sha256": self.junit_sha, "counts": count, "tree": self.tree,
             "runner": {"pid": os.getpid(), "started": storage.process_start(os.getpid())},
-            "agent": self.agent}, kind)
+            "agent": self.events.agent}, kind)
 
     def wait_for(self, deferred: dict[str, dict]) -> list[str]:
         """Wait for runs of the same keys by other agents; the files whose run did not land run here."""

@@ -99,6 +99,7 @@ class BoardEvents:
 
     def __init__(self, seat: Acting, task: str = "") -> None:
         self.seat, self.task = seat, task
+        self.agent = seat.identity
         self.threads: dict[str, int] = {}
         self.board = ""
         self.sender = ""

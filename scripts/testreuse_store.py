@@ -18,7 +18,6 @@ from ml_stack.activity import reuse
 from ml_stack.activity.reuse import SCHEMA, entry_hash, row_hash
 
 
-
 @dataclass(frozen=True)
 class Hit:
     """A verified passing entry."""
@@ -46,7 +45,7 @@ def write_atomic(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     temporary.write_text(text, encoding="utf-8")
-    os.replace(temporary, path)
+    temporary.replace(path)
 
 
 class Store:
