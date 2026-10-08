@@ -12,8 +12,8 @@ from ml_stack import home
 from ml_stack.files import read_json, write_json
 from ml_stack.person import HumanRequired, require_person
 
-__all__ = ["DELEGATED", "FLOOR_ENV", "GATES", "PERSON", "PRESETS", "audit_rows", "require", "resolve",
-           "set_state", "show", "state_of"]
+__all__ = ["DELEGATED", "FLOOR_ENV", "GATES", "PERSON", "PRESETS", "audit_rows", "record", "require",
+           "resolve", "set_state", "show", "state_of"]
 
 DELEGATED = "delegated"
 PERSON = "person"
@@ -91,6 +91,11 @@ def _log(entry: Mapping[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps({"at": time.time(), **entry}) + "\n")
+
+
+def record(event: str, **fields: Any) -> None:
+    """Append an ``event`` a person took to the audit log, with ``fields``."""
+    _log({"event": event, "by": PERSON, **fields})
 
 
 def audit_rows() -> list[dict[str, Any]]:

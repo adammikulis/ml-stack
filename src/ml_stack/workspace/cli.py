@@ -23,6 +23,7 @@ from ml_stack.sentinel.human import HumanRequired
 from ml_stack.workspace import (
     authority_cli,
     automatic_connection,
+    autostart_status,
     backlog,
     chat,
     coordinator_client,
@@ -724,7 +725,7 @@ TABLE: tuple[tuple[str, str, list[Any], Handler], ...] = (
     ("audit-head", "the audit log's head hash, to keep as an anchor", [],
      lambda a, w, t: {"head": w.audit_log.head()}),
     ("status", "who is registered, unread counts, claims, the test-slot queue; any agent token", [],
-     lambda a, w, t: {**w.status(), **w.board.summary(t)}),
+     lambda a, w, t: {**w.status(), **w.board.summary(t), **autostart_status.fields(w, t)}),
     ("gc", "prune old messages and expired scratch; lead or human", [],
      lambda a, w, t: w.gc(t)),
 )

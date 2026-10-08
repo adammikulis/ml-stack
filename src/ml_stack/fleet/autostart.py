@@ -25,9 +25,9 @@ from typing import Any
 
 from ml_stack import home, jobs, runtime
 from ml_stack.log import say, warn
-from ml_stack.platform import applescript_quote
 
-from . import wsl_startup
+from . import autostart_cli, wsl_startup
+from .autostart_backends import elevated as _ask_and_run
 from .autostart_models import (
     ADOPTED,
     DEFAULT_MODEL,
@@ -112,23 +112,6 @@ def _mac_path(mode: str) -> Path:
     if mode == "boot":
         return Path("/Library/LaunchDaemons") / f"{LABEL}.plist"
     return home.user_home() / "Library" / "LaunchAgents" / f"{LABEL}.plist"
-
-
-def _ask_and_run(command: str, prompt: str) -> tuple[bool, str]:
-    """Run a privileged command through the OS's own password dialog."""
-    if sys.platform == "darwin":
-        script = (f'do shell script "{applescript_quote(command)}" with administrator '
-                  f'privileges with prompt "{applescript_quote(prompt)}"')
-        argv = ["osascript", "-e", script]
-    elif sys.platform.startswith("linux") and shutil.which("pkexec"):
-        argv = ["pkexec", "sh", "-c", command]
-    else:
-        return False, ""
-    try:
-        done = subprocess.run(argv, capture_output=True, text=True, timeout=120)
-    except (OSError, subprocess.SubprocessError) as exc:
-        return False, str(exc)
-    return done.returncode == 0, (done.stderr or "").strip()
 
 
 def _mac_install(mode: str, argv: list[str], log_dir: Path) -> Autostart:
@@ -673,7 +656,10 @@ def main(argv: list[str] | None = None) -> int:
     donep.add_argument("--name", required=True)
     donep.add_argument("--track", default="")
 
+    autostart_cli.add_commands(sub)
     a = ap.parse_args(argv)
+    if a.cmd in autostart_cli.COMMANDS:
+        return autostart_cli.run(a)
 
     if a.cmd == "done":
         say("\n".join(last_screen(a.name, track=a.track)))
