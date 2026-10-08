@@ -12,6 +12,7 @@ from ml_stack import authority
 from ml_stack.workspace import (
     agent_display,
     agent_invites,
+    coordination_access,
     limits as limits_mod,
     reports,
     tokens,
@@ -603,7 +604,8 @@ class Workspace:
         if boarded:
             self.board.require_read(who, rows[0]["to"])
         seen = boarded or who.role != AGENT or any(
-            who.id == r["from"] or r["to"] in (who.id, BROADCAST) for r in rows)
+            who.id == r["from"] or r["to"] in (who.id, BROADCAST) for r in rows) or all(
+            coordination_access.can_read_row(self, who, r) for r in rows)
         if not seen:
             raise Denied(f"{who.id} is not part of that thread")
         take = len(rows) if widen else limit if limit > 0 else self.limits.read_items
