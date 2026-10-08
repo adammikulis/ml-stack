@@ -54,7 +54,8 @@ import testtime
 
 from ml_stack.activity import reuse
 from ml_stack.activity.gate import Run, record_run, tree_hash
-from ml_stack.workspace import testruns
+from ml_stack.workspace import testboard, testruns
+from ml_stack.workspace.taskboard import TaskBoard
 
 ROOT = Path(__file__).resolve().parent.parent
 BASE = "0.2dev"
@@ -379,14 +380,14 @@ def subscribe(jobs: testjobs.Jobs, rest: list[str], args: argparse.Namespace) ->
     if seat is None:
         raise testjobs.Refused("subscribe needs a workspace agent: pass --agent")
     if args.task:
-        print(testruns.follow_task(seat, args.task))
+        print(TaskBoard(seat.ws).subscribe(seat.token, args.task))
         return 0
     thread = int(jobs.read(rest[0]).get("thread", 0)) if rest else 0
     if args.key:
-        thread = testruns.thread_for_key(reuse_store().folder, args.key)
+        thread = testboard.thread_for_key(reuse_store().folder, args.key)
     if not thread:
         raise testjobs.Refused("that run has not opened a board thread yet")
-    print(testruns.follow_thread(seat, thread))
+    print(testboard.follow_thread(seat, thread))
     return 0
 
 
@@ -456,11 +457,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--explain", action="store_true", help="quick: say what selected what")
     args, rest = parser.parse_known_args(argv)
     REUSE["on"] = not args.no_reuse
-    seat = testruns.acting(args.agent, args.label)
+    seat = testboard.acting(args.agent, args.label)
     REUSE["seat"] = seat
     if seat is not None:
         REUSE["agent"] = seat.identity
-        REUSE["events"] = testruns.BoardEvents(seat, args.task)
+        REUSE["events"] = testboard.BoardEvents(seat, (lambda: TaskBoard(seat.ws).watchers(args.task)) if args.task else None)
         os.environ["DEV_TEST_AGENT"] = json.dumps({**seat.identity, "job": os.environ.get("DEV_TEST_JOB", "")})
     else:
         os.environ.pop("DEV_TEST_AGENT", None)

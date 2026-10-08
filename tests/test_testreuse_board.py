@@ -18,7 +18,7 @@ sys.path.insert(0, str(SCRIPTS))
 import testreuse_store as storage  # noqa: E402
 
 from ml_stack.activity import reuse  # noqa: E402
-from ml_stack.workspace import onboard, slots, testruns, tokens  # noqa: E402
+from ml_stack.workspace import onboard, slots, testboard, testruns, tokens  # noqa: E402
 from ml_stack.workspace.taskboard import TaskBoard  # noqa: E402
 
 PROJECT = {"key": "git@example.org:me/widgets.git", "name": "Widgets"}
@@ -35,11 +35,11 @@ def team(monkeypatch, tmp_path):
     for name in ("alice", "bob"):
         code = kit.ws.invites.create(name, 600.0, PROJECT)
         joined = onboard.join(kit.ws, code, name)
-        kit.seats[name] = testruns.Acting(kit.ws, tokens.load(kit.ws.base, joined),
+        kit.seats[name] = testboard.Acting(kit.ws, tokens.load(kit.ws.base, joined),
                                           {"id": joined, "label": "t", "parent": "", "source": "test"})
     other = kit.ws.invites.create("zed", 600.0, {"key": "git@example.org:other/gadgets.git", "name": "Gadgets"})
     name = onboard.join(kit.ws, other, "zed")
-    kit.seats["zed"] = testruns.Acting(kit.ws, tokens.load(kit.ws.base, name),
+    kit.seats["zed"] = testboard.Acting(kit.ws, tokens.load(kit.ws.base, name),
                                        {"id": name, "label": "", "parent": "", "source": "test"})
     return kit
 
@@ -49,10 +49,10 @@ def inbox(kit, who, ack=True):
 
 
 def test_a_subscriber_to_a_runs_thread_is_told_exactly_once_when_it_lands(team):
-    owner, watcher = testruns.BoardEvents(team.seats["alice"]), team.seats["bob"]
+    owner, watcher = testboard.BoardEvents(team.seats["alice"]), team.seats["bob"]
     thread = owner.claimed(FILE, KEY)
     assert thread > 0
-    assert testruns.follow_thread(watcher, thread)["type"] == "thread"
+    assert testboard.follow_thread(watcher, thread)["type"] == "thread"
     owner.finished(FILE, KEY, "pass", "entry0123456789abcdef")
     [message] = inbox(team, "bob")
     assert "test-result" in message["text"] and "outcome=pass" in message["text"]
@@ -61,7 +61,7 @@ def test_a_subscriber_to_a_runs_thread_is_told_exactly_once_when_it_lands(team):
 
 
 def test_waiters_are_told_when_the_run_they_waited_on_failed(team):
-    owner, watcher = testruns.BoardEvents(team.seats["alice"]), testruns.BoardEvents(team.seats["bob"])
+    owner, watcher = testboard.BoardEvents(team.seats["alice"]), testboard.BoardEvents(team.seats["bob"])
     thread = owner.claimed(FILE, KEY)
     watcher.waiting(FILE, {"thread": thread, "agent": {"id": "alice"}})
     owner.finished(FILE, KEY, "fail", "entryfail")
@@ -76,11 +76,11 @@ def test_a_job_ending_reaches_the_submitter_a_thread_follower_and_a_task_watcher
                                "source_key": "repo:demo/sim:issue:1"})
     tasks.subscribe(team.seats["bob"].token, task["id"])
     carol = onboard.join(team.ws, team.ws.invites.create("carol", 600.0, PROJECT), "carol")
-    seat = testruns.Acting(team.ws, tokens.load(team.ws.base, carol), {"id": carol, "label": "", "parent": ""})
-    events = testruns.BoardEvents(team.seats["alice"], task["id"])
+    seat = testboard.Acting(team.ws, tokens.load(team.ws.base, carol), {"id": carol, "label": "", "parent": ""})
+    events = testboard.BoardEvents(team.seats["alice"], lambda: tasks.watchers(task["id"]))
     thread = events.job_started("j1", {"argv": ["all", FILE]})
-    testruns.follow_thread(seat, thread)
-    testruns.follow_thread(team.seats["bob"], thread)
+    testboard.follow_thread(seat, thread)
+    testboard.follow_thread(team.seats["bob"], thread)
     events.job_done("j1", {"argv": ["all", FILE]}, {"exit": 0, "state": "done",
                                                    "summary": {"ran": 1, "reused": 2}}, thread)
     for name in ("alice", "bob"):
@@ -94,21 +94,21 @@ def test_a_job_ending_reaches_the_submitter_a_thread_follower_and_a_task_watcher
 
 
 def test_a_canary_mismatch_posts_one_announcement_line(team):
-    testruns.BoardEvents(team.seats["alice"]).canary_mismatch(FILE, "cached pass from e1 but a fresh run failed")
+    testboard.BoardEvents(team.seats["alice"]).canary_mismatch(FILE, "cached pass from e1 but a fresh run failed")
     rows = [r for r in team.ws.bus.log.rows() if r.get("to") == "#announcements"]
     assert len(rows) == 1 and rows[0]["type"] == "blocked" and "canary mismatch" in rows[0]["body"]
     assert "\n" not in rows[0]["body"] and len(rows[0]["body"]) <= 200
 
 
 def test_another_projects_agent_cannot_follow_a_runs_thread(team):
-    thread = testruns.BoardEvents(team.seats["alice"]).claimed(FILE, KEY)
+    thread = testboard.BoardEvents(team.seats["alice"]).claimed(FILE, KEY)
     with pytest.raises(Exception, match="no board"):
-        testruns.follow_thread(team.seats["zed"], thread)
-    assert testruns.BoardEvents(team.seats["zed"]).claimed(FILE, KEY) != thread
+        testboard.follow_thread(team.seats["zed"], thread)
+    assert testboard.BoardEvents(team.seats["zed"]).claimed(FILE, KEY) != thread
 
 
 def test_a_poisoned_thread_number_changes_neither_the_hit_nor_the_run(team, tmp_path):
-    events = testruns.BoardEvents(team.seats["zed"])
+    events = testboard.BoardEvents(team.seats["zed"])
     events.waiting(FILE, {"thread": 10 ** 6, "agent": {"id": "alice"}})
     events.waiting(FILE, {"thread": "not a number"})
     store = storage.Store(tmp_path / "store")
