@@ -15,7 +15,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-from ml_stack import agent_hooks, bench, checks, hook_diagnostics
+from ml_stack import agent_hooks, bench, checks, hook_diagnostics, hookcheck
 from ml_stack.bench.underway import measuring, measuring_file
 from ml_stack.checks import Finding, ask
 from ml_stack.command import Group, flag, option
@@ -31,8 +31,8 @@ __all__ = ["HOOKS", "STALE_BUILD_DAYS", "ahead_of", "bench_of", "builds_of",
 STALE_BUILD_DAYS = 14
 """A managed llama.cpp older than this is noted."""
 
-HOOKS = ("pre-commit", "commit-msg", "pre-push")
-"""The git hooks every repository here installs, from the directory it ships them in."""
+HOOKS = hookcheck.HOOKS
+"""The git hooks a repository here installs, each when it ships one, from the directory it ships them in."""
 
 _SHIPPED = ("scripts/hooks", "services/hooks")
 _STAMP = re.compile(r"(\d{8}T\d{6})\.log$")
@@ -94,9 +94,11 @@ def hooks_of(repo: Path) -> Finding | None:
     shipped = _shipped_hooks(repo)
     if not shipped:
         return None
+    if shipped == hookcheck.SCRIPTS:
+        return _running_hooks(repo)
     common = _git(repo, "rev-parse", "--git-common-dir")
     hooks = Path(common) if Path(common).is_absolute() else repo / common
-    missing = [h for h in HOOKS if not _installed(hooks / "hooks" / h, shipped)]
+    missing = [h for h in HOOKS if (repo / shipped / h).exists() and not _installed(hooks / "hooks" / h, shipped)]
     installer = repo / "scripts" / "install-hooks.sh"
     if installer.is_file():
         fix = ["sh", "scripts/install-hooks.sh"]
@@ -110,6 +112,20 @@ def hooks_of(repo: Path) -> Finding | None:
         note="" if not missing else
              f"git runs nothing from {shipped}/ until they are; a real name or a scrape "
              "goes into a commit unrefused")
+
+
+def _running_hooks(repo: Path) -> Finding:
+    """Whether git will run the hooks: hooks directory, hook files, repository config and guard scripts.
+
+    A repair that edits the repository config is only written in the note, for a person to run.
+    """
+    problems = hookcheck.inspect(repo)
+    installable = bool(problems) and all(p.kind == "install" and p.repair.startswith("sh ") for p in problems)
+    return Finding(
+        name=f"{repo.name}: hooks", good=not problems,
+        said=f"installed, from {hookcheck.SCRIPTS}" if not problems else "; ".join(p.what for p in problems),
+        fix=["sh", "scripts/install-hooks.sh"] if installable else [], cwd=str(repo),
+        note="; ".join(f"a person runs: {p.repair}" for p in problems if p.repair))
 
 
 def status_of(repo: Path) -> Finding:
