@@ -2,12 +2,8 @@
 
 ## Pending recovery work
 
-<<<<<<< HEAD
 - NATS JetStream as an optional journal link: parked in `~/.ml-stack/bundles/nats-jetstream-parked-20261008.bundle` (verified complete history; tips from `git bundle list-heads`), branches fix/linux-immutable-runner, fix/linux-admission-stdio-current, fix/nats-*, feat/nats-*, feat/jetstream-message-store, fix/authenticated-agent-messages(-nats), docs/nats-coordination-quickstart, feat/canonical-writer-isolation, fix/test-kernel-isolation, fix/linux-runner-immutable. Depends on it: the message store replacing graph messages, the managed loopback broker, board-host/authority_machine checks (native task registration, CPU verification client), writer attribution in `chain.held`. Mesh journals are the board; JetStream may only become a link, never a host or authority.
-- Canonical Board delivery latency exceeds the existing budgets: measured single-recipient DM 479 ms and Board 363 ms against 50/150 ms. Reduce graph opening and integrity-query costs; preserve integrity, privacy and latency budgets. Evidence: `/private/tmp/ml-stack-board-observer-handoff.md`.
-=======
 - Board delivery latency exceeds the existing budgets: measured single-recipient DM 479 ms and Board 363 ms against 50/150 ms. Reduce graph opening and integrity-query costs; preserve integrity, privacy and latency budgets. Evidence: `/private/tmp/ml-stack-board-observer-handoff.md`.
->>>>>>> 0.2dev
 - Preserve `/private/tmp/ml-stack-qwen-worker-project/published-source` while pending task scopes and the stopped worker reference it. Add an authenticated offline source-rebinding operation before removing this source anchor; preserve pending task states and grants.
 - Triage the remaining failures from the October 6 macOS background full red-team run at `920cf217`: 130 failed, 30 errors, 13,729 passed, 364 skipped. Re-run the remaining Board latency, serving, training, gym and fixture failures after scoped setup, pairing and installer repairs. Evidence: `/private/tmp/dev-final-background-full.log`, `/private/tmp/dev-full-failures.txt` and `/private/tmp/ml-stack-full-lifecycle-project-diagnosis.md`. Linux testing remains owner-paused.
 - Verify an authenticated connection and a Board message/reply with the other physical device after separate Dev profile activation. Local discovery and browser checks do not establish this roundtrip.
