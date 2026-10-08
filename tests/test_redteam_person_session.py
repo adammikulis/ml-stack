@@ -281,3 +281,24 @@ def test_the_routes_that_act_for_the_person_answer_only_a_credentialed_session(w
     assert gated(window.call(path, headers=browser(window)))
     assert gated(window.call(path, cookie=uncredentialed, headers=browser(window)))
     assert not gated(window.call(path, cookie=sign_in(window), headers=browser(window)))
+
+
+def test_credential_changes_need_a_credentialed_session(window):
+    from ml_stack import credentials
+
+    body = {"name": "HF_TOKEN", "value": "isolated-secret"}
+    bare = window.ui.sessions.open("setup")
+    uncredentialed = window.ui.sessions.cookie_header(bare).split(";", 1)[0]
+    for cookie in ("", uncredentialed):
+        status, _, _ = window.call("/ui/credentials", method="POST", body=body, cookie=cookie, headers=browser(window))
+        assert status == 403
+        assert credentials.get("HF_TOKEN") is None
+    status, _, _ = window.call("/ui/credentials", method="POST", body=body, cookie=sign_in(window), headers=browser(window))
+    assert status == 200 and credentials.get("HF_TOKEN") == "isolated-secret"
+
+
+def test_the_wiring_limit_refuses_an_uncredentialed_session_before_asking_anyone(window):
+    bare = window.ui.sessions.open("setup")
+    cookie = window.ui.sessions.cookie_header(bare).split(";", 1)[0]
+    status, answer, _ = window.call("/ui/room/reset", method="POST", body={}, cookie=cookie, headers=browser(window))
+    assert status == 403 and "not opened with a credential" in answer["error"]
