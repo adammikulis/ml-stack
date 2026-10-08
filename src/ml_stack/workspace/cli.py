@@ -38,6 +38,7 @@ from ml_stack.workspace import (
     localroute,
     nudge,
     onboard,
+    person_view,
     project,
     project_connection,
     project_session,
@@ -661,6 +662,9 @@ TABLE: tuple[tuple[str, str, list[Any], Handler], ...] = (
         flag("type", choices=STYPES), flag("target", nargs="?", default="")],
      lambda a, w, t: w.board.unsubscribe(t, a.type, a.target)),
     ("subs", "your subscriptions", [], lambda a, w, t: w.board.subs(t)),
+    ("attestations", "what the harness hooks recorded the person saying, as person-attestations; read-only", [
+        flag("--session", default=""), flag("--limit", type=int, default=50)],
+     lambda a, w, t: person_view.listing(a.limit, a.session)),
     ("digest", "a bounded summary of digest subscriptions, or of --thread N", [
         flag("--thread", type=int, default=0), flag("--ack", action="store_true")], _digest),
     ("delegate", "mint a weaker child identity NAME for a subagent; prints its token file path", [

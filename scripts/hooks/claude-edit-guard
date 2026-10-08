@@ -159,10 +159,10 @@ def docstring_lines(node) -> int:
     return len(text.splitlines()) if text else 0
 
 
-def refuse(message: str) -> int:
-    print(f"blocked: {message}\n\n(ml-stack scripts/hooks/claude-edit-guard. If this is "
-          f"genuinely the right code, say so and a person can write it, or set "
-          f"MLSTACK_GUARD=off.)", file=sys.stderr)
+def refuse(message: str, hard: bool = False) -> int:
+    tail = ("no switch opens this rule" if hard else
+            "If this is genuinely the right code, say so and a person can write it, or set MLSTACK_GUARD=off")
+    print(f"blocked: {message}\n\n(ml-stack scripts/hooks/claude-edit-guard. {tail}.)", file=sys.stderr)
     return BLOCKED
 
 
@@ -294,8 +294,13 @@ def check(tool: str, given: dict) -> int:
     return ALLOWED
 
 
+PERSON_STORE = re.compile(r"(^|/)\.ml-stack/person(/|$)")
+"""The person record: statements, authorizations and the key that seals them."""
+
+
 def main() -> int:
-    if os.environ.get("MLSTACK_GUARD") == "off":
+    switched = rules_loader.guard_off()
+    if switched == "off":
         return ALLOWED
     try:
         event = json.load(sys.stdin)
@@ -305,6 +310,10 @@ def main() -> int:
     if tool not in TOOLS:
         return ALLOWED
     given = event.get("tool_input") or {}
+    if PERSON_STORE.search(str(given.get("file_path") or given.get("notebook_path") or "")):
+        return refuse("the person record is written only by the harness hooks when the person types", hard=True)
+    if switched:
+        return ALLOWED
     rules = rules_loader.load()
     if rules is not None:
         why = rules.edit_refusal([given.get("file_path") or given.get("notebook_path") or ""],

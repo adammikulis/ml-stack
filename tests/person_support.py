@@ -14,6 +14,7 @@ HOOKS = ROOT / "scripts" / "hooks"
 VERSION = "2.1.293"
 SESSION = "sess-person-1"
 DEV = "0.9dev"
+PROPOSAL_TEXT = "The tests pass. I'll push the dev branch to origin now."
 ENV_DROPPED = ("CLAUDECODE", "ML_STACK_NONINTERACTIVE", "CLAUDE_CODE_SESSION_ATTENDED", "ML_STACK_AGENT",
                "ML_STACK_SESSION_ID", "MLSTACK_GUARD", "CODEX_THREAD_ID", "CODEX_SESSION_ID")
 

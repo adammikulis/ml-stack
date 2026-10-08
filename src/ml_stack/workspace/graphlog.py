@@ -8,6 +8,7 @@ from uuid import uuid4
 from ml_stack.workspace.board_evidence import audience, checkpoints, seal, verified
 from ml_stack.workspace.board_graph import BoardGraph
 from ml_stack.workspace.chain import GENESIS, ChainBroken, Verdict, _digest
+from ml_stack.workspace.person_store import ATTESTATION
 
 
 class GraphLog:
@@ -63,6 +64,8 @@ class GraphLog:
         return self.verify().head
 
     def append(self, body):
+        if ATTESTATION in (body.get("kind"), body.get("type"), body.get("attestation")):
+            raise PermissionError("a person-attestation is written only by a harness hook, never by a board token")
         with self.graph.opened() as graph, graph.transaction():
             events = self.graph._events(graph, self.stream)
             verdict = verified(events, bases=checkpoints(graph, self.stream))

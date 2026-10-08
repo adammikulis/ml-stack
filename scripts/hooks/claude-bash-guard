@@ -34,6 +34,12 @@ PUSH_MAIN = RUN + r"git\s+push\b[^;&|\n]*\bmain\b"
 PUSH_MAIN_OPENED = r"\bML_STACK_PUSH_MAIN=yes\b"
 
 
+PUSH_FLAGS = (RUN + r"git\s+push\b[^;&|\n]*(--all\b|--mirror\b|--tags\b|--delete\b"
+              r"|--force|\s-f\b|\s-d\b)")
+MINT = RUN + r"(\S*/)?ml-stack-workspace\s+(-\S+\s+)*(mint|delegate)\b"
+PERSON_STORE = (r"\.ml-stack/person\b|person/statements\.log|"
+                r"(import|from)\s+ml_stack\.workspace(\.person_record\b|\s+import\s+[^;\n]*\bperson_record\b)")
+
 # (what it matches, what to do instead). Ordered: the first match wins.
 REFUSE = [
     (RUN + r"git\s+add\s+(-A\b|--all\b|\.(\s|$)|-u\b|--update\b)|"
@@ -80,8 +86,7 @@ REFUSE = [
     (r"\bpkill\b[^|;]*llama|\bkillall\b[^|;]*llama",
      "Do not pkill llama-server. `ml-stack-serve down --port N` releases the lease too; "
      "killing the process leaves the lease behind and the next `up` refuses."),
-    (RUN + r"git\s+push\b[^;&|\n]*(--all\b|--mirror\b|--tags\b|--delete\b"
-     r"|--force|\s-f\b|\s-d\b)",
+    (PUSH_FLAGS,
      "An agent pushes one branch by name: `git push origin <branch>`. Every branch at "
      "once, a tag, a deletion and a forced push stay the owner's, and no opener opens "
      "them."),
@@ -92,6 +97,13 @@ REFUSE = [
      "releases every commit on the branch at once.\n\n"
      "When the owner has asked for that push, the ask is written on the command itself:  "
      "ML_STACK_PUSH_MAIN=yes git push origin main"),
+    (MINT,
+     "An agent does not create identities. A person at a terminal mints a token; a joined agent "
+     "starts a new agent with `ml-stack-workspace invite`."),
+    (PERSON_STORE,
+     "The person record is written only by the harness hooks when the person types. An agent "
+     "does not read its key, open its log or import its writers; `ml-stack-workspace "
+     "attestations` shows what the hooks recorded."),
     (r"(^|[;&|]\s*|\benv\s+)SKIP_NAME_CHECK=1",
      "SKIP_NAME_CHECK is a person's to set, not an agent's. The hook is the last thing "
      "between a real community and a public repository. If it flagged an invented name, add "
@@ -131,8 +143,13 @@ def without_search_patterns(command: str) -> str:
     return re.sub(rf"\b({SEARCHERS})\b[^|;&\n]*", strip, command)
 
 
+HARD = (PUSH_FLAGS, PUSH_MAIN, MINT, PERSON_STORE)
+"""Patterns that stay in force when MLSTACK_GUARD=off is set under an agent."""
+
+
 def main() -> int:
-    if os.environ.get("MLSTACK_GUARD") == "off":
+    switched = rules_loader.guard_off()
+    if switched == "off":
         return 0
     try:
         event = json.load(sys.stdin)
@@ -141,7 +158,7 @@ def main() -> int:
     if event.get("tool_name") != "Bash":
         return 0
     command = without_heredocs((event.get("tool_input") or {}).get("command") or "")
-    rules = rules_loader.load()
+    rules = None if switched else rules_loader.load()
     why = rules.bash_refusal(command, event.get("cwd") or "") if rules else ""
     if why:
         print(f"blocked: {why}\n\n(ml-stack scripts/hooks/claude-bash-guard. Set "
@@ -149,12 +166,15 @@ def main() -> int:
         return 2
     command = without_search_patterns(command)
     for pattern, instead in REFUSE:
+        if switched and pattern not in HARD:
+            continue
         if re.search(pattern, command, re.M):
             if pattern is PUSH_MAIN and re.search(PUSH_MAIN_OPENED, command):
                 continue
-            print(f"blocked: {instead}\n\n"
-                  f"(ml-stack scripts/hooks/claude-bash-guard. If this is genuinely the right "
-                  f"command, say so and a person can run it, or set MLSTACK_GUARD=off.)",
+            tail = ("No switch opens this rule." if pattern in HARD else
+                    "If this is genuinely the right command, say so and a person can run it, "
+                    "or set MLSTACK_GUARD=off.")
+            print(f"blocked: {instead}\n\n(ml-stack scripts/hooks/claude-bash-guard. {tail})",
                   file=sys.stderr)
             return 2
     return 0

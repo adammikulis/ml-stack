@@ -3,7 +3,9 @@
 # with scripts/hooks/pushed. Claude Code sets CLAUDECODE for every command it runs, and a
 # person's shell does not. The development branch is the one the primary checkout is on, and
 # `main` is never it. ML_STACK_PUSH_MAIN=yes on the command lets `main` through, for the
-# push the owner has asked for.
+# push the owner has asked for. A live `push-dev` authorization the person spoke in this
+# session is consumed and recorded when the development branch is pushed; the push does not
+# need one. `main`, tags, forced pushes and deletions cannot be authorized from chat.
 if [ -n "$(git status --porcelain --untracked-files=all)" ]; then
     echo "pre-push: refused: working tree has uncommitted changes" >&2
     exit 1
@@ -33,6 +35,7 @@ dev=$(env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE git -C "$primary" branch
 zero=0000000000000000000000000000000000000000
 
 refused=""
+pushes_dev=""
 while read -r local_ref local_sha remote_ref remote_sha; do
     [ -z "$remote_ref" ] && continue
     if [ "$local_sha" = "$zero" ]; then
@@ -41,12 +44,18 @@ while read -r local_ref local_sha remote_ref remote_sha; do
         continue
     elif [ -z "$dev" ] || [ "$dev" = main ] || [ "$remote_ref" != "refs/heads/$dev" ]; then
         refused="$refused $remote_ref"
+    elif [ "$remote_ref" = "refs/heads/$dev" ]; then
+        pushes_dev=yes
     fi
 done <<EOF
 $input
 EOF
 
 if [ -z "$refused" ]; then
+    if [ -n "$pushes_dev" ]; then
+        used=$("${PYTHON:-python3}" "$here/person-consume" push-dev "$1" 2>/dev/null) &&
+            echo "pre-push: development push authorized by the person's statement (authorization $used)" >&2
+    fi
     printf '%s\n' "$input" | "${PYTHON:-python3}" "$here/pushed" "$dev"
     exit $?
 fi
