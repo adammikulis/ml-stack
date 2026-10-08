@@ -179,6 +179,22 @@ class ChainLog:
             self._write(json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n")
             return row
 
+    def extend(self, rows: list[dict[str, Any]]) -> int:
+        """Append rows another log produced, verbatim, each following the one before it."""
+        with held(self.guard):
+            self._cut_torn()
+            seen, verdict = self._sync(fresh=not self._stamped())
+            if not verdict.ok:
+                raise ChainBroken(f"{self.path.name} is damaged at line {verdict.broken_at}")
+            prev, seq = verdict.head, seen.base + len(seen.rows)
+            for row in rows:
+                if row.get("prev") != prev or row.get("seq") != seq + 1 or row.get("hash") != _digest(prev, row):
+                    raise ChainBroken(f"row {seq + 1} does not follow {self.path.name}")
+                prev, seq = row["hash"], seq + 1
+            if rows:
+                self._write("".join(json.dumps(r, ensure_ascii=False, separators=(",", ":")) + "\n" for r in rows))
+            return len(rows)
+
     def _write(self, text: str) -> None:
         fd = os.open(self.path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
         try:

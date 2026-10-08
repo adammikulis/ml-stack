@@ -199,6 +199,21 @@ class Signer:
         from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
         return cls(Ed25519PrivateKey.from_private_bytes(raw))
 
+    def sign_bytes(self, data: bytes) -> bytes:
+        """The Ed25519 signature of this key over ``data``."""
+        return self._private.sign(data)
+
+    @staticmethod
+    def check_bytes(public: bytes, data: bytes, signature: bytes) -> bool:
+        """Whether ``signature`` is the signature of the key ``public`` over ``data``."""
+        from cryptography.exceptions import InvalidSignature
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+        try:
+            Ed25519PublicKey.from_public_bytes(public).verify(signature, data)
+        except (InvalidSignature, ValueError):
+            return False
+        return True
+
     def ssh_public_line(self, name: str = "ml-stack") -> str:
         """The key as an OpenSSH ``allowed_signers`` line, so ``ssh-keygen -Y verify`` (on a
         machine that has no Python packages yet) can check what this key signed."""

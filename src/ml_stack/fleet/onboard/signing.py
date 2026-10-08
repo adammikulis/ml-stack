@@ -232,6 +232,14 @@ class SigningKeys:
                       files=len(listed), serial=serial)
         return raw
 
+    def sign_bytes(self, data: bytes, *, confirm: Callable[[str], bool] | None = None) -> bytes:
+        """The signature of this key over ``data``; with confirm-before-signing on, ``confirm``
+        is asked first and must say yes."""
+        doc = self.meta()
+        if doc.get("confirm") and (confirm is None or not confirm(f"sign {len(data)} bytes with key {doc['key_id'][:16]}")):
+            raise KeyStoreError("signing needs a person's confirmation and did not get it")
+        return self._get(doc["store"]).sign_bytes(data)
+
     def attest(self, entries: Iterable[Entry], *, serial: int, namespace: str,
                confirm: Callable[[str], bool] | None = None) -> dict[str, Any]:
         """A signed manifest plus an OpenSSH signature over those bytes, for a machine that can
