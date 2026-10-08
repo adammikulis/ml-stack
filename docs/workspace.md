@@ -101,7 +101,7 @@ identity and runs it as an agent that takes and gives tasks ([docs/local-agent.m
 ### Subagents
 
 Each coding agent uses its own branch and worktree beside the primary checkout, as described
-in [the repository rules](../CLAUDE.md#worktrees). Before `announce done` or a final report,
+in [the repository rules](../AGENTS.md#worktrees). Before `announce done` or a final report,
 land the work, check for unique commits, uncommitted files and ignored state, remove the
 worktree and merged branch, prune, and verify the path is absent from `git worktree list`.
 The parent checks its subagents' cleanup. A retained worktree needs a handoff naming its path,
@@ -811,7 +811,7 @@ ml-stack-peers ls
 ml-stack-workspace remote-agent --device DEVICE_NAME --json \
   --max-output-tokens 4096 --max-rounds 12 --max-tool-calls 30 \
   --max-model-calls 24 --max-task-seconds 600 \
-  --task "Read CLAUDE.md, README.md and docs/workspace.md. Recommend documentation changes with file references, priorities and evidence. Do not edit files."
+  --task "Read AGENTS.md, README.md and docs/workspace.md. Recommend documentation changes with file references, priorities and evidence. Do not edit files."
 ```
 
 Replace `DEVICE_NAME` with a discovered peer's name. With one remote device, omit

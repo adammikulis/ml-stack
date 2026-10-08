@@ -10,7 +10,7 @@ from ml_stack.workspace import onboard
 
 
 def _required(text):
-    assert 'CLAUDE.md first and AGENTS.md' in text
+    assert 'AGENTS.md first, then CLAUDE.md when your harness is Claude Code' in text
     assert 'Required briefing for every agent' in text
     assert "If I can't use it, it's not done." in text
     assert 'live proof of the original workflow' in text

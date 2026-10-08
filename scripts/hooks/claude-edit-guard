@@ -264,7 +264,7 @@ def check(tool: str, given: dict) -> int:
             continue
         if docstring_lines(node) > DOCSTRING_LINES:
             return refuse(f"`{node.name}` has a {docstring_lines(node)}-line docstring. "
-                          f"CLAUDE.md allows one line saying what it returns; the rest "
+                          f"AGENTS.md allows one line saying what it returns; the rest "
                           f"belongs in the commit message.")
         if params(node) > MAX_PARAMS:
             return refuse(f"`{node.name}` takes {params(node)} parameters. Group them into "

@@ -1,14 +1,14 @@
 # Contributing to ml-stack
 
 Issues and pull requests are welcome. This is a one-person, pre-1.0 project: expect slow reviews and changes to
-names and layout. `CLAUDE.md` holds the working rules in full; the short version:
+names and layout. `AGENTS.md` holds the working rules in full; the short version:
 
 - Python 3.13. `python -m pip install -e ".[test]"` then `python -m pytest` (`--slow` adds the slow tests).
 - Commit subjects start with `feat:`, `fix:` or `chore:`; release-please builds the changelog from them.
 - Comments say what the code does, not why it was written that way.
 - Work in a separate branch and worktree beside the primary checkout. Completion includes
   landing the work, checking for anything unique, removing the worktree and merged branch,
-  and verifying cleanup before the final report (see `CLAUDE.md`, "Worktrees").
+  and verifying cleanup before the final report (see `AGENTS.md`, "Worktrees").
 - The gates in `scripts/gates/` refuse a new violation; run `scripts/budgets` before you push. A number in
   `budgets.json` may fall, never rise.
 - Tests build their own fixtures with invented names and never read `~/.ml-stack`. No real names, emails, hostnames

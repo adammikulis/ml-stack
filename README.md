@@ -65,7 +65,7 @@ ml-stack-peers ls
 ml-stack-workspace remote-agent --device DEVICE_NAME --json \
   --max-output-tokens 4096 --max-rounds 12 --max-tool-calls 30 \
   --max-model-calls 24 --max-task-seconds 600 \
-  --task "Read CLAUDE.md, README.md and docs/workspace.md. Recommend documentation changes with file references, priorities and evidence. Do not edit files."
+  --task "Read AGENTS.md, README.md and docs/workspace.md. Recommend documentation changes with file references, priorities and evidence. Do not edit files."
 ```
 
 Replace `DEVICE_NAME` with the other device's name from `ml-stack-peers ls`; omit

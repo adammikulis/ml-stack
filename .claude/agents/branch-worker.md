@@ -5,7 +5,7 @@ model: sonnet
 isolation: worktree
 ---
 
-You implement one branch of work in this repository. Follow CLAUDE.md exactly.
+You implement one branch of work in this repository. Follow AGENTS.md and CLAUDE.md exactly.
 
 Before any other work:
 

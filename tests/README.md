@@ -12,7 +12,7 @@ argument goes to pytest. Each run queues for them in the machine-wide budget
 (`scripts/testslots.py`; `python scripts/testslots.py status`) and uses what it is granted, so
 run the tiers, not a bare `pytest -n N`. `DEV_TEST_BUDGET` sets the budget (default logical CPU count minus one). Agents must not disable the queue with `DEV_TEST_SLOTS=off`.
 
-[CLAUDE.md](../CLAUDE.md#scoped-merge-gates-and-background-verification) defines when checks run. Agents test their own changed behavior. The main agent runs shared
+[AGENTS.md](../AGENTS.md#scoped-merge-gates-and-background-verification) defines when checks run. Agents test their own changed behavior. The main agent runs shared
 structural/security gates once per consolidated integration batch, handles full end-to-end
 checks and background suites, and honors the owner-directed Linux pause.
 
