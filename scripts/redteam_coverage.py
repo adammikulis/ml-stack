@@ -31,6 +31,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(ROOT / "src"))
 
+from gates import _redteam_memo as memo  # noqa: E402
 from gates._util import calls, dotted, parse, python_files, rel  # noqa: E402
 
 SRC = "src/ml_stack"
@@ -487,6 +488,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--update", action="store_true")
     parser.add_argument("--list", metavar="STATUS", help="print the surfaces with this status")
     args = parser.parse_args(argv)
+    only_check = args.check and not (args.write or args.update or args.list)
+    inputs = memo.inputs(ROOT) if only_check else ""
+    kept = memo.passed(ROOT, inputs) if only_check else None
+    if kept is not None:
+        print(kept)
+        return 0
     found = discover()
     owner, problems = resolve(found, load_map())
     table = rows(found, owner)
@@ -497,11 +504,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.list:
         print("\n".join(f"{r['id']}  {r['source']}  {r['note']}" for r in table
                         if r["status"] == args.list))
-    print(summary(table))
+    shown = summary(table)
+    print(shown)
     if args.check:
         failures = check(found, table, owner, problems)
         for failure in failures:
             print("FAIL " + failure, file=sys.stderr)
+        if only_check and not failures:
+            memo.record(ROOT, inputs, shown)
         return 1 if failures else 0
     return 0
 
