@@ -16,7 +16,7 @@ from pathlib import Path
 from ml_stack import macauth, sealing
 from ml_stack.files import writing
 from ml_stack.fleet import updates
-from ml_stack.http import Sealed, open_stream
+from ml_stack.http import Sealed, ServerError, open_stream
 from ml_stack.lock import Busy
 from ml_stack.serve.reclaim import busy_now
 from ml_stack.windows_private import restrict, validate
@@ -29,6 +29,10 @@ DRAIN_S = 20.0
 
 class ControlError(RuntimeError):
     """The installed launcher cannot replace the running daemon."""
+
+
+class Retryable(ControlError):
+    """The replacement was refused only because requests are in progress; asking again later can succeed."""
 
 
 def _directory(root: Path) -> Path:
@@ -95,8 +99,30 @@ def request_replacement(root: Path, port: int, running: dict, expected: str, *, 
 
     if restart not in {'idle', 'preserve'}:
         raise ControlError('Unknown daemon restart mode.')
-    body = json.dumps({'version': 1, 'instance': instance, 'expected': expected, 'restart': restart}).encode()
-    with open_stream(endpoint, method='POST', data=body, token=capability, timeout=DRAIN_S + 15,
+    request = {'version': 1, 'instance': instance, 'expected': expected, 'restart': restart}
+    deadline = time.monotonic() + 10
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise ControlError('Daemon replacement did not reach its idle boundary.')
+        try:
+            return _acknowledge(endpoint, request, capability, guard, remaining)
+        except ServerError as exc:
+            if exc.status != 409:
+                raise
+            try:
+                refusal = json.loads(exc.body)
+            except (ValueError, UnicodeError):
+                raise exc from None
+            if not isinstance(refusal, dict) or refusal.get('retryable') is not True:
+                raise
+            time.sleep(min(0.1, max(0, deadline - time.monotonic())))
+
+
+def _acknowledge(endpoint, request, capability, guard, timeout):
+    body = json.dumps(request).encode()
+    instance = request['instance']
+    with open_stream(endpoint, method='POST', data=body, token=capability, timeout=timeout,
                      headers={'Content-Type': 'application/json', sealing.HEADER: '2'}, guard=guard) as response:
         if response.headers.get(sealing.HEADER) != '1':
             raise ControlError('Daemon replacement acknowledgment must authenticate with sealing.')
@@ -178,7 +204,7 @@ class Control:
             restart = _restart_mode(request)
             preserved = self._stop(restart)
         except (ControlError, Busy, ValueError, OSError, sealing.SealError) as exc:
-            handler._send(409, {'error': str(exc)})
+            handler._send(409, {'error': str(exc), 'retryable': isinstance(exc, Retryable)})
             return True
         try:
             handler._send(202, {'instance': self.instance, 'stopping': True, 'preserved': preserved})
@@ -192,7 +218,7 @@ class Control:
         if restart == 'idle':
             with self.lock:
                 if self.stopping or self.active:
-                    raise ControlError('Daemon has requests in progress; retry when it is idle.')
+                    raise Retryable('Daemon has requests in progress; retry when it is idle.')
                 return self._admit(restart)
         with self.lock:
             if self.stopping:

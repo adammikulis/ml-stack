@@ -90,27 +90,41 @@ def test_owned_idle_replacement_retains_admission_and_rejects_new_work(device):
 def test_busy_device_keeps_work_and_allows_later_retry(device):
     root, port, control, busy, stopped, _active, _release = device
     busy[0] = True
-    with pytest.raises(ServerError):
+    with pytest.raises(ServerError) as refused:
         request_replacement(root, port, {'launcher_control': control.instance}, 'a' * 40)
+    assert json.loads(refused.value.body)['retryable'] is False
     assert not stopped.is_set()
     busy[0] = False
     assert request_replacement(root, port, {'launcher_control': control.instance}, 'a' * 40)['stopping']
 
 
-def test_request_in_progress_cannot_race_idle_replacement(device):
+@pytest.mark.parametrize('restart', ['idle', 'preserve'])
+def test_request_in_progress_cannot_race_idle_replacement(device, restart):
     root, port, control, _busy, stopped, active, release = device
+    control.restart_safe = lambda: {'queued': 0, 'running': 0}
     replies = []
     thread = threading.Thread(target=lambda: replies.append(request_json(
         f'http://127.0.0.1:{port}/jobs', method='POST', payload={})))
     thread.start()
     assert active.wait(2)
-    with pytest.raises(ServerError):
-        request_replacement(root, port, {'launcher_control': control.instance}, 'a' * 40)
-    assert not stopped.is_set()
+    replacements = []
+    errors = []
+    def replace():
+        try:
+            replacements.append(request_replacement(
+                root, port, {'launcher_control': control.instance}, 'a' * 40, restart=restart))
+        except (ServerError, ControlError, OSError) as exc:
+            errors.append(exc)
+    replacement = threading.Thread(target=replace)
+    replacement.start()
+    assert not stopped.wait(0.2)
+    assert replacement.is_alive()
     release.set()
     thread.join(3)
+    replacement.join(3)
     assert replies == [{'accepted': True}]
-    assert request_replacement(root, port, {'launcher_control': control.instance}, 'a' * 40)['stopping']
+    assert not errors and len(replacements) == 1
+    assert replacements[0]['stopping'] and stopped.wait(2)
 
 
 def test_other_control_instance_never_requests_shutdown(device):
