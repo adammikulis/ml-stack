@@ -9,7 +9,7 @@ from uuid import uuid4
 
 from agents import Agent, FunctionTool, Model, ModelSettings, RunConfig, Runner
 from agents.agent import ToolsToFinalOutputResult
-from agents.exceptions import MaxTurnsExceeded
+from agents.exceptions import MaxTurnsExceeded, UserError
 from agents.models.interface import ModelResponse
 from agents.usage import Usage
 from openai.types.responses import (
@@ -19,6 +19,7 @@ from openai.types.responses import (
 )
 
 from ml_stack.agent.sdk_runtime import input_items
+from ml_stack.workspace.localtools import TaskStopped
 
 
 class Conversation(Model):
@@ -102,6 +103,11 @@ async def _execute(chat: Any, schemas: list, run_by: dict, out: Any, nudge: str)
         return False
     except MaxTurnsExceeded:
         return True
+    except UserError as error:
+        # The SDK wraps a tool's exception; a task stop must reach the loop unwrapped.
+        if isinstance(error.__cause__, TaskStopped):
+            raise error.__cause__
+        raise
 
 
 def execute(chat: Any, schemas: list, run_by: dict, out: Any, nudge: str) -> bool:
