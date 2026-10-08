@@ -376,6 +376,10 @@ Do not accumulate ready branches or local-only commits until the end of a sessio
 worker to finish, or defer publication behind cleanup, unrelated work or background full suites.
 After publication, promptly complete the merged branch's maintained worktree cleanup.
 
+Verify that review and handoff recipients acknowledge the task and begin work. If a recipient
+is idle, schedule its follow-up task. With Codex collaboration tools, use `followup_task` for an
+idle or completed reviewer; `send_message` queues delivery without starting another turn.
+
 Agents may fetch and fast-forward the development branch from its upstream, and may push the
 development branch after review, scoped gates, and integration pass. Keep local and upstream
 development branches synchronized as part of completing the task; report the resulting commit
