@@ -464,7 +464,7 @@ def test_a_child_cannot_be_given_more_than_its_parent_holds(base, team):
 
 
 def test_children_are_capped_clamped_and_die_with_the_parent(base, team):
-    ws, lead, worker = team
+    ws, _lead, worker = team
     ws.limits.max_children = 2
     one = ws.delegate(worker, "a", 10 ** 9)
     ws.delegate(worker, "b")
