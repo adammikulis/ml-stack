@@ -9,12 +9,14 @@ import subprocess
 import sys
 import uuid
 import zipfile
+from dataclasses import dataclass
 from email.parser import BytesParser
 from pathlib import Path
 
 from ml_stack import runtime
 from ml_stack.files import writing
 from ml_stack.fleet.wheel_provenance import ORIGIN, stamp, wheel_commit
+from ml_stack.installed import extras
 from ml_stack.lock import only_one
 from ml_stack.net import packages
 from ml_stack.safenames import unpack
@@ -61,29 +63,35 @@ def current_wheel() -> Path | None:
     return found[0]
 
 
-def build(checkout: Path, commit: str, stage: Path, *, timeout: float,
-          into: tuple[Path, dict] | None = None) -> runtime.Runtime:
-    """Build an isolated runtime from the committed snapshot of one revision; its source stays in `stage`.
+@dataclass(frozen=True, slots=True)
+class Target:
+    """Where and by whom a runtime is built: its prefix, the creation record written first and the host Python."""
 
-    `into` is the (prefix, creator record) the tree is created with.
-    """
+    prefix: Path | None = None
+    creator: dict | None = None
+    host: Path | None = None
+
+
+def build(checkout: Path, commit: str, stage: Path, *, timeout: float, target: Target | None = None) -> runtime.Runtime:
+    """Build an isolated runtime from the committed snapshot of one revision; its source stays in `stage`."""
+    target = target or Target()
     if not re.fullmatch(r"[0-9a-f]{40}", commit):
         raise ValueError("a runtime is built from a full commit")
     snapshot = stage / "source.zip"
     _run(["git", "-C", str(checkout), "archive", "--format=zip", "--output", str(snapshot), commit], timeout)
     source, wheels = stage / "source", stage / "wheels"
     unpack(snapshot, source)
-    _run([str(_host_python()), "-m", "pip", "wheel", "--no-deps", "--wheel-dir", str(wheels), str(source)], timeout)
+    _run([str(target.host or sys.executable), "-m", "pip", "wheel", "--no-deps", "--wheel-dir", str(wheels), str(source)], timeout)
     found = list(wheels.glob("ml_stack-*.whl"))
     if len(found) != 1:
         raise ValueError("source revision must build exactly one ml-stack wheel")
     stamp(found[0], commit, checkout)
-    return prepare(found[0], commit, timeout=timeout, prefix=into[0] if into else None, creator=into[1] if into else None)
+    return prepare(found[0], commit, timeout=timeout, target=target)
 
 
-def prepare(wheel: Path, commit: str, *, timeout: float, prefix: Path | None = None,
-            creator: dict | None = None) -> runtime.Runtime:
-    """Build and verify a separate owned Python prefix for a stamped wheel; `creator` is recorded in it first."""
+def prepare(wheel: Path, commit: str, *, timeout: float, target: Target | None = None) -> runtime.Runtime:
+    """Build and verify a separate owned Python prefix for a stamped wheel; the target's creation record is written into it first."""
+    target = target or Target()
     if wheel_commit(wheel) != commit or not re.fullmatch(r"[0-9a-f]{40}", commit):
         raise ValueError("runtime wheel must match its full source revision")
     with zipfile.ZipFile(wheel) as archive:
@@ -110,32 +118,25 @@ def prepare(wheel: Path, commit: str, *, timeout: float, prefix: Path | None = N
         family.mkdir(mode=0o700, exist_ok=True)
         runtime.protect(family)
         runtime._owned(family)
-        if prefix is not None and prefix.parent != family:
+        if target.prefix is not None and target.prefix.parent != family:
             raise ValueError("a runtime prefix belongs in its own revision directory")
-        chosen = runtime.Runtime(prefix or family / uuid.uuid4().hex, commit, version, runtime.identity())
+        chosen = runtime.Runtime(target.prefix or family / uuid.uuid4().hex, commit, version, runtime.identity())
         chosen.prefix.mkdir(mode=0o700)
         runtime.protect(chosen.prefix)
-        if creator is not None:
-            (chosen.prefix / "created.json").write_text(json.dumps(creator), encoding="utf-8")
+        if target.creator is not None:
+            (chosen.prefix / "created.json").write_text(json.dumps(target.creator), encoding="utf-8")
+        done = False
         try:
-            _run([str(_host_python()), "-m", "venv", str(chosen.prefix)], timeout)
+            _run([str(target.host or sys.executable), "-m", "venv", str(chosen.prefix)], timeout)
             cached = cache_wheel(wheel, commit, prefix=chosen.prefix)
-            from ml_stack.installed import extras
             spec = f"ml-stack[{extras()}] @ {cached.as_uri()}"
             _run([str(chosen.python), "-m", "pip", "install", spec], timeout)
             runtime.verify(chosen)
-        except BaseException:
-            shutil.rmtree(chosen.prefix, ignore_errors=True)
-            raise
+            done = True
+        finally:
+            if not done:
+                shutil.rmtree(chosen.prefix, ignore_errors=True)
         return chosen
-
-
-def _host_python() -> Path:
-    from .environment import Environment
-    base = Environment(runtime.directory() / "bootstrap").host_python()
-    if base is None:
-        raise OSError("install Python 3.13 to prepare an isolated runtime")
-    return base
 
 
 def _run(argv: list[str], timeout: float) -> str:

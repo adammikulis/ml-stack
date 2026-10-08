@@ -5,16 +5,16 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import subprocess
-import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 
-from ml_stack import runtime, runtime_board, runtime_deploy, runtime_store
+from ml_stack import jobs, runtime, runtime_board, runtime_deploy, runtime_store
+from ml_stack.command import Group, flag
 from ml_stack.fleet import runtime_wheel
 from ml_stack.home import expand
 from ml_stack.lock import held_by
-from ml_stack.platform import detached_kwargs
+from ml_stack.log import say, warn
 
 
 def _source(path: Path) -> Path:
@@ -53,11 +53,9 @@ def plan_from(args: argparse.Namespace) -> runtime_deploy.Plan:
 
 def _start_background(argv: list[str]) -> None:
     root = runtime_deploy.prepare_root()
-    with os.fdopen(os.open(root / "ensure.log", os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600), "ab") as log:
-        log.write(f"started: {time.strftime('%FT%T')} argv: {' '.join(argv)}\n".encode())
-        log.flush()
-        subprocess.Popen([sys.executable, "-m", "ml_stack.runtime_cli", *argv], stdin=subprocess.DEVNULL,
-                         stdout=log, stderr=subprocess.STDOUT, **detached_kwargs())
+    log = root / "ensure.log"
+    os.close(os.open(log, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600))
+    jobs.detach("ml_stack.runtime_cli", argv, log=log)
 
 
 def _building() -> str:
@@ -65,22 +63,31 @@ def _building() -> str:
     return held_by(lock) if lock.exists() else ""
 
 
-def _ensure(args: argparse.Namespace, argv: list[str]) -> int:
+def _again(args: argparse.Namespace) -> list[str]:
+    """The ensure command line that repeats this one without --background."""
+    words = ["ensure", "--ref", args.ref, "--timeout", str(args.timeout), "--wait", str(args.wait)]
+    for name in ("checkout", "launchers", "agent", "label"):
+        if getattr(args, name):
+            words += [f"--{name}", getattr(args, name)]
+    return words + [f"--{name.replace('_', '-')}" for name in ("force", "force_build") if getattr(args, name)]
+
+
+def _ensure(args: argparse.Namespace) -> int:
     plan = plan_from(args)
     if args.background:
         settled = runtime_deploy.settled(plan)
         if settled:
-            print(f"runtime {plan.commit[:7]} is {settled}")
+            say(f"runtime {plan.commit[:7]} is {settled}")
         elif _building():
-            print("runtime build already running")
+            say("runtime build already running")
         else:
-            _start_background([word for word in argv if word != "--background"])
-            print(f"runtime {plan.commit[:7]} is building in the background; log: {runtime.directory() / 'ensure.log'}")
+            _start_background(_again(args))
+            say(f"runtime {plan.commit[:7]} is building in the background; log: {runtime.directory() / 'ensure.log'}")
         return 0
     previous = str(runtime_store.selection().get("commit", ""))
     outcome = runtime_deploy.ensure(plan, force=args.force, force_build=args.force_build)
     runtime_board.announce(outcome, previous, verb="ensure", agent=args.agent, label=args.label)
-    print(f"{outcome.action} {outcome.commit[:7]} {outcome.detail}".strip())
+    say(f"{outcome.action} {outcome.commit[:7]} {outcome.detail}".strip())
     return 0 if outcome.ok else 1
 
 
@@ -88,8 +95,24 @@ def _rollback(args: argparse.Namespace) -> int:
     previous = str(runtime_store.selection().get("commit", ""))
     outcome = runtime_deploy.rollback(plan_from(args), args.to)
     runtime_board.announce(outcome, previous, verb="rollback to", agent=args.agent, label=args.label)
-    print(f"{outcome.action} {outcome.commit[:7]} {outcome.detail}".strip())
+    say(f"{outcome.action} {outcome.commit[:7]} {outcome.detail}".strip())
     return 0 if outcome.ok else 1
+
+
+def _status(args: argparse.Namespace) -> int:
+    plan = plan_from(args)
+    say(json.dumps(status_record(plan), indent=2) if args.json else "\n".join(status_lines(plan)))
+    return 0
+
+
+def _reported(run: Callable[[argparse.Namespace], int]) -> Callable[[argparse.Namespace], int]:
+    def wrapped(args: argparse.Namespace) -> int:
+        try:
+            return run(args)
+        except (runtime_deploy.DeployError, OSError, ValueError) as exc:
+            warn(f"ml-stack runtime: {exc}")
+            return 1
+    return wrapped
 
 
 def _verdict(plan: runtime_deploy.Plan) -> str:
@@ -136,40 +159,27 @@ def status_record(plan: runtime_deploy.Plan) -> dict:
             "unmanaged": runtime_store.unmanaged()}
 
 
-def main(argv: list[str] | None = None) -> int:
-    """Entry point of ml-stack-runtime."""
-    parser = argparse.ArgumentParser(prog="ml-stack-runtime", description=__doc__)
-    common = argparse.ArgumentParser(add_help=False)
-    common.add_argument("--checkout", default="", help="source checkout (default: the one recorded)")
-    common.add_argument("--launchers", default="", help="directory holding the console launchers")
-    common.add_argument("--timeout", type=float, default=runtime_deploy.BUILD_TIMEOUT)
-    common.add_argument("--agent", default="", help="workspace agent that posts the outcome (default: the environment's)")
-    common.add_argument("--label", default="", help="helper label shown beside the agent")
-    common.add_argument("--wait", type=float, default=runtime_deploy.CLAIM_WAIT_S,
-                        help="seconds to wait for another owner's install claim")
-    sub = parser.add_subparsers(dest="command", required=True)
-    ensure = sub.add_parser("ensure", parents=[common], help="make the checkout's commit the selected runtime")
-    ensure.add_argument("--ref", default="HEAD")
-    ensure.add_argument("--force", action="store_true", help="rebuild even when held or current")
-    ensure.add_argument("--force-build", action="store_true", help="build again at once after a failed build (needs an agent)")
-    ensure.add_argument("--background", action="store_true", help="return at once; build in a detached process")
-    state = sub.add_parser("status", parents=[common], help="show the selected runtime and the fallbacks kept")
-    state.add_argument("--json", action="store_true")
-    back = sub.add_parser("rollback", parents=[common], help="select the newest earlier verified runtime")
-    back.add_argument("--to", default="", help="commit prefix to select")
-    words = list(sys.argv[1:] if argv is None else argv)
-    args = parser.parse_args(words)
-    try:
-        if args.command == "ensure":
-            return _ensure(args, words)
-        if args.command == "rollback":
-            return _rollback(args)
-        plan = plan_from(args)
-        print(json.dumps(status_record(plan), indent=2) if args.json else "\n".join(status_lines(plan)))
-        return 0
-    except (runtime_deploy.DeployError, OSError, ValueError) as exc:
-        print(f"ml-stack-runtime: {exc}", file=sys.stderr)
-        return 1
+COMMON = [
+    flag("--checkout", default="", help="source checkout (default: the one recorded)"),
+    flag("--launchers", default="", help="absolute directory holding the console launchers (default: the one recorded)"),
+    flag("--timeout", type=float, default=runtime_deploy.BUILD_TIMEOUT),
+    flag("--wait", type=float, default=runtime_deploy.CLAIM_WAIT_S, help="seconds to wait for another owner's install claim"),
+    flag("--agent", default="", help="workspace agent that holds the claims and posts the outcome (default: the environment's)"),
+    flag("--label", default="", help="helper label shown beside the agent"),
+]
+
+GROUP = Group("ml-stack runtime", "Build, verify and select the installed runtime from the source checkout; status; rollback.")
+GROUP.add("ensure", _reported(_ensure), help="make the checkout's commit the selected runtime", options=[
+    *COMMON, flag("--ref", default="HEAD"),
+    flag("--force", action="store_true", help="rebuild even when held or current"),
+    flag("--force-build", action="store_true", help="build again at once after a failed build (needs an agent)"),
+    flag("--background", action="store_true", help="return at once; build in a detached process")])
+GROUP.add("status", _reported(_status), help="show the selected runtime, the fallbacks kept and unmanaged trees",
+          options=[*COMMON, flag("--json", action="store_true")])
+GROUP.add("rollback", _reported(_rollback), help="select the newest earlier verified runtime (needs an agent)",
+          options=[*COMMON, flag("--to", default="", help="commit prefix to select")])
+
+main = GROUP.run
 
 
 if __name__ == "__main__":

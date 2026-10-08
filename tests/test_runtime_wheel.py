@@ -51,10 +51,8 @@ def test_stamp_records_the_source_and_hashes_every_installed_file(tmp_path):
 
 @pytest.mark.parametrize("frozen", [False, True])
 def test_build_uses_the_committed_snapshot_of_the_named_commit(tmp_path, monkeypatch, frozen):
-    from ml_stack.fleet.environment import Environment
     host = tmp_path / "host" / "python"
     monkeypatch.setattr(sys, "frozen", frozen, raising=False)
-    monkeypatch.setattr(Environment, "host_python", lambda self: host)
     calls = []
 
     def run(argv, timeout):
@@ -72,7 +70,7 @@ def test_build_uses_the_committed_snapshot_of_the_named_commit(tmp_path, monkeyp
     monkeypatch.setattr(runtime_wheel, "prepare", lambda wheel, commit, timeout, **kw: chosen)
     stage = tmp_path / "stage"
     stage.mkdir()
-    assert runtime_wheel.build(tmp_path, COMMIT, stage, timeout=7) == chosen
+    assert runtime_wheel.build(tmp_path, COMMIT, stage, timeout=7, target=runtime_wheel.Target(host=host)) == chosen
     assert calls[0][-1] == COMMIT
     assert calls[1][0] == str(host)
     assert str(tmp_path) not in calls[1]
@@ -89,7 +87,6 @@ def test_a_failed_prepare_leaves_no_prefix_behind(tmp_path, monkeypatch):
         archive.writestr("ml_stack-0.1.0.dist-info/METADATA", "Name: ml-stack\nVersion: 0.1.0\n")
     runtime_wheel.stamp(wheel, COMMIT, tmp_path)
     monkeypatch.setattr(runtime_wheel, "_run", lambda argv, timeout: (_ for _ in ()).throw(ValueError("missing dependency")))
-    monkeypatch.setattr(runtime_wheel, "_host_python", lambda: tmp_path / "python")
     with pytest.raises(ValueError, match="missing dependency"):
         runtime_wheel.prepare(wheel, COMMIT, timeout=7)
     assert not list((runtime.directory() / COMMIT).iterdir())
@@ -228,16 +225,18 @@ def test_third_party_installs_keep_matching_bundled_wheels(tmp_path, monkeypatch
 
 
 def test_frozen_build_uses_verified_external_host_python(tmp_path, monkeypatch):
+    from ml_stack import runtime_deploy
     from ml_stack.fleet.environment import Environment
     host = tmp_path / "host" / "python"
     monkeypatch.setattr(sys, "frozen", True, raising=False)
     monkeypatch.setattr(Environment, "host_python", lambda self: host)
-    assert runtime_wheel._host_python() == host
+    assert runtime_deploy.host_python() == host
 
 
 def test_missing_host_python_refuses_before_selection(tmp_path, monkeypatch):
     from ml_stack.fleet.environment import Environment
     monkeypatch.setattr(Environment, "host_python", lambda self: None)
     monkeypatch.setattr(runtime, "publish", lambda value: pytest.fail("selected failed build"))
+    from ml_stack import runtime_deploy
     with pytest.raises(OSError, match=r"Python 3\.13"):
-        runtime_wheel._host_python()
+        runtime_deploy.host_python()

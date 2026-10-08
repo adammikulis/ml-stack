@@ -10,7 +10,7 @@ import stat
 import subprocess
 import sys
 import tempfile
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 
 from ml_stack import windows_private
@@ -139,7 +139,8 @@ def publish(runtime: Runtime) -> None:
         raise OSError("runtime selection cannot replace a symbolic link")
     with writing(target) as temporary:
         protect(temporary)
-        temporary.write_text(json.dumps({"format": 1, **asdict(runtime), "prefix": str(runtime.prefix)}), encoding="utf-8")
+        temporary.write_text(json.dumps({"format": 1, "version": runtime.version, "commit": runtime.commit,
+                                         "identity": runtime.identity, "prefix": str(runtime.prefix)}), encoding="utf-8")
         protect(temporary)
 
 

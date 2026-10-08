@@ -83,7 +83,7 @@ def builder(hook_code=0, log=None, epoch=0):
         runtime_wheel.stamp(built, plan.commit, plan.checkout)
         if log is not None:
             log.append(plan.commit)
-        return runtime_wheel.prepare(built, plan.commit, timeout=120, prefix=prefix)
+        return runtime_wheel.prepare(built, plan.commit, timeout=120, target=runtime_wheel.Target(prefix))
     return build
 
 
@@ -352,7 +352,7 @@ def test_a_current_runtime_answers_without_taking_the_build_lock(world):
         assert runtime_deploy.ensure(plan_for(repo, launchers), builder=builder()).action == "current"
 
 
-def fake_tree(root, commit_id, verified_at, name, **options):
+def tree_at(root, commit_id, verified_at, name, **options):
     importable, created = options.get("importable", True), options.get("created", True)
     prefix = root / commit_id / f"{len(name):032x}"
     (prefix / "bin").mkdir(parents=True)
@@ -384,9 +384,9 @@ def run_launcher(path, cwd=None):
 def test_launcher_fallback_prefers_the_selection_honours_the_hold_and_survives_a_bad_timestamp(tmp_path):
     root = tmp_path / "root"
     a, b, c = "a" * 40, "b" * 40, "c" * 40
-    fake_tree(root, a, "garbage", "tree-a")
-    chosen = fake_tree(root, b, 100.0, "tree-b")
-    fake_tree(root, c, 200.0, "tree-c")
+    tree_at(root, a, "garbage", "tree-a")
+    chosen = tree_at(root, b, 100.0, "tree-b")
+    tree_at(root, c, 200.0, "tree-c")
     launcher = render_launcher(tmp_path, root)
     (root / "selected.json").write_text(json.dumps({"prefix": str(chosen), "commit": b}))
     assert run_launcher(launcher).stdout.strip() == "tree-b"
@@ -521,7 +521,7 @@ def test_a_rollback_hold_does_not_block_recovery_and_background_does_not_spawn_w
 def test_discarding_a_tree_unlaunches_it_even_when_deletion_fails(world, monkeypatch):
     import shutil
     runtime_deploy.prepare_root()
-    prefix = fake_tree(runtime.directory(), "d" * 40, 5.0, "tree-d")
+    prefix = tree_at(runtime.directory(), "d" * 40, 5.0, "tree-d")
     monkeypatch.setattr(shutil, "rmtree", lambda *a, **k: None)
     runtime_store.discard(prefix)
     assert prefix.exists() and not (prefix / "verified.json").exists() and runtime_store.rejected(prefix)
@@ -667,7 +667,7 @@ def test_the_canonical_acting_identity_is_the_physical_owner_and_needs_the_claim
 def test_a_symlinked_family_directory_is_never_listed_collected_or_deleted(world, tmp_path):
     runtime_deploy.prepare_root()
     outside = tmp_path / "outside"
-    prefix = fake_tree(outside, "a" * 40, 5.0, "tree-x")
+    prefix = tree_at(outside, "a" * 40, 5.0, "tree-x")
     (runtime.directory() / ("a" * 40)).symlink_to(outside / ("a" * 40))
     assert runtime_store.trees() == [] and runtime_store.candidates() == []
     runtime_store.collect(set(), keep=0)
@@ -676,11 +676,11 @@ def test_a_symlinked_family_directory_is_never_listed_collected_or_deleted(world
 
 def test_the_launcher_fallback_needs_this_tools_creation_record(tmp_path):
     root = tmp_path / "root"
-    fake_tree(root, "a" * 40, 100.0, "tree-a", created=False)
+    tree_at(root, "a" * 40, 100.0, "tree-a", created=False)
     launcher = render_launcher(tmp_path, root)
     done = run_launcher(launcher)
     assert done.returncode != 0 and "no usable" in done.stderr
-    fake_tree(root, "b" * 40, 50.0, "tree-b")
+    tree_at(root, "b" * 40, 50.0, "tree-b")
     assert run_launcher(launcher).stdout.strip() == "tree-b"
 
 

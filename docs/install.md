@@ -177,12 +177,12 @@ Everything is adjustable later:
 
 ## Following the source checkout
 
-`ml-stack-runtime` keeps the installed runtime on the commit a source checkout's development branch is on. Each runtime is its own tree, `~/.ml-stack/runtimes/<platform>/<commit>/<id>`, built from `git archive <commit>` with the extras a full install asks for and never changed afterwards. Console launchers (`ml-stack-workspace` and the rest) are small files that exec the selected tree's interpreter with `-I`.
+`ml-stack runtime` keeps the installed runtime on the commit a source checkout's development branch is on. Each runtime is its own tree, `~/.ml-stack/runtimes/<platform>/<commit>/<id>`, built from `git archive <commit>` with the extras a full install asks for and never changed afterwards. Console launchers (`ml-stack-workspace` and the rest) are small files that exec the selected tree's interpreter with `-I`.
 
 ```
-ml-stack-runtime ensure [--checkout PATH] [--launchers DIR] [--ref REF] [--force] [--background]
-ml-stack-runtime status [--json]
-ml-stack-runtime rollback [--to COMMIT]
+ml-stack runtime ensure [--checkout PATH] [--launchers DIR] [--ref REF] [--force] [--force-build] [--background] [--agent NAME]
+ml-stack runtime status [--json]
+ml-stack runtime rollback [--to COMMIT]
 ```
 
 The first `ensure` names `--checkout` and, to have launchers rewritten, `--launchers DIR` (an absolute directory holding the console launchers); both are recorded for later runs. Without a launcher directory the selection changes and launchers are left alone. When an authenticated workspace agent is known (`--agent`, `ML_STACK_WORKSPACE_AGENT`, or the session's agent passed by the hooks), `ensure` takes its install claims and posts to the board as that agent. With none (launcher recovery, a hook outside an agent session) it takes no claim and posts nothing, relying on the build lock and writing `ensure.log`. `rollback` and `ensure --force-build` need an agent. `status` needs none and writes nothing. `ensure` does nothing when the selection already names the commit. Otherwise it takes the build lock, then `claim install` on the new tree, the launcher directory and the selection file, and:

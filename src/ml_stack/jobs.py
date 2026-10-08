@@ -13,7 +13,6 @@ import json
 import os
 import signal
 import subprocess
-import sys
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field

@@ -725,7 +725,7 @@ def follow_runtime(*, idle: Callable[[], bool], schedule: UpdateSchedule = _FOLL
                             return
             except Busy:
                 pass
-            except Exception as exc:                  # noqa: BLE001 - a loop that dies stops following
+            except (OSError, ValueError, subprocess.SubprocessError) as exc:
                 note(checked_at=time.time(), error=str(exc))
             time.sleep(schedule.interval)
 

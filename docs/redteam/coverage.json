@@ -1,8 +1,8 @@
 {
- "surfaces": 795,
+ "surfaces": 808,
  "by_status": {
-  "covered": 470,
-  "partial": 199,
+  "covered": 484,
+  "partial": 198,
   "uncovered": 53,
   "n/a": 73,
   "unmapped": 0
@@ -51,7 +51,7 @@
    "unmapped": 0
   },
   "human": {
-   "covered": 104,
+   "covered": 110,
    "partial": 0,
    "uncovered": 0,
    "n/a": 0,
@@ -79,7 +79,7 @@
    "unmapped": 0
   },
   "parser": {
-   "covered": 74,
+   "covered": 75,
    "partial": 0,
    "uncovered": 49,
    "n/a": 0,
@@ -100,8 +100,8 @@
    "unmapped": 0
   },
   "spawn": {
-   "covered": 48,
-   "partial": 62,
+   "covered": 55,
+   "partial": 61,
    "uncovered": 0,
    "n/a": 2,
    "unmapped": 0
@@ -2989,6 +2989,26 @@
    "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
   },
   {
+   "id": "human:fleet/runtime_wheel.py:prepare",
+   "kind": "human",
+   "source": "fleet/runtime_wheel.py:prepare",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item",
+    "tests/test_requests_floor.py::test_the_request_commands_refuse_a_process_an_agent_started",
+    "tests/test_redteam_requests.py::test_a_model_cannot_answer_its_own_request_by_any_tool_name_or_command_text",
+    "tests/test_workspace_model.py::test_only_a_person_or_launcher_process_records_a_verified_model",
+    "tests/test_workspace_model.py::test_an_agent_cannot_verify_itself_or_overwrite_a_verified_model_or_set_anothers",
+    "tests/test_workspace_model.py::test_a_claimed_model_changes_no_right"
+   ],
+   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+  },
+  {
    "id": "human:gym/decision_process.py:DecisionProcess.__init__",
    "kind": "human",
    "source": "gym/decision_process.py:DecisionProcess.__init__",
@@ -3232,6 +3252,106 @@
    "id": "human:requests/inbox.py:answer",
    "kind": "human",
    "source": "requests/inbox.py:answer",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item",
+    "tests/test_requests_floor.py::test_the_request_commands_refuse_a_process_an_agent_started",
+    "tests/test_redteam_requests.py::test_a_model_cannot_answer_its_own_request_by_any_tool_name_or_command_text",
+    "tests/test_workspace_model.py::test_only_a_person_or_launcher_process_records_a_verified_model",
+    "tests/test_workspace_model.py::test_an_agent_cannot_verify_itself_or_overwrite_a_verified_model_or_set_anothers",
+    "tests/test_workspace_model.py::test_a_claimed_model_changes_no_right"
+   ],
+   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+  },
+  {
+   "id": "human:runtime.py:publish",
+   "kind": "human",
+   "source": "runtime.py:publish",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item",
+    "tests/test_requests_floor.py::test_the_request_commands_refuse_a_process_an_agent_started",
+    "tests/test_redteam_requests.py::test_a_model_cannot_answer_its_own_request_by_any_tool_name_or_command_text",
+    "tests/test_workspace_model.py::test_only_a_person_or_launcher_process_records_a_verified_model",
+    "tests/test_workspace_model.py::test_an_agent_cannot_verify_itself_or_overwrite_a_verified_model_or_set_anothers",
+    "tests/test_workspace_model.py::test_a_claimed_model_changes_no_right"
+   ],
+   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+  },
+  {
+   "id": "human:runtime.py:write_launcher",
+   "kind": "human",
+   "source": "runtime.py:write_launcher",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item",
+    "tests/test_requests_floor.py::test_the_request_commands_refuse_a_process_an_agent_started",
+    "tests/test_redteam_requests.py::test_a_model_cannot_answer_its_own_request_by_any_tool_name_or_command_text",
+    "tests/test_workspace_model.py::test_only_a_person_or_launcher_process_records_a_verified_model",
+    "tests/test_workspace_model.py::test_an_agent_cannot_verify_itself_or_overwrite_a_verified_model_or_set_anothers",
+    "tests/test_workspace_model.py::test_a_claimed_model_changes_no_right"
+   ],
+   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+  },
+  {
+   "id": "human:runtime_deploy.py:prepare_root",
+   "kind": "human",
+   "source": "runtime_deploy.py:prepare_root",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item",
+    "tests/test_requests_floor.py::test_the_request_commands_refuse_a_process_an_agent_started",
+    "tests/test_redteam_requests.py::test_a_model_cannot_answer_its_own_request_by_any_tool_name_or_command_text",
+    "tests/test_workspace_model.py::test_only_a_person_or_launcher_process_records_a_verified_model",
+    "tests/test_workspace_model.py::test_an_agent_cannot_verify_itself_or_overwrite_a_verified_model_or_set_anothers",
+    "tests/test_workspace_model.py::test_a_claimed_model_changes_no_right"
+   ],
+   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+  },
+  {
+   "id": "human:runtime_launchers.py:_replace",
+   "kind": "human",
+   "source": "runtime_launchers.py:_replace",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item",
+    "tests/test_requests_floor.py::test_the_request_commands_refuse_a_process_an_agent_started",
+    "tests/test_redteam_requests.py::test_a_model_cannot_answer_its_own_request_by_any_tool_name_or_command_text",
+    "tests/test_workspace_model.py::test_only_a_person_or_launcher_process_records_a_verified_model",
+    "tests/test_workspace_model.py::test_an_agent_cannot_verify_itself_or_overwrite_a_verified_model_or_set_anothers",
+    "tests/test_workspace_model.py::test_a_claimed_model_changes_no_right"
+   ],
+   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+  },
+  {
+   "id": "human:runtime_launchers.py:install",
+   "kind": "human",
+   "source": "runtime_launchers.py:install",
    "trust": "an agent process or a peer",
    "attacker": "an agent or a forged grant takes an action only a person may take",
    "status": "covered",
@@ -7401,6 +7521,19 @@
    "note": ""
   },
   {
+   "id": "parser:workspace/device_metadata.py",
+   "kind": "parser",
+   "source": "workspace/device_metadata.py",
+   "trust": "files, pages and archives from outside",
+   "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
+   "status": "covered",
+   "tests": [
+    "tests/test_workspace_bus.py",
+    "tests/test_workspace_rules.py"
+   ],
+   "note": ""
+  },
+  {
    "id": "parser:workspace/filestore.py",
    "kind": "parser",
    "source": "workspace/filestore.py",
@@ -10531,11 +10664,17 @@
    "source": "fleet/runtime_wheel.py:_run",
    "trust": "arguments built from model output, peer messages or file names",
    "attacker": "attacker text becomes a command line, environment or working directory",
-   "status": "partial",
+   "status": "covered",
    "tests": [
-    "tests/test_redteam_spawn.py::test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line"
+    "tests/test_redteam_runtime_deploy.py::test_a_checkout_path_with_shell_punctuation_reaches_git_as_one_argument",
+    "tests/test_redteam_runtime_deploy.py::test_a_ref_that_looks_like_an_option_or_a_command_names_no_commit",
+    "tests/test_redteam_runtime_deploy.py::test_forward_hands_hostile_arguments_to_the_selected_interpreter_unchanged",
+    "tests/test_redteam_runtime_deploy.py::test_a_state_root_with_shell_punctuation_still_builds_verifies_and_installs_launchers",
+    "tests/test_redteam_runtime_deploy.py::test_the_smoke_runs_hooks_from_a_source_path_with_punctuation_as_one_argument",
+    "tests/test_redteam_runtime_deploy.py::test_the_launcher_directory_with_shell_punctuation_is_one_path",
+    "tests/test_redteam_runtime_deploy.py::test_the_tracker_hands_a_hostile_checkout_path_to_the_runtime_command_as_one_argument"
    ],
-   "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
+   "note": "Checkout paths, refs, state roots, launcher directories and forwarded arguments are single argv items with no shell; a ref starting with a dash names no commit; module and function names in launchers are matched against a pattern"
   },
   {
    "id": "spawn:fleet/settings.py:_has_battery",
@@ -10608,6 +10747,24 @@
     "tests/test_redteam_spawn.py::test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line"
    ],
    "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
+  },
+  {
+   "id": "spawn:fleet/updates.py:pip_install",
+   "kind": "spawn",
+   "source": "fleet/updates.py:pip_install",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_runtime_deploy.py::test_a_checkout_path_with_shell_punctuation_reaches_git_as_one_argument",
+    "tests/test_redteam_runtime_deploy.py::test_a_ref_that_looks_like_an_option_or_a_command_names_no_commit",
+    "tests/test_redteam_runtime_deploy.py::test_forward_hands_hostile_arguments_to_the_selected_interpreter_unchanged",
+    "tests/test_redteam_runtime_deploy.py::test_a_state_root_with_shell_punctuation_still_builds_verifies_and_installs_launchers",
+    "tests/test_redteam_runtime_deploy.py::test_the_smoke_runs_hooks_from_a_source_path_with_punctuation_as_one_argument",
+    "tests/test_redteam_runtime_deploy.py::test_the_launcher_directory_with_shell_punctuation_is_one_path",
+    "tests/test_redteam_runtime_deploy.py::test_the_tracker_hands_a_hostile_checkout_path_to_the_runtime_command_as_one_argument"
+   ],
+   "note": "Checkout paths, refs, state roots, launcher directories and forwarded arguments are single argv items with no shell; a ref starting with a dash names no commit; module and function names in launchers are matched against a pattern"
   },
   {
    "id": "spawn:fleet/updates.py:relaunch.go",
@@ -10989,6 +11146,96 @@
     "tests/test_redteam_spawn.py::test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line"
    ],
    "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
+  },
+  {
+   "id": "spawn:runtime.py:forward",
+   "kind": "spawn",
+   "source": "runtime.py:forward",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_runtime_deploy.py::test_a_checkout_path_with_shell_punctuation_reaches_git_as_one_argument",
+    "tests/test_redteam_runtime_deploy.py::test_a_ref_that_looks_like_an_option_or_a_command_names_no_commit",
+    "tests/test_redteam_runtime_deploy.py::test_forward_hands_hostile_arguments_to_the_selected_interpreter_unchanged",
+    "tests/test_redteam_runtime_deploy.py::test_a_state_root_with_shell_punctuation_still_builds_verifies_and_installs_launchers",
+    "tests/test_redteam_runtime_deploy.py::test_the_smoke_runs_hooks_from_a_source_path_with_punctuation_as_one_argument",
+    "tests/test_redteam_runtime_deploy.py::test_the_launcher_directory_with_shell_punctuation_is_one_path",
+    "tests/test_redteam_runtime_deploy.py::test_the_tracker_hands_a_hostile_checkout_path_to_the_runtime_command_as_one_argument"
+   ],
+   "note": "Checkout paths, refs, state roots, launcher directories and forwarded arguments are single argv items with no shell; a ref starting with a dash names no commit; module and function names in launchers are matched against a pattern"
+  },
+  {
+   "id": "spawn:runtime.py:verify",
+   "kind": "spawn",
+   "source": "runtime.py:verify",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_runtime_deploy.py::test_a_checkout_path_with_shell_punctuation_reaches_git_as_one_argument",
+    "tests/test_redteam_runtime_deploy.py::test_a_ref_that_looks_like_an_option_or_a_command_names_no_commit",
+    "tests/test_redteam_runtime_deploy.py::test_forward_hands_hostile_arguments_to_the_selected_interpreter_unchanged",
+    "tests/test_redteam_runtime_deploy.py::test_a_state_root_with_shell_punctuation_still_builds_verifies_and_installs_launchers",
+    "tests/test_redteam_runtime_deploy.py::test_the_smoke_runs_hooks_from_a_source_path_with_punctuation_as_one_argument",
+    "tests/test_redteam_runtime_deploy.py::test_the_launcher_directory_with_shell_punctuation_is_one_path",
+    "tests/test_redteam_runtime_deploy.py::test_the_tracker_hands_a_hostile_checkout_path_to_the_runtime_command_as_one_argument"
+   ],
+   "note": "Checkout paths, refs, state roots, launcher directories and forwarded arguments are single argv items with no shell; a ref starting with a dash names no commit; module and function names in launchers are matched against a pattern"
+  },
+  {
+   "id": "spawn:runtime_deploy.py:git",
+   "kind": "spawn",
+   "source": "runtime_deploy.py:git",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_runtime_deploy.py::test_a_checkout_path_with_shell_punctuation_reaches_git_as_one_argument",
+    "tests/test_redteam_runtime_deploy.py::test_a_ref_that_looks_like_an_option_or_a_command_names_no_commit",
+    "tests/test_redteam_runtime_deploy.py::test_forward_hands_hostile_arguments_to_the_selected_interpreter_unchanged",
+    "tests/test_redteam_runtime_deploy.py::test_a_state_root_with_shell_punctuation_still_builds_verifies_and_installs_launchers",
+    "tests/test_redteam_runtime_deploy.py::test_the_smoke_runs_hooks_from_a_source_path_with_punctuation_as_one_argument",
+    "tests/test_redteam_runtime_deploy.py::test_the_launcher_directory_with_shell_punctuation_is_one_path",
+    "tests/test_redteam_runtime_deploy.py::test_the_tracker_hands_a_hostile_checkout_path_to_the_runtime_command_as_one_argument"
+   ],
+   "note": "Checkout paths, refs, state roots, launcher directories and forwarded arguments are single argv items with no shell; a ref starting with a dash names no commit; module and function names in launchers are matched against a pattern"
+  },
+  {
+   "id": "spawn:runtime_deploy.py:smoke",
+   "kind": "spawn",
+   "source": "runtime_deploy.py:smoke",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_runtime_deploy.py::test_a_checkout_path_with_shell_punctuation_reaches_git_as_one_argument",
+    "tests/test_redteam_runtime_deploy.py::test_a_ref_that_looks_like_an_option_or_a_command_names_no_commit",
+    "tests/test_redteam_runtime_deploy.py::test_forward_hands_hostile_arguments_to_the_selected_interpreter_unchanged",
+    "tests/test_redteam_runtime_deploy.py::test_a_state_root_with_shell_punctuation_still_builds_verifies_and_installs_launchers",
+    "tests/test_redteam_runtime_deploy.py::test_the_smoke_runs_hooks_from_a_source_path_with_punctuation_as_one_argument",
+    "tests/test_redteam_runtime_deploy.py::test_the_launcher_directory_with_shell_punctuation_is_one_path",
+    "tests/test_redteam_runtime_deploy.py::test_the_tracker_hands_a_hostile_checkout_path_to_the_runtime_command_as_one_argument"
+   ],
+   "note": "Checkout paths, refs, state roots, launcher directories and forwarded arguments are single argv items with no shell; a ref starting with a dash names no commit; module and function names in launchers are matched against a pattern"
+  },
+  {
+   "id": "spawn:runtime_launchers.py:install",
+   "kind": "spawn",
+   "source": "runtime_launchers.py:install",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_runtime_deploy.py::test_a_checkout_path_with_shell_punctuation_reaches_git_as_one_argument",
+    "tests/test_redteam_runtime_deploy.py::test_a_ref_that_looks_like_an_option_or_a_command_names_no_commit",
+    "tests/test_redteam_runtime_deploy.py::test_forward_hands_hostile_arguments_to_the_selected_interpreter_unchanged",
+    "tests/test_redteam_runtime_deploy.py::test_a_state_root_with_shell_punctuation_still_builds_verifies_and_installs_launchers",
+    "tests/test_redteam_runtime_deploy.py::test_the_smoke_runs_hooks_from_a_source_path_with_punctuation_as_one_argument",
+    "tests/test_redteam_runtime_deploy.py::test_the_launcher_directory_with_shell_punctuation_is_one_path",
+    "tests/test_redteam_runtime_deploy.py::test_the_tracker_hands_a_hostile_checkout_path_to_the_runtime_command_as_one_argument"
+   ],
+   "note": "Checkout paths, refs, state roots, launcher directories and forwarded arguments are single argv items with no shell; a ref starting with a dash names no commit; module and function names in launchers are matched against a pattern"
   },
   {
    "id": "spawn:sandbox/bubblewrap.py:_probe",

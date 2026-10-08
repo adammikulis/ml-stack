@@ -19,6 +19,7 @@ from pathlib import Path
 from ml_stack import runtime, runtime_launchers, runtime_store
 from ml_stack.files import writing
 from ml_stack.fleet import runtime_wheel
+from ml_stack.fleet.environment import Environment
 from ml_stack.lock import Busy, only_one
 from ml_stack.workspace import cli, harness_remote, limits, project_connection, tokens
 from ml_stack.workspace.claims import Claims, Conflict
@@ -83,6 +84,8 @@ def git(checkout: Path, *words: str, check: bool = True) -> str:
 
 def resolve_commit(checkout: Path, ref: str = "HEAD") -> str:
     """The full commit a ref names in a checkout."""
+    if ref.startswith("-"):
+        raise DeployError(f"{ref!r} is not a ref")
     commit = git(checkout, "rev-parse", "--verify", f"{ref}^{{commit}}")
     if not COMMIT.fullmatch(commit):
         raise DeployError(f"{ref} does not name a commit")
@@ -164,10 +167,19 @@ def owning(paths: list[Path], *, wait_s: float, who: Identity | None, note: str 
                 store.release(me, "install", str(path))
 
 
+def host_python() -> Path:
+    """The Python that builds runtime environments."""
+    found = Environment(runtime.directory() / "bootstrap").host_python()
+    if found is None:
+        raise OSError("install Python 3.13 to prepare an isolated runtime")
+    return found
+
+
 def build(plan: Plan, stage: Path, prefix: Path) -> runtime.Runtime:
     """Build the plan's commit into a new immutable runtime tree at `prefix`."""
     creator = runtime_store.creator_record(plan.agent or os.environ.get(tokens.AGENT_ENV, ""), "ensure")
-    return runtime_wheel.build(plan.checkout, plan.commit, stage, timeout=plan.timeout, into=(prefix, creator))
+    target = runtime_wheel.Target(prefix, creator, host_python())
+    return runtime_wheel.build(plan.checkout, plan.commit, stage, timeout=plan.timeout, target=target)
 
 
 def _clean_environment(home: Path, bin_dir: Path) -> dict[str, str]:
@@ -266,11 +278,10 @@ def build_and_switch(plan: Plan, builder: Builder = build, who: Identity | None 
                 runtime_launchers.install(plan.launchers, built)
             runtime.publish(built)
             published = True
-        except BaseException:
+        finally:
             if not published:
                 _restore(plan.launchers, original)
                 runtime_store.discard(built.prefix)
-            raise
         _record(plan)
         return built
 
