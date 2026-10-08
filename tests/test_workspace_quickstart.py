@@ -18,7 +18,7 @@ from types import SimpleNamespace
 import pytest
 from workspace_kit import SRC, STRIPPED, clean_env
 
-from ml_stack import authority, private_path
+from ml_stack import agent_hooks, authority, private_path
 from ml_stack.briefing import REQUIRED_BRIEFING
 from ml_stack.workspace import Workspace, coordinator_config, guide, onboard, project, tokens
 from ml_stack.workspace.identity import Denied
@@ -37,7 +37,19 @@ CODE = re.compile(r"join ((?:[A-Z0-9]{4}-){3}[A-Z0-9]{4})")
 def base(monkeypatch, tmp_path):
     root = clean_env(monkeypatch, tmp_path)
     at_terminal(monkeypatch)
+    hooked_agents(monkeypatch, tmp_path)
     return root
+
+
+def hooked_agents(monkeypatch, tmp_path):
+    """Both agents' settings live under ``tmp_path`` with the nudge hooks in, and the nudge command
+    is on PATH, so the doctor judges this setup and not the machine's own agents."""
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude-settings"))
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex-settings"))
+    agent_hooks.install(where=agent_hooks.paths())
+    real = shutil.which
+    monkeypatch.setattr(agent_hooks.shutil, "which",
+                        lambda name, *a, **k: "/fake/bin/" + name if name == agent_hooks.BINARY else real(name, *a, **k))
 
 
 def at_terminal(monkeypatch):
