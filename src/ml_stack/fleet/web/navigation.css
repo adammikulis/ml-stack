@@ -8,8 +8,9 @@ fleet-nav { display:contents; }
 .poolside-mark { width:48px; height:48px; display:grid; place-items:center; border-radius:15px; background:#ffffff0c; transition:background .2s; }
 .poolside-mark:hover { background:#ffffff18; }
 .poolside-mark svg { width:38px; height:38px; }
-.primary-navigation { display:flex; flex-direction:column; gap:18px; width:100%; }
-.rail-link { --rail-accent:var(--poolside-pink); --rail-ink:var(--poolside-pink-ink); width:60px; min-height:58px; margin:0; padding:8px 2px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:5px; border:0; border-radius:13px; text-decoration:none; background:transparent; color:#c5cadc; position:relative; transition:background .2s,color .2s,transform .2s; }
+.rail-main { display:flex; flex-direction:column; gap:18px; width:100%; }
+.primary-navigation,.rail-tools { display:flex; flex-direction:column; gap:18px; width:100%; }
+.rail-link { --rail-accent:var(--poolside-pink); --rail-ink:var(--poolside-pink-ink); width:60px; min-height:58px; margin:0; padding:8px 2px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:5px; line-height:1.5; border:0; border-radius:13px; text-decoration:none; background:transparent; color:#c5cadc; position:relative; transition:background .2s,color .2s,transform .2s; }
 .rail-link[data-color="orange"] { --rail-accent:var(--poolside-orange); --rail-ink:var(--poolside-orange-ink); }
 .rail-link[data-color="yellow"] { --rail-accent:var(--poolside-yellow); --rail-ink:var(--poolside-yellow-ink); }
 .rail-link[data-color="cyan"] { --rail-accent:var(--poolside-cyan); --rail-ink:var(--poolside-cyan-ink); }
@@ -20,13 +21,6 @@ fleet-nav { display:contents; }
 .rail-link.on svg { stroke:var(--rail-ink); }
 .rail-link.on::before { content:""; position:absolute; width:3px; height:28px; border-radius:0 3px 3px 0; left:-8px; background:var(--rail-accent); }
 .rail-utilities { margin-top:auto; display:flex; flex-direction:column; align-items:center; gap:8px; }
-.rail-utilities .rail-link { min-height:45px; }
-.rail-utilities #nav-signout { min-height:32px; }
-.rail-utilities #nav-signout svg { width:18px; height:18px; stroke:#a2a9c3; }
-.connection-dot { width:7px; height:7px; margin-top:8px; border-radius:50%; background:var(--poolside-cyan); box-shadow:0 0 0 4px #2de2e615; }
-.connection-dot[data-state="local"] {background:#a2a9c3;box-shadow:none;}
-.rail-utilities .rail-utility {min-height:34px;}
-.rail-utility svg {width:20px;height:20px;}
 #nav-guide svg {stroke:var(--poolside-yellow);}
 #nav-jobs svg {stroke:var(--poolside-cyan);}
 .jobs-count {position:absolute;right:8px;top:2px;min-width:16px;padding:1px 4px;border-radius:6px;background:var(--poolside-yellow);color:var(--poolside-yellow-ink);font-size:9px;}
@@ -61,7 +55,7 @@ fleet-nav { display:contents; }
   .workspace-rail {padding:14px 5px;gap:20px;}
   .rail-link {width:50px;min-height:54px;}
   .rail-link span {font-size:8px;}
-  .primary-navigation {gap:12px;}
+  .primary-navigation,.rail-tools,.rail-main {gap:12px;}
   .poolside-mark {width:42px;height:42px;}
   .context-navigation {gap:18px;padding:0 14px;}
   .context-link {font-size:11px;}
@@ -69,4 +63,5 @@ fleet-nav { display:contents; }
   #nav-demo {padding:22px;}
   .demo-heading h1 {font-size:28px;}
 }
-@media(max-height:560px) { .workspace-rail {gap:10px;padding-top:10px;} .primary-navigation {gap:5px;} .rail-link {min-height:46px;} .rail-utilities #nav-signout,.connection-dot {display:none;} }
+@media(max-height:740px) { .workspace-rail {gap:10px;padding-top:10px;} .primary-navigation,.rail-tools,.rail-main {gap:5px;} .rail-link {min-height:46px;padding:4px 2px;gap:3px;} .rail-link svg {width:20px;height:20px;} .rail-link span {font-size:8px;} }
+@media(max-height:460px) { .workspace-rail {gap:8px;padding:8px;} .poolside-mark {width:32px;height:32px;} .poolside-mark svg {width:28px;height:28px;} .primary-navigation,.rail-tools,.rail-main {gap:4px;} .rail-link,.rail-utilities .rail-link {min-height:38px;padding:2px;gap:2px;} .rail-link svg {width:20px;height:20px;} .rail-link span {font-size:8px;} .rail-utilities {gap:4px;} }

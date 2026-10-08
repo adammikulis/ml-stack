@@ -1,0 +1,76 @@
+<script>
+(function () {
+  const M = window.fleetModel;
+  const pause = () => new Promise(resolve => setTimeout(resolve, 1500));
+  const status = () => M.api("/ui/agent-runtime/status", {method: "POST", body: "{}"});
+  const pending = job => job && ["waiting", "queued", "installing"].includes(job.state);
+
+  function control(target, ready, error, current, onReady) {
+    const repair = ready !== false;
+    const label = repair ? "Repair agent runtime" : "Install agent runtime";
+    const note = M.el("div", {role: "status"}, repair ? "Agent runtime ready" : error);
+    const button = M.el("button", {type: "button"}, label);
+    const alert = M.el("div", {class: repair ? "muted" : "err"}, note, button);
+    target.replaceChildren(alert);
+    let active;
+    const show = job => {
+      note.textContent = job?.error || job?.note || error || "Agent runtime ready";
+      button.disabled = !!pending(job);
+      button.textContent = job?.state === "failed" ? "Retry installation" : label;
+    };
+    const follow = async job => {
+      active = job.id;
+      while (active === job.id && alert.isConnected) {
+        show(job);
+        if (job.state === "failed") return;
+        try {
+          const current = await status();
+          if (current.runtime_ready && current.job?.state === "done") {
+            active = null;
+            if (onReady) { alert.remove(); onReady(); }
+            else show(current.job);
+            return;
+          }
+          if (current.ok && current.job) job = current.job;
+        } catch { note.textContent = "Waiting for the app to restart. You can keep using other pages."; }
+        await pause();
+      }
+    };
+    button.onclick = async () => {
+      button.disabled = true;
+      try {
+        const result = await M.api(`/ui/agent-runtime/${repair ? "repair" : "install"}`, {method: "POST", body: "{}"});
+        if (!result.ok) throw new Error(result.error || "Could not start agent runtime installation.");
+        void follow(result.job);
+      } catch (error) { note.textContent = error.message; button.disabled = false; }
+    };
+    if (pending(current)) void follow(current);
+    else if (current) show(current);
+    return alert;
+  }
+
+  M.agentRuntimeAlert = async function (chat) {
+    if (chat.runtimeChecking || chat.runtimeAlert?.isConnected) return;
+    chat.runtimeChecking = true;
+    try {
+      const current = await status().catch(() => ({}));
+      if (!chat.isConnected || (chat.runtimeReady !== false && !pending(current.job) && current.job?.state !== "failed")) return;
+      chat.runtimeAlert = control(chat.note, chat.runtimeReady, chat.runtimeError, current.job, () => {
+        chat.runtimeReady = true;
+        chat.updateReadiness();
+      });
+    } finally { chat.runtimeChecking = false; }
+  };
+
+  M.agentRuntimeMaintenance = async function (target) {
+    try {
+      const current = await status();
+      if (!current.ok) throw new Error(current.error || "Could not read the agent runtime.");
+      if (target.isConnected) control(target, current.runtime_ready, "The agent runtime is not installed.", current.job);
+    } catch (error) {
+      target.replaceChildren(M.el("div", {class:"err", role:"status"}, error.message),
+        M.el("button", {type:"button", onclick:() => M.agentRuntimeMaintenance(target)}, "Retry"));
+    }
+  };
+})();
+</script>

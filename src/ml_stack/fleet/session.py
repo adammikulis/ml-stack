@@ -29,6 +29,7 @@ class Session:
     created_at: float
     expires_at: float
     who: str = ""
+    pool: str = ""
 
 
 class Sessions:
@@ -47,10 +48,10 @@ class Sessions:
         for t in [t for t, exp in self._tickets.items() if exp <= now]:
             self._tickets.pop(t, None)
 
-    def open(self, who: str = "") -> Session:
+    def open(self, who: str = "", *, pool: str = "") -> Session:
         now = time.time()
         session = Session(sid=secrets.token_urlsafe(32), created_at=now,
-                          expires_at=now + self.ttl_s, who=who)
+                          expires_at=now + self.ttl_s, who=who, pool=pool)
         with self._lock:
             self._reap()
             self._sessions[session.sid] = session

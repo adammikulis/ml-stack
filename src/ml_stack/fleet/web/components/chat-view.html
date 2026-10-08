@@ -47,11 +47,11 @@
       <div class="messages" id="chat-messages" aria-label="Chat messages" role="log"></div>
       <div id="chat-note" role="status"></div>
       <details id="chat-activity" class="aside" hidden><summary>Tool activity and session details</summary><pre id="chat-activity-output"></pre></details>
-      <div class="askrow" id="chat-askrow" hidden>
+      <ml-composer class="askrow" id="chat-askrow" recipient="Message your model" hidden>
         <textarea id="ask" rows="3" placeholder="Message your model…" aria-label="Message"></textarea>
-        <button id="chat-send">Send</button><button class="ghost" id="chat-cancel" hidden>Stop</button>
-      </div>
-      <div class="chat-hint">Enter to send · Shift + Enter for a new line · Saved on this machine</div>
+        <button id="chat-send" data-composer-send>Send</button><button class="ghost" id="chat-cancel" data-composer-cancel hidden>Stop</button>
+      </ml-composer>
+      <div class="chat-hint">Saved on this machine</div>
     </div>
   </main>
   <dialog id="chat-model-dialog" aria-labelledby="chat-model-heading">
@@ -94,7 +94,7 @@
       this.input = this.querySelector("#ask");
       this.send = this.querySelector("#chat-send");
       this.stop = this.querySelector("#chat-cancel");
-      this.stop.onclick = () => this.request?.abort();
+      this.askrow.addEventListener("composer-cancel", () => this.coding.stop());
       this.newChat = this.querySelector("#chat-new");
       this.search = this.querySelector("#chat-search");
       this.heading = this.querySelector("#chat-title");
@@ -110,7 +110,7 @@
       this.defaultSettings = {};
       this.searchEpoch = 0;
       this.loadEpoch = 0;
-      this.send.onclick = () => this.ask();
+      this.askrow.addEventListener("composer-send", () => this.ask());
       this.picker.onchange = () => { this.updateReadiness(); this.modelPicker.render(); this.saveSettings(); };
       this.temperature.onchange = () => this.saveSettings();
       this.outputTokens = this.querySelector("#chat-output-tokens");
@@ -138,9 +138,6 @@
       this.search.oninput = () => {
         clearTimeout(this.searchTimer);
         this.searchTimer = setTimeout(() => this.paintList(), 180);
-      };
-      this.input.onkeydown = (e) => {
-        if (e.key === "Enter" && !e.shiftKey && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); this.ask(); }
       };
       this.workspace = new window.ConversationsWorkspace(this);
       M.onRoute((route) => {
@@ -253,8 +250,9 @@
     }
 
     updateReadiness() {
+      this.askrow.setAttribute("recipient", `Message ${this.picker.value || "your model"}`);
       this.send.disabled = (!this.coding.active && this.runtimeReady === false) || !this.picker.value || !!this.picker.selectedOptions[0]?.disabled;
-      if (this.runtimeReady === false && !this.coding.active) this.showError(this.runtimeError);
+      if (!this.coding.active) M.agentRuntimeAlert(this);
       this.coding.readiness();
     }
 
@@ -397,7 +395,7 @@
           this.open = made.id;
           localStorage.setItem("ml-stack.chat.selected", made.id);
         }
-        this.input.value = "";
+        if (this.input.value.trim() === text) this.input.value = "";
         if (this.heading.textContent === "New conversation") this.heading.textContent = text.replace(/\s+/g, " ").slice(0, 60);
         this.list.querySelector(".chat-welcome")?.remove();
         userBody = this.say("user", text);
@@ -426,7 +424,7 @@
         else this.showError(error.message || "The connection to the model ended.");
         if (reply && !reply.dataset.text) reply.closest(".msg").remove();
         if (!accepted) userBody?.closest(".msg").remove();
-        if (error.name !== "AbortError" && !reply?.dataset.text) this.input.value = text;
+        if (error.name !== "AbortError" && !reply?.dataset.text && !this.input.value) this.input.value = text;
       } finally {
         if (reply?.dataset.text) {
           this.renderBody(reply, reply.dataset.text);

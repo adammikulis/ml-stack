@@ -271,3 +271,10 @@ Import Quota
 Currency Clause
 Downstream Trade Policy
 Moonbase Zeta
+
+# labels and a CSS transition the recogniser reads as people
+Open Models
+Explore Poolside
+Remove Poolside
+Install MetaDrive
+color .2s

@@ -22,6 +22,7 @@ MODULES = {"task-publishing": frozenset({"tasks-view"}),
            "gym-drone-geometry": frozenset({"gym-scene"}),
            "setup-recovery": frozenset({"first-run", "cluster-actions"}),
            "chat-model-picker": frozenset({"chat-view"}),
+           "chat-runtime": frozenset({"chat-view", "settings-view"}),
            "chat-coding": frozenset({"chat-view"}), "workspace-model": frozenset({
     "workspace-jobs", "history-view", "tasks-view", "data-view", "knowledge-view", "training-view", "tools-view", "benchmarks-view",
     "gym-world-options", "gym-recordings", "gym-model-options", "gym-view",

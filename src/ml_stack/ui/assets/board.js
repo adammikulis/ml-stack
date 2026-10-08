@@ -3,6 +3,7 @@
    removed; nothing is parsed as markup and the only link is a file's download (an attachment, never shown inline). The page holds no token. */
 import { MlElement, define, h } from "./base.js";
 import { INTEGRATED_STYLES } from "./board-styles.js";
+import "./composer.js";
 
 const HIDDEN = /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff]/g;
 const BODY_MAX = 4000;
@@ -292,10 +293,10 @@ class MlBoard extends MlElement {
         item(agent.display_name || agent.id, 0, this.view.kind === "dm" && [this.view.a, this.view.b].includes(agent.id),
           () => this.open({kind:"dm", a:this.me, b:agent.id}), `${agent.id} · ${agent.device?.verification || "unknown"}`))] : []));
     this.feed.replaceChildren(...this.pane());
-    const key = JSON.stringify([this.target(), this.readonly, this.draft.error, Boolean(this.error), this.loading]);
+    const key = JSON.stringify([this.target(), this.readonly, this.draft.error]);
     if (key !== this.composerKey) {
       this.composerKey = key;
-      const node = this.error ? null : this.composer();
+      const node = this.composer();
       this.compose.replaceChildren(...(node ? [node] : []));
     }
   }
@@ -326,26 +327,29 @@ class MlBoard extends MlElement {
 
   composer() {
     const to = this.target();
-    if (this.readonly || !to || this.loading) return null;
+    if (this.readonly || !to) return null;
     const text = h("textarea", { "aria-label": "Message", maxlength: String(POST_MAX) });
     text.value = this.draft.body;
     text.addEventListener("input", () => { this.draft.body = text.value; this.rememberDraft(); });
     const subject = this.view.kind === "board" ? h("input", { type: "text", maxlength: "200", "aria-label": "Subject",
       placeholder: "subject (optional)", value: this.draft.subject }) : null;
     subject?.addEventListener("input", () => { this.draft.subject = subject.value; this.rememberDraft(); });
-    const go = h("button", { type: "button" }, "Send");
+    const go = h("button", { type: "button", "data-composer-send":"" }, "Send");
     const post = async () => {
       if (go.disabled || !text.value.trim()) return;
       const targetKey = JSON.stringify(to);
+      const submitted = {body:text.value, subject:subject ? subject.value : ""};
       go.disabled = true; go.textContent = "Sending…";
       try {
-        await this.send({ ...to, body: text.value, subject: subject ? subject.value : "" });
-        const cleared = {body:"", subject:"", error:""};
+        await this.send({...to, ...submitted});
+        const saved = this.drafts.get(targetKey) || submitted;
+        const cleared = saved.body === submitted.body && saved.subject === submitted.subject
+          ? {body:"", subject:"", error:""} : {...saved, error:""};
         this.drafts.set(targetKey, cleared);
         if (JSON.stringify(this.target()) === targetKey) this.draft = cleared;
         this.rememberDraft();
-        text.value = "";
-        if (subject) subject.value = "";
+        text.value = cleared.body;
+        if (subject) subject.value = cleared.subject;
         go.disabled = false; go.textContent = "Send";
         await this.load();
       } catch (e) {
@@ -356,10 +360,11 @@ class MlBoard extends MlElement {
         this.update();
       }
     };
-    go.addEventListener("click", post);
-    text.addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); post(); } });
-    return h("div", { class: "composer" }, subject, text, go,
+    const node = h("ml-composer", {class:"composer", recipient:this.view.kind === "thread"
+      ? `Reply in ${to.to}` : `Message ${to.to}`}, subject, text, go,
       this.draft.error ? h("div", { class: "err", role: "alert" }, this.draft.error) : null);
+    node.addEventListener("composer-send", post);
+    return node;
   }
 
   pane() {
@@ -385,7 +390,7 @@ class MlBoard extends MlElement {
         `Back to ${line(v.board, 60)}`) : null;
     const display = id => this.agents.find(agent => agent.id === id)?.display_name || id;
     const title = v.kind === "dm" ? `${line(display(v.a), 160)} and ${line(display(v.b), 160)}` : `Thread ${Number(v.root) || ""}`;
-    return [back, this.title(title, this.readonly ? "read only" : "live", v.kind === "dm" ? `${v.a} and ${v.b}` : ""),
+    return [...(back ? [back] : []), this.title(title, this.readonly ? "read only" : "live", v.kind === "dm" ? `${v.a} and ${v.b}` : ""),
       ...this.messages(v.kind === "dm" ? v.a : "")];
   }
 

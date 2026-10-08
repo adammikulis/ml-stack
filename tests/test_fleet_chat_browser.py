@@ -92,9 +92,41 @@ def test_one_composer_enter_sends_and_shift_enter_keeps_the_draft(chat_browser):
     expect(page.locator("chat-view #chat-messages")).to_contain_text("Saved answer")
     assert calls[0]["messages"][-1]["content"] == "First line\nSecond line"
     assert page.locator("chat-view textarea:visible").count() == 1
+    expect(page.locator("chat-view ml-composer .composer-recipient")).to_have_text("Message model-a")
     assert not page.locator("chat-view #chat-options").evaluate("node => node.open")
     page.reload()
     expect(page.locator("chat-view #chat-messages")).to_contain_text("Saved answer")
+
+
+def test_shared_composer_cancel_and_failed_send_keep_the_next_draft(chat_browser):
+    from playwright.sync_api import expect
+    served, page = chat_browser
+    _open(served, page)
+    page.evaluate("""() => {
+      const fetch = window.fetch;
+      window.fetch = (url, options) => {
+        if (url !== '/ui/chat' || options?.method !== 'POST') return fetch(url, options);
+        return new Promise((resolve, reject) => {
+          window.failComposerSend = () => resolve(new Response(JSON.stringify({error:'Try again'}), {status:503}));
+          options.signal.addEventListener('abort', () => reject(new DOMException('Stopped','AbortError')));
+        });
+      };
+    }""")
+    composer = page.get_by_role("textbox", name="Message", exact=True)
+    composer.fill("First request")
+    page.locator("chat-view #chat-send").click()
+    expect(page.locator("chat-view #chat-cancel")).to_be_visible()
+    composer.fill("Next draft")
+    page.locator("chat-view #chat-cancel").click()
+    expect(page.locator("chat-view #chat-note")).to_have_text("Generation stopped.")
+    expect(composer).to_have_value("Next draft")
+    page.evaluate("window.failComposerSend = null")
+    composer.press("Enter")
+    page.wait_for_function("typeof window.failComposerSend === 'function' && document.querySelector('chat-view').request !== null")
+    composer.fill("Keep this draft")
+    page.evaluate("window.failComposerSend()")
+    expect(page.locator("chat-view #chat-note")).to_contain_text("Try again")
+    expect(composer).to_have_value("Keep this draft")
 
 
 def test_saved_temperature_restores_when_switching_and_reloading(chat_browser):

@@ -19,18 +19,45 @@ class InitialSetupRoutes:
             self.send(403, {"error": "open setup in this computer's browser"})
             return True
         try:
+            pool = ""
             if self.path.endswith("local-session"):
                 state = self.ui.state()
                 if state["needs_setup"] or state["cluster_mode"] != "dev" or not state["in_cluster"]:
                     raise DiscoveryError("local sessions require completed Development setup")
+                length = self.header("Content-Length", "0")
+                if (not length.isascii() or not length.isdigit() or len(length) > 4
+                        or int(length) > 256):
+                    raise ValueError("pool selection must be at most 256 bytes")
+                body = self.body()
+                if not isinstance(body, dict) or set(body) - {"pool"}:
+                    raise ValueError("choose an existing Development pool")
+                pool = body.get("pool", state["group"])
+                if not isinstance(pool, str) or pool not in self._local_session_pools():
+                    raise DiscoveryError("choose an existing Development pool")
             else:
                 self._initial_preferences()
-            session = self.ui.sessions.open("setup")
-            self.send(200, {"ok": True, **self.ui.state()},
+            session = self.ui.sessions.open("setup", pool=pool)
+            self.send(200, {"ok": True, "pool": pool, **self.ui.state()},
                       {"Set-Cookie": self.ui.sessions.cookie_header(session), "Cache-Control": "no-store"})
         except (DiscoveryError, ValueError, OSError) as error:
             self.send(400, {"error": str(error)})
         return True
+
+    def _local_session_pools(self) -> list[str]:
+        try:
+            host = urllib.parse.urlsplit("//" + self.host_header)
+            if (not invite_routes.local(self.client_ip)
+                    or host.hostname not in {"localhost", "127.0.0.1", "::1"}
+                    or host.port != self.handler.server.server_address[1]
+                    or any(self.header(name) for name in
+                           ("Authorization", "X-ML-Stack-Token", "X-ML-Stack-Agent"))):
+                return []
+        except ValueError:
+            return []
+        state = self.ui.state()
+        if state["needs_setup"] or state["cluster_mode"] != "dev" or not state["in_cluster"]:
+            return []
+        return [member.group for member in memberships(self.ui.cluster_key_path) if member.mode == "dev"]
 
     def _local_browser(self) -> bool:
         try:

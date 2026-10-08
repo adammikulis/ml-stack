@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import base64
 import contextlib
 import hashlib
@@ -21,11 +22,13 @@ from ml_stack import home, macauth, sentinel
 from ml_stack.files import write_text
 from ml_stack.fleet.onboard.requests import Devices
 from ml_stack.hub import default_roots
+from ml_stack.limits import read as limits_read
 from ml_stack.lock import only_one
 from ml_stack.log import say, warn
 from ml_stack.platform import on_quit, private_file
 from ml_stack.serve import canaries, guarded
 from ml_stack.serve.leases import lease_file
+from ml_stack.serve.reclaim import watching
 from ml_stack.speech import service as speech
 
 from . import (
@@ -36,6 +39,7 @@ from . import (
     cluster_modes,
     invite_client,
     invite_routes,
+    runtime_repair,
     tls,
     updates as updating,
 )
@@ -438,13 +442,8 @@ class DaemonRuntime:
     def run(self) -> None:
         on_quit(self._quit)
         self.scanner = guarded.start(sentinel.armed(), canaries.lease_file_targets(lease_file()))
-        from contextlib import ExitStack
-
-        from ml_stack.limits import read as limits_read
-        from ml_stack.serve.reclaim import watching
-
         self.idle_s = limits_read().idle_s
-        self.reclaiming = ExitStack()
+        self.reclaiming = contextlib.ExitStack()
         if self.idle_s:
             say(f"  reclaiming a server unused for {self.idle_s:.0f}s")
             self.reclaiming.enter_context(watching(older_than=self.idle_s, say=print))
@@ -458,6 +457,7 @@ class DaemonRuntime:
                 daemon=True,
             )
             self.convergence.start()
+        runtime_repair.resume_stored(self.interface, self.root)
         try:
             while True:
                 self.httpd.serve_forever()
@@ -699,8 +699,6 @@ def run(
     *,
     workspace_factory: Callable[[ProjectRegistry], Any] | None = None,
 ) -> int:
-    import argparse
-
     ap = argparse.ArgumentParser(prog="ml-stack-traind")
     ap.add_argument("--root", default=str(default_root()))
     ap.add_argument(
@@ -843,7 +841,10 @@ def run(
         "replaces the first install.",
     )
     ap.add_argument("--initial-setup", action="store_true", help=argparse.SUPPRESS)
+    ap.add_argument("--agent-runtime-job", type=runtime_repair.job_id, help=argparse.SUPPRESS)
     a = ap.parse_args(argv)
+    if a.agent_runtime_job:
+        return runtime_repair.run(Path(a.root).expanduser(), a.agent_runtime_job)
     if a.persist:
         return persist(
             slots=a.slots, labels=tuple(a.label), report=a.report[-1] if a.report else ""

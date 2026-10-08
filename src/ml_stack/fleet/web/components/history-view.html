@@ -8,6 +8,7 @@ history-view .activity-reputation { margin:24px 0; padding:calc(18px * var(--ui-
 history-view .activity-reputation > summary { font-weight:600; }
 history-view .history-agent { border:1px solid var(--line); background:var(--bg-raised); border-radius:14px; padding:calc(20px * var(--ui-density,1)); }
 
+history-view .intro { overflow-wrap:anywhere; }
 history-view .history-controls { display:flex; flex-wrap:wrap; gap:12px; align-items:end; margin-bottom:16px; }
 history-view .history-controls label { margin:0; flex:1 1 180px; }
 history-view .history-controls input,history-view .history-controls select { display:block; width:100%; margin-top:6px; }
@@ -34,6 +35,7 @@ history-view .history-links { display:flex; flex-wrap:wrap; gap:12px; margin-top
   <header class="activity-heading"><div><h1>Activity</h1></div></header>
   <div class="history-controls">
     <label>Agent<select id="history-agent"><option value="">All agents</option></select></label>
+    <label>Reputation view<select id="history-dimension"><option value="family">Model family</option><option value="agent">Overall agent</option><option value="model">Exact model</option><option value="execution">Model execution</option></select></label>
     <label>Search actions<input id="history-search" type="search" placeholder="Tool, model, task, or status…"></label>
     <button id="history-refresh" type="button">Refresh</button>
   </div>
@@ -52,6 +54,7 @@ history-view .history-links { display:flex; flex-wrap:wrap; gap:12px; margin-top
    if(this.wired)return;this.wired=true;
    this.host=this.querySelector('section');this.note=this.querySelector('#history-status');
    this.list=this.querySelector('#history-list');this.credits=this.querySelector('#history-credits');this.agent=this.querySelector('#history-agent');
+   this.dimension=this.querySelector('#history-dimension');this.dimension.onchange=()=>this.paint();
    this.search=this.querySelector('#history-search');this.refresh=this.querySelector('#history-refresh');
    this.events=[];this.openActions=new Set();this.closedAgents=new Set();this.openReputation=new Set();
    this.agent.onchange=()=>this.paint();this.search.oninput=()=>this.paint();this.refresh.onclick=()=>this.load();
@@ -69,7 +72,7 @@ history-view .history-links { display:flex; flex-wrap:wrap; gap:12px; margin-top
     this.agent.value=selected;this.paint();
     const reputation=await W.api('/ui/work-reputation/standings').catch(()=>null);
     this.reputation=reputation;
-    const agents=new Set([...this.events.map(e=>this.actor(e)),...(reputation?.team||[]).map(item=>item.agent)]);
+    const agents=new Set([...this.events.map(e=>this.actor(e)),...(reputation?.team||[]).map(item=>item.agent),...(reputation?.dimensions?.agents||[]).map(item=>item.id)]);
     this.agent.replaceChildren(E('option',{value:''},'All agents'),...[...agents].sort().map(name=>E('option',{value:name},name)));
     this.agent.value=selected;this.paint();
    }catch(error){W.status(this.note,error);}
@@ -88,7 +91,9 @@ history-view .history-links { display:flex; flex-wrap:wrap; gap:12px; margin-top
       E('summary',{},actor,E('span',{class:'history-count'},`${events.length} actions`)),...events.map(event=>this.action(event)));
     card.ontoggle=()=>card.open?this.closedAgents.delete(actor):this.closedAgents.add(actor);return card;
    }));
-   const team=(this.reputation?.team||[]).filter(item=>!this.agent.value||this.matches(item,this.agent.value));
+   const dimensions=this.reputation?.dimensions;
+   const rows=this.dimension.value==='agent'?(dimensions?.agents||[]).map(item=>({...item,agent:item.id,label:(item.aliases||[]).join(' / ')||item.id})):['model','execution'].includes(this.dimension.value)?(dimensions?.[this.dimension.value==='execution'?'executions':'models']||[]).map(item=>({...item,agent:item.id,label:this.dimension.value==='model'?(item.model||'Unknown model'):`${item.model||'Unknown model'} · ${item.runtime||'Unknown runtime'}`})):(this.reputation?.team||[]);
+   const team=rows.filter(item=>!this.agent.value||this.matches(item,this.agent.value));
    this.credits.replaceChildren(...team.map(item=>this.standing(item)),...(team.length?[]:[E('p',{class:'intro'},this.reputation?'No recorded standings match this agent.':'Credit and reputation records are unavailable.')]));
    const count=[...groups.values()].reduce((sum,events)=>sum+events.length,0);
    this.note.textContent=count?`${count} actions · newest first · refreshed ${new Date().toLocaleTimeString()}`:this.events.length?'No actions match these filters.':'No activity has been recorded yet.';
@@ -103,6 +108,9 @@ history-view .history-links { display:flex; flex-wrap:wrap; gap:12px; margin-top
    const box=E('details',{class:'workspace-card history-action',open:this.openReputation.has(actor)},E('summary',{},title));
    box.ontoggle=()=>box.open?this.openReputation.add(actor):this.openReputation.delete(actor);
    box.append(E('p',{class:'intro'},`Account identity: ${actor}${standing.account_type==='model_family'?' · Model family across devices':''}`));
+   if(standing.origins?.length)box.append(E('p',{class:'intro'},`Project origins: ${standing.origins.map(origin=>origin.project?.key||'Unknown project').join(', ')}`));
+   if(standing.dimension)box.append(E('p',{class:'intro'},'These are views of the same independently reviewed project contributions.'));
+   if(['model','execution'].includes(standing.dimension))box.append(E('p',{class:'intro'},`Model source: ${standing.model_source||'unknown'} · Runtime source: ${standing.runtime_source||'unknown'} · Artifact: ${standing.artifact?.id||'unknown'}`));
    if(standing.devices?.length)box.append(E('details',{},E('summary',{},`${standing.devices.length} contributing devices`),...standing.devices.map(id=>E('p',{class:'intro'},id))));
    if(standing.members?.length)box.append(E('p',{class:'intro'},`Workers: ${standing.members.join(', ')}`));
    const metrics=E('div',{class:'history-economy'});
@@ -112,12 +120,16 @@ history-view .history-links { display:flex; flex-wrap:wrap; gap:12px; margin-top
    else box.append(E('p',{class:'intro'},'Work reputation: no independent quality or reliability assessment recorded.'));
    const usage=economy?.usage;
    if(usage?.recorded&&usage.tasks)box.append(E('p',{class:'intro'},`Recorded compute usage · ${usage.tasks} tasks${usage.tokens_in!=null?` · ${usage.tokens_in} input tokens`:''}${usage.tokens_out!=null?` · ${usage.tokens_out} output tokens`:''}${usage.wall_seconds!=null?` · ${Number(usage.wall_seconds).toFixed(1)} seconds`:''}`));
-   if(standing.evidence_held)box.append(E('p',{class:'intro'},`${standing.evidence_held} earlier verifications remain in the encrypted ledger.`));
+   if(standing.evidence_held)box.append(E('p',{class:'intro'},`${standing.evidence_held} earlier verifications remain recorded.`));
    for(const evidence of standing.evidence||[])box.append(this.evidence(evidence));
    if(standing.evidence_held)box.append(W.button('Load earlier verification evidence',async()=>{
-    const more=await W.api(`/ui/work-reputation/standings?agent=${encodeURIComponent(actor)}&offset=${standing.evidence.length}`);
-    const next=more.team.find(item=>item.agent===actor);
-    if(next){standing.evidence.push(...next.evidence);standing.evidence_held=next.evidence_held;this.paint();}
+    const query=standing.dimension==='agent'?`agent=${encodeURIComponent(actor)}&`:'';
+    const more=await W.api(`/ui/work-reputation/standings?${query}offset=${standing.evidence.length}`);
+    const rows=standing.dimension==='agent'?more.dimensions.agents:standing.dimension==='model'?more.dimensions.models:standing.dimension==='execution'?more.dimensions.executions:more.team;
+    const next=rows.find(item=>(item.agent||item.id)===actor);
+    if(next){standing.evidence.push(...next.evidence);standing.evidence_held=next.evidence_held;
+     if(standing.dimension){const source=(standing.dimension==='agent'?this.reputation.dimensions.agents:standing.dimension==='execution'?this.reputation.dimensions.executions:this.reputation.dimensions.models).find(item=>item.id===actor);if(source)source.evidence_held=next.evidence_held;}
+     this.paint();}
    }));
    return box;
   }

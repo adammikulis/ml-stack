@@ -40,6 +40,7 @@ from .page import COMPONENTS, render
 from .pausing import minutes_of
 from .project_board_routes import ProjectBoardRoutes
 from .room_routes import RoomRoutes
+from .runtime_repair_routes import RuntimeRepairRoutes
 from .session import parse_cookie
 from .setup_jobs import jobs, libraries, provenance, server
 from .setup_recovery_routes import SetupRecoveryRoutes
@@ -316,7 +317,9 @@ class SessionRoutes:
         if self.method == "GET":
             session = ui.sessions.get(parse_cookie(self.cookie))
             self.send(200, {"signed_in": session is not None,
-                            "expires_at": session.expires_at if session else None})
+                            "expires_at": session.expires_at if session else None,
+                            "pool": session.pool if session else "",
+                            "local_pools": self._local_session_pools()})
             return True
         if self.method == "DELETE":
             ui.sessions.close(parse_cookie(self.cookie))
@@ -834,7 +837,7 @@ class JobRoutes:
         return True
 
 
-class Router(InitialSetupRoutes, PageRoutes, SetupRecoveryRoutes, SetupRoutes, SessionRoutes, MeasureRoutes, SettingsRoutes,
+class Router(InitialSetupRoutes, RuntimeRepairRoutes, PageRoutes, SetupRecoveryRoutes, SetupRoutes, SessionRoutes, MeasureRoutes, SettingsRoutes,
              ProjectBoardRoutes, RoomRoutes, ModelRoutes, ChatRoutes, UpdateRoutes, ClusterRoutes, JobRoutes,
              KnowledgeRoutes, WorkspaceRoutes, GymRecordingRoutes, GymRoutes, LaunchRoutes, ExtensionRoutes, Base):
     """Every screen's routes, in the order a request meets them."""

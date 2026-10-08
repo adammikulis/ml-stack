@@ -1,13 +1,16 @@
-<!-- sign-in: the passphrase this cluster was set up with -->
+<!-- sign-in: local Development pools and Production passphrases -->
 <template>
   <div class="centre" id="signin" hidden>
     <div class="card">
       <div class="hint">POOLSIDE</div>
       <h1>Sign in</h1>
-      <p class="sub">Unlock this compute pool with its cluster passphrase.</p>
+      <p class="sub" id="signin-description">Unlock this compute pool with its cluster passphrase.</p>
+      <div id="signin-pools" aria-label="Existing Development pools"></div>
+      <div id="signin-passphrase">
       <label for="p">Passphrase</label>
       <input type="password" id="p" placeholder="Cluster passphrase" autocomplete="current-password">
       <button id="signin-go">Sign in</button>
+      </div>
       <div id="signin-note" role="alert" aria-live="polite"></div>
     </div>
   </div>
@@ -25,6 +28,8 @@
       this.pass = this.querySelector("#p");
       this.go = this.querySelector("#signin-go");
       this.note = this.querySelector("#signin-note");
+      this.pools = this.querySelector("#signin-pools");
+      this.password = this.querySelector("#signin-passphrase");
       this.go.onclick = () => this.submit();
       this.pass.onkeydown = (e) => { if (e.key === "Enter") this.submit(); };
       M.onRoute((route) => {
@@ -33,8 +38,35 @@
         if (!on) return;
         this.note.replaceChildren(...M.kids(M.signInMessage
           ? el("div", { class: "err" }, M.signInMessage) : null));
-        this.pass.focus();
+        this.loadPools();
       });
+    }
+
+    async loadPools() {
+      const revision = this.poolRevision = (this.poolRevision || 0) + 1;
+      this.pools.replaceChildren();
+      this.password.hidden = false;
+      const result = await M.api("/ui/session");
+      if (revision !== this.poolRevision || this.box.hidden) return;
+      const names = result.ok && Array.isArray(result.local_pools) ? result.local_pools : [];
+      this.password.hidden = names.length > 0;
+      this.querySelector("#signin-description").textContent = names.length
+        ? "Choose an existing Development pool to sign in on this computer."
+        : "Unlock this compute pool with its cluster passphrase.";
+      this.pools.replaceChildren(...names.map(pool => el("button", {type:"button", onclick:() => this.joinPool(pool)}, pool)));
+      if (names.length) this.pools.querySelector("button")?.focus();
+      else this.pass.focus();
+    }
+
+    async joinPool(pool) {
+      if (this.joining) return;
+      this.joining = true;
+      this.pools.querySelectorAll("button").forEach(button => { button.disabled = true; });
+      const result = await M.api("/ui/setup/local-session", {method:"POST", body:JSON.stringify({pool})});
+      this.joining = false;
+      this.pools.querySelectorAll("button").forEach(button => { button.disabled = false; });
+      if (result.ok) { M.signInMessage = ""; M.sessionPool = result.pool; return M.go("cluster"); }
+      M.signIn(result.error || "Could not sign in to this Development pool.");
     }
 
     async submit() {
