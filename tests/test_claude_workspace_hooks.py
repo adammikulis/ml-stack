@@ -41,6 +41,10 @@ print('Authenticated parent brief: hello-model; claims and independent review re
     assert binary, 'hook tests require installed Git'
     (directory / 'git').symlink_to(binary)
     calls = tmp_path / 'calls.json'
+    tree = tmp_path / 'tree'
+    shutil.copytree(ROOT / 'scripts/hooks', tree / 'scripts/hooks')
+    (tree / 'src').symlink_to(ROOT / 'src')
+    monkeypatch.setitem(globals(), 'HOOKS', tree / 'scripts/hooks')
     monkeypatch.setenv('PATH', str(directory))
     monkeypatch.setenv('HOOK_CALLS', str(calls))
     monkeypatch.delenv('ANTHROPIC_MODEL', raising=False)
@@ -256,12 +260,12 @@ def test_invalid_native_session_does_not_export_or_register(commands, tmp_path, 
 
 def test_subagent_stop_records_transcript_model_and_announces_done(commands, tmp_path):
     transcript = tmp_path / 'agent.jsonl'
-    transcript.write_text('{"message": {"role": "user"}}\n{"message": {"model": "claude-haiku-4-5-20251001"}}\n')
+    transcript.write_text('{"message": {"role": "user"}}\n{"message": {"model": "claude-haiku-4-5"}}\n')
     done = invoke('claude-subagent-stop', {'agent_type': 'Explore', 'agent_id': 'abcdef12345',
                                            'agent_transcript_path': str(transcript),
                                            'last_assistant_message': 'Fixing lint errors'})
     assert done.returncode == 0 and not done.stderr
     records = json.loads(commands[1].read_text())
     assert [record['argv'] for record in records] == [
-        ['hello-model', 'explore-abcdef', 'claude-haiku-4-5-20251001', '--agent', 'claude'],
+        ['hello-model', 'explore-abcdef', 'claude-haiku-4-5', '--agent', 'claude'],
         ['announce', 'done', 'explore-abcdef: finished', '--agent', 'claude', '--label', 'explore-abcdef']]
