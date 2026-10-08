@@ -1,0 +1,116 @@
+#!/usr/bin/env python3
+"""Prepare, probe and report the OS sandbox for agents.
+
+    scripts/agent-sandbox prepare [--state DIR]   stage the managed files and print the one sudo command
+    scripts/agent-sandbox probe                   run the probes; use it inside a sandboxed session
+    scripts/agent-sandbox status                  read-only: staged versus installed files, and what this session sees
+
+It never runs sudo and never writes a destination path. A person installs the staged files at their own terminal.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+import agent_sandbox_probe as probe
+import agent_sandbox_profile as profile
+import agent_sandbox_stage as stage
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+
+
+def worktrees(checkout: Path) -> list[Path]:
+    """Every checkout `git worktree list` names, primary first."""
+    done = subprocess.run(["git", "-C", str(checkout), "worktree", "list", "--porcelain"],
+                          capture_output=True, text=True, check=False)
+    return [Path(line.split(" ", 1)[1]) for line in done.stdout.splitlines() if line.startswith("worktree ")]
+
+
+def device() -> str:
+    """The app-scoped device id, or ``unknown`` when the provider is unavailable."""
+    from ml_stack import home
+
+    try:
+        return home.device_id()
+    except RuntimeError:
+        return "unknown"
+
+
+def layout_from(args: argparse.Namespace) -> profile.Layout:
+    """The machine layout from the arguments, the environment and `git worktree list`."""
+    from ml_stack import home
+
+    found = worktrees(Path.cwd())
+    primary = found[0] if found else Path.cwd()
+    platform = args.platform or ("darwin" if sys.platform == "darwin" else "linux")
+    scratch = [Path(item) for item in args.scratch] + [Path(tempfile.gettempdir())]
+    if platform == "darwin":
+        scratch.append(Path("/private/tmp"))
+    return profile.Layout(
+        home=Path(args.home).expanduser() if args.home else home.user_home(),
+        state=Path(args.state).expanduser() if args.state else home.home(),
+        primary=primary, worktrees=tuple(found[1:]), scratch=tuple(dict.fromkeys(scratch)), platform=platform)
+
+
+def prepare(args: argparse.Namespace) -> int:
+    layout = layout_from(args)
+    target = stage.prepare(layout, device())
+    manifest = stage.load(layout.state)
+    print(f"staged in {target} (expires in {int((manifest['expires'] - time.time()) / 3600)} h)")
+    for item in manifest["files"]:
+        print(f"  {item['sha256'][:12]}  {item['name']} -> {item['destination']}")
+    print("\nRead the staged files, then run this at your own terminal:\n")
+    print(stage.install_command(layout.state))
+    return 0
+
+
+def run_probes(args: argparse.Namespace) -> int:
+    layout = layout_from(args)
+    results = probe.all_probes(layout, Path.cwd(), extra=[lambda: probe.test_probe(Path.cwd())])
+    print(probe.render(results))
+    failed = [item for item in results if item.status == probe.FAIL]
+    print(f"\n{len(results) - len(failed)} of {len(results)} lines passed or were skipped; "
+          + ("this session is sandboxed" if probe.inside(results) else "this session is NOT sandboxed"))
+    return 1 if failed else 0
+
+
+def status(args: argparse.Namespace) -> int:
+    layout = layout_from(args)
+    manifest = stage.load(layout.state)
+    if not manifest:
+        print("nothing staged: run scripts/agent-sandbox prepare")
+    else:
+        print(f"staged for device {manifest['device_id'][:12]}"
+              + (" (EXPIRED)" if stage.expired(layout.state) else ""))
+        for destination, state in stage.installed(layout.state):
+            print(f"  {state:8} {destination}")
+    quick = probe.filesystem_probes(layout, Path.cwd())[:3] + probe.environment_probes(dict(os.environ))
+    counts = {name: sum(item.status == name for item in quick) for name in (probe.PASS, probe.FAIL, probe.SKIP)}
+    print(f"this session: {counts[probe.PASS]} refused or scrubbed, {counts[probe.FAIL]} open, "
+          f"{counts[probe.SKIP]} not checkable")
+    if args.json:
+        print(json.dumps(counts))
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="agent-sandbox", description=__doc__.splitlines()[0])
+    parser.add_argument("--state", help="the ml-stack state root")
+    parser.add_argument("--home", help="the account's home directory")
+    parser.add_argument("--platform", choices=("darwin", "linux"))
+    parser.add_argument("--scratch", action="append", default=[], help="a scratch directory the agent may write")
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument("mode", choices=("prepare", "probe", "status"))
+    args = parser.parse_args(argv)
+    return {"prepare": prepare, "probe": run_probes, "status": status}[args.mode](args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
