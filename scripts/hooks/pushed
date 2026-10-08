@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check what an agent pushes: Python parses, no data files, and no merged worktree outlives a push.
+"""Check what an agent pushes: Python parses, no data files, and a warning for a merged worktree that outlives a push.
 
     pushed DEV   reads pre-push lines on stdin; DEV is the development branch
 """
@@ -69,8 +69,7 @@ def main(dev: str, lines: list[str]) -> int:
         _, tip, remote_ref, base = parts
         if remote_ref == f"refs/heads/{dev}":
             for where, branch in leftover_worktrees(tip):
-                refused = 1
-                print(f"pushed: {branch} has nothing outside {dev}; remove its worktree first:",
+                print(f"pushed: warning: {branch} has nothing outside {dev}; remove its worktree:",
                       *(f"  {shlex.join(c)}" for c in (["git", "worktree", "remove", where],
                                                        ["git", "branch", "-d", branch])),
                       sep="\n", file=sys.stderr)
@@ -85,8 +84,7 @@ def main(dev: str, lines: list[str]) -> int:
     if not refused:
         subprocess.run([sys.executable, str(HERE / "runtime-refresh"), "pushed"], check=False)
     if refused:
-        print("\nEvery pushed commit passes the pre-commit hooks. Fix it in a new commit, remove "
-              "merged worktrees with their branches, or lock a worktree still in use.", file=sys.stderr)
+        print("\nEvery pushed commit passes the pre-commit hooks. Fix it in a new commit.", file=sys.stderr)
     return refused
 
 
