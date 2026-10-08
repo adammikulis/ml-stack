@@ -380,4 +380,15 @@ def test_replacement_control_uses_existing_wsl_runtime_before_install(monkeypatc
     assert calls[0][0] == "python3"
     action = next(row for row in calls if row[0] == "env")
     assert "/home/test/runtime/bin/python" in action
-    assert action[-4:] == ("/mnt/c/preview", "8770", '{"launcher_control": "' + "a" * 32 + '"}', "b" * 40)
+    assert action[-5:] == ("/mnt/c/preview", "8770", '{"launcher_control": "' + "a" * 32 + '"}', "b" * 40, "idle")
+
+
+@pytest.mark.parametrize('restart', ['preserve'])
+def test_wsl_owned_restart_propagates_job_preserving_mode(monkeypatch, restart):
+    from ml_stack.fleet import wsl
+    calls = []
+    monkeypatch.setattr(wsl, '_read', lambda *args: calls.append(args) or '/home/test/runtime/bin/python')
+    wsl.replace_running([], 8770, {'launcher_control': 'a' * 32}, 'b' * 40, restart=restart)
+    action = next(row for row in calls if row[0] == 'env')
+    assert action[-1] == restart
+    assert 'restart=sys.argv[5]' in action[action.index('-c') + 1]

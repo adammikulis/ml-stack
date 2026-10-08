@@ -39,6 +39,15 @@ def _worker(ws, token, worker):
     return who, runner, child
 
 
+def _project_changes(ws, task, parent, child):
+    child_project = ws.registry.info(child.id).get('project') or {}
+    if not task['project'] and not child_project:
+        return False
+    parent_project = ws.registry.info(parent.id).get('project') or {}
+    return bool((task['project'] and parent_project != task['project'])
+                or (child_project and child_project != (task['project'] or parent_project)))
+
+
 def _scopes(ws, graph, board, binding):
     who, child, source, target = binding.who, binding.child, binding.source, binding.target
     scopes = sorted([node['attrs'] for node in graph.nodes('task-worktree')
@@ -50,8 +59,7 @@ def _scopes(ws, graph, board, binding):
         task = board._task(graph, scope['task'])
         if who.id != scope['owner'] or who.id != task['created_by']:
             raise Denied('source recovery requires ownership and creation of every affected task')
-        if task['project'] and any(ws.registry.info(ident).get('project') != task['project']
-                                   for ident in (who.id, child.id)):
+        if _project_changes(ws, task, who, child):
             raise Denied('source recovery cannot change existing task project grants')
         _inactive(ws, graph, task, scope)
         if scope.get('state') != 'reserved' or Path(scope['project']).exists() or Path(scope['project']).is_symlink():

@@ -32,6 +32,7 @@ def test_source_rebind_preserves_specs_grants_states_and_historical_allocations(
     with GraphStore(kit.base / 'coordination.db') as graph:
         allocation = record(graph, kit.allocation['allocation_id'], 'allocation')
         scope = record(graph, 'task-worktree:' + kit.task['id'].split(':')[1], 'task-worktree')
+    kit.now[0] += 1
     result = recovery.rebind(kit.ws, kit.parent, kit.worker_id, str(kit.target), 'Retire source anchor')
     after = kit.board.get(kit.parent, kit.task['id'])
     assert result['verified'] and result['tasks'] == [kit.task['id']]
@@ -207,3 +208,53 @@ def test_cancelled_graph_update_restores_worker_and_preserves_pending_scope(stop
         assert len(journals) == 1 and journals[0]['attrs']['state'] == 'prepared'
     monkeypatch.setattr(recovery, 'save', real_save)
     assert recovery.rebind(kit.ws, kit.parent, kit.worker_id, str(kit.target), 'Resume source recovery')['verified']
+
+
+@pytest.mark.parametrize('task_grant', [False, True])
+@pytest.mark.parametrize('child_grant', [False, True])
+def test_source_recovery_retains_inherited_parent_project_grant(stopped, task_grant, child_grant):
+    from ml_stack.workspace.task_schema import SPEC_FIELDS, fingerprint
+
+    kit = stopped
+    project = {'key': 'repo-demo', 'name': 'demo'}
+    owner = kit.ws.auth(kit.owner)
+    kit.ws.registry.set_project(owner, 'lead', project)
+    if child_grant:
+        kit.ws.registry.set_project(owner, kit.worker_id, project)
+    with GraphStore(kit.base / 'coordination.db') as graph:
+        task = record(graph, kit.task['id'], 'task')
+        task['project'] = project if task_grant else {}
+        task['spec_hash'] = fingerprint({key: task[key] for key in SPEC_FIELDS})
+        graph.upsert_node({'id': task['id'], 'kind': 'task', 'attrs': task})
+    registry = deepcopy(kit.ws.registry._load())
+    before = kit.board.get(kit.parent, kit.task['id'])
+    result = recovery.rebind(kit.ws, kit.parent, kit.worker_id, str(kit.target), 'Retire source anchor')
+    assert result['verified']
+    assert kit.ws.registry._load() == registry
+    after = kit.board.get(kit.parent, kit.task['id'])
+    for key in ('state', 'spec_hash', 'project', 'assignees', 'blocked_reason', 'failures'):
+        assert after[key] == before[key]
+    assert recovery.rebind(kit.ws, kit.parent, kit.worker_id, str(kit.target), 'Verify source')['recovery'] == result['recovery']
+
+
+@pytest.mark.redteam
+@pytest.mark.parametrize('task_grant', [False, True])
+def test_source_recovery_refuses_conflicting_child_project_grant(stopped, task_grant):
+    from ml_stack.workspace.task_schema import SPEC_FIELDS, fingerprint
+
+    kit = stopped
+    owner = kit.ws.auth(kit.owner)
+    project = {'key': 'repo-demo', 'name': 'demo'}
+    kit.ws.registry.set_project(owner, 'lead', project)
+    kit.ws.registry.set_project(owner, kit.worker_id, {'key': 'other-repo', 'name': 'other'})
+    with GraphStore(kit.base / 'coordination.db') as graph:
+        task = record(graph, kit.task['id'], 'task')
+        task['project'] = project if task_grant else {}
+        task['spec_hash'] = fingerprint({key: task[key] for key in SPEC_FIELDS})
+        graph.upsert_node({'id': task['id'], 'kind': 'task', 'attrs': task})
+    registry = deepcopy(kit.ws.registry._load())
+    before = localagent.load(kit.ws, 'native-worker')
+    with pytest.raises(Denied, match='project grants'):
+        recovery.rebind(kit.ws, kit.parent, kit.worker_id, str(kit.target), 'Retire source anchor')
+    assert localagent.load(kit.ws, 'native-worker') == before
+    assert kit.ws.registry._load() == registry
