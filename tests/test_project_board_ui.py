@@ -8,6 +8,7 @@ import pytest
 
 from ml_stack.fleet.project_board_routes import ProjectBoardRoutes
 from ml_stack.fleet.routes import Base
+from ml_stack.fleet.session import Sessions
 from ml_stack.workspace import tokens
 from ml_stack.workspace.remote_host import WorkspaceHost
 from ml_stack.workspace.service import Workspace
@@ -32,7 +33,7 @@ def canonical(tmp_path):
         agent = ws.mint(owner, "demo-worker")
         ws.send(agent, "#general", "note", ident)
         workspaces[ident] = ws
-    projects = {ident: SimpleNamespace(authority_machine="local", board_host="http://127.0.0.1:8770")
+    projects = {ident: SimpleNamespace(name="fixture", authority_machine="local", board_host="http://127.0.0.1:8770")
                 for ident in workspaces}
     def get(ident):
         if ident not in projects:
@@ -40,11 +41,14 @@ def canonical(tmp_path):
         return projects[ident]
     registry = SimpleNamespace(machine="local", get=get,
                                workspace_base=lambda ident: workspaces[ident].base)
-    ui = SimpleNamespace(projects=registry,
+    sessions = Sessions()
+    session = sessions.open("fixture-person")
+    cookie_value = f"ml_stack_ui={session.sid}"
+    ui = SimpleNamespace(sessions=sessions, projects=registry,
                          workspaces=WorkspaceHost(registry),
-                         authed=lambda cookie: cookie == "signed-in", host_ok=lambda host: host == "127.0.0.1:8770")
+                         authed=lambda cookie: cookie == cookie_value, host_ok=lambda host: host == "127.0.0.1:8770")
     def call(suffix, *, project=PROJECT, method="GET", body=None, **options):
-        cookie = options.get("cookie", "signed-in")
+        cookie = options.get("cookie", cookie_value)
         ip = options.get("ip", "127.0.0.1")
         origin = options.get("origin", "http://127.0.0.1:8770")
         raw = json.dumps(body).encode() if body is not None else b""
@@ -59,6 +63,8 @@ def canonical(tmp_path):
                                   end_headers=lambda: None)
         assert Request(ui, handler).route()
         return codes[0], json.loads(handler.wfile.getvalue())
+    for ident in workspaces:
+        assert call("connect", project=ident, method="POST", body={})[0] == 200
     return call, workspaces, projects
 
 
@@ -97,12 +103,13 @@ def test_person_identity_is_required_and_never_created(canonical):
     call, workspaces, _ = canonical
     ws = workspaces[PROJECT]
     owner_path = tokens.directory(ws.base) / tokens.OWNER_FILE
-    owner = tokens.read_file(owner_path)
-    agent = ws.mint(owner, "other-worker")
-    tokens.store(ws.base, tokens.OWNER_FILE, agent)
-    assert call("boards")[0] == 403
     owner_path.unlink()
+    assert call("boards")[0] == 200
+    agents = ws.registry._load()
+    agents['demo-owner'].pop('person_project')
+    ws.registry._save(agents)
     assert call("boards")[0] == 503
+    assert 'person_project' not in ws.registry._load()['demo-owner']
     assert not owner_path.exists()
 
 
@@ -141,3 +148,14 @@ def test_canonical_person_post_accepts_exact_browser_origin(canonical, scheme):
 def test_canonical_person_post_rejects_different_browser_origin(canonical, origin):
     assert canonical[0]('post', method='POST', origin=origin,
                          body={'to': '#general', 'body': 'foreign message'})[0] == 403
+
+
+def test_canonical_person_task_create_rejects_other_project(canonical):
+    call, _, _ = canonical
+    path = f'/ui/projects/{PROJECT}/tasks'
+    status, task = call('', path=path, method='POST', body={
+        'spec': {'title': 'Replay', 'acceptance': ['Replay passes']}})
+    assert status == 200 and task['project']['key'] == PROJECT
+    status, _ = call('', path=path, method='POST', body={
+        'spec': {'title': 'Foreign', 'acceptance': ['Denied'], 'project': {'key': OTHER}}})
+    assert status == 403

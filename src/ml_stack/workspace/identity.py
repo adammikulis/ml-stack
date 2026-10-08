@@ -569,11 +569,14 @@ class Registry:
 
     def authenticate(self, token: str) -> Identity:
         """The identity ``token`` stands for; raises `Denied` for anything else."""
+        if not isinstance(token, str):
+            raise Denied("the token is not recognised")
         head, _, secret = token.removeprefix(PREFIX).rpartition(".") if token.startswith(PREFIX) \
             else ("", "", "")
         agents = self._load()
         entry = agents.get(head) if secret else None
-        good = bool(entry) and hmac.compare_digest(_hash(secret), str(entry["hash"]))
+        good = bool(entry) and isinstance(entry.get("hash"), str) and hmac.compare_digest(
+            _hash(secret), entry["hash"])
         if not good or entry is None:
             raise Denied("the token is not recognised")
         if entry.get("revoked"):

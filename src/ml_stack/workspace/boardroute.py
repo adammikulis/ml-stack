@@ -88,7 +88,7 @@ class Request:
     body: bytes = b""
 
 
-def respond(ws: Workspace, req: Request) -> Reply:
+def respond(ws: Workspace, req: Request, *, actor=None) -> Reply:
     """The answer to one request."""
     parts = urlsplit(req.target)
     refused = _checked(req.method, req.headers, req.port, parts.path in (PREFIX + "post", PREFIX + "ack"))
@@ -104,7 +104,7 @@ def respond(ws: Workspace, req: Request) -> Reply:
                            'coordinator': configured['endpoint'], 'workspace': configured['workspace']})
     api = ws.board
     try:
-        token = tokens.read_file(tokens.directory(ws.base) / tokens.OWNER_FILE)
+        token = actor if actor is not None else tokens.read_file(tokens.directory(ws.base) / tokens.OWNER_FILE)
     except (Denied, OSError):
         return _json(503, {"error": "the person's identity is not set up: run `ml-stack-workspace setup`"})
     try:
