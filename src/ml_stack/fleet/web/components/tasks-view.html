@@ -67,7 +67,7 @@ tasks-view .task-composer { background:var(--bg-raised); border:1px solid var(--
 const M=window.fleetModel,W=window.workspaceModel,E=M.el;
 class TasksView extends HTMLElement{
  connectedCallback(){if(this.wired)return;this.wired=true;this.host=this.querySelector('section');this.note=this.querySelector('.status');this.rows=[];this.selected='';
- this.search=this.querySelector('input[aria-label="Search tasks"]');this.filter=this.querySelector('select[aria-label="Task status"]');this.project=this.querySelector('.task-project');this.project.onchange=()=>{this.reloadAfterLoad=this.loading;this.selected='';this.rows=[];this.overview=null;this.detailKey='';this.paint();this.load();};
+ this.search=this.querySelector('input[aria-label="Search tasks"]');this.filter=this.querySelector('select[aria-label="Task status"]');this.project=this.querySelector('.task-project');this.project.onchange=()=>{this.reloadAfterLoad=this.loading;this.selected='';this.rows=[];this.overview=null;this.loadError='';this.detailKey='';this.paint();this.load();};
  for(const state of ['queued','working','review','accepted','completed','blocked','rejected'])this.filter.append(E('option',{value:state},state));
  this.search.oninput=this.filter.onchange=()=>this.paint();this.querySelector('.task-refresh').onclick=()=>this.load();
  this.querySelector('form').onsubmit=async event=>{event.preventDefault();const form=event.currentTarget;try{const row=await this.post(this.endpoint(),{spec:{title:form.elements.namedItem('title').value,description:form.elements.namedItem('description').value,acceptance:form.elements.namedItem('acceptance').value.split('\n').map(x=>x.trim()).filter(Boolean)}});this.selected=row.id;form.reset();await this.load();}catch(error){W.status(this.note,error);}};
@@ -90,25 +90,27 @@ class TasksView extends HTMLElement{
    if(!this.project.value){this.rows=[];this.overview=null;this.paint();this.note.replaceChildren(E('span',{},'Choose a project workspace. '),W.button('Open Projects',()=>M.go('projects')));return;}
    const selected=this.project.value;this.note.textContent='Updating task overview…';
    const data=await W.api(this.endpoint());if(selected!==this.project.value)return;
-   this.rows=data.tasks||[];this.metrics=data.metrics||{};this.overview=data.overview;this.paint();
+   this.rows=data.tasks||[];this.metrics=data.metrics||{};this.overview=data.overview;this.loadError='';this.paint();
    this.note.textContent=`Updated ${new Date(this.overview.as_of*1000).toLocaleTimeString()}`;
    const project=this.projects.find(row=>row.id===selected);this.querySelector('.task-authority').textContent=project?`Canonical workspace · ${project.authority_machine||'authority not configured'}`:'';
-  }catch(error){this.rows=[];this.overview=null;this.paint();W.status(this.note,error);}
+  }catch(error){this.rows=[];this.overview=null;this.loadError=error.message||String(error);this.paint();this.note.replaceChildren(E('span',{},`Task data unavailable: ${this.loadError} Use Refresh to try again, or check the project workspace. `),W.button('Open Projects',()=>M.go('projects')));}
   finally{this.loading=false;if(this.reloadAfterLoad){this.reloadAfterLoad=false;this.load();}}
  }
  summary(){
   const value=this.overview,metrics=this.querySelector('.task-metrics');
   metrics.replaceChildren(...[['Queued','queued'],['Running','running'],['Blocked','blocked'],['Review','review'],['Done','done'],['Failed','failed']].map(([label,key])=>E('div',{'data-task-count':key},E('strong',{},value?String(value[key]):'—'),label)));
   this.querySelector('.task-remaining-number').textContent=value?String(value.remaining):'—';
-  this.querySelector('.task-total').textContent=value?`${value.done} completed of ${value.total} tasks${value.awaiting_integration?` · ${value.awaiting_integration} awaiting integration`:''}`:'Choose a project workspace';
+  this.querySelector('.task-total').textContent=value?`${value.done} completed of ${value.total} tasks${value.awaiting_integration?` · ${value.awaiting_integration} awaiting integration`:''}`:this.loadError?'Task data unavailable':'Choose a project workspace';
   this.querySelector('.task-eta-value').textContent=value?.eta_seconds!=null?this.duration(value.eta_seconds):'Unknown';
-  this.querySelector('.task-eta-reason').textContent=value?.eta_reason||'Waiting for project task data.';
+  this.querySelector('.task-eta-reason').textContent=value?.eta_reason||(this.loadError?'Task data could not be loaded. Refresh to try again.':'Waiting for project task data.');
   const workers=this.querySelector('.task-worker-list');workers.replaceChildren(...(value?.workers||[]).map(worker=>E('button',{type:'button',onclick:()=>{this.selected=worker.task;this.paint();}},E('strong',{},worker.id),E('small',{},`${worker.device_id||'Device not recorded'} · ${worker.active?'Active lease':'Heartbeat expired'}${worker.heartbeat_age_seconds!=null?' · '+this.duration(worker.heartbeat_age_seconds)+' since heartbeat':''}`),E('small',{},worker.title))));
-  if(!workers.children.length)workers.append(E('p',{class:'hint'},value?'No tasks currently assigned to a working agent.':'Choose a project to inspect worker assignments.'));
+  if(!workers.children.length)workers.append(E('p',{class:'hint'},value?'No tasks currently assigned to a working agent.':this.loadError?'Worker assignments unavailable.':'Choose a project to inspect worker assignments.'));
   this.querySelector('.task-composer').hidden=!value;
  }
  duration(seconds){if(seconds<60)return `${Math.floor(seconds)}s`;if(seconds<3600)return `${Math.floor(seconds/60)}m`;return `${Math.floor(seconds/3600)}h ${Math.floor(seconds%3600/60)}m`;}
  paint(){this.summary();
+ const layout=this.querySelector('.task-layout');layout.hidden=!this.overview;this.search.disabled=this.filter.disabled=!this.overview;
+ if(!this.overview){this.querySelector('.task-list').replaceChildren();this.querySelector('.task-detail').replaceChildren();this.detailKey='';return;}
  const query=this.search.value.toLowerCase();const rows=this.rows.filter(row=>(!this.filter.value||row.state===this.filter.value)&&`${row.title} ${row.description} ${row.worker||''} ${row.base_id||''}`.toLowerCase().includes(query));
  const lanes=[['Ready',['queued']],['In progress',['working','blocked']],['Review & done',['review','accepted','completed','rejected']]];
  this.querySelector('.task-list').replaceChildren(...lanes.map(([label,states])=>{
