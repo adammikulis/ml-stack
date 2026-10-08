@@ -325,5 +325,5 @@ def doctor(ws: Workspace) -> list[Finding]:
     found.append(Finding(ws.audit_verify()["ok"], "the logs' chains hold",
                          "ml-stack-workspace audit-verify"))
     found.append(_round_trip(ws))
-    found.extend(Finding(f.good, f"{f.name}: {f.said}", f.fix) for f in agent_hooks.findings())
+    found.extend(Finding(f.good, f"{f.name}: {f.said}", " ".join(f.fix)) for f in agent_hooks.findings())
     return found

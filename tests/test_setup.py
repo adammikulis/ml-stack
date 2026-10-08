@@ -64,7 +64,7 @@ def test_nothing_is_run_without_being_asked(capsys, monkeypatch):
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: ran.append(a))
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
 
-    ask([Finding(name="a thing", good=False, said="wrong", fix="rm -rf /")])
+    ask([Finding(name="a thing", good=False, said="wrong", fix=["rm", "-rf", "/"])])
     assert ran == [], "a non-interactive run must offer, not act"
     assert "fix: rm -rf /" in capsys.readouterr().out
 
@@ -73,11 +73,11 @@ def test_a_fix_runs_only_when_it_is_wanted(capsys, monkeypatch):
     import subprocess
     ran = []
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: ran.append(a[0]))
-    ask([Finding(name="a thing", good=False, said="wrong", fix="echo yes")], yes=True)
-    assert ran == ["echo yes"]
+    ask([Finding(name="a thing", good=False, said="wrong", fix=["echo", "yes"])], yes=True)
+    assert ran == [["echo", "yes"]]
 
     ran.clear()
-    ask([Finding(name="a thing", good=True, said="fine", fix="echo no")], yes=True)
+    ask([Finding(name="a thing", good=True, said="fine", fix=["echo", "no"])], yes=True)
     assert ran == [], "nothing is run to fix what is not broken"
 
 
@@ -176,11 +176,11 @@ def test_a_missing_architecture_offers_the_build_fix(monkeypatch, tmp_path):
 
     monkeypatch.setattr(setup, "_arches", lambda binary: {"gemma4"})
     found = [f for f in setup.look() if f.name == "architecture qwen4exp"]
-    assert found and found[0].fix == "ml-stack-serve build"
+    assert found and found[0].fix == ["ml-stack-serve", "build"]
 
     monkeypatch.setattr(setup, "_arches", lambda binary: {"gemma4", "qwen4exp"})
     found = [f for f in setup.look() if f.name == "architecture qwen4exp"]
-    assert found and found[0].fix == ""
+    assert found and found[0].fix == []
 
 
 def test_lacking_flags_offer_the_build_fix(tmp_path, monkeypatch):
@@ -193,7 +193,7 @@ def test_lacking_flags_offer_the_build_fix(tmp_path, monkeypatch):
     stand_in = _server_answering(tmp_path, "-m, --model FNAME   model path\n")
     monkeypatch.setattr(binary_module, "find_binary", lambda *a, **k: stand_in)
     found = [f for f in setup.look() if f.name == "flags this build lacks"]
-    assert found and found[0].fix == "ml-stack-serve build"
+    assert found and found[0].fix == ["ml-stack-serve", "build"]
 
 
 def test_a_managed_build_is_labelled_by_commit_and_age_not_by_version(tmp_path):
@@ -253,7 +253,7 @@ def test_every_command_the_package_installs_is_looked_for_on_path(monkeypatch, t
     assert found and not found[0].good
     assert "ml-stack-ingest" in found[0].said
     assert "ml-stack-serve" not in found[0].said, "only what is missing is named"
-    assert found[0].fix == f"pip install -e {tmp_path} && pyenv rehash"
+    assert found[0].fix == ["pip", "install", "-e", str(tmp_path)]
 
     monkeypatch.setattr(shutil, "which", lambda name, *a, **k: f"/opt/bin/{name}")
     found = [f for f in setup.look() if f.name == "commands on PATH"]
@@ -292,7 +292,7 @@ def test_the_printed_report_names_the_missing_command_and_the_line(monkeypatch, 
     assert setup.main(["--quiet"]) == 1
     out = capsys.readouterr().out
     assert "ml-stack-jobs" in out
-    assert f"fix: pip install -e {tmp_path} && pyenv rehash" in out
+    assert f"fix: pip install -e {tmp_path}" in out
 
 
 def test_the_models_finding_names_each_cache_and_its_size(monkeypatch, capsys, tmp_path):
@@ -369,7 +369,7 @@ def test_a_machine_with_no_speech_engine_is_told_what_would_add_one(monkeypatch)
             vad=[("energy", ProviderHealth.ok("energy"))])
     found = {f.name: f for f in look()}
     assert not found["speech recognition"].good
-    assert found["speech recognition"].fix == "pip install 'ml-stack[speech]'"
+    assert found["speech recognition"].fix == ["pip", "install", "ml-stack[speech]"]
     assert "faster-whisper is not installed" in found["speech recognition"].note
     assert not found["speech synthesis"].good
     assert found["voice activity"].good, "the energy detector needs nothing installed"
@@ -403,8 +403,8 @@ def test_the_firewall_finding_names_both_inbound_rules_and_how_to_add_them():
     assert bool(finding.fix) is not finding.good
     if not finding.good:
         assert finding.said.startswith("no inbound rule for ")
-        assert finding.fix == windows_firewall_line()
-        assert "protocol=TCP" in finding.fix and "protocol=UDP" in finding.fix
+        assert finding.fix == ["cmd", "/c", windows_firewall_line()]
+        assert "protocol=TCP" in finding.fix[2] and "protocol=UDP" in finding.fix[2]
         assert "Windows blocks inbound TCP 8770" in finding.note
     else:
         assert finding.said.startswith("inbound rules present: ")
@@ -427,7 +427,7 @@ def test_the_gguf_finding_only_counts_gguf_files(monkeypatch, tmp_path):
     monkeypatch.setattr("ml_stack.hub.default_roots", lambda root: [mine, tmp_path / "absent"])
     found = {f.name: f for f in setup.look()}
     assert not found["a GGUF on disk"].good
-    assert found["a GGUF on disk"].fix == "ml-stack-models fetch hf:owner/repo/file.gguf"
+    assert found["a GGUF on disk"].fix == ["ml-stack-models", "fetch", "hf:owner/repo/file.gguf"]
 
     (mine / "small-Q4_K_M.gguf").write_bytes(b"y")
     found = {f.name: f for f in setup.look()}
@@ -464,7 +464,7 @@ def test_store_finding_reports_a_store_that_will_not_open(tmp_path):
     path.write_bytes(b"not a ladybug database")
     found = _store_finding(path)
     assert not found.good
-    assert found.fix == f"ml-stack-store check {path}"
+    assert found.fix == ["ml-stack-store", "check", str(path)]
 
 
 # -- the ports --------------------------------------------------------------
@@ -503,7 +503,7 @@ def test_ports_finding_says_what_holds_a_taken_port():
         holder.close()
     assert not found.good
     assert str(http_port) in found.said
-    assert f"lsof -nP -iTCP:{http_port} -iUDP:{disco_port}" == found.fix
+    assert ["lsof", "-nP", f"-iTCP:{http_port}", f"-iUDP:{disco_port}"] == found.fix
 
 
 def test_ports_finding_says_held_by_the_given_daemon():
@@ -524,7 +524,7 @@ def test_fleet_finding_says_in_no_cluster_when_never_joined(tmp_path):
     assert found.keys() == {"fleet: joined", "ports"}
     assert not found["fleet: joined"].good
     assert found["fleet: joined"].said == "in no cluster"
-    assert "ml-stack-cluster join --passphrase" in found["fleet: joined"].fix
+    assert found["fleet: joined"].fix[:2] == ["ml-stack-cluster", "join"] and "--passphrase" in found["fleet: joined"].fix
 
 
 def test_fleet_finding_says_the_daemon_does_not_answer(tmp_path):
@@ -538,7 +538,7 @@ def test_fleet_finding_says_the_daemon_does_not_answer(tmp_path):
                              cluster_key_path=keyfile)}
     assert found["fleet: joined"].good
     assert not found["fleet: daemon"].good
-    assert found["fleet: daemon"].fix == "ml-stack-cluster join"
+    assert found["fleet: daemon"].fix == ["ml-stack-cluster", "join"]
     assert "fleet: seen" not in found
     assert found["ports"].good
 
@@ -637,3 +637,13 @@ def test_a_checkout_with_no_installed_metadata_reads_its_pyproject(monkeypatch, 
     monkeypatch.setattr(setup, "checkout", lambda: tmp_path)
     monkeypatch.setattr(setup, "distribution", not_installed)
     assert setup._scripts() == ["ml-stack-newthing"]
+
+
+def test_a_fix_naming_a_hostile_path_runs_as_one_argument_and_no_shell(tmp_path):
+    """A path with shell metacharacters reaches the command as data: nothing it contains runs."""
+    marker = tmp_path / "executed"
+    hostile = tmp_path / "a; touch executed; $(touch executed) `touch executed` & b"
+    hostile.mkdir()
+    ask([Finding(name="a thing", good=False, said="wrong", fix=["ls", "-d", str(hostile)])], yes=True)
+    ask([Finding(name="a thing", good=False, said="wrong", fix=["pwd"], cwd=str(hostile))], yes=True)
+    assert not marker.exists() and not (hostile / "executed").exists() and not list(tmp_path.glob("**/executed"))

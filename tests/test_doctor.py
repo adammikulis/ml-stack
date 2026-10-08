@@ -92,12 +92,13 @@ def test_hooks_not_installed_is_named_with_the_installer_as_the_fix(tmp_path):
     found = hooks_of(repo)
     assert not found.good
     assert found.said == "not installed: pre-commit, commit-msg, pre-push"
-    assert found.fix == f"cd {repo} && sh scripts/install-hooks.sh"
+    assert (found.fix, found.cwd) == (["sh", "scripts/install-hooks.sh"], str(repo))
 
 
 def test_the_offered_fix_installs_them_and_the_next_look_is_good(tmp_path):
     repo = make_repo(tmp_path / "quenlow")
-    subprocess.run(hooks_of(repo).fix, shell=True, check=True, capture_output=True)  # noqa: S602
+    found = hooks_of(repo)
+    subprocess.run(found.fix, cwd=found.cwd, check=True, capture_output=True)
     found = hooks_of(repo)
     assert found.good
     assert found.said == "installed, from scripts/hooks"
@@ -121,10 +122,9 @@ def test_a_repository_shipping_hooks_under_services_gets_a_link_fix(tmp_path):
     repo = make_repo(tmp_path / "pellard", hooks_dir="services/hooks")
     found = hooks_of(repo)
     assert not found.good
-    assert found.fix == (f"cd {repo} && ln -sf ../../services/hooks/pre-commit .git/hooks/pre-commit"
-                         " && ln -sf ../../services/hooks/commit-msg .git/hooks/commit-msg"
-                         " && ln -sf ../../services/hooks/pre-push .git/hooks/pre-push")
-    subprocess.run(found.fix, shell=True, check=True)  # noqa: S602 - a fix is a shell line
+    assert found.fix == ["ln", "-sf", "../../services/hooks/pre-commit", "../../services/hooks/commit-msg",
+                         "../../services/hooks/pre-push", ".git/hooks/"]
+    subprocess.run(found.fix, cwd=found.cwd, check=True)
     assert hooks_of(repo).said == "installed, from services/hooks"
 
 
@@ -155,7 +155,7 @@ def test_a_clean_tree_is_clean_and_a_dirty_one_lists_what_is_not(tmp_path):
     found = status_of(repo)
     assert not found.good
     assert found.said == "2 not committed: note-0.txt, new.txt"
-    assert found.fix == ""
+    assert found.fix == []
 
 
 def test_ahead_of_origin_is_a_note_and_never_a_push(tmp_path):
@@ -171,7 +171,7 @@ def test_ahead_of_origin_is_a_note_and_never_a_push(tmp_path):
     found = ahead_of(repo)
     assert found.good
     assert found.said == "main is 1 commit(s) ahead of origin/main"
-    assert "not pushed" in found.note and found.fix == ""
+    assert "not pushed" in found.note and found.fix == []
     assert git(repo, "rev-list", "--count", "origin/main..main") == "1"
 
 
@@ -222,7 +222,7 @@ def test_an_install_under_the_checkout_is_good_and_reports_the_path(tmp_path):
     found = install_of(repo, checkout=checkout)
     assert found.good
     assert found.said == str(ask)
-    assert found.fix == ""
+    assert found.fix == []
 
 
 def test_an_install_in_site_packages_is_a_copy_with_pip_e_as_the_fix(tmp_path):
@@ -236,7 +236,7 @@ def test_an_install_in_site_packages_is_a_copy_with_pip_e_as_the_fix(tmp_path):
     found = install_of(repo, checkout=checkout)
     assert not found.good
     assert found.said == str(copy)
-    assert found.fix == f"{python} -m pip install -e {checkout}"
+    assert found.fix == [str(python), "-m", "pip", "install", "-e", str(checkout)]
     assert "imports a copy" in found.note
 
 
@@ -287,7 +287,7 @@ def test_empty_runs_are_counted_and_named_with_forget_as_the_fix(tmp_path):
     found = by_name(bench_of(home), "bench: runs")
     assert not found.good
     assert found.said == "2 run(s) read back as nothing: bench:hollow:1, bench:hollow:2"
-    assert found.fix == f"ml-stack-bench forget --empty --kept {home / 'runs.ladybug'}"
+    assert found.fix == ["ml-stack-bench", "forget", "--empty", "--kept", str(home / "runs.ladybug")]
 
 
 def test_a_record_whose_pid_is_gone_is_the_last_run_and_not_a_fault(tmp_path):
@@ -299,7 +299,7 @@ def test_a_record_whose_pid_is_gone_is_the_last_run_and_not_a_fault(tmp_path):
     assert found.good
     assert found.said == "nothing is measuring"
     assert f"pid {pid} is gone" in found.note
-    assert found.fix == ""
+    assert found.fix == []
     assert (home / "measuring.json").exists(), "the record is what says what ran last"
 
 
@@ -319,7 +319,7 @@ def test_a_log_newer_than_the_newest_run_with_no_run_kept_is_a_run_that_died(tmp
     assert not found.good
     assert found.said == ("1 log(s) newer than the newest kept run, with no run kept: "
                           "sweep-died-20260830T130000.log")
-    assert found.fix == ""
+    assert found.fix == []
 
 
 def test_every_log_with_a_run_after_it_is_good(tmp_path):
@@ -362,18 +362,18 @@ def test_a_build_older_than_fourteen_days_is_noted_with_build_as_the_fix(tmp_pat
     found = builds_of(current, tmp_path / "named")[0]
     assert not found.good
     assert found.said == "abc1234, 20d old, answers --help"
-    assert found.fix == "ml-stack-serve build"
+    assert found.fix == ["ml-stack-serve", "build"]
     assert builds_of(current, tmp_path / "named", stale_days=30)[0].good
 
 
 def test_no_current_and_a_current_that_does_not_answer_are_both_told_to_build(tmp_path):
     found = builds_of(tmp_path / "current", tmp_path / "named")[0]
-    assert (found.good, found.said, found.fix) == (False, "not built yet", "ml-stack-serve build")
+    assert (found.good, found.said, found.fix) == (False, "not built yet", ["ml-stack-serve", "build"])
     broken = make_build(tmp_path / "broken", commit="bad0000", days_old=1, answers=False)
     found = builds_of(broken, tmp_path / "named")[0]
     assert not found.good
     assert found.said == f"{broken / 'llama-server'} does not answer --help"
-    assert found.fix == "ml-stack-serve build"
+    assert found.fix == ["ml-stack-serve", "build"]
 
 
 def test_named_builds_are_listed_beside_current(tmp_path):
@@ -479,18 +479,18 @@ def test_yes_runs_the_fixes_it_can_and_does_not_touch_the_build(everything, caps
     """Installing the hooks is safe; ``ml-stack-serve build`` is a compile, and the test
     replaces it with a record of having been asked."""
     repo, home = everything
-    asked: list[str] = []
+    asked: list[list[str]] = []
     real = subprocess.run
 
     def run(cmd, *args, **kwargs):
-        if cmd == "ml-stack-serve build":
+        if cmd == ["ml-stack-serve", "build"]:
             asked.append(cmd)
             return subprocess.CompletedProcess(cmd, 0)
         return real(cmd, *args, **kwargs)
 
     monkeypatch.setattr(subprocess, "run", run)
     assert main(["--repo", str(repo), "--bench-home", str(home), "--yes"]) == 1
-    assert asked == ["ml-stack-serve build"]
+    assert asked == [["ml-stack-serve", "build"]]
     assert (home / "measuring.json").exists(), "nothing deletes what says what ran last"
     assert hooks_of(repo).good
     found = look([repo], bench_home=home)
