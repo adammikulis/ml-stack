@@ -29,6 +29,7 @@ ENV_SKIP = frozenset({"PYTHONPATH", "DEV_TEST_PYTEST_TOKEN", "DEV_TEST_PYTEST_EN
                       "DEV_TEST_JOB", "DEV_TEST_AGENT", "ML_STACK_SHIM_LOG"})
 CONFIG = ("pyproject.toml", "pytest.ini", "tox.ini", "setup.cfg", "tests/heavy-modules.txt")
 TREE_DIRS = ("src", "scripts", "tests")
+IGNORED_NAMES = frozenset({"__pycache__", ".DS_Store", ".pytest_cache", ".testmondata", ".ruff_cache"})
 STDLIB = frozenset(sys.stdlib_module_names)
 _hashes: dict[tuple[str, int, int], str] = {}
 _texts: dict[tuple[str, int, int], str] = {}
@@ -71,9 +72,9 @@ def text_of(path: Path) -> str:
 
 
 def dir_sha(path: Path) -> str:
-    """A digest of the names in a directory, or ``missing``."""
+    """A digest of the names in a directory without caches, or ``missing``."""
     try:
-        return sha("\n".join(sorted(os.listdir(path))))
+        return sha("\n".join(sorted(n for n in os.listdir(path) if n not in IGNORED_NAMES and not n.endswith(".pyc"))))
     except OSError:
         return "missing"
 
