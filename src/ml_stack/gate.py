@@ -28,8 +28,8 @@ from typing import Any
 from ml_stack import home
 from ml_stack.lock import release, take
 
-__all__ = ["DEFAULT_WAIT_S", "ENV_PARALLEL", "ENV_WAIT", "QueueTimeout", "is_generation",
-           "parallel", "device_of", "snapshot", "turn"]
+__all__ = ["DEFAULT_WAIT_S", "ENV_PARALLEL", "ENV_WAIT", "QueueTimeout", "device_of", "is_generation",
+           "parallel", "snapshot", "turn"]
 
 logger = logging.getLogger(__name__)
 
