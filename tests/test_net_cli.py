@@ -15,10 +15,11 @@ from tests.net_site import Site, gguf_bytes
 @pytest.fixture
 def person(capsys, monkeypatch):
     """A terminal with a person who types back what they are asked."""
-    monkeypatch.setitem(human.mint.__kwdefaults__, "terminal", (True, True))
+    for grant in (human.mint, human.mint_gated):
+        monkeypatch.setitem(grant.__kwdefaults__, "terminal", (True, True))
+        monkeypatch.setitem(grant.__kwdefaults__, "typed", lambda prompt="": prompt.split()[1])
     for name in human.AGENT_MARKERS:
         monkeypatch.delenv(name, raising=False)
-    monkeypatch.setitem(human.mint.__kwdefaults__, "typed", lambda prompt="": prompt.split()[1])
 
 
 def run(capsys, *argv):
@@ -80,7 +81,7 @@ def test_an_agent_cannot_approve_a_host(person, capsys, monkeypatch):
 def test_a_process_without_a_terminal_cannot_approve_a_host(capsys, monkeypatch):
     for name in human.AGENT_MARKERS:
         monkeypatch.delenv(name, raising=False)
-    monkeypatch.setitem(human.mint.__kwdefaults__, "terminal", (False, False))
+    monkeypatch.setitem(human.mint_gated.__kwdefaults__, "terminal", (False, False))
     code = run(capsys, "approve-host", "evil.example")[0]
     assert code == 2 and not policy.default().approved("evil.example")
 
