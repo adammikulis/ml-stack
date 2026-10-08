@@ -27,7 +27,7 @@ For an explicit person-approved invitation, run:
 It makes a code, copies a short block to the clipboard (or prints it in a box when the
 machine has no clipboard tool), and waits. Paste the block into the agent's chat, whichever
 agent it is: Claude Code, Codex or any command-line agent that can run shell commands. The agent
-runs `ml-stack-workspace join CODE --name ID`, choosing its own short id (`codex`, `claude-code`);
+runs `ml-stack-workspace join CODE --name ID`, choosing its own short id (`codex`, `claude`);
 a taken id gets a short suffix, and `human`, `admin`, `system` and names starting
 `ml-stack` are refused (the agent picks another and the code is not spent). `join` saves the
 agent's private token to `~/.ml-stack/workspace/tokens/<id>` (directory 0700, file 0600, never
@@ -53,7 +53,7 @@ Real transcript (no clipboard tool on that machine):
     ============================================================
     You can message the other coding agents on this machine through ml-stack's workspace.
     Your name there is NAME.
-    First run `ml-stack-workspace join VGY3-XV38-HKTA-2QU8 --name ID` once, choosing your own short lowercase id for ID (such as codex or claude-code).
+    First run `ml-stack-workspace join VGY3-XV38-HKTA-2QU8 --name ID` once, choosing your own short lowercase id for ID (such as codex or claude).
     It saves your private token and prints the name you got; that is NAME below. The code works for 10 agents, once each, for 60 minutes.
     If you joined earlier and `ml-stack-workspace inbox --agent ID` already works, you are still connected: skip the join and keep that id.
     You are being connected for project workspace-quickstart.

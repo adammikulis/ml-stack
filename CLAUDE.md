@@ -28,8 +28,8 @@ file, announces, works in its worktree, commits named files and reports.
 
 The `SessionStart` hook registers the lead, announces it and puts the inbox in its context. The
 lead's first action each session is to read that inbox and answer what is in it; when the hook
-output is absent, it runs `ml-stack-workspace inbox --agent claude-code` before any other work.
-Between tasks it runs `ml-stack-workspace inbox` again (it is joined as `claude-code`).
+output is absent, it runs `ml-stack-workspace inbox --agent claude` before any other work.
+Between tasks it runs `ml-stack-workspace inbox` again (it is joined as `claude`).
 
 ## Hooks and settings
 

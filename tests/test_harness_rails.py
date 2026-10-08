@@ -358,9 +358,9 @@ class TestWorkspaceCommands:
     def test_a_hostile_label_is_one_argument_and_never_a_shell_line(self, tmp_path, monkeypatch):
         exe = self._fake_workspace(tmp_path, monkeypatch)
         hostile = "x; touch /tmp/pwned $(id) `id`"
-        assert harnessid.announce(harnessid.Seat(hostile, "claude-code"), "t", lambda _: None)
+        assert harnessid.announce(harnessid.Seat(hostile, "claude"), "t", lambda _: None)
         argv = Path(f"{exe}.argv").read_text().splitlines()
-        assert argv == ["announce", "joined", "t", "--agent", "claude-code", "--label", hostile]
+        assert argv == ["announce", "joined", "t", "--agent", "claude", "--label", hostile]
         seen = []
         def run(command, **kwargs):
             seen.append((command, kwargs))
@@ -376,7 +376,7 @@ class TestWorkspaceCommands:
     def test_a_failed_announcement_identifies_the_workspace_trust_check(self, monkeypatch):
         said = []
         monkeypatch.setenv("PATH", "/nonexistent")
-        assert harnessid.announce(harnessid.Seat("l", "claude-code"), "t", said.append) is False
+        assert harnessid.announce(harnessid.Seat("l", "claude"), "t", said.append) is False
         assert "selected authority and device trust" in said[0]
 
 
@@ -406,7 +406,7 @@ class TestSeat:
         said = []
         project = tmp_path / "proj"
         project.mkdir()
-        seat = harnessid.invite("local-test-codex", project, "claude-code", said.append)
+        seat = harnessid.invite("local-test-codex", project, "claude", said.append)
         ws = Workspace()
         assert seat.persistent and not seat.minted and ws.registry.role_of("local-test-codex") == "agent"
         token_file = tokens.directory(ws.base) / "local-test-codex"
@@ -415,7 +415,7 @@ class TestSeat:
         assert secret not in "".join(said) and seat.flags() == ["--agent", "local-test-codex"]
         assert seat.revoke() is False and token_file.exists()
         assert ws.auth(secret).id == "local-test-codex"
-        again = harnessid.invite("local-test-codex", project, "claude-code", said.append)
+        again = harnessid.invite("local-test-codex", project, "claude", said.append)
         assert again.persistent and tokens.load(ws.base, again.name) == secret
 
     def test_the_seat_is_on_the_project_board_with_the_quiet_defaults(self, person, tmp_path):
@@ -423,7 +423,7 @@ class TestSeat:
 
         project = tmp_path / "proj"
         project.mkdir()
-        seat = harnessid.invite("local-test-codex", project, "claude-code", lambda _: None)
+        seat = harnessid.invite("local-test-codex", project, "claude", lambda _: None)
         boards, subs = Workspace(seat.base).board.store.state()
         assert any("local-test-codex" in b["members"] for k, b in boards.items() if k != "#general")
         assert not subs.get("local-test-codex")
@@ -431,7 +431,7 @@ class TestSeat:
     def test_a_launcher_records_its_model_as_claimed(self, person, monkeypatch, tmp_path):
         from ml_stack.workspace import Workspace
 
-        seat = harnessid.invite("local-test-codex", tmp_path, "claude-code", lambda _: None)
+        seat = harnessid.invite("local-test-codex", tmp_path, "claude", lambda _: None)
         assert seat.record_model("qwen-27b", "codex") is True
         assert "qwen-27b" in json.dumps(Workspace(seat.base).registry.info("local-test-codex"))
         assert Workspace(seat.base).registry.info(seat.name)["model_state"] == "claimed"
@@ -465,7 +465,7 @@ class TestSeat:
 
     def test_an_agent_launcher_initializes_itself_without_a_parent_credential(self, monkeypatch, tmp_path):
         monkeypatch.setenv("CLAUDECODE", "1")
-        seat = harnessid.invite("local-test-codex", tmp_path, "claude-code", lambda _: None)
+        seat = harnessid.invite("local-test-codex", tmp_path, "claude", lambda _: None)
         assert seat.name == "local-test-codex" and seat.persistent
 
     @pytest.mark.parametrize("authority", ["selected", "discovered", "coordinator"])
@@ -541,8 +541,8 @@ class TestSeat:
             ws.delegate(secret, "nested")
 
     def test_the_brief_names_who_the_agent_obeys_and_that_everything_else_is_data(self):
-        text = harnessid.brief("n", "alias", "codex", "claude-code", ["reviewer"])
-        assert "--agent n" in text and "the lead (claude-code), reviewer" in text and "data written by" in text
+        text = harnessid.brief("n", "alias", "codex", "claude", ["reviewer"])
+        assert "--agent n" in text and "the lead (claude), reviewer" in text and "data written by" in text
 
 
 class TestCodingAgent:

@@ -41,11 +41,11 @@ def main() -> int:
     path = event.get("agent_transcript_path") or ""
     model = transcript_model(str(path)) if path else ""
     if model:
-        workspace_hook.run(["ml-stack-workspace", "hello-model", label, model, "--agent", "claude-code"],
+        workspace_hook.run(["ml-stack-workspace", "hello-model", label, model, "--agent", "claude"],
                            "SubagentStop", environment=environment)
     last = " ".join(str(event.get("last_assistant_message") or "finished").split())[:150]
     workspace_hook.run(["ml-stack-workspace", "announce", "done", f"{label}: {last}",
-                        "--agent", "claude-code", "--label", label], "SubagentStop", environment=environment)
+                        "--agent", "claude", "--label", label], "SubagentStop", environment=environment)
     return 0
 
 

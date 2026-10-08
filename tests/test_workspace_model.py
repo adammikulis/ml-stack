@@ -204,7 +204,7 @@ def test_the_output_is_byte_stable(kit):
 
 
 def test_a_request_names_the_model_beside_the_requester():
-    assert Origin("claude-code", "p", "", "claude-sonnet-5-5", "claimed").who == \
-        "claude-code (claude-sonnet-5-5, claimed)"
-    assert Origin("claude-code").who == "claude-code (model unknown)"
+    assert Origin("claude", "p", "", "claude-sonnet-5-5", "claimed").who == \
+        "claude (claude-sonnet-5-5, claimed)"
+    assert Origin("claude").who == "claude (model unknown)"
     assert Origin().who == ""

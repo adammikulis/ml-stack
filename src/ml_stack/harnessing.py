@@ -54,7 +54,7 @@ __all__ = [
 DEFAULT_CTX = 0
 DEFAULT_MODEL = "Qwen3.8-27B-UD-Q4_K_XL.gguf"
 DEFAULT_ROLE = APPROVE_FIRST
-PARENT = "claude-code"
+PARENT = "claude"
 KV = "q8_0"
 
 

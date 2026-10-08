@@ -461,9 +461,9 @@ def test_claude_first_command_and_saved_codex_session_share_dev_without_pairing(
     codex_board, codex_token = cli._context(codex_args)
     if expired:
         local = cli.Workspace()
-        guide.agent_connect(local, 'claude-code', project.describe(), host_coordinator=False)
+        guide.agent_connect(local, 'claude', project.describe(), host_coordinator=False)
         entries = local.registry._load()
-        entries['claude-code']['expires'] = local.clock() - 1
+        entries['claude']['expires'] = local.clock() - 1
         local.registry._save(entries)
     source = '''import sys
 from ml_stack.workspace import automatic_connection, cli, coordinator_bootstrap, coordinator_client
@@ -475,7 +475,7 @@ def forbidden(*args, **kwargs):
 coordinator_bootstrap.ensure_host = forbidden
 coordinator_client._device_peer = forbidden
 automatic_connection.HTTP_PORT = int(sys.argv[1])
-raise SystemExit(cli.main(["whoami", "--agent", "claude-code", "--json"]))
+raise SystemExit(cli.main(["whoami", "--agent", "claude", "--json"]))
 '''
     environment = dict(os.environ)
     environment['PYTHONPATH'] = str(Path(cli.__file__).parents[2])
@@ -484,20 +484,20 @@ raise SystemExit(cli.main(["whoami", "--agent", "claude-code", "--json"]))
     assert done.returncode == 0, done.stderr
     actor = json.loads(done.stdout)['id']
     assert actor != codex_args.agent
-    args = SimpleNamespace(agent='claude-code', token_file='')
+    args = SimpleNamespace(agent='claude', token_file='')
     claude_board, claude_token = cli._context(args)
     assert args.agent == actor
     assert claude_board.remote.host == codex_board.remote.host
     assert claude_board.remote.project_id == project_id
     assert claude_token != codex_token
-    assert cli._context(SimpleNamespace(agent='claude-code', token_file=''))[1] == claude_token
+    assert cli._context(SimpleNamespace(agent='claude', token_file=''))[1] == claude_token
     assert project_connection.selected(device.checkout)['agent'] == codex_args.agent
     for command in ('inbox', 'agents', 'status', 'connect'):
-        assert cli.main([command, '--agent', 'claude-code', '--json']) == 0
-    assert tokens.load(cli.Workspace().base, 'claude-code')
+        assert cli.main([command, '--agent', 'claude', '--json']) == 0
+    assert tokens.load(cli.Workspace().base, 'claude')
     (tokens.directory(claude_board.remote.base) / actor).unlink()
     with pytest.raises(Denied):
-        cli._context(SimpleNamespace(agent='claude-code', token_file=''))
+        cli._context(SimpleNamespace(agent='claude', token_file=''))
 
 
 @pytest.mark.parametrize('failure', ['revoked', 'foreign', 'restricted', 'lead', 'child'])
@@ -506,10 +506,10 @@ def test_different_dev_local_actor_cannot_escape_existing_authority(repository, 
 
     local = Workspace(tmp_path / 'private-local')
     found = project.describe(str(repository))
-    guide.agent_connect(local, 'claude-code', found, host_coordinator=False)
-    token = tokens.load(local.base, 'claude-code')
+    guide.agent_connect(local, 'claude', found, host_coordinator=False)
+    token = tokens.load(local.base, 'claude')
     entries = local.registry._load()
-    entry = entries['claude-code']
+    entry = entries['claude']
     if failure == 'revoked':
         entry['revoked'] = True
     elif failure == 'foreign':
@@ -521,7 +521,7 @@ def test_different_dev_local_actor_cannot_escape_existing_authority(repository, 
     else:
         parent_token = local.registry.bootstrap_agent('parent', found, (10, 64))
         entries = local.registry._load()
-        entries['claude-code']['parent'] = local.auth(parent_token).id
+        entries['claude']['parent'] = local.auth(parent_token).id
     local.registry._save(entries)
     monkeypatch.setattr(automatic_connection, 'RemoteWorkspace', lambda *a, **kw: SimpleNamespace(base=tmp_path / 'remote'))
     monkeypatch.setattr(automatic_connection, 'selected', lambda *a, **kw: None)
@@ -529,8 +529,8 @@ def test_different_dev_local_actor_cannot_escape_existing_authority(repository, 
     connection = {'host': 'https://board.invalid', 'project_id': 'a' * 32,
                   'cluster': 'development', 'root': str(repository)}
     with pytest.raises(Denied):
-        automatic_connection._other_local_actor(SimpleNamespace(agent='claude-code'), connection,
-                                                lambda args: token, lambda: local, 'claude-code')
+        automatic_connection._other_local_actor(SimpleNamespace(agent='claude'), connection,
+                                                lambda args: token, lambda: local, 'claude')
 
 
 def test_binding_explicit_capability_cannot_swap_same_project_actor(monkeypatch, tmp_path):
@@ -538,4 +538,4 @@ def test_binding_explicit_capability_cannot_swap_same_project_actor(monkeypatch,
                              call=lambda *args: {'id': 'codex', 'role': 'agent', 'project': {'key': 'a' * 32}})
     monkeypatch.setattr(project_connection, 'selected', lambda *a, **kw: None)
     with pytest.raises(Denied, match='another agent'):
-        project_connection.bind(remote, tmp_path, 'claude-code', local_agent='claude-code', agent_token='fixture')
+        project_connection.bind(remote, tmp_path, 'claude', local_agent='claude', agent_token='fixture')

@@ -80,7 +80,7 @@ capability; every line is something that already exists not being what it says.
 - No context trimming: a task is held inside the 32768-token context by its caps. A task with large
   tool results needs a trim that drops whole oldest turns at a fixed boundary.
 - The guard's model-based screen (`native_screen`) is not attached to the local agent's chat.
-- `--orders-from` defaults to `claude-code`: whoever registers that id is obeyed.
+- `--orders-from` defaults to `claude`: whoever registers that id is obeyed.
 - The general local agent has no worktree of its own; Coding mode works in the selected project
   directly, so edits need a separate checkout when isolation is required.
 

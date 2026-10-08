@@ -384,7 +384,7 @@ def test_join_refuses_reserved_and_invalid_names_without_spending_the_code(base,
     with pytest.raises(ValueError, match=r"pick another|not a usable"):
         onboard.join(ws, code, name)
     assert ws.invites.state(code) == "waiting"
-    assert onboard.join(ws, code, "claude-code") == "claude-code"
+    assert onboard.join(ws, code, "claude") == "claude"
 
 
 def test_lead_is_a_joinable_name_and_a_taken_one_is_suffixed(base, ws):
@@ -775,8 +775,8 @@ def test_the_clipboard_gets_the_text_on_stdin_and_never_through_a_shell(monkeypa
 
 def test_a_shared_invite_serves_several_agents_then_stops(base, ws):
     code = ws.invites.create("", 600.0, uses=3)
-    names = [onboard.join(ws, code, "claude-code") for _ in range(3)]
-    assert len(set(names)) == 3 and names[0] == "claude-code"
+    names = [onboard.join(ws, code, "claude") for _ in range(3)]
+    assert len(set(names)) == 3 and names[0] == "claude"
     assert ws.invites.joined(code) == names and ws.invites.state(code) == "used"
     with pytest.raises(Denied):
         onboard.join(ws, code, "late")
@@ -875,8 +875,8 @@ def test_canonical_dev_local_bootstrap_does_not_host_legacy_coordinator(base, ws
 
     monkeypatch.setattr(coordinator_bootstrap, 'ensure_host', lambda *a: pytest.fail('legacy host'))
     found = project.describe(str(tmp_path))
-    guide.agent_connect(ws, 'claude-code', found, host_coordinator=False)
-    token = tokens.load(base, 'claude-code')
-    assert ws.auth(token).id == 'claude-code'
-    assert ws.registry.info('claude-code')['project'] == found
+    guide.agent_connect(ws, 'claude', found, host_coordinator=False)
+    token = tokens.load(base, 'claude')
+    assert ws.auth(token).id == 'claude'
+    assert ws.registry.info('claude')['project'] == found
     assert not (tokens.directory(base) / tokens.OWNER_FILE).exists()

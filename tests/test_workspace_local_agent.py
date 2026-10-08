@@ -212,9 +212,9 @@ class Script:
 
 
 class Rig:
-    def __init__(self, kit, model, role=roles.DEFAULT, orders=("claude-code",), effort="off", **settings):
+    def __init__(self, kit, model, role=roles.DEFAULT, orders=("claude",), effort="off", **settings):
         self.kit, self.model, self.released = kit, model, []
-        kit.agent("claude-code")
+        kit.agent("claude")
         kit.agent("mallory")
         self.tok = {n: kit.agent(n) for n in ("bob",)}
         la.save(kit.ws, la.Agent(name="local-t", model="m", model_name="m", role=role,
@@ -362,7 +362,7 @@ def test_the_loop_stops_at_its_step_cap_its_clock_and_the_kill_switch(kit):
         assert model.calls <= 3
         la.stop_file(kit2.ws, "local-t").unlink(missing_ok=True)
         kit2.ws.registry.revoke(__import__("ml_stack.workspace.onboard", fromlist=["x"]).SETUP, "local-t")
-        kit2.ws.registry.revoke(__import__("ml_stack.workspace.onboard", fromlist=["x"]).SETUP, "claude-code")
+        kit2.ws.registry.revoke(__import__("ml_stack.workspace.onboard", fromlist=["x"]).SETUP, "claude")
         kit2.ws.registry.revoke(__import__("ml_stack.workspace.onboard", fromlist=["x"]).SETUP, "mallory")
         kit2.ws.registry.revoke(__import__("ml_stack.workspace.onboard", fromlist=["x"]).SETUP, "bob")
 

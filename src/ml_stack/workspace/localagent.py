@@ -26,7 +26,7 @@ __all__ = ["APPROVE_FIRST", "DEFAULT_ORDERS_FROM", "ORDER_KINDS", "PLAN_AND_GO",
            "Agent", "Status", "alive", "check_name", "check_orders", "check_project", "folder",
            "load", "names", "obeys", "role_choices", "save", "status_of"]
 
-DEFAULT_ORDERS_FROM = ("claude-code",)
+DEFAULT_ORDERS_FROM = ("claude",)
 ORDER_KINDS = ("task", "question")
 MOST_ORDERERS = 8
 RESERVED = frozenset({"admin", "system", "human", "workspace", "owner", "root", "setup", "agent"})

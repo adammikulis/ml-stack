@@ -59,12 +59,12 @@ def test_session_event_forwards_exact_model_as_a_claim(commands, model):
     assert done.returncode == 0 and not done.stderr
     records = json.loads(calls.read_text())
     assert records[0]['session'] == 'native-main-1' and records[0]['harness'] == 'claude-code'
-    assert records[1]['argv'] == ['main-session', '--agent', 'claude-code', '--harness', 'claude-code']
+    assert records[1]['argv'] == ['main-session', '--agent', 'claude', '--harness', 'claude-code']
     assert [r['argv'][0] for r in records[2:]] == ['announce', 'inbox']
     assert records[2]['argv'][1] == 'joined'
     context = json.loads(done.stdout)['hookSpecificOutput']
     assert context['hookEventName'] == 'SessionStart' and 'Authenticated parent brief' in context['additionalContext']
-    assert records[0]['argv'] == ['whoami', '--agent', 'claude-code', '--model',
+    assert records[0]['argv'] == ['whoami', '--agent', 'claude', '--model',
                                            model['id'] if isinstance(model, dict) else model,
                                            '--harness', 'claude-code']
 
@@ -81,9 +81,9 @@ def test_missing_model_registers_session_without_guessing_and_explains_it(comman
     done = invoke('claude-session-start', {'session_id': 'native-with-unknown-model'})
     assert done.returncode == 0
     records = json.loads(calls.read_text())
-    assert records[0] == {'argv': ['whoami', '--agent', 'claude-code', '--harness', 'claude-code'],
+    assert records[0] == {'argv': ['whoami', '--agent', 'claude', '--harness', 'claude-code'],
                           'session': 'native-with-unknown-model', 'harness': 'claude-code'}
-    assert records[1]['argv'] == ['main-session', '--agent', 'claude-code', '--harness', 'claude-code']
+    assert records[1]['argv'] == ['main-session', '--agent', 'claude', '--harness', 'claude-code']
     assert 'model unavailable' in done.stderr and 'no model claim recorded' in done.stderr
 
 
@@ -118,8 +118,8 @@ def test_subagent_event_includes_brief_and_actual_primary_branch_rules(commands,
     assert 'Acquire authenticated claims before mutation' in context and 'separate sibling worktrees' in context
     records = json.loads(commands[1].read_text())
     assert [record['argv'] for record in records] == [
-        ['announce', 'joined', 'explore-abcdef: Explore', '--agent', 'claude-code', '--label', 'explore-abcdef'],
-        ['brief', 'explore-abcdef', '--agent', 'claude-code', '--registered']]
+        ['announce', 'joined', 'explore-abcdef: Explore', '--agent', 'claude', '--label', 'explore-abcdef'],
+        ['brief', 'explore-abcdef', '--agent', 'claude', '--registered']]
     assert all(record['session'] == 'native-parent' and record['harness'] == 'claude-code' for record in records)
 
 
@@ -164,17 +164,17 @@ def test_actual_hooks_record_claimed_metadata_and_authenticated_subagent_brief(t
     git.run(['-c', 'user.name=Hook fixture', '-c', 'user.email=fixture@example.invalid',
              'commit', '--allow-empty', '-m', 'fixture project'], cwd=repository)
     ws = Workspace(tmp_path / 'ws')
-    guide.agent_connect(ws, 'claude-code', project.describe(str(repository)), host_coordinator=False)
+    guide.agent_connect(ws, 'claude', project.describe(str(repository)), host_coordinator=False)
     monkeypatch.chdir(repository)
     done = invoke('claude-session-start', {'model': 'claude-sonnet-4-6'})
     assert done.returncode == 0 and not done.stderr
-    info = ws.registry.info('claude-code')
+    info = ws.registry.info('claude')
     assert info['model'] == 'claude-sonnet-4-6' and info['model_state'] == 'claimed'
     assert info['harness'] == 'claude-code'
     brief = invoke('claude-subagent-start', {'agent_type': 'Explore', 'agent_id': 'abcdef12345', 'cwd': str(repository)})
     assert brief.returncode == 0 and not brief.stderr
     context = json.loads(brief.stdout)['hookSpecificOutput']['additionalContext']
-    assert 'hello-model' in context and '--agent claude-code' in context and 'explore-abcdef' in context
+    assert 'hello-model' in context and '--agent claude' in context and 'explore-abcdef' in context
     assert 'Acquire authenticated claims before mutation' in context
 
 
@@ -194,7 +194,7 @@ def test_session_exports_preserve_native_context_without_global_configuration(co
     assert 'export ML_STACK_SESSION_ID=native-main-1' in text
     assert 'export ML_STACK_SESSION_HARNESS=claude-code' in text
     assert [item['argv'][0] for item in json.loads(commands[1].read_text())] == ['whoami', 'main-session', 'announce', 'inbox']
-    shell = subprocess.run(['/bin/sh', '-c', '. "$1"; ml-stack-workspace whoami --agent claude-code',
+    shell = subprocess.run(['/bin/sh', '-c', '. "$1"; ml-stack-workspace whoami --agent claude',
                             'hook-test', str(target)], capture_output=True, text=True, check=False)
     assert shell.returncode == 0
     recorded = json.loads(commands[1].read_text())[-1]
@@ -247,5 +247,5 @@ def test_subagent_stop_records_transcript_model_and_announces_done(commands, tmp
     assert done.returncode == 0 and not done.stderr
     records = json.loads(commands[1].read_text())
     assert [record['argv'] for record in records] == [
-        ['hello-model', 'explore-abcdef', 'claude-haiku-4-5-20251001', '--agent', 'claude-code'],
-        ['announce', 'done', 'explore-abcdef: found it', '--agent', 'claude-code', '--label', 'explore-abcdef']]
+        ['hello-model', 'explore-abcdef', 'claude-haiku-4-5-20251001', '--agent', 'claude'],
+        ['announce', 'done', 'explore-abcdef: found it', '--agent', 'claude', '--label', 'explore-abcdef']]

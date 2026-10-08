@@ -114,16 +114,16 @@ def test_the_installer_adds_the_three_hooks_idempotently_and_keeps_other_hooks(m
             {"matcher": "Bash", "hooks": [{"type": "command", "command": "other-tool"}]},
             {"matcher": "*", "hooks": [{"type": "command", "command": "sh ~/.ml-stack/hooks/claude-nudge.sh"}]}],
         "Stop": [{"hooks": [{"type": "command", "command": "keep-me"}]}]}}))
-    assert onboard.install_hooks(path, "claude-code") == ["PostToolUse", "Stop", "UserPromptSubmit"]
+    assert onboard.install_hooks(path, "claude") == ["PostToolUse", "Stop", "UserPromptSubmit"]
     first = path.read_text()
-    onboard.install_hooks(path, "claude-code")
+    onboard.install_hooks(path, "claude")
     assert path.read_text() == first
     data = json.loads(first)
     assert data["model"] == "x"
     commands = {e: [h["command"] for g in groups for h in g["hooks"]] for e, groups in data["hooks"].items()}
-    assert commands["PostToolUse"] == ["other-tool", "ml-stack-workspace nudge --agent claude-code --hook post"]
-    assert commands["Stop"] == ["keep-me", "ml-stack-workspace nudge --agent claude-code --hook stop"]
-    assert commands["UserPromptSubmit"] == ["ml-stack-workspace nudge --agent claude-code --hook prompt"]
+    assert commands["PostToolUse"] == ["other-tool", "ml-stack-workspace nudge --agent claude --hook post"]
+    assert commands["Stop"] == ["keep-me", "ml-stack-workspace nudge --agent claude --hook stop"]
+    assert commands["UserPromptSubmit"] == ["ml-stack-workspace nudge --agent claude --hook prompt"]
     assert re.search(r'"matcher": "\*"', first)
 
 

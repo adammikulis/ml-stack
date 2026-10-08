@@ -45,12 +45,12 @@ def workspace_brief(event: dict) -> str:
         return ""
     model = definition_model(event)
     if model:
-        workspace_hook.run(["ml-stack-workspace", "hello-model", label, model, "--agent", "claude-code"],
+        workspace_hook.run(["ml-stack-workspace", "hello-model", label, model, "--agent", "claude"],
                            "SubagentStart", environment=environment)
     purpose = " ".join(str(event.get("description") or event.get("agent_type") or "subagent").split())[:150]
     joined = workspace_hook.run(["ml-stack-workspace", "announce", "joined", f"{label}: {purpose}",
-                                 "--agent", "claude-code", "--label", label], "SubagentStart", environment=environment)
-    done = workspace_hook.run(["ml-stack-workspace", "brief", label, "--agent", "claude-code", "--registered"],
+                                 "--agent", "claude", "--label", label], "SubagentStart", environment=environment)
+    done = workspace_hook.run(["ml-stack-workspace", "brief", label, "--agent", "claude", "--registered"],
                               "SubagentStart", environment=environment)
     return done.stdout.strip() if done else ""
 

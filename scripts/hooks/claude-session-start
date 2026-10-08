@@ -20,7 +20,7 @@ def main() -> int:
     model = event.get("model") or os.environ.get("ANTHROPIC_MODEL", "")
     if isinstance(model, dict):
         model = model.get("id", "")
-    command = ["ml-stack-workspace", "whoami", "--agent", "claude-code"]
+    command = ["ml-stack-workspace", "whoami", "--agent", "claude"]
     if isinstance(model, str) and model and len(model) <= 256 and model.isprintable():
         command.extend(["--model", model])
     else:
@@ -28,7 +28,7 @@ def main() -> int:
     command.extend(["--harness", "claude-code"])
     registered = workspace_hook.run(command, "SessionStart", environment=environment)
     if registered and not event.get("agent_id"):
-        workspace_hook.run(["ml-stack-workspace", "main-session", "--agent", "claude-code", "--harness", "claude-code"],
+        workspace_hook.run(["ml-stack-workspace", "main-session", "--agent", "claude", "--harness", "claude-code"],
                            "SessionStart", environment=environment)
         print_board(environment)
     return 0
@@ -39,7 +39,7 @@ def print_board(environment: dict) -> None:
     if os.environ.get("ML_STACK_NONINTERACTIVE"):
         return
     base = ["ml-stack-workspace"]
-    tail = ["--agent", "claude-code"]
+    tail = ["--agent", "claude"]
     workspace_hook.run([*base, "announce", "joined", "main session started", *tail], "SessionStart",
                        environment=environment)
     inbox = workspace_hook.run([*base, "inbox", *tail], "SessionStart", environment=environment)

@@ -510,7 +510,7 @@ def _hook(args: argparse.Namespace) -> int:
 
 def _install_hooks(args: argparse.Namespace, ws: Workspace) -> int:
     path = Path(args.settings).expanduser()
-    events = onboard.install_hooks(path, args.agent or "claude-code")
+    events = onboard.install_hooks(path, args.agent or "claude")
     say(f"wrote {', '.join(events)} to {path}")
     return 0
 

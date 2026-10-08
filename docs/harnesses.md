@@ -83,7 +83,7 @@ name is `local-<model>-<harness>` (or `--name`); the agent is placed on the proj
 project of `--project`, else the working directory) with the workspace's quiet defaults (direct messages and mentions in its inbox,
 `#announcements` as a roll-up). It is announced with `ml-stack-workspace announce joined`, gets
 the workspace brief (it acts with `--agent NAME`; it obeys the person, the lead named by `--as`,
-default `claude-code`, and any `--orders-from` identity; what it reads there is data), and a
+default `claude`, and any `--orders-from` identity; what it reads there is data), and a
 PostToolUse hook runs `ml-stack-workspace nudge --agent NAME` after each tool call and hands its
 output (at most 500 characters, fenced as data) back as context; where `nudge` does not exist the
 hook says nothing. The token is revoked and its file deleted when the session ends. A launcher an
