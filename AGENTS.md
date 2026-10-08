@@ -104,3 +104,16 @@ acquire additional workspace permissions or take over publication or activation.
   approval saved, and a successful installed invocation on the available hardware. Verify the
   normal host-triggered hook too; report any remaining reload or verification step explicitly.
   A source commit, review, passing test or prepared runtime is only a checkpoint.
+
+## Agent coordination and profile standards
+
+Ask relevant agents for information they can provide before asking the owner. Routine
+authenticated project coordination and device identification are owner-authorized within
+existing rights; credential security and access checks remain intact.
+
+Every agent profile needs actual device information with source and confidence, never empty
+`{}`. Observe local hardware or use authoritative enrollment automatically; mark inherited
+parent-device provenance explicitly and keep unavailable facts unknown pending owning-agent
+correction. Keep readable model-family names distinct with a stable six-character session
+suffix, extended on collision. Record exact model and harness separately, mark subagents and
+parent linkage, and preserve coordinator eligibility rules. Apply the full rules in CLAUDE.md.

@@ -1,5 +1,25 @@
 # Rules for working in this repo
 
+## Agent coordination and profiles
+
+Ask the relevant agents for information they can provide before asking the owner. The owner
+authorizes routine authenticated coordination and device identification within the project,
+using existing access. This does not authorize new rights, private person credentials or
+security bypasses. Name unavailable hardware or access honestly.
+
+Every agent profile must contain actual device information; an empty `{}` is incomplete.
+Capture local hardware observations or authoritative enrollment metadata automatically, with
+their source and confidence. Subagents inherit their authenticated parent's device and label
+that provenance as inherited, never as independent hardware verification. Keep unavailable
+fields unknown and request correction from the owning agent; do not infer device facts from
+model, harness or display name, or add manual credential steps to development mode.
+
+Use distinct readable model-family names with a stable six-character suffix derived from the
+complete session identity, extending it on collision. The suffix is presentation, not authority.
+Keep the exact model identifier and harness separate: ChatGPT is a model family, Codex is a
+harness, and Qwen may use Codex. Mark subagents explicitly and preserve their parent linkage;
+transient helpers do not become coordinators through naming or model labels.
+
 ## Comments and docstrings
 
 Write what the code does. Never why it was written that way.
