@@ -101,6 +101,24 @@ class BoardEvents:
         self.seat, self.task = seat, task
         self.threads: dict[str, int] = {}
         self.board = ""
+        self.sender = ""
+
+    def _sender_token(self) -> str:
+        """The token notices go out under: the agent's ``test-runner`` delegate, which can send and
+        whose messages reach the agent's own inbox; the agent's own token for a delegate or a remote workspace."""
+        if not self.sender:
+            self.sender = self.seat.token
+            who = self.seat.identity
+            if not who.get("parent") and hasattr(self.seat.ws, "delegate"):
+                child = f"{who['id']}/test-runner"
+                try:
+                    token = tokens.load(self.seat.ws.base, child)
+                    self.seat.ws.auth(token)
+                except (Denied, OSError, ValueError):
+                    made = self.seat.ws.delegate(self.seat.token, "test-runner", can=("send",))
+                    token = tokens.read_file(Path(made["token_file"]))
+                self.sender = token
+        return self.sender
 
     def _try(self, what: str, call, *args, **kwargs):
         try:
@@ -119,7 +137,7 @@ class BoardEvents:
         board = self._project_board()
         if board == "-":
             return 0
-        sent = self.seat.ws.send(self.seat.token, board, "status", body, subject=subject, reply_to=reply_to)
+        sent = self.seat.ws.send(self._sender_token(), board, "status", body, subject=subject, reply_to=reply_to)
         return int(sent["seq"])
 
     def claimed(self, file: str, key: str) -> int:
@@ -149,7 +167,7 @@ class BoardEvents:
     def canary_mismatch(self, file: str, detail: str) -> None:
         """Announce a cached pass that failed when re-executed."""
         line = f"test reuse canary mismatch: {file}: {detail}"[:190]
-        self._try("canary", self.seat.ws.announce, self.seat.token, "blocked", line)
+        self._try("canary", lambda: self.seat.ws.announce(self._sender_token(), "blocked", line))
 
     def job_started(self, job: str, spec: dict) -> int:
         """Open the job's thread on the project board."""
@@ -174,8 +192,8 @@ class BoardEvents:
         watchers = self._try("task watchers", self._watchers) or []
         for name in dict.fromkeys([self.seat.identity["id"], *watchers]):
             if name not in listeners:
-                self._try("direct", self.seat.ws.send, self.seat.token, name, "status", body,
-                          subject=f"test job {job} {outcome}")
+                self._try("direct", lambda name=name: self.seat.ws.send(
+                    self._sender_token(), name, "status", body, subject=f"test job {job} {outcome}"))
 
     def _watchers(self) -> list[str]:
         from ml_stack.workspace.taskboard import TaskBoard
