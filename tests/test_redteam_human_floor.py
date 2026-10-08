@@ -333,3 +333,40 @@ def test_the_one_thing_an_agent_may_mint_is_a_bounded_child_invite_and_never_a_p
             kit.ws.invite(tokens.load(kit.base, name), "z")
     with pytest.raises(Denied, match=r"limit is 3"):
         kit.ws.invite(worker, "peer", 600.0, 4)
+
+
+APPLY_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "github-protection-apply"
+
+
+def apply_child(tmp_path: Path, *, agent: bool, terminal: bool) -> tuple[int, str]:
+    """scripts/github-protection-apply --apply as a child process with a `gh` that logs its calls."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    gh = bin_dir / "gh"
+    gh.write_text(f'#!/bin/sh\necho "$@" >> {tmp_path / "gh.log"}\necho "{{}}"\n')
+    gh.chmod(0o755)
+    env = {**os.environ, "ML_STACK_HOME": str(tmp_path / "home"), **CLEAN,
+           "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+           **({"CLAUDECODE": "1"} if agent else {})}
+    argv = [sys.executable, str(APPLY_SCRIPT), "--repo", "o/r", "--apply", "--identity-ready"]
+    if not terminal:
+        done = subprocess.run(argv, env=env, capture_output=True, text=True,
+                              stdin=subprocess.DEVNULL, timeout=60)
+        return done.returncode, done.stderr
+    master, slave = pty.openpty()
+    child = subprocess.Popen(argv, env=env, stdin=slave, stdout=slave, stderr=slave, close_fds=True)
+    os.close(slave)
+    child.wait(timeout=60)
+    heard = os.read(master, 8192).decode(errors="replace")
+    os.close(master)
+    return child.returncode, heard
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="requires a POSIX pseudoterminal")
+@pytest.mark.parametrize("agent,terminal", [(True, True), (False, False), (True, False)])
+def test_the_github_protection_apply_script_refuses_an_agent_and_a_missing_terminal(
+        tmp_path, agent, terminal):
+    code, heard = apply_child(tmp_path, agent=agent, terminal=terminal)
+    assert code != 0, heard
+    assert not (tmp_path / "gh.log").exists(), "gh was called"
+    assert not (tmp_path / "home").exists(), "state was written"

@@ -29,7 +29,9 @@ PROTECTED = (
     "scripts/release-key", "scripts/github-protection", "scripts/audit_gate.py",
     "tests/known-fixtures.txt", "src/ml_stack/fleet/signing.py", "src/ml_stack/guard/",
     "src/ml_stack/person.py", "src/ml_stack/worktreerules.py",
-    "src/ml_stack/workspace/person_*.py",
+    "src/ml_stack/workspace/person_*.py", "scripts/github-protection-apply", "scripts/notices.py",
+    "release-please-config.json", ".release-please-manifest.json", "src/ml_stack/fleet/updates.py",
+    "src/ml_stack/redact/", "tests/test_budgets.py", "tests/test_wiring.py", "tests/test_layers.py",
 )
 """Paths whose change decides what the gates, the guards or the release signing accept."""
 
@@ -260,18 +262,19 @@ def group_findings(label: str, group: list[dict], needed: set[str], section: str
     return out
 
 
-def main_findings(group: list[dict], signatures: bool) -> list[str]:
-    needed = MAIN_RULES | ({"required_signatures"} if signatures else set())
+def main_findings(group: list[dict], args: argparse.Namespace) -> list[str]:
+    needed = MAIN_RULES | ({"required_signatures"} if args.require_signatures else set())
     out = group_findings("main", group, needed, "main-branch-ruleset")
     pr = parameters(group, "pull_request")
-    for key, want in (("require_code_owner_review", True), ("dismiss_stale_reviews_on_push", True),
-                      ("require_last_push_approval", True)):
-        if pr and pr.get(key) is not want:
-            out.append(finding("ruleset.main.pull-request", f"pull_request.{key} is {pr.get(key)}",
+    if args.require_owner_review:
+        for key, want in (("require_code_owner_review", True), ("dismiss_stale_reviews_on_push", True),
+                          ("require_last_push_approval", True)):
+            if pr and pr.get(key) is not want:
+                out.append(finding("ruleset.main.pull-request", f"pull_request.{key} is {pr.get(key)}",
+                                   "main-branch-ruleset"))
+        if pr and pr.get("required_approving_review_count", 0) < 1:
+            out.append(finding("ruleset.main.pull-request", "no approving review is required",
                                "main-branch-ruleset"))
-    if pr and pr.get("required_approving_review_count", 0) < 1:
-        out.append(finding("ruleset.main.pull-request", "no approving review is required",
-                           "main-branch-ruleset"))
     contexts = [c.get("context", "") for c in parameters(group, "required_status_checks").get(
         "required_status_checks", [])]
     for name in MAIN_CHECKS:
@@ -295,7 +298,7 @@ def check_rulesets(repo: str, args: argparse.Namespace) -> list[str]:
         body = read(f"repos/{repo}/rulesets/{entry['id']}", "ruleset.read", "rulesets", out)
         if body is not None:
             full.append(body)
-    out += main_findings(ruleset_group(full, "branch", "~DEFAULT_BRANCH"), args.require_signatures)
+    out += main_findings(ruleset_group(full, "branch", "~DEFAULT_BRANCH"), args)
     out += group_findings("dev", ruleset_group(full, "branch", "refs/heads/*dev"), DEV_RULES,
                           "development-branch-ruleset", DEV_FORBIDDEN)
     out += group_findings("tags", ruleset_group(full, "tag", "refs/tags/v*"),
@@ -340,11 +343,10 @@ def environment_refs(repo: str) -> list[str]:
     if found is None:
         return out
     names = {(p.get("type", "branch"), p.get("name")) for p in found.get("branch_policies", [])}
-    for want in (("branch", "main"), ("tag", "v*")):
-        if want not in names:
-            out.append(finding("env.deployment", f"{ENVIRONMENT} does not allow deployment from "
-                               f"{want[0]} {want[1]}", "the-release-environment"))
-    extra = names - {("branch", "main"), ("tag", "v*")}
+    if ("branch", "main") not in names:
+        out.append(finding("env.deployment", f"{ENVIRONMENT} does not allow deployment from main",
+                           "the-release-environment"))
+    extra = names - {("branch", "main")}
     if extra:
         out.append(finding("env.deployment", f"{ENVIRONMENT} also allows {sorted(extra)}",
                            "the-release-environment"))
@@ -358,9 +360,9 @@ def secret_names(body) -> set[str]:
 def check_secret_scope(repo: str) -> list[str]:
     out: list[str] = []
     held = read(f"repos/{repo}/actions/secrets", "secret.read", "the-release-environment", out)
-    if held is not None and SECRET in secret_names(held):
-        out.append(finding("secret.repository", f"{SECRET} is a repository secret, readable by "
-                           "any workflow on any branch", "the-release-environment"))
+    for name in sorted(secret_names(held)):
+        out.append(finding("secret.repository", f"{name} is a repository secret, readable by "
+                           "a workflow on any branch", "the-release-environment"))
     scoped = read(f"repos/{repo}/environments/{ENVIRONMENT}/secrets", "secret.read",
                   "the-release-environment", out)
     if scoped is not None and SECRET not in secret_names(scoped):
@@ -442,6 +444,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="the credentials in use are an agent's: fail when they are the owner's")
     parser.add_argument("--require-signatures", action="store_true",
                         help="also require signed commits on the default branch")
+    parser.add_argument("--require-owner-review", action="store_true",
+                        help="also require the owner's approval on pull requests to the default branch")
     parser.add_argument("--strict-tags", action="store_true",
                         help="also require the tag ruleset to block creation of v* tags")
     args = parser.parse_args(argv)

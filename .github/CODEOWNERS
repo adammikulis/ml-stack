@@ -12,6 +12,15 @@
 /scripts/test* @adammikulis
 /scripts/release-key @adammikulis
 /scripts/github-protection @adammikulis
+/scripts/github-protection-apply @adammikulis
+/scripts/notices.py @adammikulis
+/release-please-config.json @adammikulis
+/.release-please-manifest.json @adammikulis
+/src/ml_stack/fleet/updates.py @adammikulis
+/src/ml_stack/redact/ @adammikulis
+/tests/test_budgets.py @adammikulis
+/tests/test_wiring.py @adammikulis
+/tests/test_layers.py @adammikulis
 /scripts/audit_gate.py @adammikulis
 /tests/known-fixtures.txt @adammikulis
 /src/ml_stack/fleet/signing.py @adammikulis

@@ -285,7 +285,11 @@ After publication, promptly complete the merged branch's maintained worktree cle
 whoever landed it, immediately and without asking. Never leave a landed commit for the owner to push,
 never ask the owner whether to push it, and never answer another agent's question about who publishes
 with "the owner"; the agent that landed it is the publisher. The owner should never have to check a
-device for unpushed work. Only `main` waits on the owner's explicit instruction.
+device for unpushed work. Agents push everything with the agent identity, workflow files
+included (docs/github-protection.md). Only `main` waits on the owner's explicit instruction: a
+promotion is a pull request from a frozen `promote/<date>` snapshot of the development branch,
+opened by the agent, and merged by the agent only while the owner's `release-main`
+authorization for that pull request's head SHA is live (docs/person-delegation.md).
 
 **Pull and push as work lands.** Every landed batch is followed at once by `git fetch`, a
 reconcile of anything the remote gained, and a normal push of the development branch. Every agent

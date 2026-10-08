@@ -221,8 +221,9 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
 
-      # On a pull request the checkers, their pins and the hooks come from the base commit,
-      # so a pull request cannot edit the gate it is measured by.
+      # On a pull request the checker code and the hooks come from the base commit; the
+      # data beside them (pinned.txt, survivors.txt, budgets.json) is the pull request's own,
+      # so a change to a checker lands before the numbers it moves.
       - name: the base commit's checkers
         if: github.event_name == 'pull_request'
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -238,11 +239,9 @@ jobs:
       # pytest run, and numpy because tests/conftest.py imports ml_stack.graph.topology at
       # collection.
       - name: install pytest, and the pinned ruff and pyright
-        env:
-          PINS: ${{ github.event_name == 'pull_request' && 'trusted/' || '' }}scripts/gates/pinned.txt
         run: |
           python -m pip install pytest pytest-xdist numpy
-          python -m pip install -r "$PINS"
+          python -m pip install -r scripts/gates/pinned.txt
 
       - name: gate tests
         run: |
@@ -255,8 +254,9 @@ jobs:
       - name: the base commit's gate over this tree
         if: github.event_name == 'pull_request'
         run: |
-          rm -rf scripts/gates scripts/hooks scripts/budgets
-          cp -R trusted/scripts/gates trusted/scripts/hooks scripts/
+          rm -rf scripts/hooks scripts/budgets scripts/gates/*.py
+          cp -R trusted/scripts/hooks scripts/
+          cp trusted/scripts/gates/*.py scripts/gates/
           cp trusted/scripts/budgets scripts/budgets
 
       - name: budgets

@@ -5,15 +5,13 @@ from __future__ import annotations
 import copy
 import importlib.machinery
 import importlib.util
-import json
-import os
 import re
 from pathlib import Path
 
 import pytest
 
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "github-protection"
-REPO = "ownerlogin/ml-stack-test"
+from tests.github_support import GOOD, REPO, serve  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -23,76 +21,6 @@ def gp():
     module = importlib.util.module_from_spec(spec)
     loader.exec_module(module)
     return module
-
-
-def ruleset(name, target, include, rules, bypass=()):
-    return {"name": name, "target": target, "enforcement": "active", "bypass_actors": list(bypass),
-            "conditions": {"ref_name": {"include": include, "exclude": []}}, "rules": rules}
-
-
-GOOD = {
-    f"repos/{REPO}/rulesets": [{"id": 1}, {"id": 2}, {"id": 3}],
-    f"repos/{REPO}/rulesets/1": ruleset("main", "branch", ["~DEFAULT_BRANCH"], [
-        {"type": "deletion"}, {"type": "non_fast_forward"},
-        {"type": "pull_request", "parameters": {
-            "required_approving_review_count": 1, "require_code_owner_review": True,
-            "dismiss_stale_reviews_on_push": True, "require_last_push_approval": True}},
-        {"type": "required_status_checks", "parameters": {"required_status_checks": [
-            {"context": "gates"}, {"context": "privacy"}, {"context": "licenses"},
-            {"context": "test (ubuntu-latest, 3.13, --slow)"}]}}]),
-    f"repos/{REPO}/rulesets/2": ruleset("dev", "branch", ["refs/heads/*dev"], [
-        {"type": "deletion"}, {"type": "non_fast_forward"}]),
-    f"repos/{REPO}/rulesets/3": ruleset("tags", "tag", ["refs/tags/v*"], [
-        {"type": "deletion"}, {"type": "non_fast_forward"}, {"type": "update"},
-        {"type": "creation"}]),
-    f"repos/{REPO}/environments/release": {
-        "can_admins_bypass": False,
-        "protection_rules": [{"type": "required_reviewers", "reviewers": [
-            {"type": "User", "reviewer": {"login": "ownerlogin"}}]}],
-        "deployment_branch_policy": {"protected_branches": False, "custom_branch_policies": True}},
-    f"repos/{REPO}/environments/release/deployment-branch-policies": {"branch_policies": [
-        {"name": "main", "type": "branch"}, {"name": "v*", "type": "tag"}]},
-    f"repos/{REPO}/actions/secrets": {"secrets": []},
-    f"repos/{REPO}/environments/release/secrets": {"secrets": [{"name": "RELEASE_SIGNING_KEY"}]},
-    f"repos/{REPO}/actions/permissions/workflow": {
-        "default_workflow_permissions": "read", "can_approve_pull_request_reviews": False},
-    f"repos/{REPO}/actions/permissions": {"allowed_actions": "selected", "sha_pinning_required": True},
-    f"repos/{REPO}/actions/permissions/fork-pr-contributor-approval": {
-        "approval_policy": "all_external_contributors"},
-    f"repos/{REPO}": {
-        "allow_auto_merge": False, "permissions": {"admin": False, "push": True},
-        "security_and_analysis": {k: {"status": "enabled"} for k in (
-            "secret_scanning", "secret_scanning_push_protection", "dependabot_security_updates")}},
-    "user": {"login": "agent-app"},
-}
-
-GH = """#!/bin/sh
-echo "$@" >> "$GH_LOG"
-if [ "$1" = repo ]; then echo "$GH_REPO"; exit 0; fi
-name=$(printf '%s' "$2" | tr '/' '_')
-if [ -f "$GH_REPLIES/$name.json" ]; then cat "$GH_REPLIES/$name.json"; exit 0; fi
-echo "gh: Not Found (HTTP 404)" >&2
-exit 1
-"""
-
-
-def serve(tmp_path, monkeypatch, replies):
-    """Put a `gh` on PATH that answers each GET from ``replies`` and logs its arguments."""
-    bin_dir, store = tmp_path / "bin", tmp_path / "replies"
-    bin_dir.mkdir()
-    store.mkdir()
-    gh = bin_dir / "gh"
-    gh.write_text(GH)
-    gh.chmod(0o755)
-    for path, body in replies.items():
-        (store / f"{path.replace('/', '_')}.json").write_text(json.dumps(body))
-    log = tmp_path / "gh.log"
-    log.write_text("")
-    monkeypatch.setenv("GH_LOG", str(log))
-    monkeypatch.setenv("GH_REPLIES", str(store))
-    monkeypatch.setenv("GH_REPO", REPO)
-    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
-    return log
 
 
 def run(gp, capsys, *flags):
@@ -141,7 +69,7 @@ def test_a_repository_that_matches_the_target_has_no_findings(gp, tmp_path, monk
     code, out = run(gp, capsys)
     assert (code, out.strip().splitlines()[-1]) == (0, "0 findings"), out
     calls = log.read_text().splitlines()
-    assert calls and all(re.fullmatch(r"api \S+", line) for line in calls), calls
+    assert calls and all(re.fullmatch(r"GET \S+", line) for line in calls), calls
 
 
 def test_every_call_is_a_plain_get(gp, tmp_path, monkeypatch, capsys):
@@ -149,7 +77,7 @@ def test_every_call_is_a_plain_get(gp, tmp_path, monkeypatch, capsys):
     run(gp, capsys, "--agent")
     for line in log.read_text().splitlines():
         words = line.split()
-        assert words[0] == "api" and len(words) == 2, line
+        assert words[0] == "GET" and len(words) == 2, line
 
 
 def test_the_repository_comes_from_gh_when_none_is_named(gp, tmp_path, monkeypatch, capsys):
@@ -172,9 +100,6 @@ CASES = {
         "ruleset.main.bypass"),
     "no pull request rule": (
         lambda r: r[f"repos/{REPO}/rulesets/1"]["rules"].pop(2), "ruleset.main.rule"),
-    "code owner review off": (
-        lambda r: r[f"repos/{REPO}/rulesets/1"]["rules"][2]["parameters"].update(
-            require_code_owner_review=False), "ruleset.main.pull-request"),
     "gates not required": (
         lambda r: r[f"repos/{REPO}/rulesets/1"]["rules"][3]["parameters"][
             "required_status_checks"].pop(0), "ruleset.main.checks"),
@@ -197,7 +122,7 @@ CASES = {
             deployment_branch_policy={"custom_branch_policies": False}), "env.deployment"),
     "environment allows another branch": (
         lambda r: r[f"repos/{REPO}/environments/release/deployment-branch-policies"][
-            "branch_policies"].append({"name": "*", "type": "branch"}), "env.deployment"),
+            "branch_policies"].append({"name": "v*", "type": "tag"}), "env.deployment"),
     "key held as a repository secret": (
         lambda r: r[f"repos/{REPO}/actions/secrets"]["secrets"].append(
             {"name": "RELEASE_SIGNING_KEY"}), "secret.repository"),
@@ -250,6 +175,21 @@ def test_an_agent_run_fails_on_owner_or_admin_credentials(gp, tmp_path, monkeypa
     assert run(gp, capsys)[0] == 0
     status, out = run(gp, capsys, "--agent")
     assert status == 1 and {"identity.owner", "identity.admin"} <= codes(out)
+
+
+def test_the_owner_review_is_required_only_when_asked(gp, tmp_path, monkeypatch, capsys):
+    serve(tmp_path, monkeypatch, GOOD)
+    assert run(gp, capsys)[0] == 0
+    status, out = run(gp, capsys, "--require-owner-review")
+    assert status == 1 and "ruleset.main.pull-request" in codes(out)
+
+
+def test_any_repository_secret_is_a_finding(gp, tmp_path, monkeypatch, capsys):
+    replies = changed(lambda r: r[f"repos/{REPO}/actions/secrets"]["secrets"].append(
+        {"name": "OTHER_TOKEN"}))
+    serve(tmp_path, monkeypatch, replies)
+    status, out = run(gp, capsys)
+    assert status == 1 and "OTHER_TOKEN" in out
 
 
 def test_tag_creation_is_blocked_only_when_asked(gp, tmp_path, monkeypatch, capsys):

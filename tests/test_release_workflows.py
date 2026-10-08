@@ -56,13 +56,18 @@ def test_the_checkers_of_a_pull_request_come_from_its_base():
 
 def test_the_gate_scripts_run_from_the_base_not_the_pull_request():
     runs = [str(s.get("run", "")) for s in CI["jobs"]["gates"]["steps"]]
-    overlay = next(i for i, run in enumerate(runs) if "cp -R trusted/scripts/gates" in run)
+    overlay = next(i for i, run in enumerate(runs) if "trusted/scripts/gates/*.py" in run)
     for needle in ("python scripts/budgets", "budgets-only-fall"):
         at = next(i for i, run in enumerate(runs) if needle in run)
         assert at > overlay, f"{needle} ran before the base commit's copy was in place"
-    pins = next(s for s in CI["jobs"]["gates"]["steps"]
-                if "pinned.txt" in str(s.get("env", {})))
-    assert "trusted/" in pins["env"]["PINS"]
+
+
+def test_the_data_beside_the_checkers_is_the_pull_requests_own():
+    """A pull request that moves a pin or a survivor row is measured against its own data."""
+    overlay = next(s["run"] for s in CI["jobs"]["gates"]["steps"]
+                   if "trusted/scripts/gates/*.py" in str(s.get("run", "")))
+    assert "pinned.txt" not in overlay and "survivors.txt" not in overlay
+    assert "rm -rf scripts/gates " not in overlay and "scripts/gates/*.py" in overlay
 
 
 def test_the_name_hooks_run_from_the_base_not_the_pull_request():
@@ -174,8 +179,8 @@ def test_no_workflow_passes_every_secret_to_a_called_one():
 def test_the_signing_key_is_read_only_by_a_job_in_the_release_environment():
     jobs = {n: j for n, j in RELEASE["jobs"].items()
             if "secrets." in yaml.safe_dump(j)}
-    assert list(jobs) == ["publish"]
-    assert jobs["publish"]["environment"] == "release"
+    assert sorted(jobs) == ["publish", "pypi"]
+    assert all(job["environment"] == "release" for job in jobs.values())
     assert "secrets." not in yaml.safe_dump(BUILD)
 
 
@@ -195,7 +200,8 @@ def test_the_build_and_the_dry_run_hold_no_write_grant():
 def test_a_tag_publishes_only_a_commit_that_is_on_main():
     guard = RELEASE["jobs"]["guard"]
     run = next(s["run"] for s in guard["steps"] if "run" in s)
-    assert "merge-base --is-ancestor" in run and "origin main" in run
+    assert "merge-base --is-ancestor" in run and "origin/main" in run
+    assert "git fetch" not in run
     assert guard["steps"][0]["with"]["fetch-depth"] == 0
     for name in ("pypi", "publish"):
         assert "guard" in RELEASE["jobs"][name]["needs"]
@@ -210,8 +216,12 @@ def test_the_upload_passes_no_password():
     assert not [k for k in with_ if "token" in k or "secret" in k]
 
 
-def test_no_secret_reaches_the_upload_job():
-    assert "secrets." not in yaml.safe_dump(RELEASE["jobs"]["pypi"])
+def test_the_signing_key_reaches_the_upload_job_only_as_a_presence_check():
+    steps = RELEASE["jobs"]["pypi"]["steps"]
+    holders = [s for s in steps if "secrets." in yaml.safe_dump(s)]
+    assert len(holders) == 1 and steps.index(holders[0]) == 0
+    assert "test -n" in holders[0]["run"]
+    assert "secrets." not in yaml.safe_dump(upload_step())
 
 
 def test_the_upload_runs_in_the_release_environment():

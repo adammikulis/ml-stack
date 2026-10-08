@@ -282,6 +282,17 @@ saved rules, the review screen, `init`); raising a budget; tags, forced pushes, 
 reply. A sentence naming one of the others is answered with a refusal that says the owner runs it.
 `ML_STACK_PUSH_MAIN=yes` opens nothing for an agent; the owner's own terminal push meets no hook.
 
+### release-main on a pull request
+
+With the main ruleset of [github-protection.md](github-protection.md) on, GitHub refuses a push of `main`, so a
+promotion is a pull request from a frozen `promote/<date>` snapshot of the development branch, opened and merged by
+the agent identity. The approval question names one commit; here that commit is the snapshot's tip, which is the
+pull request's head SHA, and the merge consumes the approval: a push to the snapshot branch, a different pull
+request or a rebuilt snapshot is not covered. GitHub enforces nothing about the approval, since the ruleset
+requires the pull request and its checks only; the gate is our guard and the agent credential's lack of rights over
+the ruleset. The guard side for `gh pr merge` and the merge API calls (the consumer of `person-consume` for the
+pull request head) is not written yet, and until it is the owner's word in chat is the only check.
+
 ## 8. Removing `delegate`, and checking `mint` and `invite`
 
 `delegate` goes in slice 1. A subagent then has no token of its own: it acts as its parent's

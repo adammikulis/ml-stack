@@ -54,6 +54,9 @@ git config user.signingkey 'key::ssh-ed25519 AAAA...'
 git config commit.gpgsign true
 ```
 
+The `release` environment must exist before `scripts/release-key create` runs
+(`scripts/github-protection-apply` creates it; [github-protection.md](github-protection.md)), since the secret is set on it.
+
 The key is made and kept by `scripts/release-key`, run by a person at a terminal (it refuses an agent and a process
 with no terminal). It needs `ssh-keygen` and an authenticated `gh` in this repository.
 
@@ -62,7 +65,7 @@ with no terminal). It needs `ssh-keygen` and an authenticated `gh` in this repos
   public line. `--write` sets `RELEASE_KEY` in `src/ml_stack/fleet/signing.py`; commit that file. It refuses when a key
   is already stored.
 - `scripts/release-key show-public` prints the stored key's public line.
-- `scripts/release-key rotate [--write]` replaces the stored key, the repository secret and `RELEASE_KEY`. Releases
+- `scripts/release-key rotate [--write]` replaces the stored key, the environment secret and `RELEASE_KEY`. Releases
   signed before it verify only against the old public key.
 - `scripts/release-key agent` loads the stored key into ssh-agent.
 

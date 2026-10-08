@@ -48,8 +48,7 @@ jobs:
           head=$(git rev-parse HEAD)
           tagged=$(git rev-parse -q --verify "refs/tags/$TAG^{commit}" || true)
           test "$tagged" = "$head" || { echo "tag $TAG is $tagged, not the checked-out $head"; exit 1; }
-          git fetch --no-tags origin main
-          git merge-base --is-ancestor "$head" FETCH_HEAD \
+          git merge-base --is-ancestor "$head" origin/main \
             || { echo "$head is not an ancestor of main"; exit 1; }
 
   # Trusted publishing: the action mints an OIDC token from `id-token: write` and PyPI
@@ -70,6 +69,10 @@ jobs:
     permissions:
       id-token: write
     steps:
+      - name: the signing key is set before anything is published
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: test -n "$RELEASE_SIGNING_KEY" || { echo "RELEASE_SIGNING_KEY is not set in the release environment"; exit 1; }
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: wheels

@@ -93,6 +93,21 @@ def test_any_other_value_of_the_opener_is_not_one(checkout):
     assert push(checkout, "main", CLAUDECODE="1", ML_STACK_PUSH_MAIN="1").returncode != 0
 
 
+def test_a_new_promote_snapshot_branch_goes_through(checkout):
+    done = push(checkout, "promote/2026-10-08", CLAUDECODE="1")
+    assert done.returncode == 0, done.stderr
+
+
+def test_a_promote_branch_that_already_exists_is_not_rewritten(checkout):
+    sha = git(checkout, "rev-parse", "HEAD")
+    assert push(checkout, "promote/x", base=sha, CLAUDECODE="1").returncode != 0
+
+
+def test_the_refusal_names_the_promotion_pull_request(checkout):
+    done = push(checkout, "main", CLAUDECODE="1")
+    assert "refs/heads/promote/<date>" in done.stderr
+
+
 def test_an_agents_push_of_a_work_branch_is_refused(checkout):
     assert push(checkout, "split-something", CLAUDECODE="1").returncode != 0
 
