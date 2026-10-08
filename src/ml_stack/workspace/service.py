@@ -812,7 +812,7 @@ class Workspace:
                 "quarantined": sum(1 for q in self.quarantine_list() if q["state"] == "quarantined"),
                 "claims": self.claims.listing(), "chains_ok": chain["ok"],
                 "fullest_inboxes": self.fullest_inboxes(),
-                "testslots": testslots()}
+                "testslots": testslots(self.registry.role_of)}
 
     def fullest_inboxes(self, top: int = 5) -> list[dict[str, Any]]:
         """The identities with the most unread messages, most first."""
