@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import getpass
 import json
 import shlex
 import sys
@@ -138,6 +139,30 @@ def test_a_unit_and_manifest_edited_together_still_differ_from_what_prepare_rend
     done.path.write_text(json.dumps(raw))
     outcome, _ = run_install(done)
     assert not outcome.ok and "does not match the manifest" in " ".join(outcome.lines)
+
+
+def test_a_consistently_forged_environment_is_refused(tmp_path, user):
+    import hashlib
+    from dataclasses import replace
+
+    from ml_stack.fleet.autostart_manifest import parse
+    from ml_stack.fleet.autostart_units import render
+
+    done = staged(tmp_path, roles=("pool-daemon",))
+    raw = json.loads(done.path.read_text())
+    raw["roles"][0]["environment"]["PATH"] = "/tmp/evil"
+    forged = render(replace(parse(raw).roles[0], units=()), "linux", "user", getpass.getuser())["service"]
+    (done.path.parent / "ml-stack-traind.service").write_bytes(forged)
+    raw["roles"][0]["units"][0]["sha256"] = hashlib.sha256(forged).hexdigest()
+    done.path.write_text(json.dumps(raw))
+    outcome, recorder = run_install(done)
+    assert not outcome.ok and "environment is not the allowed one" in " ".join(outcome.lines)
+    assert recorder.ran == []
+
+
+def test_an_agent_is_refused_before_a_manifest_is_even_opened(tmp_path, user):
+    with pytest.raises(HumanRequired):
+        install(tmp_path / "missing.json", seams=seams(Recorder(), env={"CLAUDECODE": "1"}))
 
 
 def edit(done, change):

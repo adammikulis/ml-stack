@@ -18,6 +18,12 @@
 
 - **The agent sandbox is staged, not installed or measured** (`docs/agent-sandbox.md`, `scripts/agent-sandbox`). The owner runs the fifteen acceptance steps; every sandboxed result in the compatibility matrix is predicted. Open design gaps: the workspace CLI writes `~/.ml-stack/workspace` from the agent's own process, so a sandboxed agent that may announce may also edit board files (needs the CLI to go through the daemon with `workspace/` read-only to agents); `testslots_rpc` binds an ephemeral loopback port that Linux and WSL cannot allow-list (needs a configurable fixed port); Codex's workspace-write cannot deny `.git/config` and `.git/hooks` in the shared git directory.
 
+## Autostart units (prepare and install)
+
+- **`runtime-ensure` waits on the runtime tooling.** It runs `ml-stack-runtime ensure --unattended` from the stable launcher in `--launchers` (default `~/.ml-stack/bin`). The runtime-deploy branch (`worktree-agent-ab65aad6496698862`, `ml_stack.runtime_cli`) must land with an `--unattended` mode (build lock only, no board post, no agent identity) and record its launcher directory. `launcher_problem` in `src/ml_stack/fleet/autostart_manifest.py` recognises a launcher by the header of `runtime.LAUNCHER`; replace it with a function from `ml_stack.runtime` once that module is on the development branch.
+- **No unit has run under a real service manager here.** The `launchctl bootstrap`/`bootout`, `systemctl --user`, `schtasks /XML` commands and copy-truncate log rotation under launchd are covered by a recorder and real files, not by a loaded unit. Run the reboot checklist in `docs/install.md` on a Mac and on the WSL device; the Windows task XML has not been loaded on Windows. systemd units have no watchdog because the daemon sends no `sd_notify`.
+- **`autostart.install` (UI toggle, join, `--persist`) still writes units from a running process.** The Settings and join flows call it without a manifest; moving them to prepare plus a person's `install` is the rest of the owner's decision that agents never install units.
+
 ## Active work (2026-10-06)
 
 - **Speed up checks without reducing coverage.** `scripts/gates/_floors.py` now reuses the gate's
