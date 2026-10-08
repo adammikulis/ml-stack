@@ -243,9 +243,9 @@ def test_subagent_stop_records_transcript_model_and_announces_done(commands, tmp
     transcript.write_text('{"message": {"role": "user"}}\n{"message": {"model": "claude-haiku-4-5-20251001"}}\n')
     done = invoke('claude-subagent-stop', {'agent_type': 'Explore', 'agent_id': 'abcdef12345',
                                            'agent_transcript_path': str(transcript),
-                                           'last_assistant_message': 'found it'})
+                                           'last_assistant_message': 'Fixing lint errors'})
     assert done.returncode == 0 and not done.stderr
     records = json.loads(commands[1].read_text())
     assert [record['argv'] for record in records] == [
         ['hello-model', 'explore-abcdef', 'claude-haiku-4-5-20251001', '--agent', 'claude'],
-        ['announce', 'done', 'explore-abcdef: found it', '--agent', 'claude', '--label', 'explore-abcdef']]
+        ['announce', 'done', 'explore-abcdef: finished', '--agent', 'claude', '--label', 'explore-abcdef']]

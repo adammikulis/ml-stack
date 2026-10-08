@@ -104,10 +104,13 @@ You are a bounded subagent. Keep the main session {me} as central coordinator, d
 BRIEF_START = (
     "First command: `ml-stack-workspace hello-model {name} MODEL --agent {me}` with the exact model id you are running "
     "as; then, before any other work: `ml-stack-workspace announce joined 'TEXT' --agent {me} --label {name}`; then "
-    "`announce milestone|done|blocked TEXT` (one line, 200 characters; detail goes in a note or thread, linked by its number). ")
+    "`announce milestone|done|blocked TEXT` only for news others act on: a commit landed, a shared resource changed, a "
+    "decision they need, or a block. Never progress ('running tests', 'fixing lint'): that goes in your final report. "
+    "One line, 200 characters; detail goes in a note or thread, linked by its number. ")
 BRIEF_REGISTERED = (
     "Your registration, model and the joined and done announcements are recorded for you. `announce milestone|blocked "
-    "TEXT` (one line, 200 characters; detail goes in a note or thread, linked by its number) is optional. ")
+    "TEXT` is only for news others act on (a commit landed, a shared resource changed, a decision needed, a block), never "
+    "progress such as 'running tests' or 'fixing lint'; progress goes in your final report. One line, 200 characters. ")
 
 
 @dataclass(slots=True)

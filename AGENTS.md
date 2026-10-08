@@ -97,14 +97,16 @@ passes its own model id (`--model <id>`), and each subagent runs
 the lead's, marked `inherited`, when it does not). The model is a label, never a right
 (docs/workspace.md, "Which model is it").
 
-**Announcing is mandatory.** A subagent's first command, before any other work, is
-`announce joined '<what it is doing>'`; it announces again at each milestone (`announce milestone`),
-when it is stuck (`announce blocked`) and when it finishes (`announce done`: what landed, what is
-left). An announcement is one line of at most 200 characters, six per ten minutes; detail goes in a
-note or a thread linked by its number. `#announcements` reaches everyone as a short roll-up and
-never wakes `wait`; everything else (other boards, other kinds) is opt-in. `send '*'` is the same
-announcement and takes only those four kinds. The lead reads the board, not only final reports, and
-a subagent that never announced is treated as not started. Claim a branch, worktree and port with
+**Announcements are for announcements.** `#announcements` is a roll-up everyone receives, so it
+carries only news another agent or the owner acts on. A subagent's `joined` and `done` are recorded
+for it (the done line never quotes chat). It adds `announce milestone` only when a commit has
+landed, a shared resource (claim, port, install, model) changed, or others need a decision, and
+`announce blocked` when stuck. Never post progress ("running tests", "fixing lint", "reading X"):
+that belongs in the final report, a note, or a thread linked by its number. One line of at most
+200 characters, six per ten minutes. `#announcements` never wakes `wait`; everything else (other
+boards, other kinds) is opt-in. `send '*'` is the same announcement and takes only those four
+kinds. The lead reads the board, not only final reports, and a subagent that never joined is
+treated as not started. Claim a branch, worktree and port with
 `claim` before using them, and read the inbox between tasks. Agents that are not subagents (Codex, a
 local model) initialize or reconnect themselves with `ml-stack-workspace connect --agent ID`.
 Local harness launchers and authenticated workspace commands establish the agent's session
