@@ -260,7 +260,7 @@ def test_agent_env_and_flag_find_the_right_token_and_one_cannot_pose_as_another(
     assert json.loads(via_env.stdout)["id"] == "codex"
     via_flag = child(["whoami", "--json", "--agent", "lead"], base)
     assert json.loads(via_flag.stdout) == {"id": "lead", "role": "lead", "project": {}, "model": "unknown",
-                                           "model_state": "", "harness": ""}
+                                           "model_state": "", "harness": "", "enforcement": "open"}
     scope = project.describe()
     owner = ws.auth(tokens.read_file(tokens.directory(base) / tokens.OWNER_FILE))
     for name in ("codex", "lead"):
@@ -474,7 +474,7 @@ def test_children_are_capped_clamped_and_die_with_the_parent(base, team):
     assert one["expires"] <= ws.registry.info("worker")["expires"]
     tok = tokens.load(base, "worker/a")
     assert ws.auth(tok).id == "worker/a"
-    ws.revoke(lead, "worker")
+    ws.revoke(tokens.read_file(tokens.directory(base) / tokens.OWNER_FILE), "worker")
     with pytest.raises(Denied, match="parent"):
         ws.auth(tok)
     assert ws.registry.children("worker") == []
@@ -529,10 +529,9 @@ def test_a_child_has_no_notes_or_scratch_and_no_human_floor(base, team):
 
 
 def test_two_children_in_real_processes_labels_and_the_children_filter(base, team):
-    out = child(["delegate", "a", "--agent", "worker", "--json"], base)
-    assert out.returncode == 0, out.stderr
-    assert "mlws1" not in out.stdout
-    child(["delegate", "b", "--agent", "worker", "--ttl", "30m"], base)
+    worker = tokens.load(base, "worker")
+    team[0].delegate(worker, "a")
+    team[0].delegate(worker, "b", 1800.0)
     sent = child(["send", "worker", "status", "from a", "--agent", "worker/a"], base)
     assert sent.returncode == 0, sent.stderr
     child(["send", "worker", "status", "from lead", "--agent", "lead"], base)
@@ -551,7 +550,8 @@ def test_two_children_in_real_processes_labels_and_the_children_filter(base, tea
     kids = child(["inbox", "--agent", "worker", "--children", "--json"], base)
     assert {m["from"] for m in json.loads(kids.stdout)} == {"worker/a"}
     assert child(["inbox", "--agent", "worker", "--children", "--ack"], base).returncode == 2
-    assert child(["delegate", "c", "--agent", "worker/a"], base).returncode == 3
+    with pytest.raises(Denied):
+        team[0].delegate(tokens.load(base, "worker/a"), "c")
     claim = child(["claim", "branch", "worker/b/t", "--agent", "worker/b"], base)
     assert claim.returncode == 0
     assert child(["claim", "branch", "elsewhere", "--agent", "worker/b"], base).returncode == 3

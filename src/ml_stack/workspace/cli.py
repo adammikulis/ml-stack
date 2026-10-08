@@ -667,10 +667,6 @@ TABLE: tuple[tuple[str, str, list[Any], Handler], ...] = (
      lambda a, w, t: person_view.listing(a.limit, a.session)),
     ("digest", "a bounded summary of digest subscriptions, or of --thread N", [
         flag("--thread", type=int, default=0), flag("--ack", action="store_true")], _digest),
-    ("delegate", "mint a weaker child identity NAME for a subagent; prints its token file path", [
-        flag("name"), flag("--ttl", default="8h", help="e.g. 8h, 30m (never longer than yours)"),
-        flag("--can", default="", help="comma list from send,read,claim (default: all you hold)")],
-     lambda a, w, t: w.delegate(t, a.name, _ttl(a.ttl), tuple(c for c in a.can.split(",") if c))),
     ("wait", "block until a message arrives", [
         *READ, flag("--timeout", type=float, default=60.0)], _wait),
     ("outbox", "messages you sent", [], lambda a, w, t: w.outbox(t)),
