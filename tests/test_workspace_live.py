@@ -295,7 +295,7 @@ def route(kit):
     server.start()
 
     def call(path, method="GET", headers=None, body=None, json_body=True):
-        head = dict(headers or {})
+        head = {"Cookie": f"ml_session={server.session}", **(headers or {})}
         if body is not None and json_body:
             head.setdefault("Content-Type", "application/json")
             body = json.dumps(body)

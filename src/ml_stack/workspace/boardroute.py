@@ -2,14 +2,17 @@
 
 ``respond`` answers one request; ``serve`` runs it on a loopback socket with the Board page
 and the ml-ui assets. The page holds no token: the person's identity is read here, from the
-workspace's own owner token file.
+workspace's own owner token file, for a browser that opened the page with the listener's session
+secret.
 """
 
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import re
+import secrets
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
@@ -25,9 +28,10 @@ from ml_stack.workspace.rates import RateLimited
 from ml_stack.workspace.screen import Refused
 from ml_stack.workspace.service import Workspace
 
-__all__ = ["MAX_BODY", "PREFIX", "Request", "respond", "serve"]
+__all__ = ["COOKIE", "MAX_BODY", "PREFIX", "Request", "respond", "serve", "session_ok"]
 
 PREFIX = "/board/"
+COOKIE = "ml_session"
 MAX_BODY = 512 * 1024
 POST_MAX = 32 * 1024
 WAIT_MAX_S = 25
@@ -247,20 +251,39 @@ def _page(req: Request) -> Reply:
     return 200, {**SAFE, "Content-Type": f"{kind}; charset=utf-8"}, found.read_bytes()
 
 
+def session_ok(headers: Mapping[str, str], secret: str) -> bool:
+    """Whether the request's cookie holds the page server's session secret."""
+    for part in headers.get("cookie", "").split(";"):
+        key, _, value = part.strip().partition("=")
+        if key == COOKIE and secret and hmac.compare_digest(value.encode(), secret.encode()):
+            return True
+    return False
+
+
 class _Route:
-    """The dispatch function of a listener: the Board route, the page and the assets."""
+    """The dispatch function of a listener: the Board route, the page and the assets. The
+    person's browser session is a secret made here; only a browser that opened the page with it
+    holds the cookie the Board route requires."""
 
     def __init__(self, ws: Workspace) -> None:
         self.ws = ws
         self.port = 0
+        self.session = secrets.token_urlsafe(24)
+
+    def opened_with_session(self, call: Call) -> bool:
+        """Whether the page was requested with this listener's session secret in its query."""
+        given = parse_qs(urlsplit(call.path).query).get("session", [""])[0]
+        return bool(given) and hmac.compare_digest(given.encode(), self.session.encode())
 
     def __call__(self, call: Call) -> WebReply:
         headers = {k.lower(): v for k, v in call.headers.items()}
         wanted = int(headers.get("content-length", "0") or 0) if headers.get("content-length", "0").isdigit() else 0
         body = call.body(POST_MAX) if call.method == "POST" and 0 < wanted <= POST_MAX else b""
-        req = Request(call.method, call.path, headers, self.port, True, body)
+        req = Request(call.method, call.path, headers, self.port, session_ok(headers, self.session), body)
         board = urlsplit(call.path).path.startswith(PREFIX)
         status, headers, body = respond(self.ws, req) if board else _page(req)
+        if status == 200 and not board and self.opened_with_session(call):
+            headers["Set-Cookie"] = f"{COOKIE}={self.session}; HttpOnly; SameSite=Strict; Path=/"
         kind = headers.pop("Content-Type", "application/octet-stream")
         return WebReply(status, body, headers, kind)
 
@@ -272,10 +295,12 @@ PAGE = """<!doctype html><meta charset="utf-8"><title>Board</title>
 <script type="module" src="/ui/ml-ui/ml-ui.js"></script>"""
 
 
-def serve(ws: Workspace, port: int = 0) -> Listener:
+def serve(ws: Workspace, port: int = 0, *, routes: type[_Route] = _Route) -> Listener:
     """A loopback listener for the Board page and its route; the caller calls ``start`` and
-    ``stop``."""
-    route = _Route(ws)
+    ``stop``, and ``listener.session`` is the secret a browser opens the page with
+    (``/?session=...``) to hold the cookie the route requires."""
+    route = routes(ws)
     listener = Listener(route, ("127.0.0.1", port))
     route.port = listener.port
+    listener.session = route.session  # type: ignore[attr-defined]
     return listener

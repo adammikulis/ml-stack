@@ -163,7 +163,8 @@ def route(kit):
 
     def call(path, method="GET", headers=None, body=None):
         conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
-        conn.request(method, path, body=body, headers=headers or {})
+        conn.request(method, path, body=body,
+                     headers={"Cookie": f"ml_session={server.session}", **(headers or {})})
         r = conn.getresponse()
         out = r.status, r.read()
         conn.close()
@@ -249,3 +250,35 @@ def test_following_and_the_live_route_give_an_agent_nothing_it_could_not_already
     with pytest.raises(Denied):
         ws.news(b, 0, 0)
     assert "SECRET" not in route("/board/wait?after=0&timeout=1")[1].decode()
+
+
+def test_the_route_answers_nobody_without_the_session_the_listener_made(kit):
+    ws, a = kit.ws, kit.tokens["alice"]
+    ws.board.create(a, "#ops")
+    server = boardroute.serve(kit.ws)
+    server.start()
+    before = (ws.bus.log.head(), ws.board.store.log.head())
+
+    def ask(path, method="GET", cookie="", body=None):
+        conn = http.client.HTTPConnection("127.0.0.1", server.port, timeout=10)
+        headers = {"Origin": f"http://127.0.0.1:{server.port}", "Content-Type": "application/json"}
+        conn.request(method, path, body=body, headers={**headers, **({"Cookie": cookie} if cookie else {})})
+        reply = conn.getresponse()
+        out = reply.status, reply.getheader("Set-Cookie"), reply.read()
+        conn.close()
+        return out
+
+    try:
+        post = json.dumps({"to": "#ops", "body": "forged"}).encode()
+        for cookie in ("", "ml_session=guess", "ml_session="):
+            assert ask("/board/boards", cookie=cookie)[0] == 401
+            assert ask("/board/post", "POST", cookie, post)[0] == 401
+        assert (ws.bus.log.head(), ws.board.store.log.head()) == before
+        for path in ("/", "/?session=guess", "/?session="):
+            status, cookie, _ = ask(path)
+            assert status == 200 and cookie is None
+        status, cookie, _ = ask(f"/?session={server.session}")
+        assert status == 200 and cookie.startswith(f"ml_session={server.session};") and "HttpOnly" in cookie
+        assert ask("/board/boards", cookie=f"ml_session={server.session}")[0] == 200
+    finally:
+        server.stop()
