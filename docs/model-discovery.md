@@ -279,6 +279,6 @@ models. Incomplete builds and unsupported formats remain visible with serving di
 
 `GET /ui/models` includes a `library` of grouped discovery entries alongside the existing
 file-level `here` rows used for network copies. Starting a library model submits its exact
-canonical path to `POST /ui/serving`; the daemon rechecks that it is a complete supported
+resolved path to `POST /ui/serving`; the daemon rechecks that it is a complete supported
 primary entry within its configured model roots. A display label cannot select a different
 format or build. Every expected GGUF shard number, including shard 1, must be present.

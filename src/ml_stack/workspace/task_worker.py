@@ -26,24 +26,24 @@ def run(ws, name):
     try:
         while not la.stop_file(ws, name).exists():
             if la.pause_file(ws, name).exists():
-                status.update(state='paused', detail='Canonical tasks wait until resumed')
+                status.update(state='paused', detail='Project tasks wait until resumed')
                 time.sleep(1)
                 continue
             agent = la.load(ws, name)
             if agent is None:
                 raise ValueError('the registered local worker is missing')
             if agent.harness not in ('pi', 'claude'):
-                raise ValueError('canonical coding needs a supported coding harness')
+                raise ValueError('project task work needs a supported coding harness')
             identity = agent.identity or agent.name
             if held is None:
                 held = localloop.lease_model(agent)
                 status.update(lease=held.lease)
             allocation = assigned(ws, identity, board, held.lease['id'])
             if not allocation:
-                status.update(state='idle', detail='Waiting for a canonical task allocation')
+                status.update(state='idle', detail='Waiting for a task assignment')
                 time.sleep(1)
                 continue
-            status.update(state='working', detail='Executing canonical task', task=allocation['task'])
+            status.update(state='working', detail='Executing project task', task=allocation['task'])
             def native(task, project, stopped, checkpoint, runner=agent):
                 return task_coding.perform(ws, runner, task, project, (stopped, checkpoint))
             outcome = task_runtime.execute(board, identity, allocation['task'], allocation['allocation_id'], native,
@@ -52,11 +52,11 @@ def run(ws, name):
             status.update(state=outcome.get('state', 'review'), detail=outcome.get('blocked_reason', 'Awaiting independent review'),
                           task=allocation['task'])
     finally:
-        status.update(state='stopped', detail='Canonical worker stopped')
+        status.update(state='stopped', detail='Project worker stopped')
         try:
             if held is not None:
                 held.release()
         except (OSError, RuntimeError) as error:
-            status.update(detail=f'Canonical worker stopped; lease cleanup failed: {error}')
+            status.update(detail=f'Project worker stopped; lease cleanup failed: {error}')
             raise
         status.update(lease={})

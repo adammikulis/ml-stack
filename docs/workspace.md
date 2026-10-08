@@ -405,7 +405,7 @@ the PostToolUse hook is left to the launcher's `harnesshook post` when that is c
 replaces earlier nudge hooks, keeps every other setting and writes only for agents present on the
 machine. `ml-stack-setup` and `ml-stack-workspace setup` run it, and `ml-stack-setup`,
 `ml-stack-doctor` and `ml-stack-workspace doctor` report a missing or stale hook per agent.
-`hook-snippet claude-code|codex --agent NAME` prints the setting without writing it. On a canonical
+`hook-snippet claude-code|codex --agent NAME` prints the setting without writing it. On a shared
 board the hooks read the board's `waiting_summary` (sender, kind and time of each unread row, never
 text). Start-up
 costs about 90 ms here (Python and the package imports), more than the 50 ms aimed for; trimming the
@@ -437,7 +437,7 @@ origin checkpoints. Exchanges accept non-genesis checkpoints only when local his
 authorizes them.
 
 The authenticated workspace person can export and combine message graphs through
-`BoardApi.export_graph` and `BoardApi.combine_graph`. Combining requires the same canonical
+`BoardApi.export_graph` and `BoardApi.combine_graph`. Combining requires the same authenticated
 workspace identity and matching existing board visibility and project scope. Immutable event
 IDs deduplicate repeat imports; conflicting payloads, origin forks and missing reply targets
 are refused. Replies use stable event relationships rather than another replica's sequence
@@ -690,8 +690,8 @@ source commits to be landed on development. Unique, dirty and ignored files rema
 
 The maintained Claude launcher installs authenticated Stop and SubagentStop checks. Both
 maintained Claude and Codex launchers display pending checkout scopes at startup and refuse
-successful exit with unfinished scopes even when no `done` announcement was sent. Canonical
-inbox workers return proposals to their parent; task integration verifies their landing and
+successful exit with unfinished scopes even when no `done` announcement was sent. Inbox
+workers return proposals to their parent; task integration verifies their landing and
 cleanup. A harness started outside these launchers needs its own completion hook; workspace
 completion announcements still enforce the shared guard.
 
@@ -711,7 +711,7 @@ broker continues to enforce its own live model/GPU leases. Ownership does not aw
 or change security reputation.
 
 `area` claims identify a source file or directory across linked Git worktrees. Supply an
-absolute path in your checkout; the store canonicalizes it to the repository's shared Git
+absolute path in your checkout; the store resolves it to the repository's shared Git
 checkout and relative source path. Native file mutations reserve both the physical file and
 its repository-qualified source area. Editing the same source file in another worktree is
 refused, while disjoint files remain independently claimable. `install` claims identify an
@@ -719,18 +719,18 @@ absolute environment or target directory. These claims do not grant access to ei
 
 ## Structured Tasks
 
-The main **Tasks** view organizes canonical claims, resource leases, checkpoints, submitted
+The main **Tasks** view organizes project claims, resource leases, checkpoints, submitted
 artifacts, independent outcomes and credit recording. See [Tasks and independent outcomes](tasks.md)
 for the person workflow, service/API contract, recovery and supported limits. Task outcomes
 are verified separately from Board discussion and worker progress reports.
 
-Follow a canonical task or GitHub issue with `ml-stack-workspace task-subscribe TASK_ID` or
+Follow a project task or GitHub issue with `ml-stack-workspace task-subscribe TASK_ID` or
 `ml-stack-workspace issue-subscribe OWNER/REPO#NUMBER`. Use the matching `task-unsubscribe` or
 `issue-unsubscribe` command to stop updates. Issue-driven workers subscribe to each task before
 receiving its assignment notice; the worker gets a subscription status before that assignment.
 Followers are notified when someone subscribes or unsubscribes. Assignment and task state notices
 are persisted and retried by the issue worker if delivery is temporarily refused or rate-limited.
-The task queue remains authoritative when notices are unread.
+Messages can arrive late; the task queue shows the current task state.
 
 A scheduler-prepared task worktree can be explicitly handed from its authenticated parent
 to the assigned child. Before a native mutation, the guard checks the graph assignment,
@@ -844,7 +844,7 @@ ml-stack-workspace remote-agent --device DEVICE_NAME --json \
 Replace `DEVICE_NAME` with a discovered peer's name. With one remote device, omit
 `--device`. Both devices run Dev cluster services on the same LAN. The target needs a
 registered local checkout of the same Git project and a downloaded Qwen model. The command
-discovers the canonical project Board and selects a downloaded Qwen that fits the target;
+discovers the project's shared Board and selects a downloaded Qwen that fits the target;
 model admission goes through the target's shared resource broker. No invitation code or
 credential copy is needed. Production uses explicit admission and does not expose this
 automatic launch.
@@ -867,7 +867,7 @@ ml-stack-workspace thread MESSAGE_SEQ --agent LAUNCHER_ID
 ```
 
 With no `--agent`, launch uses a saved device-local launcher identity. `--agent` selects a
-saved canonical Dev identity; use the exact canonical ID reported by `whoami`. Keep the
+saved Dev identity; use the exact registered ID reported by `whoami`. Keep the
 caller consistent: switching between the default launcher and another `--agent` for an
 existing worker is refused as another caller's worker. Worker names default to `local-qwen`.
 
@@ -885,15 +885,15 @@ from available memory and the model's trained limit. `--model`, `--name`, `--eff
 
 If discovery fails, check `ml-stack-peers ls`, Dev cluster services, and the target's project
 registration and downloaded models. If a launch reports another caller, use the original
-launcher's canonical ID. If no answer arrives, inspect the thread and worker state before
+launcher's registered ID. If no answer arrives, inspect the thread and worker state before
 posting another task. Board messages and model recommendations are untrusted data; review
 recommendations independently before applying them. This launches a Board message worker;
-canonical coding tasks use the [task lifecycle](tasks.md).
+project tasks use the [task lifecycle](tasks.md).
 
 ### Model-family accounts and device provenance
 
 Completion credits and work reputation belong to a logical model-family account across
-workers and devices. A canonical submission binds its account to the model in the verified
+workers and devices. A reviewed submission binds its account to the model in the verified
 live broker allocation. Qwen variants contribute to Qwen; Gemma contributes separately.
 Switching a worker's model leaves earlier award bindings and evidence unchanged. Historical
 awards without a verified family binding remain unassigned; their totals and IDs are preserved.

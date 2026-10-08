@@ -486,7 +486,7 @@ tomorrow. Only the selectors differ, so the selectors are data — `website`, `s
 
 ## Entities
 
-- **Resolving names.** Folding duplicates, canonical forms, and telling a handle from a name.
+- **Resolving names.** Folding duplicates, normalized names, and telling a handle from a name.
 - **Spelling.** Whether two words are one word typed twice. A doubled letter is its own case at
   any length, because it is the commonest way to write a name wrong; a substitution in a short
   word is not, because two four-letter names one letter apart are two people.

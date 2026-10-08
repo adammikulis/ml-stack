@@ -362,7 +362,7 @@ def _connect(args: argparse.Namespace, ws: Workspace) -> int:
             who = canonical.auth(token)
             info = canonical.registry.info(who.id)
             if info.get("project", {}).get("key") != connection["project_id"]:
-                raise Denied("this identity is not authorized for the canonical project")
+                raise Denied("this identity is not authorized for the selected project")
             _show(args, {"id": who.id, "project": connection["project_id"], "state": "connected"})
             return 0
         found = project.describe(args.project)
@@ -601,9 +601,9 @@ TABLE: tuple[tuple[str, str, list[Any], Handler], ...] = (
                         "done, blocked only)"), flag("type", choices=CALL_TYPES),
         flag("body"), flag("--subject", default=""), flag("--reply-to", type=int, default=0),
         flag("--ttl", type=float, default=0.0, help="seconds until it expires")], _send),
-    ("task-create", "create a canonical task in your existing project grant", [flag("payload")],
+    ("task-create", "create a project task in your existing project grant", [flag("payload")],
      lambda a, w, t: TaskBoard(w).create(t, json.loads(_body(a.payload)))),
-    ("tasks", "authorized canonical tasks and progress metrics", [], lambda a, w, t: TaskBoard(w).list(t)),
+    ("tasks", "authorized project tasks and progress metrics", [], lambda a, w, t: TaskBoard(w).list(t)),
     ("task", "task lease, checkpoints, proposal and independent review", [flag("id")],
      lambda a, w, t: TaskBoard(w).get(t, a.id)),
     ("task-subscribe", "receive inbox status changes for a task", [flag("id")],
@@ -616,7 +616,7 @@ TABLE: tuple[tuple[str, str, list[Any], Handler], ...] = (
      lambda a, w, t: backlog.subscribe_issue(w, t, a.ref, False)),
     ("task-claim", "claim a queued task with an existing trusted allocation", [flag("id"), flag("allocation_id")],
      lambda a, w, t: TaskBoard(w).claim(t, a.id, a.allocation_id)),
-    ("task-heartbeat", "renew your active canonical task lease", [flag("id")],
+    ("task-heartbeat", "renew your active project task lease", [flag("id")],
      lambda a, w, t: TaskBoard(w).heartbeat(t, a.id)),
     ("task-checkpoint", "save your active task checkpoint (JSON or - for stdin)", [flag("id"), flag("payload")],
      lambda a, w, t: TaskBoard(w).checkpoint(t, a.id, json.loads(_body(a.payload)))),
@@ -823,7 +823,7 @@ def _bare(handler: Callable[[argparse.Namespace, Workspace], int]) -> Callable[[
         if connection is not None:
             if handler in {_brief, hooks_cli.snippet, hooks_cli.install}:
                 return handler(args, None)
-            raise Denied("this command is unavailable in a canonical project; use its shared board")
+            raise Denied("this command is unavailable in a registered project; use its shared board")
         if coordinator_client.client(limits.root()) and handler is not _join:
             raise Denied('this is a local-only operation; this device uses a shared coordinator')
         return handler(args, Workspace())

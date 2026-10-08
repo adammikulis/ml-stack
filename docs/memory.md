@@ -18,7 +18,7 @@ conventions, decisions and their reasons, what worked or failed in that reposito
 **Which project.** `--project PATH` if given, else the git toplevel above the working directory,
 else the working directory itself; none when that is the home directory or `/` (then only `user`
 exists). The project id is `git:<origin url>` when the repository has an `origin` remote and
-`path:<canonical root>` otherwise; the project key is the first 16 hex characters of its SHA-256
+`path:<project root>` otherwise; the project key is the first 16 hex characters of its SHA-256
 and names the store directory. A git repository therefore keeps its memory when the folder is
 moved, renamed or cloned again with the same origin, and every worktree of one repository shares
 it. A folder with no origin is identified by its path: after moving it, run
@@ -80,7 +80,7 @@ queries apply to it.
 | node | kind | holds |
 |---|---|---|
 | `fact:mNNNN` | `fact` | label = the text (one line, at most 400 characters); attrs `ident`, `fkind` (`preference`, `machine`, `result`, `note`), `source` (`user-said`, `agent-observed`, `tool-result`), `created`, `last_confirmed`, `confirm_count`, `scope` (machine, llama.cpp build), `state` (`current` or `superseded`) |
-| `entity:KIND:KEY` | `model`, `build`, `setting`, `task`, `topic` | label = the display name; the key is the casefolded, hyphenated canonical name |
+| `entity:KIND:KEY` | `model`, `build`, `setting`, `task`, `topic` | label = the display name; the key is the casefolded, hyphenated normalized name |
 
 | edge | from, to | meaning |
 |---|---|---|
@@ -93,7 +93,7 @@ queries apply to it.
 **Entities.** `remember` takes `entities`, a list of `kind:name` strings
 (`model:Qwen3.8-Flash-Next`, `build:b11380`, `topic:slot count`). Each name goes through the
 write checks (credentials, instruction-like text, permission claims, sentinel state names), is
-at most 80 characters, and at most 6 are allowed per fact. Names are canonicalised so two
+at most 80 characters, and at most 6 are allowed per fact. Names are normalized so two
 spellings are one node: a model is read as `hub.naming.pretty_name` does (path, `.gguf`, shard
 suffix and `UD-` removed, quantisation in brackets), a build as `bNNNN` (`llama.cpp b11380`
 and `B11380` are the same), anything else by case and spacing.

@@ -1,4 +1,4 @@
-# Canonical coding workers
+# Project task workers
 
 Coding workers consume structured TaskBoard assignments. Board chat messages discuss work;
 they do not start jobs. An authenticated registered parent runs
@@ -28,7 +28,7 @@ the task baseline through the native commit, including deleted files. Its propos
 final clean commit and hashed artifacts for independent review. A final answer alone does not
 award reputation or accept a task.
 
-Canonical coding currently uses the Claude harness. Its maintained coding profile caps native
+Coding workers currently use the Claude harness. Its maintained coding profile caps native
 turns with `--max-turns`; output tokens per response use `CLAUDE_CODE_MAX_OUTPUT_TOKENS`, and
 effort stays within the saved worker ceiling. These are not a total task token budget. The
 TaskBoard accepts model, wall time and retry limits; memory, context, total-token and custom
@@ -42,7 +42,7 @@ Stop ends only the saved worker process and its verified broker holder. It retai
 private identity, token, preferences and device account. Start reuses that identity
 when changing models; identity revocation is a separate operation.
 
-Repository issue intake creates canonical TaskBoard tasks with source-revision keys,
+Repository issue intake creates project tasks with source-revision keys,
 acceptance criteria and coding limits. Board chat replies cannot complete those tasks.
 Blocked intake stays blocked until an authorized review changes its condition; issue
 edits and elapsed time do not retry a blocked task. The scheduler selects eligible
@@ -62,5 +62,5 @@ issue edits do not remove that decision; nothing is posted to GitHub.
 The person or actual registered parent can explicitly recover a blocked legacy issue
 projection with `agent resume-issue WORKER --issue NUMBER --reason "Changed condition" --agent PARENT`.
 Recovery preserves the failed attempt and reason as linked graph nodes and permits
-one new intake attempt. This does not resume canonical tasks or change their retry
-budget; canonical blocked tasks use the existing TaskBoard recovery path.
+one new intake attempt. This does not resume project tasks or change their retry
+budget; blocked tasks use the existing task queue recovery path.

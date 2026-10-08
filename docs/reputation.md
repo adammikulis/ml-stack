@@ -12,7 +12,7 @@ keystore (profile `reputation`). The key is created on the first write; construc
 reading an empty store never touches the keystore. Nothing about a source is on disk in plaintext
 except `summary.json` beside it: counts by state and waiting notices, no names.
 
-Nodes: `source` (kind, canonical key, scores, traits, state) and `event` (a bad event tied to its
+Nodes: `source` (kind, normalized key, scores, traits, state) and `event` (a bad event tied to its
 source by an `event` edge). At most 1000 sources and 20 event nodes per source; the oldest
 unknown or established sources go first.
 
@@ -74,7 +74,7 @@ A person at a terminal only; an agent marker in the environment refuses every on
 ## Verified work
 
 Completion credits and work reputation are separate from source-risk scores. New
-awards come only from the canonical task board's independently accepted review.
+awards come only from the project task queue's independently accepted review.
 The reviewer is the person, the worker's actual task-creator parent, or a designated
 peer with a live person-set project grant. The worker cannot review or award itself.
 The award binds the immutable task specification, worker proposal and review hashes;
@@ -112,7 +112,7 @@ rating on that same review does not add another success. Infrastructure blocks,
 broker shortages and approval availability remain distinct and contribute no negative
 quality or reliability sample. Sample counts, outcomes and confidence accompany the
 metrics; credits and test quantity do not produce quality ratings. Historical explicit
-ratings remain recorded evidence; new canonical reliability uses verified outcomes.
+ratings remain recorded evidence; new reliability scores use verified outcomes.
 A future advisory pricing
 modifier is bounded from 0.8 to 1.2 using evidenced reliability and confidence, starts
 neutral, and guarantees baseline access; actual price remains zero. Source-risk

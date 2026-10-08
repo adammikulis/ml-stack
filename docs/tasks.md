@@ -50,7 +50,7 @@ allocation. Recovery consumes the configured retry budget. Supported limits curr
 model choice, wall time and retries. Memory, context and token limits require maintained
 broker/runtime enforcement before they can be represented as guarantees.
 
-Independent review automatically records the canonical outcome in the encrypted work ledger.
+Independent review automatically records the verified outcome in the encrypted work ledger.
 Accepted work earns completion credits once, with independently evidenced quality bonuses
 when recorded by the reviewer. If the ledger is unavailable, the review remains saved and
 the UI reports credit recording as pending. **Record verified outcome** retries the same
