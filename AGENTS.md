@@ -501,6 +501,12 @@ as reused. Tier runs, `gate`, `quick` and the coordinator's combined-tree checks
 `task-submit` accept runner entry ids (`test_entry`, `test_entries`) that the board verifies. Running tests creates no identity, token or credential: board notices go out under the submitting
 agent's own session, and nothing is posted when no agent is configured.
 
+**The queue runs shorter suites first.** The test queue orders runs by their estimated length, taken
+from timings it records itself on every run, so many short runs finish before one long one and agents
+get the most done. A long suite is never refused or held: it ages up the queue and is always granted
+after a bounded wait. During normal hours (weekdays 08:00 to 21:00, machine-local) long runs together
+hold at most half the budget while shorter ones are waiting; outside them they may use all of it.
+
 The maintained tiers are `fast` (neither slow nor heavy), `full` (not slow), `slow` (only slow)
 and `all` (including slow). `tests/README.md` describes their mechanics; the policy above
 controls when each is authorized. Run the relevant slow tests for packaging, page and Fleet
