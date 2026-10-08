@@ -898,7 +898,7 @@ LIVE_WRITERS = frozenset({"broker-leases.json", "broker.json", "broker.lock", "s
 #: in `workspace/`), so a write there says nothing about this run. A glob per path, and only logs
 #: and the hub: the keystore, key files, manifests, canaries, honey, requests, credentials and the
 #: sentinel's records stay guarded, because a test that reached for those would be an escape.
-LIVE_PATHS = ("workspace/*", "harness/*", "activity/*/activity.log*", "activity/*/activity.log.lock",
+LIVE_PATHS = ("workspace/*", "harness/*", "workspace-connections.json", "workspace-remote/*/worktree-lifecycle.db*", "activity/*/activity.log*", "activity/*/activity.log.lock",
               "sentinel/events.log*", "sentinel/anchor.log")
 
 
@@ -1014,8 +1014,26 @@ def _external_activity_drop_write(root: Path, rel: Path) -> bool:
     except (OSError, ValueError, KeyError, TypeError, AttributeError, psutil.Error):
         return False
 
+def _external_board_write(root: Path, rel: Path) -> bool:
+    """Whether ``rel`` is under the board daemon's root and a live process outside this session serves it."""
+    import psutil
+
+    if rel.parts[:1] != ('traind',):
+        return False
+    target = str(root / 'traind')
+    for process in psutil.process_iter():
+        try:
+            argv = process.cmdline()
+            if '--root' in argv[:-1] and argv[argv.index('--root') + 1] == target:
+                return not ours({'owner_pid': process.pid})
+        except (psutil.Error, OSError):
+            continue
+    return False
+
+
 def _external_state_write(root: Path, rel: Path) -> bool:
-    return (_external_keystore_lock(root, rel) or _external_keystore_rate(root, rel)
+    return (_external_keystore_lock(root, rel) or _external_board_write(root, rel)
+            or _external_keystore_rate(root, rel)
             or _external_harness_key(root, rel) or _external_scanner_write(root, rel)
             or _external_activity_drop_write(root, rel))
 

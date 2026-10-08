@@ -146,3 +146,38 @@ def test_scanner_write_attribution_excludes_only_live_external_registered_proces
     monkeypatch.setattr(Process, 'is_running', lambda self: True)
     monkeypatch.setattr(Process, 'create_time', lambda self: now + 1)
     assert len(file_mtimes(tmp_path)) == 3
+
+
+def test_board_daemon_files_are_excluded_only_while_an_outside_process_serves_the_root(tmp_path, monkeypatch):
+    import conftest
+    import psutil
+
+    served = tmp_path / 'traind'
+    board = served / 'shared-workspaces' / 'project'
+    board.mkdir(parents=True)
+    (board / 'board.db').write_text('x')
+    (tmp_path / 'other.json').write_text('x')
+    argv = {'pid': 12345, 'cmd': ['ml-stack-headless', '--port', '8770', '--root', str(served)]}
+
+    class Process:
+        def __init__(self):
+            self.pid = argv['pid']
+        def cmdline(self):
+            return argv['cmd']
+
+    monkeypatch.setattr(psutil, 'process_iter', lambda: [Process()])
+    monkeypatch.setattr(conftest, 'ours', lambda entry: entry['owner_pid'] == os.getpid())
+    assert set(file_mtimes(tmp_path)) == {'other.json'}
+    argv['pid'] = os.getpid()
+    assert set(file_mtimes(tmp_path)) == {'other.json', 'traind/shared-workspaces/project/board.db'}
+    argv.update(pid=12345, cmd=['ml-stack-headless', '--root', str(tmp_path / 'elsewhere')])
+    assert set(file_mtimes(tmp_path)) == {'other.json', 'traind/shared-workspaces/project/board.db'}
+
+
+def test_workspace_hub_files_written_by_agent_commands_are_not_this_runs(tmp_path):
+    (tmp_path / 'workspace-connections.json').write_text('{}')
+    lifecycle = tmp_path / 'workspace-remote' / 'host'
+    lifecycle.mkdir(parents=True)
+    (lifecycle / 'worktree-lifecycle.db').write_text('x')
+    (lifecycle / 'secret.key').write_text('x')
+    assert set(file_mtimes(tmp_path)) == {'workspace-remote/host/secret.key'}
