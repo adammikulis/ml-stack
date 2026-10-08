@@ -77,10 +77,10 @@ def test_a_forged_head_signature_marks_the_origin_damaged_and_stores_nothing(tmp
     from ml_stack.workspace.chain import _digest
     head['hash'] = _digest(head['prev'], head)
     with pytest.raises(rules.Damaged, match='bad signature'):
-        b.ingest(a.origin, rows)
+        b.ingest(a.origin, rows, authoritative=True)
     assert b.rows(a.origin) == [] and a.origin in b.damaged()
     with pytest.raises(rules.Damaged, match='refused'):
-        b.ingest(a.origin, a.rows(a.origin))
+        b.ingest(a.origin, a.rows(a.origin), authoritative=True)
 
 
 def test_a_head_signed_by_another_key_than_the_pinned_one_is_refused(tmp_path):
@@ -153,11 +153,11 @@ def test_merge_orders_by_clock_then_origin_then_sequence_whatever_order_it_is_gi
     assert [(r['origin'], r['seq']) for r in forward] == [('a', 1), ('b', 1), ('a', 2), ('a', 3), ('b', 2)]
 
 
-def test_merge_keeps_one_row_per_actor_and_idem_and_drops_heads():
-    a = [row('a', 1, 10, 0, idem='r1'), row('a', 2, 11, 0, kind='head')]
+def test_merge_keeps_one_row_per_origin_actor_and_idem_and_drops_heads():
+    a = [row('a', 1, 10, 0, idem='r1'), row('a', 2, 11, 0, kind='head'), row('a', 3, 12, 0, idem='r1')]
     b = [row('b', 1, 12, 0, idem='r1'), row('b', 2, 13, 0, actor='y', idem='r1')]
     merged = rules.merge({'a': a, 'b': b})
-    assert [(r['origin'], r['seq']) for r in merged] == [('a', 1), ('b', 2)]
+    assert [(r['origin'], r['seq']) for r in merged] == [('a', 1), ('b', 1), ('b', 2)]
 
 
 def test_a_row_far_ahead_of_the_local_clock_is_held_back_and_does_not_move_the_local_clock(tmp_path):
@@ -175,3 +175,120 @@ def test_a_row_far_ahead_of_the_local_clock_is_held_back_and_does_not_move_the_l
     assert rules.held_back(rows[2], int(clock.now * 1000)) and not rules.held_back(rows[0], int(clock.now * 1000))
     mine = post(b, 'now')
     assert mine['hlc'][0] < int(far * 1000)
+
+
+def forge(journals, genuine, extra):
+    """Rows a relay builds after ``genuine``: the chain hashes are unkeyed, so anyone can."""
+    from ml_stack.workspace.chain import _digest
+    out, prev = [], genuine[-1]
+    for seq, (kind, body) in enumerate(extra, start=len(genuine) + 1):
+        made = {'v': 1, 'origin': prev['origin'], 'hlc': [prev['hlc'][0], 0, prev['origin']], 'kind': kind,
+                'actor': 'claude' if kind != 'head' else '', 'idem': '', 'body': body, 'seq': seq,
+                'prev': prev['hash'], 'ts': 1.0}
+        made['hash'] = _digest(prev['hash'], made)
+        out.append(made)
+        prev = made
+    return out
+
+
+def test_a_relay_cannot_append_rows_under_a_replayed_head(tmp_path):
+    v, _ = device(tmp_path, 'v')
+    victim, _ = device(tmp_path, 'victim')
+    post(v, 'genuine1')
+    post(v, 'genuine2')
+    v.seal()
+    genuine = v.rows(v.origin)
+    old_head = dict(genuine[-1]['body'])
+    forged = forge(v, genuine, [('message', {'body': 'FORGED'}), ('head', old_head)])
+    with pytest.raises(rules.Damaged, match='does not sign the row before'):
+        victim.ingest(v.origin, genuine + forged)
+    assert victim.rows(v.origin) == []
+    assert victim.ingest(v.origin, genuine, authoritative=True) == genuine
+
+
+def test_a_head_must_sign_the_row_directly_before_it(tmp_path):
+    v, key = device(tmp_path, 'v')
+    victim, _ = device(tmp_path, 'victim')
+    post(v, 'one')
+    v.seal()
+    genuine = v.rows(v.origin)
+    between = forge(v, genuine, [('message', {'body': 'unsigned row between'})])
+    target = genuine[-2]
+    body = {'head': target['seq'], 'hash': target['hash'], 'public': genuine[-1]['body']['public'],
+            'sig': rules.base64.b64encode(key.sign_bytes(rules.head_message('', v.origin, target['seq'], target['hash']))).decode()}
+    late = forge(v, genuine + between, [('head', body)])
+    with pytest.raises(rules.Damaged):
+        victim.ingest(v.origin, genuine + between + late)
+
+
+@pytest.mark.parametrize('name', ['../../../escaped', '/tmp/absolute-origin', 'A' * 32, 'g' * 32, 'a' * 31, 'a' * 33, ''])
+def test_an_origin_that_is_not_32_lower_case_hex_never_reaches_the_file_system(tmp_path, name):
+    victim, _ = device(tmp_path / 'one' / 'two', 'victim')
+    with pytest.raises(ValueError, match='not a journal id'):
+        victim.ingest(name, [{'seq': 1}])
+    with pytest.raises(ValueError, match='not a journal id'):
+        victim.log(name)
+    assert sorted(p.name for p in tmp_path.rglob('*') if p.suffix == '.jsonl') == []
+
+
+def test_the_upper_case_form_of_this_devices_origin_cannot_reach_its_journal(tmp_path):
+    a, _ = device(tmp_path, 'a')
+    post(a, 'mine')
+    before = a.rows(a.origin)
+    with pytest.raises(ValueError, match='not a journal id'):
+        a.ingest(a.origin.upper(), before)
+    assert a.rows(a.origin) == before and [p.name for p in a.directory.glob('*.jsonl')] == [a.origin + '.jsonl']
+
+
+def test_a_forged_copy_marks_an_origin_damaged_only_when_its_owner_presented_it(tmp_path):
+    a, _ = device(tmp_path, 'a')
+    b, _ = device(tmp_path, 'b')
+    post(a, 'one')
+    a.seal()
+    rows = copy.deepcopy(a.rows(a.origin))
+    rows[-1]['body']['sig'] = rules.base64.b64encode(b'\x00' * 64).decode()
+    from ml_stack.workspace.chain import _digest
+    rows[-1]['hash'] = _digest(rows[-1]['prev'], rows[-1])
+    with pytest.raises(rules.Damaged):
+        b.ingest(a.origin, rows, authoritative=False)
+    assert b.damaged() == {}
+    with pytest.raises(rules.Damaged):
+        b.ingest(a.origin, rows, authoritative=True)
+    assert list(b.damaged()) == [a.origin]
+    b.forgive(a.origin)
+    assert b.damaged() == {} and len(b.ingest(a.origin, a.rows(a.origin), authoritative=True)) == 2
+
+
+def test_an_origin_bound_by_a_relay_is_rebound_to_the_key_its_owner_presents(tmp_path):
+    a, _ = device(tmp_path, 'a')
+    squatter = Signer.generate()
+    owner = Signer.generate()
+    a.signer = lambda: squatter
+    post(a, 'squatted')
+    a.seal()
+    squat_rows = a.rows(a.origin)
+    victim, _ = device(tmp_path, 'victim')
+    victim.ingest(a.origin, squat_rows, authoritative=False)
+    real, _ = device(tmp_path, 'real', key=owner)
+    real._origin = a.origin
+    post(real, 'the owner')
+    real.seal()
+    took = victim.ingest(a.origin, real.rows(a.origin), authoritative=True)
+    assert [r['body'].get('text') for r in took if r['kind'] == 'message'] == ['the owner']
+    assert [r['body'].get('text') for r in victim.rows(a.origin) if r['kind'] == 'message'] == ['the owner']
+
+
+def test_a_device_holds_no_more_journals_than_the_origin_cap(tmp_path, monkeypatch):
+    from ml_stack.workspace import journal
+    monkeypatch.setattr(journal, 'MAX_ORIGINS', 2)
+    victim, _ = device(tmp_path, 'victim')
+    post(victim, 'own')
+    for name in ('x', 'y'):
+        other, _ = device(tmp_path, name)
+        post(other, name)
+        other.seal()
+        if name == 'x':
+            victim.ingest(other.origin, other.rows(other.origin))
+        else:
+            with pytest.raises(rules.Quota):
+                victim.ingest(other.origin, other.rows(other.origin))
