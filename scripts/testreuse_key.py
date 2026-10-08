@@ -11,6 +11,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 from dataclasses import dataclass
 from importlib import metadata
 from pathlib import Path
@@ -24,7 +25,9 @@ SPAWNS = re.compile(r"\b(?:subprocess|Popen|os\.system|os\.exec\w*|os\.spawn\w*|
                     r"concurrent\.futures\.process)\b")
 DYNAMIC = re.compile(r"\b(?:importlib\.util|runpy|pkgutil|entry_points|importorskip|__import__|import_module)\b")
 UNSEEN = re.compile(r"\b(?:DirEntry|scandir|fstat|utime|chown|setxattr|mmap|sqlite3|ladybug)\b")
-SNAPSHOT_SKIP = frozenset({".git", ".venv", "venv", "node_modules"})
+SNAPSHOT_SKIP = frozenset({".git", ".claude/worktrees", ".venv", "venv", ".build-venv", ".build-work", "node_modules"})
+SNAPSHOT_BUDGET_S = 10.0
+RUNNER_OWNED = frozenset({".full-tier-last.json"})
 RUNNER_PLUGINS = frozenset({"testslots_pytest", "testreuse_plugin"})
 VALUE_OPTIONS = frozenset({"-m", "-k", "-c", "-o", "-W", "-p", "-n", "--rootdir", "--confcutdir", "--ignore",
                            "--ignore-glob", "--deselect", "--override-ini", "--maxfail", "--tb", "--basetemp",
@@ -47,8 +50,8 @@ TREE_DIRS = ("src", "scripts", "tests", "docs", "packaging")
 TREE_FILES = ("budgets.json", "AGENTS.md", "CLAUDE.md", "pyproject.toml", "HANDOFF.md")
 IGNORED_NAMES = frozenset({"__pycache__", ".DS_Store", ".pytest_cache", ".testmondata", ".ruff_cache"})
 STDLIB = frozenset(sys.stdlib_module_names)
-_hashes: dict[tuple[str, int, int], str] = {}
-_texts: dict[tuple[str, int, int], str] = {}
+_hashes: dict[tuple[str, int, int, int, int], str] = {}
+_texts: dict[tuple[str, int, int, int, int], str] = {}
 
 
 @dataclass(frozen=True)
@@ -66,9 +69,9 @@ def sha(data: bytes | str) -> str:
     return hashlib.sha256(data.encode() if isinstance(data, str) else data).hexdigest()
 
 
-def _stamp(path: Path) -> tuple[str, int, int]:
+def _stamp(path: Path) -> tuple[str, int, int, int, int]:
     stat = path.stat()
-    return (str(path), stat.st_mtime_ns, stat.st_size)
+    return (str(path), stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size, stat.st_ino)
 
 
 def file_sha(path: Path) -> str:
@@ -349,20 +352,27 @@ def build_manifest(root: Path, rel: str, seen: dict, closures: Closures, argumen
             "tree": closures.tree() if spawning or dynamic else ""}
 
 
-def snapshot(root: Path) -> dict[str, tuple[int, int]]:
-    """Modification time and size of every file under ``root`` except caches and environments, ignored files included."""
-    found: dict[str, tuple[int, int]] = {}
+def snapshot(root: Path) -> dict[str, tuple[int, int, int]] | None:
+    """Modification time, change time and size of every file under ``root``, ignored files included; caches,
+    environments, other agents' worktrees (by root-relative path) and the runner's own files are left out.
+    None when the walk outlasts ``SNAPSHOT_BUDGET_S``."""
+    found: dict[str, tuple[int, int, int]] = {}
+    started = time.monotonic()
     for folder, names, files in os.walk(root):
-        names[:] = [n for n in names if n not in IGNORED_NAMES and n not in SNAPSHOT_SKIP]
+        here = Path(folder).relative_to(root).as_posix()
+        names[:] = [n for n in names if n not in IGNORED_NAMES
+                    and (n if here == "." else f"{here}/{n}") not in SNAPSHOT_SKIP]
+        if time.monotonic() - started > SNAPSHOT_BUDGET_S:
+            return None
         for name in files:
-            if name.endswith(".pyc") or name.startswith(".testmondata") or name == ".DS_Store":
+            if name.endswith(".pyc") or name.startswith(".testmondata") or name == ".DS_Store" or (
+                    here == "." and name in RUNNER_OWNED):
                 continue
-            path = Path(folder) / name
             try:
-                stat = path.lstat()
+                stat = (Path(folder) / name).lstat()
             except OSError:
                 continue
-            found[path.relative_to(root).as_posix()] = (stat.st_mtime_ns, stat.st_size)
+            found[name if here == "." else f"{here}/{name}"] = (stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size)
     return found
 
 

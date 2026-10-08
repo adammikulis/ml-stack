@@ -17,6 +17,8 @@ from pathlib import Path
 import testreuse_key as keys
 import testreuse_store as storage
 
+from ml_stack.log import warn
+
 CANARY_RATE = 0.05
 WAIT_S = 900.0
 POLL_S = 0.5
@@ -134,7 +136,7 @@ def results(junit: Path, root: Path) -> dict[str, dict[str, int]]:
     """Per test file: tests, failures and skips counted from a junit file; ``""`` holds cases that name no file."""
     rows: dict[str, dict[str, int]] = {}
     for case in ET.parse(junit).getroot().iter("testcase"):  # noqa: S314 - the file pytest just wrote
-        path = file_of(case.get("classname", ""), root)
+        path = file_of(case.get("classname", "") or case.get("name", ""), root)
         row = rows.setdefault(path, {"tests": 0, "failed": 0, "skipped": 0})
         row["tests"] += 1
         row["failed"] += any(child.tag in ("failure", "error") for child in case)
@@ -211,7 +213,7 @@ class Session:
         self.events = events or Events()
         self.closures = keys.Closures(root)
         self.rate = canary_rate()
-        self.commit = head(root)
+        self.commit = ""
         self.tree_of: Callable[[], str] = lambda: ""
         self.draw: Callable[[], float] = random.random
         self.tree, self.refresh = "", False
@@ -243,11 +245,11 @@ class Session:
         self.refresh = not reuse
         self.checked_tree = self.tree_of()
         plan = Plan(run=list(self.files or []))
-        if reuse and self.files:
-            plan.run = []
-            for file in self.files:
-                self.consider(file, plan)
         try:
+            if reuse and self.files:
+                plan.run = []
+                for file in self.files:
+                    self.consider(file, plan)
             self.execute(plan, launch)
         finally:
             for file in plan.claimed:
@@ -313,20 +315,28 @@ class Session:
         try:
             self.looked.clear()
             before = {f: self.lookup(f).key for f in run}
-            self.tree = self.tree_of()
-            self.clean = is_clean(self.root)
+            self.tree, self.commit, self.clean = self.tree_of(), head(self.root), is_clean(self.root)
             stamps = keys.snapshot(self.root)
             status = launch(command)
-            moved = keys.snapshot(self.root) != stamps or (bool(self.tree) and self.tree_of() != self.tree)
+            moved = (stamps is not None and (keys.snapshot(self.root) != stamps)) or (
+                bool(self.tree) and self.tree_of() != self.tree)
             self.looked.clear()
             stale = {f for f in run if self.checked.get(f, before[f]) != before[f] or self.lookup(f).key != before[f]}
             stale |= set(run) if self.checked_tree and self.checked_tree != self.tree else set()
-            self.report.status = max(self.report.status, 4 if moved else 0 if status == 5 else status)
-            counts = results(junit, self.root) if junit.is_file() else {}
+            try:
+                counts = results(junit, self.root) if junit.is_file() else {}
+            except (ET.ParseError, OSError):
+                counts, unreadable = {}, True
+            else:
+                unreadable = False
             unattributed = counts.pop("", None)
+            ended = 0 if status == 5 and counts and all(counts.get(f) for f in (run or counts)) else status
+            self.report.status = max(self.report.status, 4 if moved else ended)
             seen, trouble = recorded(scratch / "record") if (scratch / "record").is_dir() else ({}, "")
             self.junit_sha = keys.sha(junit.read_bytes()) if junit.is_file() else ""
             problem = "the tree changed during the run" if moved else (
+                "the junit file is unreadable" if unreadable else
+                "the checkout is too large to watch" if stamps is None else
                 f"pytest exited {status}" if status not in (0, 1, 5) else (
                     "an error belongs to no test file" if status == 1 and unattributed and unattributed["failed"]
                     else "the tree hash is unknown" if not self.tree else trouble))
@@ -343,10 +353,9 @@ class Session:
     def settle(self, file: str, ran: Ran) -> None:
         """Record one executed file's outcome, store a clean pass, and compare it with a canary."""
         outcome, look, count, hit = self.outcome(file), self.lookup(file), ran.count, ran.hit
-        outcome.passed = (bool(count) and not count["failed"]) or (
-            count is None and ran.status in (0, 5) and not ran.problem)
-        if count is None and outcome.passed:
-            outcome.detail = f"{outcome.detail} (no tests ran: not stored)".strip()
+        outcome.passed = bool(count) and not count["failed"]
+        if count is None and not ran.problem:
+            outcome.detail = f"{outcome.detail} (no tests ran)".strip()
             return
         if ran.problem:
             outcome.passed = outcome.passed and not ran.problem.startswith(("the tree", "pytest exited"))
@@ -356,7 +365,7 @@ class Session:
             detail = f"cached pass from {hit.id} but a fresh run failed"
             self.store.disable(look.key, hit.entry, detail)
             self.events.canary_mismatch(file, detail)
-            outcome.how, outcome.detail = "ran  CANARY MISMATCH", f"({detail}; reuse disabled for this file)"
+            outcome.how, outcome.detail = "ran  canary mismatch", f"({detail}; reuse disabled for this file)"
             self.report.status = self.report.status or 1
             return
         if hit is not None:
@@ -375,7 +384,9 @@ class Session:
             self.events.finished(file, look.key, "pass-unstored", "")
         else:
             outcome.stored = self.store_entry(file, ran, "pass", manifest)
-            self.events.finished(file, look.key, "pass", outcome.stored)
+            if not outcome.stored:
+                outcome.detail = f"{outcome.detail} (not stored: the store is unavailable or an input changed)".strip()
+            self.events.finished(file, look.key, "pass" if outcome.stored else "pass-unstored", outcome.stored)
 
     @staticmethod
     def refusal(seen: dict | None, count: dict) -> str:
@@ -391,9 +402,19 @@ class Session:
         return f"marked {sorted(seen['marks'] & keys.NEVER_MARKS)[0]}" if seen["marks"] & keys.NEVER_MARKS else ""
 
     def store_entry(self, file: str, ran: Ran, kind: str, manifest: dict | None = None) -> str:
-        """Write the entry for an executed file."""
-        count, command = ran.count, ran.command
+        """Write the entry for an executed file; empty when an input changed or the store could not be written."""
         manifest = manifest or keys.build_manifest(self.root, file, ran.seen or {}, self.closures, tuple(self.command))
+        if kind == "pass" and keys.manifest_holds(self.root, manifest, self.closures):
+            return ""
+        try:
+            return self.put_entry(file, ran, kind, manifest)
+        except OSError as error:
+            warn(f"test: {file}: result not stored ({error})")
+            return ""
+
+    def put_entry(self, file: str, ran: Ran, kind: str, manifest: dict) -> str:
+        """Hand the entry's fields to the store."""
+        count, command = ran.count, ran.command
         return self.store.put({
             "lookup": self.lookup(file).key, "file": file, "outcome": kind, "manifest": manifest,
             "manifest_digest": keys.manifest_digest(manifest), "command": command,

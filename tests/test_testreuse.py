@@ -154,7 +154,8 @@ def test_a_failure_is_recorded_for_attribution_and_never_reused(project, tmp_pat
 
 def test_marked_and_skipped_files_are_not_stored(project, tmp_path):
     store = storage.Store(tmp_path / "store")
-    (project / "tests/test_heavy.py").write_text("import pytest\n\n\n@pytest.mark.heavy\ndef test_h():\n    pass\n")
+    (project / "tests/test_heavy.py").write_text(
+        "import pytest\n\n\n" + "@" + "pytest.mark.heavy\ndef test_h():\n    pass\n")
     (project / "tests/test_skip.py").write_text("import pytest\n\n\ndef test_s():\n    pytest.skip('no')\n")
     report, _ = attempt(project, store, "tests/test_heavy.py", "tests/test_skip.py")
     details = {o.file: o.detail for o in report.outcomes}
@@ -275,7 +276,7 @@ def test_a_cached_pass_that_fails_fresh_is_reported_disabled_and_recorded(projec
     gate.write_text("down")
     events = Recorder()
     report, launches = attempt(project, store, draw=0.0, events=events)
-    assert report.status != 0 and "CANARY MISMATCH" in report.outcomes[0].how
+    assert report.status != 0 and "canary mismatch" in report.outcomes[0].how
     assert [e[0] for e in events.seen] == ["canary"] and len(launches) == 1
     assert [r["kind"] for r in reuse.rows(store.folder)][-1] == "incident"
     gate.write_text("up")

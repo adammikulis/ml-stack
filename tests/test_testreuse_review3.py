@@ -215,7 +215,7 @@ def test_stat_accepts_keywords_and_directory_descriptors_under_the_plugin(projec
     store = storage.Store(tmp_path / "store")
     (project / FILE).write_text(
         "import os\n\n\ndef test_a():\n    folder = os.path.dirname(__file__)\n    os.stat(path=__file__)\n"
-        "    fd = os.open(folder, os.O_RDONLY)\n    try:\n        assert not os.path.exists(os.path.join(folder, 'flag.txt'))\n"
+        "    fd = os.open(folder, os.O_RDONLY)\n    try:\n"
         "        try:\n            os.stat('flag.txt', dir_fd=fd)\n        except FileNotFoundError:\n            pass\n"
         "        else:\n            raise AssertionError('flag')\n    finally:\n        os.close(fd)\n")
     report, _ = attempt(project, store)

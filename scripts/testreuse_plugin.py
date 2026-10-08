@@ -21,6 +21,7 @@ MUTATING = {"os.mkdir": (0,), "os.rmdir": (0,), "os.remove": (0,), "os.rename": 
             "os.link": (1,), "os.truncate": (0,), "os.chmod": (0,), "shutil.rmtree": (0,),
             "shutil.copyfile": (1,), "shutil.move": (1,)}
 DIR_FDS = {"os.remove": (1,), "os.rmdir": (1,), "os.mkdir": (2,), "os.rename": (2, 3), "shutil.rmtree": (1,)}
+PATHS = (str, bytes, os.PathLike)
 SHARED = "*"
 FILES: dict[str, dict] = {}
 CURRENT: list[str] = []
@@ -53,6 +54,29 @@ def _source_of(path: str) -> str:
     except (ValueError, OSError):
         return ""
     return "" if any(p in IGNORED for p in rel.parts) else rel.as_posix()
+
+
+def _fd_path(descriptor: int) -> str:
+    """The path a directory descriptor names, or empty when the platform cannot say."""
+    try:
+        return str(Path(f"/proc/self/fd/{descriptor}").readlink())
+    except OSError:
+        pass
+    try:
+        import fcntl
+
+        return fcntl.fcntl(descriptor, fcntl.F_GETPATH, b"\0" * 1024).split(b"\0", 1)[0].decode()
+    except (ImportError, AttributeError, OSError):
+        return ""
+
+
+def _resolve(path: object, dir_fd: object = None) -> str:
+    """The absolute text of ``path``, relative to ``dir_fd`` when one is given; empty if that cannot be resolved."""
+    text = _text(path)
+    if isinstance(dir_fd, int) and dir_fd >= 0 and not Path(text).is_absolute():
+        base = _fd_path(dir_fd)
+        return str(Path(base) / text) if base else ""
+    return str(Path(text).absolute())
 
 
 def _writing(mode: object, flags: object) -> bool:
@@ -107,8 +131,8 @@ def _audit(event: str, args: tuple) -> None:
     BUSY.append(True)
     try:
         bucket = _entry(CURRENT[-1])
-        if event == "open" and isinstance(args[0], (str, bytes, os.PathLike)):
-            absolute = str(Path(_text(args[0])).absolute())
+        if event == "open" and isinstance(args[0], PATHS):
+            absolute = _resolve(args[0])
             writing = _writing(args[1], args[2])
             if writing and not _write_ok(absolute):
                 bucket["violations"].add(f"wrote {absolute}")
@@ -116,6 +140,9 @@ def _audit(event: str, args: tuple) -> None:
                 _note_path(bucket, absolute, "reads")
             if any(_under(Path(absolute), base) for base in REAL_STATE) and (writing or not _from_conftest()):
                 bucket["violations"].add(f"touched {absolute}")
+        elif event == "sqlite3.connect" and args and isinstance(args[0], PATHS) and not _text(args[0]).startswith(
+                (":memory:", "file:")):
+            _note_path(bucket, _resolve(args[0]), "reads")
         elif event in ("os.listdir", "os.scandir") and args and isinstance(args[0], (str, bytes, os.PathLike)):
             rel = _source_of(str(Path(_text(args[0])).absolute()) + "/x")
             if rel:
@@ -123,33 +150,55 @@ def _audit(event: str, args: tuple) -> None:
         elif event in MUTATING:
             fds = DIR_FDS.get(event, ())
             for place, index in enumerate(MUTATING[event]):
-                relative = place < len(fds) and len(args) > fds[place] and args[fds[place]] not in (None, -1)
-                if not relative and len(args) > index and isinstance(args[index], (str, bytes, os.PathLike)):
-                    absolute = str(Path(_text(args[index])).absolute())
-                    if not _write_ok(absolute):
+                if len(args) > index and isinstance(args[index], PATHS):
+                    fd = args[fds[place]] if place < len(fds) and len(args) > fds[place] else None
+                    absolute = _resolve(args[index], fd)
+                    if absolute and not _write_ok(absolute):
                         bucket["violations"].add(f"{event.split('.')[-1]} {absolute}")
     finally:
         BUSY.pop()
 
 
-def _probe(original):
+def _note_probe(path: object, dir_fd: object) -> None:
+    if CURRENT and not BUSY and isinstance(path, PATHS):
+        BUSY.append(True)
+        try:
+            absolute = _resolve(path, dir_fd)
+            if absolute:
+                _note_path(_entry(CURRENT[-1]), absolute, "stats")
+        finally:
+            BUSY.pop()
+
+
+def _probe_stat(original):
     @functools.wraps(original)
-    def wrapper(path, *args, **kwargs):
-        if CURRENT and not BUSY and isinstance(path, (str, bytes, os.PathLike)):
-            BUSY.append(True)
-            try:
-                _note_path(_entry(CURRENT[-1]), str(Path(_text(path)).absolute()), "stats")
-            finally:
-                BUSY.pop()
-        return original(path, *args, **kwargs)
+    def wrapper(path, *, dir_fd=None, follow_symlinks=True):
+        _note_probe(path, dir_fd)
+        return original(path, dir_fd=dir_fd, follow_symlinks=follow_symlinks)
+    return wrapper
+
+
+def _probe_lstat(original):
+    @functools.wraps(original)
+    def wrapper(path, *, dir_fd=None):
+        _note_probe(path, dir_fd)
+        return original(path, dir_fd=dir_fd)
+    return wrapper
+
+
+def _probe_access(original):
+    @functools.wraps(original)
+    def wrapper(path, mode, *, dir_fd=None, effective_ids=False, follow_symlinks=True):
+        _note_probe(path, dir_fd)
+        return original(path, mode, dir_fd=dir_fd, effective_ids=effective_ids, follow_symlinks=follow_symlinks)
     return wrapper
 
 
 if ENABLED:
     sys.addaudithook(_audit)
-    for _name in ("stat", "lstat", "access"):
+    for _name, _make in (("stat", _probe_stat), ("lstat", _probe_lstat), ("access", _probe_access)):
         _original = getattr(os, _name)
-        _wrapper = _probe(_original)
+        _wrapper = _make(_original)
         for _support in (os.supports_follow_symlinks, os.supports_effective_ids, os.supports_dir_fd,
                          os.supports_fd):
             if _original in _support:

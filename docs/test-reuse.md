@@ -60,6 +60,8 @@ byte. Nothing in either is a path, so two worktrees with identical content hit t
 Limits of what the plugin sees: `DirEntry.stat`, `fstat`, `utime`, `chown`, `setxattr`, `mmap`, `sqlite3` and C extensions (such as `ladybug`) touch files without a Python-level `open`, `os.stat`, `lstat`, `access` or listing event, and a function bound before the plugin loaded (`from os import stat`) bypasses the `os.stat` wrapper. A file whose own code (the test file, its `tests/` helpers and conftests) mentions any of `DirEntry`, `scandir`, `fstat`, `utime`, `chown`, `setxattr`, `mmap`, `sqlite3` or `ladybug` is therefore never stored. Library code under `src/` that uses them is not scanned: a file that reaches such code is covered by the recorded reads, the tree digest for spawning code and the canary only.
 A removal or rename made relative to a directory file descriptor is not attributed.
 
+File hashes are memoised on path, modification time, change time, size and inode. An edit that restores the modification time still moves the change time, which user space cannot set; the residual is an edit inside one clock tick of the earlier read, and manifest members are checked once more just before an entry is written. A checkout whose walk takes more than ten seconds is not watched: its runs execute and store nothing. The plugin's `os.stat`, `lstat` and `access` wrappers take the real keyword arguments and resolve `dir_fd` paths where the platform can name the descriptor's directory.
+
 Known gaps: a module another test file had already imported and that is reached only through a
 run-time `importlib` call is not attributed; a file read by a child process of a test that spawns
 nothing the regex recognises is not seen; a network or clock dependency has no file to record.
@@ -81,8 +83,9 @@ A file is executed and no passing entry is written for it when any of the follow
   `tests/conftest.py` reads real state to check it is untouched; those reads are ignored);
 - the run emitted a warning that mentions an isolation violation;
 - any test in it was skipped or xfailed, because a skip depends on conditions the key lacks;
-- the source tree changed during the run: the tree hash and a stamp (modification time and size) of every
-  file in the checkout, ignored files included, are read before and after, so an edit that is put back is
+- the source tree changed during the run: the tree hash and a stamp (modification time, change time and size) of every
+  file in the checkout, ignored files included but not caches, virtual environments, other agents'
+  worktrees under `.claude/worktrees` or the runner's own `.full-tier-last.json`, are read before and after, so an edit that is put back is
   caught; the run fails with status 4. An unknown tree hash (git failed) also stores nothing;
 - the lookup key of a file, recomputed at the start and the end of the launch, differs from the key used
   for its hit check, so a result is stored only under the key of the bytes that ran;
@@ -91,7 +94,7 @@ A file is executed and no passing entry is written for it when any of the follow
   junit holds an error that names no test file while pytest exited 1;
 
 A file whose tests all skip at module level, or that collects no tests, counts as passed and is not stored;
-pytest's status 5 (no tests ran) is reported as 0 for named files.
+pytest's status 5 (no tests ran) stays 5, unless every named file collected tests and skipped them.
 
 ## Integrity
 
@@ -112,7 +115,7 @@ operating system user as the agent. That user can rewrite an entry and the whole
 consistently, delete the chain, edit the runner or the plugin, or set `DEV_TEST_REUSE_DIR` to a store
 it made. The chain detects corruption, a partial write and an edited entry; it does not stop a
 deliberate forger. A forged hit is caught only by the canary on its sample and by the tier and gate
-runs, which execute. Entries also hold the commit they ran on. The store sits under a per-project directory (a hash of the project key), and
+runs, which execute. Entries also hold the commit they ran on and whether the checkout was clean; the tree hash, commit and cleanliness are read together just before each launch. The store sits under a per-project directory (a hash of the project key), and
 board verification reads only the asking agent's project directory.
 
 ## Single flight
@@ -130,7 +133,7 @@ Each file prints `ran` or `reused from <run id> (tree <hash>, <age>, by <agent>)
 the summary counts both. The exit code is pytest's status for what ran; a run of reused files only
 exits 0. `--no-reuse` forces execution. Each hit is re-executed with probability `CANARY_RATE`
 (0.05; `DEV_TEST_REUSE_CANARY` overrides it). A cached pass that fails fresh prints
-`CANARY MISMATCH`, fails the run, writes an `incident` chain row and a disabling record for the key
+`canary mismatch`, fails the run, writes an `incident` chain row and a disabling record for the key
 (reuse stays off while the manifest equals the one the cached pass recorded), and posts one
 `#announcements` line.
 
@@ -153,8 +156,8 @@ the broker. A job without a workspace agent can be cancelled only by the process
   which says whether the workspace has that identity.
 - Entries, in-flight claims and jobs sit under a per-project directory. `task-checkpoint`/`task-submit`
   verification and board threads are project-scoped by the board's own membership.
-- Notices go out under the submitting agent's own authenticated identity (`--agent`, or the session
-  already in use). Running tests creates no identity, token file or credential; without a workspace
+- Notices go out under the submitting agent's own authenticated identity (the identity the harness assigned
+  this process through its environment; the runner takes no `--agent` or `--label`). Running tests creates no identity, token file or credential; without a workspace
   agent the runner posts nothing. A run that takes a key opens a thread on the project board and
   replies when it ends; a job opens a thread when it starts and replies when it ends. A finishing job
   also sends one direct message to each watcher of the task it was attached to (`--task`) that is not

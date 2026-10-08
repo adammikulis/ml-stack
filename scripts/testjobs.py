@@ -134,8 +134,8 @@ class Jobs:
 
     @staticmethod
     def passthrough(extra: dict) -> list[str]:
-        """Arguments that re-establish the submitter's agent in the runner."""
-        return [x for k in ("agent", "label", "task") if extra.get(k) for x in (f"--{k}", extra[k])]
+        """Arguments the detached runner needs besides its environment."""
+        return [x for k in ("task",) if extra.get(k) for x in (f"--{k}", extra[k])]
 
     def wait(self, job: str, timeout: float, tail: bool = False) -> dict:
         """Block until the job ends or ``timeout`` seconds pass; optionally copy its log to stdout."""

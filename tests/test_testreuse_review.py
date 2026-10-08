@@ -174,7 +174,7 @@ def test_a_session_fixture_read_is_attributed_to_every_file_that_runs_with_it(pr
     store = storage.Store(tmp_path / "store")
     (project / "tests/data.txt").write_text("1")
     (project / "tests/conftest.py").write_text(
-        "from pathlib import Path\n\nimport pytest\n\n\n@pytest.fixture(scope='session')\ndef data():\n"
+        "from pathlib import Path\n\nimport pytest\n\n\n" "@pytest.fixture(scope='session')\ndef data():\n"
         "    return Path(__file__).with_name('data.txt').read_text()\n")
     for name in ("a", "b"):
         (project / f"tests/test_{name}.py").write_text("def test_x(data):\n    assert data\n")

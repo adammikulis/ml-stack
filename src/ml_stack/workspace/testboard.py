@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import http.client
 import os
+import pickle
+import sqlite3
+import struct
+import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,9 +22,10 @@ from ml_stack.workspace.screen import Refused
 
 __all__ = ["Acting", "BoardEvents", "acting", "follow_thread", "thread_for_key"]
 
-LABEL_ENV = "ML_STACK_WORKSPACE_LABEL"
 BOARD_ERRORS = (Denied, Refused, RateLimited, ArithmeticError, AssertionError, AttributeError, EOFError,
-                ImportError, LookupError, NotImplementedError, OSError, RuntimeError, TypeError, ValueError)
+                ImportError, LookupError, NotImplementedError, OSError, RuntimeError, StopIteration, TypeError,
+                ValueError, sqlite3.Error, subprocess.SubprocessError, http.client.HTTPException, struct.error,
+                pickle.PickleError)
 
 
 @dataclass
@@ -40,12 +46,12 @@ def guarded(what: str, call: Callable[[], Any]) -> Any:
         return None
 
 
-def acting(agent: str = "", label: str = "") -> Acting | None:
-    """The session for ``--agent``/``--label`` or the environment, or None when none is configured."""
-    named = agent or os.environ.get(tokens.AGENT_ENV, "")
+def acting() -> Acting | None:
+    """The session of the identity the harness assigned this process, or None when it assigned none."""
+    named = os.environ.get(tokens.AGENT_ENV, "")
     if not named and not os.environ.get(TOKEN_ENV):
         return None
-    args = argparse.Namespace(agent=named, label=label or os.environ.get(LABEL_ENV, ""), token_file="")
+    args = argparse.Namespace(agent=named, label="", token_file="")
     try:
         opened = guarded("session", lambda: cli._context(args))
     except SystemExit:
@@ -53,7 +59,7 @@ def acting(agent: str = "", label: str = "") -> Acting | None:
     who = guarded("session", lambda: opened[0].auth(opened[1])) if opened else None
     if who is None:
         return None
-    return Acting(opened[0], opened[1], {"id": who.id, "label": args.label, "parent": who.parent or "",
+    return Acting(opened[0], opened[1], {"id": who.id, "label": "", "parent": who.parent or "",
                                           "source": "workspace-session"})
 
 

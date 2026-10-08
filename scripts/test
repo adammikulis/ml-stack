@@ -38,7 +38,6 @@ import subprocess
 import sys
 import tempfile
 import time
-import traceback
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -84,7 +83,7 @@ def run(command: list[str], env: dict[str, str] | None = None, tier: str = "") -
     files = testreuse_run.selectors(command, ROOT)
     reuse = REUSE["on"] and files is not None and tier != "gate"
     session = testreuse_run.Session(ROOT, command, files, reuse_store(), REUSE["events"])
-    report = session.run(lambda shown: launch(shown, env, tier), tree_hash(ROOT), reuse)
+    report = session.run(lambda shown: launch(shown, env, tier), lambda: tree_hash(ROOT), reuse)
     REUSE["report"] = report
     print("\n".join(report.lines()), flush=True)
     return report.status
@@ -347,7 +346,7 @@ def job_command(args: argparse.Namespace, rest: list[str], argv: list[str]) -> i
             if inner[0] != "gate":
                 testselectors.validate(rest[1:], ROOT)
             print(jobs.submit(inner, REUSE["agent"], ROOT, Path(__file__).resolve(),
-                              {"agent": args.agent, "label": args.label, "task": args.task}))
+                              {"task": args.task}))
             return 0
         if args.tier == "_job":
             return run_job(jobs, rest[0], args)
@@ -382,7 +381,7 @@ def subscribe(jobs: testjobs.Jobs, rest: list[str], args: argparse.Namespace) ->
     """Follow a job, a reuse key or a task through the board's own subscriptions."""
     seat = REUSE["seat"]
     if seat is None:
-        raise testjobs.Refused("subscribe needs a workspace agent: pass --agent")
+        raise testjobs.Refused("subscribe needs a workspace agent: run it as the identity the harness assigned")
     if args.task:
         print(TaskBoard(seat.ws).subscribe(seat.token, args.task))
         return 0
@@ -402,23 +401,22 @@ def run_job(jobs: testjobs.Jobs, job: str, args: argparse.Namespace) -> int:
     thread = REUSE["events"].job_started(job, spec)
     jobs.write(job, "status.json", {"state": "running", "at": time.time(), "thread": thread, **me})
     signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
-    state, code = "done", 1
-    flags = [x for k in ("agent", "label", "task") if getattr(args, k) for x in (f"--{k}", getattr(args, k))]
+    state, code = "failed", 1
+    flags = ["--task", args.task] if args.task else []
     try:
         code = main([*spec["argv"], *flags])
+        state = "done"
     except KeyboardInterrupt:
         state, code = "cancelled", 130
     except SystemExit as stop:
-        code = stop.code if isinstance(stop.code, int) else 1
-    except BaseException:  # noqa: BLE001 - the job records any end of its own run
-        traceback.print_exc()
-        state = "failed"
-    report = REUSE.get("report")
-    ran, reused = report.counts() if report else (0, 0)
-    status = {"state": state, "exit": code, "finished": time.time(), "thread": thread, **me,
-              "summary": {"ran": ran, "reused": reused} if report else {}}
-    jobs.write(job, "status.json", status)
-    REUSE["events"].job_done(job, spec, status, thread)
+        state, code = "done", stop.code if isinstance(stop.code, int) else 1
+    finally:
+        report = REUSE.get("report")
+        ran, reused = report.counts() if report else (0, 0)
+        status = {"state": state, "exit": code, "finished": time.time(), "thread": thread, **me,
+                  "summary": {"ran": ran, "reused": reused} if report else {}}
+        jobs.write(job, "status.json", status)
+        REUSE["events"].job_done(job, spec, status, thread)
     return code
 
 
@@ -427,7 +425,7 @@ def follow(argv: list[str], args: argparse.Namespace) -> int:
     jobs, me = jobs_store(), REUSE["agent"].get("id", "")
     try:
         job = jobs.submit(argv, REUSE["agent"], ROOT, Path(__file__).resolve(),
-                          {"agent": args.agent, "label": args.label, "task": args.task, "exclusive": False})
+                          {"task": args.task, "exclusive": False})
     except testjobs.Refused as error:
         print(f"test: {error}", file=sys.stderr)
         return 4
@@ -454,8 +452,6 @@ def main(argv: list[str] | None = None) -> int:
                         help="xdist worker ceiling (default: 1); explicit 0 = automatic pool up to broker capacity")
     parser.add_argument("--no-reuse", action="store_true", help="execute every named test file")
     parser.add_argument("--timeout", type=float, default=3600.0, help="wait: seconds to wait")
-    parser.add_argument("--agent", default="", help="the workspace agent this run is for")
-    parser.add_argument("--label", default="", help="the helper label under that agent")
     parser.add_argument("--task", default="", help="submit/tier runs: the task whose watchers hear how the job ends")
     parser.add_argument("--key", default="", help="subscribe: follow the run of this reuse key prefix")
     parser.add_argument("--base", default=BASE, help="branch quick diffs against")
@@ -463,7 +459,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--explain", action="store_true", help="quick: say what selected what")
     args, rest = parser.parse_known_args(argv)
     REUSE["on"] = not args.no_reuse
-    seat = testboard.acting(args.agent, args.label)
+    seat = testboard.acting()
     REUSE["seat"] = seat
     if seat is not None:
         REUSE["agent"] = seat.identity
