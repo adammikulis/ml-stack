@@ -3,8 +3,9 @@ on:
   push:
     branches: [main, "*dev"]
     paths-ignore: ["**.md", "docs/**"]
+  # No path filter: a required check that never starts leaves a documentation-only
+  # pull request unmergeable.
   pull_request:
-    paths-ignore: ["**.md", "docs/**"]
   workflow_dispatch:
     inputs:
       macos-pytest:
@@ -220,6 +221,17 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
 
+      # On a pull request the checker code and the hooks come from the base commit; the
+      # data beside them (pinned.txt, survivors.txt, budgets.json) is the pull request's own,
+      # so a change to a checker lands before the numbers it moves.
+      - name: the base commit's checkers
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: trusted
+
       # The checkers are stdlib only apart from the two they shell out to, and those two
       # come from scripts/gates/pinned.txt: each ruff and pyright release finds sites the
       # last one did not, so an unpinned install scores the same tree differently here and
@@ -231,6 +243,22 @@ jobs:
           python -m pip install pytest pytest-xdist numpy
           python -m pip install -r scripts/gates/pinned.txt
 
+      - name: gate tests
+        run: |
+          files=()
+          for f in tests/test_budgets.py tests/test_wiring.py tests/test_layers.py; do
+            [ -f "$f" ] && files+=("$f")
+          done
+          python -m pytest "${files[@]}" -q
+
+      - name: the base commit's gate over this tree
+        if: github.event_name == 'pull_request'
+        run: |
+          rm -rf scripts/hooks scripts/budgets scripts/gates/*.py
+          cp -R trusted/scripts/hooks scripts/
+          cp trusted/scripts/gates/*.py scripts/gates/
+          cp trusted/scripts/budgets scripts/budgets
+
       - name: budgets
         run: python scripts/budgets
 
@@ -241,14 +269,6 @@ jobs:
         run: python scripts/hooks/budgets-only-fall --against "$BASE"
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
-
-      - name: gate tests
-        run: |
-          files=()
-          for f in tests/test_budgets.py tests/test_wiring.py tests/test_layers.py; do
-            [ -f "$f" ] && files+=("$f")
-          done
-          python -m pytest "${files[@]}" -q
 
   # scripts/hooks/no-real-names and commit-msg, over a pushed range rather than a commit
   # being made, on a machine that always has the [privacy] extra.
@@ -266,6 +286,14 @@ jobs:
           python-version: "3.13"
           cache: pip
           cache-dependency-path: pyproject.toml
+
+      - name: the base commit's hooks
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: trusted
 
       - name: install the name gate
         run: |
@@ -285,6 +313,12 @@ jobs:
               BASE="$(git rev-parse HEAD~1 2>/dev/null || git rev-parse HEAD)" ;;
           esac
           echo "sha=$BASE" >> "$GITHUB_OUTPUT"
+
+      - name: the base commit's hooks over this tree
+        if: github.event_name == 'pull_request'
+        run: |
+          rm -rf scripts/hooks
+          cp -R trusted/scripts/hooks scripts/
 
       - name: no name in the files this range changed
         run: scripts/hooks/no-real-names --against "${{ steps.base.outputs.sha }}"

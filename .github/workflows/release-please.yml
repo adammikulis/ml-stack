@@ -5,13 +5,15 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 jobs:
   propose:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
     outputs:
       released: ${{ steps.rp.outputs.release_created }}
       tag: ${{ steps.rp.outputs.tag_name }}
@@ -37,19 +39,20 @@ jobs:
   release-pr:
     needs: propose
     if: needs.propose.outputs.pr_branch != ''
+    permissions:
+      contents: read
     uses: ./.github/workflows/ci.yml
     with:
       ref: ${{ needs.propose.outputs.pr_branch }}
 
-  # An empty tag leaves release.yml's pypi and publish jobs skipped, so this builds and
-  # smoke-checks every bundle without uploading or publishing anything.
+  # release-build.yml only builds and smoke-checks every bundle; nothing is uploaded to an
+  # index or a release.
   release-pr-bundles:
     needs: propose
     if: needs.propose.outputs.pr_branch != ''
     permissions:
-      contents: write
-      id-token: write
-    uses: ./.github/workflows/release.yml
+      contents: read
+    uses: ./.github/workflows/release-build.yml
     with:
       ref: ${{ needs.propose.outputs.pr_branch }}
 
@@ -64,4 +67,3 @@ jobs:
     uses: ./.github/workflows/release.yml
     with:
       tag: ${{ needs.propose.outputs.tag }}
-    secrets: inherit

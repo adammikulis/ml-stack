@@ -80,9 +80,9 @@ def test_the_ci_test_matrix_runs_every_supported_python_and_other_jobs_the_app_p
 
 
 def test_the_release_workflow_builds_on_the_one_python():
-    release = workflow("release.yml")
     pinned = {str(step.get("with", {}).get("python-version", ""))
-              for job in release["jobs"].values() for step in job["steps"]}
+              for name in ("release.yml", "release-build.yml")
+              for job in workflow(name)["jobs"].values() for step in job.get("steps", [])}
     assert {v for v in pinned if v} == {PYTHON}
 
 

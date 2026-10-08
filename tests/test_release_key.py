@@ -75,7 +75,7 @@ def test_create_stores_the_key_and_sends_it_to_gh_on_stdin(rk, tmp_path, capsys)
     assert private.startswith(b"-----BEGIN OPENSSH PRIVATE KEY-----")
     assert _stdin(rk) == private
     argv = (rk.log / "argv.0").read_text()
-    assert argv.split() == ["secret", "set", "RELEASE_SIGNING_KEY"]
+    assert argv.split() == ["secret", "set", "RELEASE_SIGNING_KEY", "--env", "release"]
     assert "PRIVATE KEY" not in argv
     out = capsys.readouterr()
     assert "PRIVATE KEY" not in out.out + out.err

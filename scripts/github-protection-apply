@@ -1,0 +1,293 @@
+#!/usr/bin/env python3
+"""Apply the GitHub protection target of docs/github-protection.md. The owner runs it at a terminal.
+
+    scripts/github-protection-apply --repo OWNER/NAME                     print what would change
+    scripts/github-protection-apply --repo OWNER/NAME --apply --identity-ready
+    scripts/github-protection-apply --restore BACKUP [--apply]            put a backup's settings back
+
+A run without --apply changes nothing and prints a diff per step. --apply saves the current
+settings to a file under the state root, applies the steps in order, stops at the first error,
+prints the restore command, and ends with `scripts/github-protection --check`. An agent marker
+or a missing terminal refuses.
+"""
+from __future__ import annotations
+
+import argparse
+import difflib
+import json
+import subprocess
+import sys
+import time
+from dataclasses import dataclass
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "src"))
+
+from ml_stack import home, person  # noqa: E402
+
+ENV = "release"
+SECRET = "RELEASE_SIGNING_KEY"
+CHECKS = ("gates", "privacy", "licenses", "test (ubuntu-latest, 3.13, --slow)")
+SECURITY = {"secret_scanning": {"status": "enabled"},
+            "secret_scanning_push_protection": {"status": "enabled"},
+            "dependabot_security_updates": {"status": "enabled"}}
+IDENTITY = ("The agent identity comes first and has no API: create the GitHub App (or fine-grained token) "
+            "with Contents, Pull requests and Workflows write and Metadata read, and start the harness "
+            "with it (docs/github-protection.md#agent-identity). Pass --identity-ready once that is done.")
+
+
+class Failed(RuntimeError):
+    pass
+
+
+@dataclass
+class Step:
+    label: str
+    method: str
+    path: str
+    body: dict | None = None
+
+
+def gh(method: str, path: str, body: dict | None = None):
+    """The JSON reply of one `gh api` call; None when the path does not exist."""
+    argv = ["gh", "api", path] if method == "GET" else ["gh", "api", "-X", method, path, "--input", "-"]
+    data = json.dumps(body if body is not None else {}) if method != "GET" else None
+    try:
+        done = subprocess.run(argv, input=data, capture_output=True, text=True, check=False)
+    except FileNotFoundError:
+        raise Failed("gh is not installed") from None
+    if done.returncode:
+        message = (done.stderr.strip() or done.stdout.strip() or "gh failed").splitlines()[0]
+        if method == "GET" and "404" in message:
+            return None
+        raise Failed(f"{method} {path}: {message}")
+    return json.loads(done.stdout) if done.stdout.strip() else {}
+
+
+# -- the target ---------------------------------------------------------------------------
+
+def main_ruleset(owner_review: bool) -> dict:
+    review = {"required_approving_review_count": 1 if owner_review else 0,
+              "require_code_owner_review": owner_review, "dismiss_stale_reviews_on_push": owner_review,
+              "require_last_push_approval": owner_review, "required_review_thread_resolution": False,
+              "allowed_merge_methods": ["merge"]}
+    return {"name": "main", "target": "branch", "enforcement": "active", "bypass_actors": [],
+            "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}},
+            "rules": [{"type": "deletion"}, {"type": "non_fast_forward"},
+                      {"type": "pull_request", "parameters": review},
+                      {"type": "required_status_checks", "parameters": {
+                          "strict_required_status_checks_policy": False,
+                          "required_status_checks": [{"context": c} for c in CHECKS]}}]}
+
+
+def dev_ruleset() -> dict:
+    return {"name": "development", "target": "branch", "enforcement": "active", "bypass_actors": [],
+            "conditions": {"ref_name": {"include": ["refs/heads/*dev"], "exclude": []}},
+            "rules": [{"type": "deletion"}, {"type": "non_fast_forward"}]}
+
+
+def tag_ruleset(strict: bool) -> dict:
+    kinds = ["deletion", "non_fast_forward", "update"] + (["creation"] if strict else [])
+    return {"name": "release-tags", "target": "tag", "enforcement": "active", "bypass_actors": [],
+            "conditions": {"ref_name": {"include": ["refs/tags/v*"], "exclude": []}},
+            "rules": [{"type": k} for k in kinds]}
+
+
+def environment(owner_id: int) -> dict:
+    return {"reviewers": [{"type": "User", "id": owner_id}], "can_admins_bypass": False,
+            "deployment_branch_policy": {"protected_branches": False, "custom_branch_policies": True}}
+
+
+ACTIONS = (
+    ("workflow token read-only", "PUT", "actions/permissions/workflow",
+     {"default_workflow_permissions": "read", "can_approve_pull_request_reviews": True}),
+    ("only selected actions, pinned", "PUT", "actions/permissions",
+     {"enabled": True, "allowed_actions": "selected", "sha_pinning_required": True}),
+    ("the allowed actions", "PUT", "actions/permissions/selected-actions",
+     {"github_owned_allowed": True, "verified_allowed": False, "patterns_allowed": [
+         "Swatinem/rust-cache@*", "dtolnay/rust-toolchain@*", "googleapis/release-please-action@*",
+         "ossf/scorecard-action@*", "pypa/gh-action-pypi-publish@*", "softprops/action-gh-release@*"]}),
+    ("outside contributors wait for approval", "PUT", "actions/permissions/fork-pr-contributor-approval",
+     {"approval_policy": "all_external_contributors"}),
+)
+REPOSITORY = {"allow_auto_merge": False, "delete_branch_on_merge": False,
+              "security_and_analysis": SECURITY}
+
+
+# -- the plan -----------------------------------------------------------------------------
+
+def by_name(listing) -> dict[str, int]:
+    return {r["name"]: r["id"] for r in listing or []}
+
+
+def ruleset_steps(repo: str, existing: dict[str, int], args: argparse.Namespace) -> list[Step]:
+    steps = []
+    for body in (main_ruleset(args.owner_review), dev_ruleset(), tag_ruleset(args.strict_tags)):
+        found = existing.get(body["name"])
+        path = f"repos/{repo}/rulesets" + (f"/{found}" if found else "")
+        steps.append(Step(f"ruleset {body['name']}", "PUT" if found else "POST", path, body))
+    if "default" in existing:
+        steps.append(Step("remove the ruleset named default", "DELETE",
+                          f"repos/{repo}/rulesets/{existing['default']}"))
+    return steps
+
+
+def plan(repo: str, args: argparse.Namespace) -> tuple[list[Step], str]:
+    """The ordered steps, and a reason to stop after the environment steps when the key is absent."""
+    owner_id = gh("GET", "user")["id"]
+    env_steps = [Step("release environment", "PUT", f"repos/{repo}/environments/{ENV}",
+                      environment(owner_id))]
+    policies = gh("GET", f"repos/{repo}/environments/{ENV}/deployment-branch-policies") or {}
+    if "main" not in {p.get("name") for p in policies.get("branch_policies", [])}:
+        env_steps.append(Step("deploy the environment from main", "POST",
+                              f"repos/{repo}/environments/{ENV}/deployment-branch-policies",
+                              {"name": "main", "type": "branch"}))
+    held = gh("GET", f"repos/{repo}/environments/{ENV}/secrets") or {}
+    stop = "" if SECRET in {s["name"] for s in held.get("secrets", [])} else (
+        f"{SECRET} is not a secret of {ENV}: run scripts/release-key create (or rotate), then run "
+        "this again")
+    repo_secrets = (gh("GET", f"repos/{repo}/actions/secrets") or {}).get("secrets", [])
+    steps = env_steps + [Step(f"remove repository secret {s['name']}", "DELETE",
+                              f"repos/{repo}/actions/secrets/{s['name']}") for s in repo_secrets]
+    steps += ruleset_steps(repo, by_name(gh("GET", f"repos/{repo}/rulesets")), args)
+    steps += [Step(label, method, f"repos/{repo}/{path}", body) for label, method, path, body in ACTIONS]
+    steps.append(Step("repository and security settings", "PATCH", f"repos/{repo}", REPOSITORY))
+    return steps, stop
+
+
+def project(current, wanted):
+    """``current`` cut down to the keys ``wanted`` names."""
+    if isinstance(wanted, dict) and isinstance(current, dict):
+        return {k: project(current.get(k), v) for k, v in wanted.items()}
+    return current
+
+
+def show(step: Step) -> None:
+    print(f"== {step.label}: {step.method} {step.path}")
+    if step.body is None:
+        print("   (removes it)")
+        return
+    now = gh("GET", step.path) if step.method != "POST" else None
+    before = json.dumps(project(now, step.body), indent=2, sort_keys=True).splitlines() if now else []
+    after = json.dumps(step.body, indent=2, sort_keys=True).splitlines()
+    diff = list(difflib.unified_diff(before, after, "current", "target", lineterm="", n=1))
+    print("\n".join(f"   {line}" for line in diff) if diff else "   unchanged")
+
+
+# -- backup and restore -------------------------------------------------------------------
+
+BACKED_UP = ("rulesets", f"environments/{ENV}", f"environments/{ENV}/deployment-branch-policies",
+             f"environments/{ENV}/secrets", "actions/secrets", "actions/permissions/workflow",
+             "actions/permissions", "actions/permissions/selected-actions",
+             "actions/permissions/fork-pr-contributor-approval", "")
+
+
+def backup(repo: str) -> Path:
+    """Save the settings the steps touch under the state root; returns the file."""
+    saved = {"repo": repo, "taken": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "reads": {}}
+    for tail in BACKED_UP:
+        path = f"repos/{repo}" + (f"/{tail}" if tail else "")
+        saved["reads"][path] = gh("GET", path)
+    for entry in saved["reads"][f"repos/{repo}/rulesets"] or []:
+        path = f"repos/{repo}/rulesets/{entry['id']}"
+        saved["reads"][path] = gh("GET", path)
+    target = home.state("github-protection")
+    target.mkdir(parents=True, exist_ok=True)
+    out = target / f"backup-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}.json"
+    out.write_text(json.dumps(saved, indent=2), encoding="utf-8")
+    out.chmod(0o600)
+    return out
+
+
+def restore_plan(saved: dict) -> list[Step]:
+    """Steps that put a backup's settings back; secrets that were removed cannot be."""
+    repo, reads = saved["repo"], saved["reads"]
+    now = by_name(gh("GET", f"repos/{repo}/rulesets"))
+    before = by_name(reads[f"repos/{repo}/rulesets"])
+    steps = [Step(f"remove ruleset {name}", "DELETE", f"repos/{repo}/rulesets/{i}")
+             for name, i in now.items() if name not in before]
+    for name, old in before.items():
+        body = {k: v for k, v in reads[f"repos/{repo}/rulesets/{old}"].items()
+                if k in ("name", "target", "enforcement", "bypass_actors", "conditions", "rules")}
+        steps.append(Step(f"ruleset {name}", "PUT" if name in now else "POST",
+                          f"repos/{repo}/rulesets" + (f"/{now[name]}" if name in now else ""), body))
+    for label, _method, path, body in ACTIONS:
+        old = reads.get(f"repos/{repo}/{path}")
+        if old:
+            steps.append(Step(label, "PUT", f"repos/{repo}/{path}", project(old, body)))
+    old = reads[f"repos/{repo}"]
+    steps.append(Step("repository and security settings", "PATCH", f"repos/{repo}",
+                      project(old, REPOSITORY)))
+    if reads[f"repos/{repo}/environments/{ENV}"] is None:
+        steps.append(Step("remove the release environment", "DELETE", f"repos/{repo}/environments/{ENV}"))
+    return steps
+
+
+# -- running ------------------------------------------------------------------------------
+
+def check(repo: str, args: argparse.Namespace) -> int:
+    argv = [sys.executable, str(ROOT / "scripts" / "github-protection"), "--check", "--repo", repo]
+    argv += ["--require-owner-review"] * args.owner_review + ["--strict-tags"] * args.strict_tags
+    done = subprocess.run(argv, capture_output=True, text=True, check=False)
+    print(done.stdout, end="")
+    print(done.stderr, end="", file=sys.stderr)
+    return done.returncode
+
+
+def execute(steps: list[Step]) -> None:
+    for step in steps:
+        print(f"-> {step.label}: {step.method} {step.path}")
+        gh(step.method, step.path, step.body)
+
+
+def run(args: argparse.Namespace) -> int:
+    if args.restore:
+        saved = json.loads(Path(args.restore).read_text(encoding="utf-8"))
+        repo, steps, stop = saved["repo"], restore_plan(saved), ""
+    else:
+        repo = args.repo
+        steps, stop = plan(repo, args)
+    if not args.apply:
+        print(IDENTITY if not args.restore else "restore: nothing is changed without --apply")
+        for step in steps:
+            show(step)
+        if stop:
+            print(f"\nNote: {stop}")
+        return 0
+    if not args.restore and not args.identity_ready:
+        raise Failed(IDENTITY)
+    saved_to = backup(repo) if not args.restore else None
+    if saved_to:
+        print(f"saved the current settings to {saved_to}")
+        print(f"restore: scripts/github-protection-apply --restore {saved_to} --apply")
+    if stop:
+        envs = [s for s in steps if "environments" in s.path]
+        execute(envs)
+        raise Failed(stop)
+    execute(steps)
+    return 0 if args.restore else check(repo, args)
+
+
+def main(argv: list[str] | None = None, terminal: tuple[bool, bool] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="github-protection-apply", description=__doc__.splitlines()[0])
+    parser.add_argument("--repo", help="OWNER/NAME")
+    parser.add_argument("--apply", action="store_true", help="make the changes; without it, print them")
+    parser.add_argument("--identity-ready", action="store_true", help="the agent identity is in use")
+    parser.add_argument("--restore", help="a backup file written by --apply")
+    parser.add_argument("--owner-review", action="store_true",
+                        help="GitHub requires the owner's approval on pull requests to the default branch")
+    parser.add_argument("--strict-tags", action="store_true", help="block creation of v* tags")
+    args = parser.parse_args(argv)
+    try:
+        person.require_person("scripts/github-protection-apply", terminal)
+        if not (args.repo or args.restore):
+            raise Failed("name the repository with --repo OWNER/NAME")
+        return run(args)
+    except (Failed, person.HumanRequired) as exc:
+        print(f"github-protection-apply: {exc}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

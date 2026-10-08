@@ -4,7 +4,8 @@
 # a person's terminal is neither. The development branch is the one the primary checkout is on,
 # and `main` is never it. An agent's push of `main` is allowed only as one fast-forward to a
 # commit the person approved through the approval question (person-consume); tags, forced
-# pushes and deletions are never allowed.
+# pushes and deletions are never allowed. A new branch named promote/* passes: it is the snapshot a promotion
+# pull request is opened from.
 if [ -n "$(git status --porcelain --untracked-files=all)" ]; then
     echo "pre-push: refused: working tree has uncommitted changes" >&2
     exit 1
@@ -44,6 +45,8 @@ while read -r local_ref local_sha remote_ref remote_sha; do
         refused="$refused $remote_ref"
     elif [ "$remote_ref" = refs/heads/main ]; then
         pushes_main=yes
+    elif [ -n "$dev" ] && [ "$remote_sha" = "$zero" ] && [ "${remote_ref#refs/heads/promote/}" != "$remote_ref" ]; then
+        continue
     elif [ -z "$dev" ] || [ "$dev" = main ] || [ "$remote_ref" != "refs/heads/$dev" ]; then
         refused="$refused $remote_ref"
     fi
@@ -63,7 +66,7 @@ fi
 cat >&2 <<WHY
 pre-push: refused:$refused
 
-An agent pushes the development branch and, with the person's approval, one fast-forward of
+An agent pushes the development branch, a new promote/* snapshot branch and, with the person's approval, one fast-forward of
 \`main\`. release-please reads the commit subjects on \`main\`, so a push there moves the release
 pull request and publishes every commit on it at once.
 
@@ -73,5 +76,7 @@ name: git push origin ${dev:-<development branch>}
 To release \`main\`, print the approval question with scripts/hooks/person-consume propose
 and ask it with AskUserQuestion, word for word. The person's answer approves that one commit.
 Tags, forced pushes and deletions are the owner's.
+A promotion where \`main\` is protected on the server is a pull request: push a snapshot branch
+(git push origin ${dev:-<development branch>}:refs/heads/promote/<date>) and open the pull request from it.
 WHY
 exit 1

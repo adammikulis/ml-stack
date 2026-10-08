@@ -123,7 +123,7 @@ def test_every_bundle_the_release_builds_is_linked_from_its_notes():
     """An asset renamed in the matrix and not in the notes is a dead link."""
     import re
 
-    text = WORKFLOW.read_text()
+    text = (WORKFLOW.parent / "release-build.yml").read_text()
     built = set(re.findall(r"^\s+asset: (\S+)$", text, re.M))
     assert built, "the release builds no bundles"
     step = downloads_step()
@@ -275,7 +275,7 @@ def test_the_name_of_a_download_says_which_release_it_is():
     still find theirs: they look for ml-stack-<os>-<arch> inside the name."""
     import re
 
-    text = WORKFLOW.read_text()
+    text = (WORKFLOW.parent / "release-build.yml").read_text()
     packed = re.search(r'pack\.py dist/bundle "([^"]+)"', text)
     assert packed, "nothing packs the bundle"
     assert packed.group(1) == "dist/${{ matrix.asset }}-$stamp.zip", packed.group(1)
@@ -343,20 +343,17 @@ def workflows() -> dict:
             for p in sorted((REPO / ".github" / "workflows").glob("*.yml"))}
 
 
-def test_a_called_workflow_declares_the_secrets_it_reads():
-    """A reusable workflow that reads a secret it never declared does not start: the
-    run fails before any job, with nothing in the log to say which secret."""
+def test_a_called_workflow_reads_secrets_only_from_its_environment():
+    """A called workflow is handed no secret by its caller; the signing key is the
+    `release` environment's, read by the one job that declares that environment."""
     import re
 
     text = workflows()["release.yml"]
     used = {m for m in re.findall(r"secrets\.([A-Z_][A-Z0-9_]*)", text)
             if m != "GITHUB_TOKEN"}
-    called = text[text.index("workflow_call:"):]
-    for name in used:
-        assert name in called, f"{name} is read but not declared under workflow_call"
-    if used:
-        assert "secrets: inherit" in workflows()["release-please.yml"], (
-            "the called workflow would see no secrets")
+    assert used == {"RELEASE_SIGNING_KEY"}
+    assert "secrets: inherit" not in workflows()["release-please.yml"]
+    assert "secrets:" not in text[text.index("workflow_call:"):text.index("workflow_dispatch:")]
 
 
 def test_the_release_is_built_by_the_workflow_that_cuts_it():
