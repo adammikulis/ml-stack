@@ -47,6 +47,7 @@ def test_xdist_empty_explicit_node_is_an_error_even_for_quick(monkeypatch):
 def test_runner_defaults_to_one_worker_and_preserves_explicit_limits(monkeypatch, options, workers):
     module = runner()
     calls = []
+    monkeypatch.setenv('DEV_TEST_JOB', 'inline')
     monkeypatch.setattr(sys, 'argv', ['scripts/test', 'all', 'tests/test_test_selectors.py', *options])
     monkeypatch.setattr(module, 'run', lambda command, **kwargs: calls.append(command) or 0)
     assert module.main() == 0
