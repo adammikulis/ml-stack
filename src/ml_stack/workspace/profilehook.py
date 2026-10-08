@@ -11,6 +11,7 @@ from http.client import HTTPException
 from importlib.metadata import PackageNotFoundError, distribution
 from pathlib import Path
 
+from ml_stack import hook_diagnostics
 from ml_stack.workspace import harness_remote, tokens
 from ml_stack.workspace.execution_profile import OPAQUE, _document
 from ml_stack.workspace.service import Workspace
@@ -51,7 +52,7 @@ def runtime_facts():
     facts = {'python_version': sys.version.split()[0]}
     try:
         installed = distribution('ml-stack')
-        module = Path(installed.locate_file('ml_stack/profilehook.py')).resolve()
+        module = Path(installed.locate_file('ml_stack/workspace/profilehook.py')).resolve()
         if module != Path(__file__).resolve() or not module.is_relative_to(Path(sys.prefix).resolve()):
             return facts
         facts['runtime_version'] = installed.version
@@ -100,8 +101,7 @@ def notify(payload, label, root):
             document['fields'].update(runtime_facts())
             send(_document(document), label, root)
     except (OSError, ValueError, TypeError, RuntimeError, HTTPException) as error:
-        from ml_stack.harnesshook import _diagnostic
-        sys.stderr.write(f'execution metadata unavailable: {_diagnostic(error)}\n')
+        sys.stderr.write(f'execution metadata unavailable: {hook_diagnostics.reason(error)}\n')
 
 
 class _Parser(argparse.ArgumentParser):
@@ -124,8 +124,7 @@ def run(argv=None, stdin=None):
             raise ValueError('execution metadata input exceeds its size limit')
         notify(json.loads(body or '{}'), args.label, Path(args.root))
     except (OSError, ValueError, TypeError, RuntimeError, HTTPException) as error:
-        from ml_stack.harnesshook import _diagnostic
-        sys.stderr.write(f'execution metadata unavailable: {_diagnostic(error)}\n')
+        sys.stderr.write(f'execution metadata unavailable: {hook_diagnostics.reason(error)}\n')
     return 0
 
 

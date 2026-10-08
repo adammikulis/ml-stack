@@ -265,7 +265,7 @@ def session_files(cwd: Path) -> SessionFiles:
 
 def hook_command(event: str, *, role: str, label: str, root: Path, protect: list[str]) -> str:
     """The shell line a harness runs for a hook: absolute interpreter, role and paths fixed."""
-    module = "ml_stack.profilehook" if event == "observe" else "ml_stack.harnesshook"
+    module = "ml_stack.workspace.profilehook" if event == "observe" else "ml_stack.harnesshook"
     words = [sys.executable, "-m", module, event, "--role", role, "--label", label,
              "--root", str(root), "--wait", str(int(WAIT_S))]
     for each in protect:

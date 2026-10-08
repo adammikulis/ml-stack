@@ -9,7 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from ml_stack.client.health import reported_models
-from ml_stack.workspace import harness_remote, onboard, tokens, worktree_lifecycle
+from ml_stack.workspace import harness_remote, onboard, profilehook, tokens, worktree_lifecycle
 from ml_stack.workspace.identity import AGENT, Denied, Identity
 from ml_stack.workspace.remote import RemoteWorkspace
 from ml_stack.workspace.service import Workspace
@@ -78,8 +78,7 @@ class Seat:
 
         def observe():
             try:
-                from ml_stack.profilehook import launched
-                document = launched(snapshot, harness, served)
+                document = profilehook.launched(snapshot, harness, served)
                 result.append(self._record_execution(document, root))
             except (OSError, ValueError, TypeError, RuntimeError):
                 result.append(False)
@@ -103,8 +102,7 @@ class Seat:
                     return False
                 ws.record_execution_profile(token, document)
             else:
-                from ml_stack.profilehook import send
-                send(document, self.name, root, self.base)
+                profilehook.send(document, self.name, root, self.base)
         except (Denied, ValueError, OSError, HTTPException, RuntimeError, TypeError):
             return False
         return True

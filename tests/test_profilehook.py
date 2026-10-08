@@ -10,8 +10,8 @@ from types import SimpleNamespace
 import pytest
 from workspace_kit import Kit, clean_env
 
-from ml_stack import claude, harnessing, profilehook
-from ml_stack.workspace import tokens
+from ml_stack import claude, harnessing
+from ml_stack.workspace import profilehook, tokens
 from ml_stack.workspace.harness_seat import Seat
 
 
@@ -123,7 +123,7 @@ def test_claude_metadata_hooks_use_supported_command_schema_and_keep_auth_hooks(
         metadata = hooks[event][-1]['hooks'][0]
         assert metadata == {'type': 'command', 'command': 'observe', 'timeout': 2, 'async': True}
     command = harnessing.hook_command('observe', role='read-only', label='alice', root=Path('/tmp'), protect=[])
-    assert 'ml_stack.profilehook' in command and '--label alice' in command
+    assert 'ml_stack.workspace.profilehook' in command and '--label alice' in command
 
 
 @pytest.mark.slow
@@ -194,7 +194,7 @@ def test_observer_runtime_metadata_requires_matching_installed_module_and_full_c
     marker.write_text('a' * 40)
     module = Path(profilehook.__file__).resolve()
     monkeypatch.setattr(profilehook.sys, 'prefix', str(module.parents[2]))
-    installed = SimpleNamespace(version='0.1.0', locate_file=lambda name: module if name.endswith('profilehook.py') else marker)
+    installed = SimpleNamespace(version='0.1.0', locate_file=lambda name: module if name.endswith('workspace/profilehook.py') else marker)
     monkeypatch.setattr(profilehook, 'distribution', lambda _name: installed)
     facts = profilehook.runtime_facts()
     assert facts['runtime_commit'] == 'a' * 40 and facts['runtime_version'] == '0.1.0'
