@@ -64,6 +64,7 @@ def commands(tmp_path: Path) -> list[tuple[str, str, str, list[str], str]]:
         ("autostart install", "ml_stack.fleet.autostart", "main",
          ["install", "--manifest", str(tmp_path / "manifest.json")], "yes"),
         ("autostart rollback", "ml_stack.fleet.autostart", "main", ["rollback"], "yes"),
+        ("peers open", "ml_stack.fleet.peers", "main", ["open", "--print"], ""),
     ]
 
 
@@ -110,7 +111,7 @@ def run_command(tmp_path: Path, target: tuple[str, str, list[str]], *,
     return subprocess.CompletedProcess(child.args, child.returncode, heard.decode(errors="replace"), "")
 
 
-@pytest.mark.parametrize("index", range(19))
+@pytest.mark.parametrize("index", range(20))
 @pytest.mark.skipif(sys.platform == "win32", reason="requires a POSIX pseudoterminal")
 def test_every_human_only_command_refuses_a_process_started_by_an_agent(tmp_path, index):
     label, module, function, argv, typed = commands(tmp_path)[index]
@@ -120,7 +121,7 @@ def test_every_human_only_command_refuses_a_process_started_by_an_agent(tmp_path
     assert snapshot(tmp_path / "home") == before, f"{label} changed state for an agent"
 
 
-@pytest.mark.parametrize("index", range(19))
+@pytest.mark.parametrize("index", range(20))
 def test_every_human_only_command_refuses_a_process_with_no_terminal(tmp_path, index):
     label, module, function, argv, _ = commands(tmp_path)[index]
     before = snapshot(tmp_path / "home")

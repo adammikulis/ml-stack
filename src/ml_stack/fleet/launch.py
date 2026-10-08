@@ -16,6 +16,7 @@ from ml_stack import runtime
 from ml_stack.http import ServerError, request_json
 from ml_stack.log import say, warn
 
+from . import launch_open
 from .cluster_modes import notice
 from .daemon_control import ControlError, request_replacement
 from .discovery import (
@@ -110,13 +111,14 @@ def _wait_for_exit(port: int, seconds: float = 20.0) -> bool:
     return False
 
 
-def _open_when_ready(port: int, browser: bool, stopped: threading.Event) -> None:
+def _open_when_ready(port: int, browser: bool, stopped: threading.Event,
+                     root: Path | None = None) -> None:
     waiting = time.monotonic() + 20.0
     notified = False
     while not stopped.is_set():
         if _health(port) is not None:
             if browser:
-                webbrowser.open(f"http://127.0.0.1:{port}/ui/")
+                webbrowser.open(launch_open.page_url(port, root))
             return
         if not notified and time.monotonic() >= waiting:
             say("ml-stack is still starting; waiting for its web interface.")
@@ -157,7 +159,7 @@ def main(argv: list[str] | None = None, *,
         say(notice(running.get("cluster_mode") or (groups[0].mode if groups else "dev")))
         say(f"ml-stack is already running as '{running.get('name', '?')}'.")
         if not known.no_browser:
-            webbrowser.open(url)
+            webbrowser.open(launch_open.page_url(known.port, _root(rest)))
         say(f"  {url}")
         return 0
 
@@ -170,7 +172,7 @@ def main(argv: list[str] | None = None, *,
 
     stopped = threading.Event()
     threading.Thread(target=_open_when_ready,
-                     args=(known.port, not known.no_browser, stopped), daemon=True).start()
+                     args=(known.port, not known.no_browser, stopped, _root(rest)), daemon=True).start()
     arguments = ["--port", str(known.port), *rest]
     if not known.no_browser:
         arguments.append("--initial-setup")
