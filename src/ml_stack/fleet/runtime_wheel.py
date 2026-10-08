@@ -6,8 +6,6 @@ import re
 import shutil
 import subprocess
 import sys
-import sysconfig
-import tempfile
 import uuid
 import zipfile
 from email.parser import BytesParser
@@ -62,31 +60,20 @@ def current_wheel() -> Path | None:
     return found[0]
 
 
-def install_checkout(checkout: Path, *, timeout: float) -> tuple[int, str]:
-    """Install a wheel built from checkout HEAD and resolve its dependencies."""
-    try:
-        with tempfile.TemporaryDirectory(prefix="ml-stack-runtime-") as temporary:
-            stage = Path(temporary)
-            commit = _run(["git", "-C", str(checkout), "rev-parse", "HEAD"], timeout)
-            snapshot = stage / "source.zip"
-            _run(["git", "-C", str(checkout), "archive", "--format=zip",
-                  "--output", str(snapshot), commit], timeout)
-            source, wheels = stage / "source", stage / "wheels"
-            unpack(snapshot, source)
-            _run([str(_host_python()), "-m", "pip", "wheel", "--no-deps",
-                  "--wheel-dir", str(wheels), str(source)], timeout)
-            found = list(wheels.glob("ml_stack-*.whl"))
-            if len(found) != 1:
-                return 1, "source revision must build exactly one ml-stack wheel"
-            stamp(found[0], commit, checkout)
-            chosen = prepare(found[0], commit, timeout=timeout)
-            if not getattr(sys, "frozen", False):
-                from ml_stack.runtime_launchers import install
-                install(Path(sysconfig.get_path("scripts")), chosen)
-            runtime.publish(chosen)
-            return 0, f"selected immutable runtime {chosen.commit} at {chosen.prefix}"
-    except (OSError, subprocess.SubprocessError, ValueError) as exc:
-        return 1, str(exc)[-2000:]
+def build(checkout: Path, commit: str, stage: Path, *, timeout: float) -> runtime.Runtime:
+    """Build an isolated runtime from the committed snapshot of one revision; its source stays in `stage`."""
+    if not re.fullmatch(r"[0-9a-f]{40}", commit):
+        raise ValueError("a runtime is built from a full commit")
+    snapshot = stage / "source.zip"
+    _run(["git", "-C", str(checkout), "archive", "--format=zip", "--output", str(snapshot), commit], timeout)
+    source, wheels = stage / "source", stage / "wheels"
+    unpack(snapshot, source)
+    _run([str(_host_python()), "-m", "pip", "wheel", "--no-deps", "--wheel-dir", str(wheels), str(source)], timeout)
+    found = list(wheels.glob("ml_stack-*.whl"))
+    if len(found) != 1:
+        raise ValueError("source revision must build exactly one ml-stack wheel")
+    stamp(found[0], commit, checkout)
+    return prepare(found[0], commit, timeout=timeout)
 
 
 def prepare(wheel: Path, commit: str, *, timeout: float) -> runtime.Runtime:
@@ -120,13 +107,16 @@ def prepare(wheel: Path, commit: str, *, timeout: float) -> runtime.Runtime:
         chosen = runtime.Runtime(family / uuid.uuid4().hex, commit, version, runtime.identity())
         chosen.prefix.mkdir(mode=0o700)
         runtime.protect(chosen.prefix)
-        base = _host_python()
-        _run([str(base), "-m", "venv", str(chosen.prefix)], timeout)
-        cached = cache_wheel(wheel, commit, prefix=chosen.prefix)
-        from ml_stack.installed import extras
-        spec = f"ml-stack[{extras()}] @ {cached.as_uri()}"
-        _run([str(chosen.python), "-m", "pip", "install", spec], timeout)
-        runtime.verify(chosen)
+        try:
+            _run([str(_host_python()), "-m", "venv", str(chosen.prefix)], timeout)
+            cached = cache_wheel(wheel, commit, prefix=chosen.prefix)
+            from ml_stack.installed import extras
+            spec = f"ml-stack[{extras()}] @ {cached.as_uri()}"
+            _run([str(chosen.python), "-m", "pip", "install", spec], timeout)
+            runtime.verify(chosen)
+        except BaseException:
+            shutil.rmtree(chosen.prefix, ignore_errors=True)
+            raise
         return chosen
 
 

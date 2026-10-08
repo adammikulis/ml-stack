@@ -339,6 +339,7 @@ class DaemonRuntime:
             measuring=lambda: bool(self.bench_host.measuring()),
             leases=lambda: bool(self.serving.live()),
         )
+        updating.follow_runtime(idle=self.nothing_running, admission=self.update_admission)
         self.control = create_control(self)
         self.tracked = str(getattr(self.settings, "track_branch", "") or "").strip()
         self.tracked_from = str(getattr(self.settings, "track_repo", "") or "") or updating.GIT_URL

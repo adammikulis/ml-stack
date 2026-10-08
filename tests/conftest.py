@@ -51,6 +51,7 @@ _no_shadowing_tests_package()
 os.environ.setdefault("MLSTACK_GUARD_JUDGE", "off")
 sys.path.insert(0, str(REPO / "src"))
 os.environ["HF_HUB_OFFLINE"] = "1"
+os.environ["ML_STACK_RUNTIME_ENSURE"] = "off"
 sys.path.insert(0, str(REPO / "scripts"))
 
 

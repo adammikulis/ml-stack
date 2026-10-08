@@ -50,18 +50,15 @@ def test_stamp_records_the_source_and_hashes_every_installed_file(tmp_path):
 
 
 @pytest.mark.parametrize("frozen", [False, True])
-def test_install_uses_committed_snapshot_and_replaces_same_version(tmp_path, monkeypatch, frozen):
+def test_build_uses_the_committed_snapshot_of_the_named_commit(tmp_path, monkeypatch, frozen):
     from ml_stack.fleet.environment import Environment
     host = tmp_path / "host" / "python"
     monkeypatch.setattr(sys, "frozen", frozen, raising=False)
     monkeypatch.setattr(Environment, "host_python", lambda self: host)
     calls = []
-    monkeypatch.setattr(sys, "prefix", str(tmp_path / "runtime-prefix"))
 
     def run(argv, timeout):
         calls.append(argv)
-        if argv[0] == "git" and "rev-parse" in argv:
-            return COMMIT
         if argv[0] == "git" and "archive" in argv:
             with zipfile.ZipFile(argv[argv.index("--output") + 1], "w") as archive:
                 archive.writestr("pyproject.toml", "[project]\nname='ml-stack'\n")
@@ -73,44 +70,29 @@ def test_install_uses_committed_snapshot_and_replaces_same_version(tmp_path, mon
     monkeypatch.setattr(runtime_wheel, "_run", run)
     chosen = runtime.Runtime(tmp_path / "new-prefix", COMMIT, "0.1.0", runtime.identity())
     monkeypatch.setattr(runtime_wheel, "prepare", lambda wheel, commit, timeout: chosen)
-    from ml_stack import runtime_launchers
-    monkeypatch.setattr(runtime_launchers, "install", lambda directory, runtime: [])
-    published = []
-    monkeypatch.setattr(runtime, "publish", published.append)
-    code, message = runtime_wheel.install_checkout(tmp_path, timeout=7)
-    assert code == 0 and COMMIT in message and published == [chosen]
-    assert calls[1][-1] == COMMIT
-    assert calls[2][0] == str(host)
-    assert str(tmp_path) not in calls[2]
+    stage = tmp_path / "stage"
+    stage.mkdir()
+    assert runtime_wheel.build(tmp_path, COMMIT, stage, timeout=7) == chosen
+    assert calls[0][-1] == COMMIT
+    assert calls[1][0] == str(host)
+    assert str(tmp_path) not in calls[1]
     assert not any("install" in argv for argv in calls)
     assert not any("-e" in argv for argv in calls)
+    with pytest.raises(ValueError, match="full commit"):
+        runtime_wheel.build(tmp_path, "HEAD", stage, timeout=7)
 
 
-def test_dependency_failure_does_not_replace_the_installed_distribution(tmp_path, monkeypatch):
-    calls = []
-    monkeypatch.setattr(sys, "prefix", str(tmp_path / "runtime-prefix"))
-
-    def run(argv, timeout):
-        calls.append(argv)
-        if "rev-parse" in argv:
-            return COMMIT
-        if "archive" in argv:
-            with zipfile.ZipFile(argv[argv.index("--output") + 1], "w") as archive:
-                archive.writestr("pyproject.toml", "")
-        if "wheel" in argv:
-            _wheel(Path(argv[argv.index("--wheel-dir") + 1]) / "ml_stack-0.1.0-py3-none-any.whl")
-        if "--upgrade" in argv:
-            raise ValueError("missing dependency")
-        return ""
-
-    monkeypatch.setattr(runtime_wheel, "_run", run)
-    def failing(wheel, commit, timeout):
-        raise ValueError("missing dependency")
-    monkeypatch.setattr(runtime_wheel, "prepare", failing)
-    monkeypatch.setattr(runtime, "publish", lambda value: pytest.fail("selected a failed runtime"))
-    code, error = runtime_wheel.install_checkout(tmp_path, timeout=7)
-    assert code == 1 and "missing dependency" in error
-    assert not any("--force-reinstall" in argv for argv in calls)
+def test_a_failed_prepare_leaves_no_prefix_behind(tmp_path, monkeypatch):
+    monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "state"))
+    wheel = _wheel(tmp_path / "ml_stack-0.1.0-py3-none-any.whl")
+    with zipfile.ZipFile(wheel, "a") as archive:
+        archive.writestr("ml_stack-0.1.0.dist-info/METADATA", "Name: ml-stack\nVersion: 0.1.0\n")
+    runtime_wheel.stamp(wheel, COMMIT, tmp_path)
+    monkeypatch.setattr(runtime_wheel, "_run", lambda argv, timeout: (_ for _ in ()).throw(ValueError("missing dependency")))
+    monkeypatch.setattr(runtime_wheel, "_host_python", lambda: tmp_path / "python")
+    with pytest.raises(ValueError, match="missing dependency"):
+        runtime_wheel.prepare(wheel, COMMIT, timeout=7)
+    assert not list((runtime.directory() / COMMIT).iterdir())
 
 
 def _dependency_wheels(wheel, target):

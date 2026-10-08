@@ -64,7 +64,7 @@ def install(directory: Path, chosen: runtime.Runtime | None = None) -> list[Path
                 shutil.copyfile(chosen.python.parent / target.name, temporary)
                 runtime.protect(temporary)
         else:
-            runtime.gateway(target, module, function, chosen)
+            runtime.write_launcher(target, module, function, chosen)
     return [target for target, _ in targets]
 
 

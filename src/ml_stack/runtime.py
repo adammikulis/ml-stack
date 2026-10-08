@@ -181,12 +181,53 @@ def forward(module: str, argv: list[str]) -> bool:
     return True
 
 
+LAUNCHER = """#!/usr/bin/env python3
+import glob,json,os,subprocess,sys
+root = {root!r}
+python = {python!r}
+env = {{k:v for k,v in os.environ.items() if k not in
+       {{'PYTHONPATH','PYTHONHOME','VIRTUAL_ENV','_MEIPASS2','LD_LIBRARY_PATH','DYLD_LIBRARY_PATH'}}
+       and not k.startswith('_PYI_')}}
+def usable(py):
+    prefix = os.path.dirname(os.path.dirname(py))
+    found = any(glob.glob(os.path.join(prefix, where, 'ml_stack', '__init__.py'))
+                for where in ('lib/python*/site-packages', 'Lib/site-packages'))
+    return os.path.isfile(py) and found and not os.path.exists(os.path.join(prefix, 'rejected'))
+if not usable(python):
+    kept = []
+    for note in glob.glob(os.path.join(root, '*', '*', 'verified.json')):
+        try:
+            with open(note) as stream:
+                kept.append((json.load(stream)['verified_at'], os.path.join(os.path.dirname(note),
+                             'Scripts/python.exe' if os.name == 'nt' else 'bin/python')))
+        except (OSError, ValueError, KeyError):
+            pass
+    python = next((py for _, py in sorted(kept, reverse=True) if usable(py)), '')
+    if not python:
+        try:
+            with open(os.path.join(root, 'deploy.json')) as stream:
+                source = json.load(stream)['checkout']
+            subprocess.Popen([sys.executable, '-m', 'ml_stack.runtime_cli', 'ensure', '--recover'],
+                             env={{**env, 'PYTHONPATH': os.path.join(source, 'src')}}, stdin=subprocess.DEVNULL,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        except (OSError, ValueError, KeyError):
+            pass
+        sys.exit({name!r} + ': no usable ml-stack runtime; recovery started if a source checkout is recorded')
+os.execve(python, [python, '-I', *{arguments}, *sys.argv[1:]], env)
+"""
+
+
 def gateway(target: Path, module: str = "ml_stack.fleet.launch", function: str = "",
             chosen: Runtime | None = None) -> None:
     """Atomically write an owned standalone launcher for the selected interpreter."""
     chosen = verify(chosen) if chosen is not None else selected()
     if chosen is None:
         raise OSError("select an installed runtime before creating its launcher")
+    write_launcher(target, module, function, chosen)
+
+
+def write_launcher(target: Path, module: str, function: str, chosen: Runtime) -> None:
+    """Atomically write a launcher for an already verified runtime."""
     if not re.fullmatch(r"ml_stack(?:\.[a-z_][a-z0-9_]*)+", module):
         raise ValueError("launcher module must belong to ml-stack")
     if function and not re.fullmatch(r"[a-z_][a-z0-9_]*", function):
@@ -200,12 +241,8 @@ def gateway(target: Path, module: str = "ml_stack.fleet.launch", function: str =
     target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     arguments = (["-c", f"import sys;sys.argv[0]={target.name!r};from {module} import {function};sys.exit({function}())"]
                  if function else ["-m", module])
-    text = ("#!/usr/bin/env python3\nimport os,sys\n"
-            f"python = {str(chosen.python)!r}\n"
-            "env = {k:v for k,v in os.environ.items() if k not in "
-            "{'PYTHONPATH','PYTHONHOME','VIRTUAL_ENV','_MEIPASS2','LD_LIBRARY_PATH','DYLD_LIBRARY_PATH'} "
-            "and not k.startswith('_PYI_')}\n"
-            f"os.execve(python,[python,'-I',*{arguments!r},*sys.argv[1:]],env)\n")
+    text = LAUNCHER.format(root=str(directory()), python=str(chosen.python),
+                           arguments=repr(arguments), name=target.name)
     with writing(target) as temporary:
         temporary.write_text(text, encoding="utf-8")
         protect(temporary)

@@ -25,6 +25,8 @@ def test_regular_owned_console_gateway_executes_selected_python_with_literal_arg
     target.write_text("old")
     target.chmod(0o755)
     chosen.python.parent.mkdir(parents=True)
+    (chosen.prefix / "lib" / "python3.13" / "site-packages" / "ml_stack").mkdir(parents=True)
+    (chosen.prefix / "lib" / "python3.13" / "site-packages" / "ml_stack" / "__init__.py").write_text("")
     chosen.python.write_text("#!/usr/bin/env python3\nimport json,sys,os\nprint(json.dumps([sys.argv[1:],os.environ.get('PYTHONPATH')]))\n")
     chosen.python.chmod(0o700)
     runtime.gateway(target, "ml_stack.workspace.cli", "main")

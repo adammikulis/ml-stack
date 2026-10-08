@@ -45,6 +45,27 @@ def run(command: list[str], stage: str, *, environment: dict | None = None):
     return done
 
 
+def refresh_runtime(stage: str, checkout: Path | None = None) -> None:
+    """Start a detached runtime build when the selected runtime is behind the checkout's HEAD."""
+    if os.environ.get('ML_STACK_RUNTIME_ENSURE') == 'off':
+        return
+    source = Path(__file__).resolve().parents[2]
+    primary = checkout or source
+    common = run(['git', '-C', str(source), 'rev-parse', '--path-format=absolute', '--git-common-dir'], stage)
+    if common and common.stdout.strip():
+        primary = Path(common.stdout.strip()).parent
+    environment = dict(os.environ, PYTHONPATH=str(source / 'src'))
+    try:
+        done = subprocess.run([sys.executable, '-m', 'ml_stack.runtime_cli', 'ensure', '--background',
+                               '--checkout', str(primary)], capture_output=True, text=True, timeout=8,
+                              check=False, env=environment)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        warning(stage, f'runtime refresh: {error}')
+        return
+    if done.returncode:
+        warning(stage, f'runtime refresh exited {done.returncode}: {done.stderr or done.stdout}')
+
+
 def session_environment(value: dict, stage: str) -> dict | None:
     environment = dict(os.environ)
     for name in ('ML_STACK_SESSION_ID', 'ML_STACK_SESSION_HARNESS'):

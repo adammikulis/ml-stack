@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import json
 import logging
 import os
 import platform
@@ -19,7 +20,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from ml_stack import net
+from ml_stack import net, runtime
 from ml_stack.files import promote
 from ml_stack.http import ServerError, ServerUnreachable
 from ml_stack.httpguard import Refused
@@ -30,7 +31,7 @@ from ml_stack.safenames import Unsafe, safe_filename, unpack
 
 from . import signing
 from .measuring import installed_commit
-from .runtime_wheel import install_checkout, source_checkout
+from .runtime_wheel import source_checkout
 
 __all__ = [
     "GIT_URL",
@@ -48,6 +49,7 @@ __all__ = [
     "current_version",
     "download",
     "download_release",
+    "follow_runtime",
     "in_the_way",
     "install",
     "quiet",
@@ -505,9 +507,13 @@ def _remote_in(words: list[str]) -> str:
 
 
 def pip_install(checkout: Path | str) -> tuple[int, str]:
-    """Build and install an immutable wheel with the running interpreter."""
-
-    return install_checkout(Path(checkout).expanduser(), timeout=PIP_TIMEOUT)
+    """Build, verify and select the checkout's HEAD as an immutable runtime in a separate process."""
+    argv = [sys.executable, "-m", "ml_stack.runtime_cli", "ensure", "--checkout", str(Path(checkout).expanduser())]
+    try:
+        done = subprocess.run(argv, capture_output=True, text=True, timeout=PIP_TIMEOUT)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return 1, str(exc)[-2000:]
+    return done.returncode, f"{done.stdout}{done.stderr}".strip()[-2000:]
 
 
 @dataclass(frozen=True, slots=True)
@@ -535,6 +541,7 @@ class UpdateSchedule:
 _DEFAULT_RUNTIME = UpdateRuntime()
 _TRACK_SCHEDULE = UpdateSchedule()
 _RELEASE_SCHEDULE = UpdateSchedule(interval=24 * 3600, first_after_s=300.0)
+_FOLLOW_SCHEDULE = UpdateSchedule(interval=60.0, first_after_s=60.0)
 
 
 def _same(a: str, b: str) -> bool:
@@ -685,6 +692,46 @@ def restart_after_update() -> str:
     from . import autostart
 
     return autostart.restart()
+
+
+def selected_commit() -> str:
+    """The commit the machine's selected runtime was built from, or "" when none is selected."""
+    try:
+        row = json.loads((runtime.directory() / "selected.json").read_text(encoding="utf-8"))
+        return str(row.get("commit", "")) if isinstance(row, dict) else ""
+    except (OSError, ValueError):
+        return ""
+
+
+def follow_runtime(*, idle: Callable[[], bool], schedule: UpdateSchedule = _FOLLOW_SCHEDULE,
+                   admission: Callable[[], contextlib.AbstractContextManager[Any]] = contextlib.nullcontext
+                   ) -> threading.Thread | None:
+    """Restart this process onto the selected runtime when it is behind it and nothing is in the way.
+
+    Selecting a runtime never waits for this; only the restart does. Returns None when no runtime is selected.
+    """
+    if not selected_commit():
+        return None
+
+    def loop() -> None:
+        time.sleep(schedule.first_after_s)
+        while True:
+            try:
+                with admission():
+                    chosen = selected_commit()
+                    if chosen and not _same(chosen, _installed_commit()) and idle():
+                        note(commit=chosen)
+                        if restart_after_update():
+                            return
+            except Busy:
+                pass
+            except Exception as exc:                  # noqa: BLE001 - a loop that dies stops following
+                note(checked_at=time.time(), error=str(exc))
+            time.sleep(schedule.interval)
+
+    thread = threading.Thread(target=loop, daemon=True, name="follow-runtime")
+    thread.start()
+    return thread
 
 
 def apply_if_newer() -> dict[str, Any]:

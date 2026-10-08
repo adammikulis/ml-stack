@@ -82,6 +82,8 @@ def main(dev: str, lines: list[str]) -> int:
         if subprocess.run([sys.executable, str(HERE / "no-data-files"), "--range", base, tip],
                           check=False).returncode != 0:
             refused = 1
+    if not refused:
+        subprocess.run([sys.executable, str(HERE / "runtime-refresh"), "pushed"], check=False)
     if refused:
         print("\nEvery pushed commit passes the pre-commit hooks. Fix it in a new commit, remove "
               "merged worktrees with their branches, or lock a worktree still in use.", file=sys.stderr)

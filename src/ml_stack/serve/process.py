@@ -271,6 +271,20 @@ def every_server() -> list[dict]:
     return sorted(out, key=lambda r: r["port"])
 
 
+def running_within(path: Path) -> list[int]:
+    """Pids of live processes whose executable, working directory or arguments lie inside ``path``."""
+    base = str(path)
+    found = []
+    for proc in psutil.process_iter(["pid", "exe", "cwd", "cmdline"]):
+        try:
+            words = [proc.info.get("exe") or "", proc.info.get("cwd") or "", *(proc.info.get("cmdline") or [])]
+        except (psutil.Error, OSError):
+            continue
+        if any(word == base or word.startswith(base + os.sep) for word in words):
+            found.append(int(proc.info["pid"]))
+    return found
+
+
 def loaded_twice(servers: list[dict] | None = None) -> dict[str, list[int]]:
     """Each model a live llama-server reports serving on more than one port, with the ports.
 

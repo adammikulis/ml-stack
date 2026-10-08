@@ -21,6 +21,7 @@ LAYERS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("core", ("activity", "agent_dependency", "agent_hooks", "asking", "authority", "backend", "briefing", "checks", "command", "command_capture", "contracts", "credentials", "data",
               "entities", "extraction", "files", "files_windows", "gate", "geo",
               "home", "hook_bootstrap", "hook_diagnostics", "http", "http_cancel", "httpguard", "installed", "interventions", "jobs", "jsonl", "keystore", "limits",
+              "runtime", "runtime_launchers",
               "lock", "log", "macauth", "sealing",
               "markup", "sandbox",
               "deciders", "desktop", "media", "messages", "net", "paths", "platform", "safenames", "redact", "scrape", "sentinel",
@@ -31,7 +32,7 @@ LAYERS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("machine", ("doctor", "fleet", "gym", "serve", "setup")),
     ("tools", ("agent", "bench", "chat", "chatpolicy", "claude", "cli", "codex", "coding", "datasheet", "decide_cli",
                "do", "draft", "guard", "harness", "harness_claims", "harnessid", "harnessing", "harnesshook", "harnesspolicy", "mcp", "memory", "reputation", "inbox", "roles", "rules",
-               "surface", "testing", "train", "walk", "web", "workspace", "pi")),
+               "surface", "testing", "train", "walk", "web", "workspace", "pi", "runtime_board", "runtime_cli", "runtime_deploy", "runtime_store")),
     ("dev", ("redteam",)),
 )
 
