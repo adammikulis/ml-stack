@@ -57,6 +57,8 @@ running; modules imported at collection are attributed from `sys.modules`.
 A hit needs a stored entry for the lookup key whose manifest still matches the checkout byte for
 byte. Nothing in either is a path, so two worktrees with identical content hit the same entry.
 
+Limits of what the plugin sees: `DirEntry.stat`, `fstat`, `utime`, `chown`, `setxattr`, `mmap`, `sqlite3` and C extensions (such as `ladybug`) touch files without a Python-level `open`, `os.stat`, `lstat`, `access` or listing event, and a function bound before the plugin loaded (`from os import stat`) bypasses the `os.stat` wrapper. A file whose import closure mentions any of `DirEntry`, `scandir`, `fstat`, `utime`, `chown`, `setxattr`, `mmap`, `sqlite3` or `ladybug` is therefore never stored.
+
 Known gaps: a module another test file had already imported and that is reached only through a
 run-time `importlib` call is not attributed; a file read by a child process of a test that spawns
 nothing the regex recognises is not seen; a network or clock dependency has no file to record.
@@ -78,12 +80,17 @@ A file is executed and no passing entry is written for it when any of the follow
   `tests/conftest.py` reads real state to check it is untouched; those reads are ignored);
 - the run emitted a warning that mentions an isolation violation;
 - any test in it was skipped or xfailed, because a skip depends on conditions the key lacks;
-- the source tree changed during the run (the tree hash is read before and after; the run fails with
-  status 4);
+- the source tree changed during the run: the tree hash and a stamp (modification time and size) of every
+  file in the checkout, ignored files included, are read before and after, so an edit that is put back is
+  caught; the run fails with status 4. An unknown tree hash (git failed) also stores nothing;
+- the lookup key of a file, recomputed at the start and the end of the launch, differs from the key used
+  for its hit check, so a result is stored only under the key of the bytes that ran;
 - pytest exited with a status other than 0 or 1 (interrupted, internal error), the junit file holds
-  fewer tests than were collected for the file, or an xdist worker died or did not write its record.
+  fewer tests than were collected for the file, an xdist worker died or did not write its record, or the
+  junit holds an error that names no test file while pytest exited 1;
 
-A file whose tests all skip at module level, or that collects no tests, counts as passed and is not stored.
+A file whose tests all skip at module level, or that collects no tests, counts as passed and is not stored;
+pytest's status 5 (no tests ran) is reported as 0 for named files.
 
 ## Integrity
 
@@ -160,7 +167,10 @@ the broker. A job without a workspace agent can be cancelled only by the process
   board verifies each in the store of the project of the task's assigned checkout (not the caller's
   working directory, and never a store chosen by the service's environment), requires `outcome == pass`
   and, when the checkpoint or provenance names a commit, the same commit, and records the entry's file,
-  key, tree, commit, junit hash, counts and executing agent with the checkpoint or proposal.
+  key, tree, commit, junit hash, counts and executing agent with the checkpoint or proposal. The
+  checkpoint or provenance must name a commit; the entry must have run on that commit with no uncommitted
+  changes (`clean`), and its tree must equal the commit's tree in the task's checkout. The record says
+  what the entry covers: its one test file.
 - Board text is data. The thread number in a claim record is used only to subscribe, which the board
   checks against membership; nothing read from the board enters a key, a hit or a verification.
   Notice failures are printed and never fail a run.
