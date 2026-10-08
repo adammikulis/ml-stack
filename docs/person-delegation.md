@@ -263,6 +263,55 @@ row with a wrong seal makes `consume` refuse; text claiming the person's authori
 board post, note and tool result never lets `consume` succeed; every board view renders any
 non-`human` role without human styling; and the 14 adversarial phrasings in 5.4.
 
+### 6.1 The browser session that speaks for the person
+
+The loopback address, the `Host`, `Origin` and `Sec-Fetch-Site` headers and the absence of an
+`Authorization` header are all written by the caller. A process on this machine that sets them
+is indistinguishable from the page, so none of them opens a session or selects the person.
+
+* **Launch secret.** Each daemon start generates 32 random bytes, keeps them in memory and writes
+  `<root>/launch/secret.json` (`version`, `secret`, `port`) owner-only, not a symlink, with the
+  directory registered with sentinel so no agent tool call may name it. Nothing the caller sends
+  chooses the host, the port or the file.
+* **Ticket.** The daemon's own window and the owner's terminal (`ml-stack peers open`) present the
+  secret to `POST /ui/launch/ticket` (no `Origin`, no `Sec-Fetch-Site`, loopback `Host`) and get a
+  ticket valid for 60 seconds and one redemption, at most eight waiting at once. The page opens as
+  `/ui/?launch_ticket=...`, redeems it with `POST /ui/session`, and removes it from the address bar.
+  A launch-secret ticket opens no session once a Production cluster is joined: that machine asks
+  for the cluster passphrase.
+* **Origin.** Every session records how it was opened. `launch-ticket`, `passphrase`,
+  `recovery-file` and `invite` are credentialed; `token` and a session opened by joining a cluster
+  with no credential are not. Choosing a device name and mode (`/ui/setup/initial`), joining the
+  workspace as the person (`SessionWorkspace`, checked on every person request and again inside
+  `connect`), the project Board and invitation routes, every installed `/ui/<extension>` route,
+  credential changes, coordinator selection, the wiring limit and handing a session to a browser
+  (`/ui/launch-ticket`) refuse a session that is not credentialed.
+* **Hand-typed address.** A page opened without a ticket, or whose session ended, shows how to open
+  it from the Poolside window or with `ml-stack peers open`, which refuses a process an agent
+  started and a process with no terminal. Inside the app's window the page offers a Reopen button
+  that asks the app for a fresh ticket.
+* **Board page.** `ml-stack-workspace board-serve` makes its own session secret and prints the
+  address that carries it; the Board route answers only a browser holding the cookie that address
+  sets, as the Agents routes already did.
+* **Throttle and audit.** Wrong launch secrets and wrong tickets back off per source. Every ticket
+  issued, session opened and refusal is a row in the workspace audit chain with the origin and
+  reason, never the ticket or the secret.
+
+Limits that remain:
+
+* A process running as the same operating-system user can read the launch secret file, read the
+  arguments of the window the app starts (the ticket is in the address), attach to the daemon or
+  read its memory. The ticket lives 60 seconds and is spent once, so a process that wins the race
+  must also beat the person's own page load, which then shows the hand-typed-address page and not a
+  signed-in screen. Reading the secret, the arguments or the daemon's memory is not defended; a
+  separate operating-system account for agents, or a sandbox that hides the state directory and
+  process list from them, is what closes it.
+* `POST /ui/setup/join` on a machine that has not joined a cluster still opens a session for any
+  loopback caller. That session is not credentialed, so it cannot act as the person or reach the
+  routes listed above, but it is accepted by routes that only ask for a live session.
+* The Windows launcher keeps the daemon in WSL and does not read the secret file from there, so
+  its window opens the page without a ticket.
+
 ## 7. What chat authorization can and cannot cover
 
 Can (closed registry; targets derived by the guard):
