@@ -49,7 +49,7 @@ def test_failed_native_preparation_closes_owned_resources(monkeypatch, tmp_path,
     admission = SimpleNamespace(endpoint="test-endpoint", token="test-token", identity=(1, 2, 3),
                                 terminal_admission=lambda: None, finish=lambda: calls.append("admission_close"))
     monkeypatch.setattr(testslots_runner.sys, "platform", "darwin")
-    monkeypatch.setattr(testslots_runner, "environment_for", lambda value: {"DEV_TEST_BUDGET": "1"})
+    monkeypatch.setattr(testslots_runner, "environment_for", lambda value: {"DEV_TEST_BUDGET": "1", "DEV_TEST_CONFINE": "1"})
     monkeypatch.setattr(testslots_runner.testslots, "slots_dir", lambda: tmp_path)
     monkeypatch.setattr(testslots_runner.testslots, "_reject_nested", lambda: None)
     monkeypatch.setattr(testslots_runner.testslots, "lease", lambda *args, **kwargs: contextlib.nullcontext())

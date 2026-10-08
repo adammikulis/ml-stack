@@ -12,7 +12,6 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-import test_browser_admission
 import testslots
 import testslots_rpc
 
@@ -156,6 +155,7 @@ def prepare_pytest(command, environment, admission, launch, prepared):
         environment["DEV_TEST_PYTEST_IDENTITY"] = json.dumps(admission.identity)
         command, environment = launch.command(environment)
     elif confining(environment):
+        import test_browser_admission
         from test_kernel_isolation import ConfinedRun, check_selectors
         from test_terminal_bank import TerminalBank
         plan = check_selectors(command)

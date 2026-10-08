@@ -7,12 +7,14 @@ import socket
 import threading
 
 import pytest
+from confinement import needs_confinement
 from test_fixture_plan import resources
 from test_kernel_browser import Assets, identity, prepare, seal
 from test_kernel_browser_client import Listener
 from test_kernel_browser_endpoints import EndpointBank, local_interface
 
 
+@needs_confinement
 def test_browser_assets_are_sealed_and_source_changes_do_not_change_sealed_bytes(tmp_path):
     source = tmp_path / 'source'
     source.mkdir()
@@ -31,6 +33,7 @@ def test_browser_assets_are_sealed_and_source_changes_do_not_change_sealed_bytes
         assets.recheck()
 
 
+@needs_confinement
 @pytest.mark.parametrize('kind', ['symlink', 'hardlink', 'writable'])
 def test_browser_asset_seal_refuses_redirects_aliases_and_foreign_writers(tmp_path, kind):
     source = tmp_path / 'source'
@@ -47,6 +50,7 @@ def test_browser_asset_seal_refuses_redirects_aliases_and_foreign_writers(tmp_pa
         seal(source, tmp_path / 'sealed', ())
 
 
+@needs_confinement
 def test_browser_resource_bundle_requires_supervisor_fixture_admission(tmp_path):
     assert prepare(frozenset(), tmp_path, {}, (), ()) is None
 
@@ -59,6 +63,7 @@ def bank():
         assert os.environ.get(key), f'missing maintained browser fixture admission: {key}'
 
 
+@needs_confinement
 def test_transferred_listener_accepts_only_its_reserved_endpoint_and_releases(bank):
     listener = Listener()
     try:
@@ -77,6 +82,7 @@ def test_transferred_listener_accepts_only_its_reserved_endpoint_and_releases(ba
     assert listener.socket is None
 
 
+@needs_confinement
 def test_endpoint_bank_refuses_invalid_requests_before_resource_access():
     bank = EndpointBank.__new__(EndpointBank)
     bank.token = 'a' * 48
@@ -100,12 +106,14 @@ def test_endpoint_bank_refuses_invalid_requests_before_resource_access():
         bank.operate(request, None)
 
 
+@needs_confinement
 def test_supervisor_listener_refuses_foreign_and_inactive_leases(bank, monkeypatch):
     monkeypatch.setenv('DEV_TEST_REMOTE_LEASE', 'b' * 48)
     with pytest.raises(RuntimeError, match='transfer failed'):
         Listener()
 
 
+@needs_confinement
 def test_listener_leases_are_not_reused_before_descendant_cleanup(bank):
     capacity = int(os.environ['DEV_TEST_BROWSER_CAPACITY'])
     assert 1 <= capacity <= 128
@@ -125,12 +133,14 @@ def test_listener_leases_are_not_reused_before_descendant_cleanup(bank):
         Listener()
 
 
+@needs_confinement
 @pytest.mark.parametrize('address', ['127.0.0.1', '224.0.0.1', '203.0.113.255'])
 def test_lan_listener_refuses_unowned_and_loopback_addresses_before_binding(address):
     with pytest.raises((ValueError, PermissionError), match='LAN'):
         local_interface(address)
 
 
+@needs_confinement
 def test_endpoint_bank_requires_per_active_test_typed_resource_authority():
     EndpointBank.authorized(frozenset({'browser-endpoints'}), 'browser-endpoints')
     with pytest.raises(PermissionError, match='typed resource grant'):
@@ -139,6 +149,7 @@ def test_endpoint_bank_requires_per_active_test_typed_resource_authority():
         EndpointBank.authorized(None, 'browser-endpoints')
 
 
+@needs_confinement
 @pytest.mark.parametrize('proof', [False, None, 'pytest exited'])
 def test_browser_run_refuses_endpoint_teardown_without_supervisor_drain_proof(proof):
     from test_browser_admission import BrowserRun

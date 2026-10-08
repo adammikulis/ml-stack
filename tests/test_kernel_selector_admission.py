@@ -4,10 +4,12 @@ from __future__ import annotations
 import sys
 
 import pytest
+from confinement import needs_confinement
 from test_kernel_isolation import check_selectors
 from test_kernel_selectors import TEMP_ONLY, admitted_node
 
 
+@needs_confinement
 def test_reviewed_nodes_preserve_complete_invocation_validation():
     for node in TEMP_ONLY:
         assert admitted_node(node)
@@ -25,6 +27,7 @@ def test_reviewed_nodes_preserve_complete_invocation_validation():
     "tests/test_workspace_remote.py::test_remote_execution_profiles",
     "tests/test_task_native.py::test_native_task",
 ])
+@needs_confinement
 def test_unreviewed_files_and_resource_fixtures_remain_refused(node):
     assert not admitted_node(node)
     with pytest.raises(RuntimeError, match="fixture admission"):

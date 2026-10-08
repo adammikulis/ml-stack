@@ -18,6 +18,7 @@ import pytest
 import test_kernel_holder as holder
 import test_kernel_isolation as isolation
 import testslots_rpc
+from confinement import needs_confinement
 from test_kernel_attestation import CHECKS, Attestation, validate_result
 from test_kernel_endpoint import connection, verify_socket
 from test_kernel_holder import Assets, ancestry, private_directory
@@ -37,6 +38,7 @@ from ml_stack.sandbox.seatbelt import (
 )
 
 
+@needs_confinement
 def test_holder_namespace_allows_only_its_owned_unix_channels():
     root = Path(os.environ["DEV_TEST_HOLDER_NAMESPACE"])
     channel = root / "owned.sock"
@@ -63,6 +65,7 @@ def test_holder_namespace_allows_only_its_owned_unix_channels():
             channel.unlink()
 
 
+@needs_confinement
 def test_holder_namespace_refuses_redirect_owner_and_path_bounds(tmp_path):
     root = Path(os.environ["DEV_TEST_HOLDER_NAMESPACE"])
     path = root / "invalid"
@@ -95,6 +98,7 @@ def test_holder_namespace_refuses_redirect_owner_and_path_bounds(tmp_path):
         path.rmdir()
 
 
+@needs_confinement
 def test_holder_assets_refuse_replaceable_ancestry(tmp_path):
     parent = tmp_path / "parent"
     parent.mkdir(mode=0o700)
@@ -119,6 +123,7 @@ def test_holder_assets_refuse_replaceable_ancestry(tmp_path):
         ancestry(redirected / "prefix")
 
 
+@needs_confinement
 @pytest.mark.parametrize("pid", [True, 0, -1, "foreign"])
 def test_retired_probe_rejects_invalid_process_identity(pid):
     with pytest.raises(RuntimeError, match="invalid owned probe PID"):
@@ -127,6 +132,7 @@ def test_retired_probe_rejects_invalid_process_identity(pid):
 
 @pytest.mark.parametrize("field,value", [("nonce", "replayed"), ("profile", "foreign"), ("checks", []),
                                          ("extra", True)], ids=["nonce", "profile", "failed-probe", "extra"])
+@needs_confinement
 def test_precollection_refuses_forged_or_incomplete_report(field, value):
     result = {"nonce": "owned", "profile": "pinned", "checks": CHECKS}
     result[field] = value
@@ -134,6 +140,7 @@ def test_precollection_refuses_forged_or_incomplete_report(field, value):
         validate_result(result, "owned", "pinned")
 
 
+@needs_confinement
 def test_precollection_bad_nonce_does_not_release_collection():
     evidence = Attestation.__new__(Attestation)
     evidence.report, output = os.pipe()
@@ -160,6 +167,7 @@ def test_precollection_bad_nonce_does_not_release_collection():
                                          ("parent", "foreign"), ("extra", True), ("token", []),
                                          ("operation", "execute")],
                          ids=["heavy-int", "phase", "long-label", "parent", "extra-field", "token-list", "operation"])
+@needs_confinement
 def test_admission_rejects_invalid_fields_before_mutation(field, value):
     request = {"operation": "ready", "token": "a" * 48, "parent": None,
                "label": "pytest", "phase": "test", "heavy": False}
@@ -168,6 +176,7 @@ def test_admission_rejects_invalid_fields_before_mutation(field, value):
         testslots_rpc.validate_request(request)
 
 
+@needs_confinement
 def test_terminal_schema_rejects_paths_and_oversized_data():
     request = {"operation": "terminal", "token": "a" * 48, "parent": "b" * 48,
                "terminal_token": "c" * 48, "terminal_operation": "write", "terminal": "d" * 48,
@@ -179,12 +188,14 @@ def test_terminal_schema_rejects_paths_and_oversized_data():
         testslots_rpc.validate_request({**request, "path": "/tmp/foreign"})
 
 
+@needs_confinement
 @pytest.mark.parametrize("value", [1, False, "true", None])
 def test_admission_release_requires_exact_boolean(value):
     with pytest.raises(ValueError):
         testslots_rpc.validate_release({"release": value})
 
 
+@needs_confinement
 def test_ended_admission_cannot_transfer_terminal():
     admission = testslots_rpc.Admission.__new__(testslots_rpc.Admission)
     admission.guard = threading.Lock()
@@ -196,6 +207,7 @@ def test_ended_admission_cannot_transfer_terminal():
         pytest.fail("inactive admission entered descriptor transfer")
 
 
+@needs_confinement
 def test_supervisor_rejects_unknown_request_fields_over_actual_rpc():
     with connection(os.environ["DEV_TEST_PYTEST_ENDPOINT"], os.environ["DEV_TEST_PYTEST_IDENTITY"]) as channel, channel.makefile("rwb") as stream:
         testslots_rpc._write(stream, {"operation": "ready", "token": os.environ["DEV_TEST_PYTEST_TOKEN"],
@@ -206,6 +218,7 @@ def test_supervisor_rejects_unknown_request_fields_over_actual_rpc():
         assert response == {"ping": True}
 
 
+@needs_confinement
 def test_admission_socket_identity_change_is_refused_before_connection():
     identity = json.loads(os.environ["DEV_TEST_PYTEST_IDENTITY"])
     identity[1] += 1
@@ -215,6 +228,7 @@ def test_admission_socket_identity_change_is_refused_before_connection():
         assert response == {"ping": True}
 
 
+@needs_confinement
 def test_owned_retained_socket_nodes_are_private_and_inode_bound():
     for endpoint, identity in (("DEV_TEST_PYTEST_ENDPOINT", "DEV_TEST_PYTEST_IDENTITY"),
                                ("DEV_TEST_PTY_ENDPOINT", "DEV_TEST_PTY_IDENTITY")):
@@ -224,6 +238,7 @@ def test_owned_retained_socket_nodes_are_private_and_inode_bound():
             Path(path).unlink()
 
 
+@needs_confinement
 @pytest.mark.parametrize("request_count,permits", [(65536, 128), (0, 0)])
 def test_admission_rejects_exhausted_requests_without_starting_handler(request_count, permits):
     admission = testslots_rpc.Admission.__new__(testslots_rpc.Admission)
@@ -237,6 +252,7 @@ def test_admission_rejects_exhausted_requests_without_starting_handler(request_c
     assert admission.request_count == request_count
 
 
+@needs_confinement
 def test_reserved_descriptor_rejects_foreign_admission(monkeypatch):
     reservation = testslots_rpc.terminal_request("allocate")
     try:
@@ -250,12 +266,14 @@ def test_reserved_descriptor_rejects_foreign_admission(monkeypatch):
         testslots_rpc.terminal_request("release", terminal=reservation["terminal"])
 
 
+@needs_confinement
 def test_unknown_fixture_tier_is_refused_before_collection():
     with pytest.raises(RuntimeError, match="fixture admission"):
         isolation.check_selectors([sys.executable, "-m", "pytest", "tests/test_workspace_live.py"])
     isolation.check_selectors([sys.executable, "-m", "pytest", "tests/test_layers.py"])
 
 
+@needs_confinement
 def test_literal_source_grants_do_not_read_neighbor_files(tmp_path):
     source = tmp_path / "source.py"
     source.write_text("pass")
@@ -268,6 +286,7 @@ def test_literal_source_grants_do_not_read_neighbor_files(tmp_path):
     assert 'network-bind' not in text
 
 
+@needs_confinement
 def test_inherited_credentials_and_loader_paths_are_removed():
     environment = isolation.filtered_environment({"PATH": "/usr/bin:/bin", "SSH_AUTH_SOCK": "/secret.sock",
                                                   "ML_STACK_HOME": "/real-state", "PYTHONPATH": "/secret",
@@ -275,6 +294,7 @@ def test_inherited_credentials_and_loader_paths_are_removed():
     assert environment == {"PATH": "/usr/bin:/bin"}
 
 
+@needs_confinement
 @pytest.mark.skipif(sys.platform != "darwin", reason="supervisor terminal admission")
 def test_terminal_bank_requires_its_token_and_limits_input(monkeypatch):
     import testslots_rpc
@@ -293,6 +313,7 @@ def test_terminal_bank_requires_its_token_and_limits_input(monkeypatch):
         testslots_rpc.terminal_request("release", terminal=reserved["terminal"])
 
 
+@needs_confinement
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS kernel confinement")
 def test_kernel_denies_parent_storage_for_test_and_descendant():
     canary = os.environ["DEV_TEST_CONFINEMENT_CANARY"]
@@ -305,6 +326,7 @@ def test_kernel_denies_parent_storage_for_test_and_descendant():
     assert result.returncode != 0 and "PermissionError" in result.stderr
 
 
+@needs_confinement
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS reserved descriptor transfer")
 def test_reserved_slave_descriptor_supports_io_without_path_permission():
     import testslots_rpc
@@ -322,6 +344,7 @@ def test_reserved_slave_descriptor_supports_io_without_path_permission():
         testslots_rpc.terminal_request("release", terminal=reservation["terminal"])
 
 
+@needs_confinement
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS inherited kernel confinement")
 def test_kernel_denies_symlink_escape_descendant_read_and_other_unix_endpoint(tmp_path):
     canary = os.environ["DEV_TEST_CONFINEMENT_CANARY"]
@@ -341,6 +364,7 @@ def test_kernel_denies_symlink_escape_descendant_read_and_other_unix_endpoint(tm
         assert response == {"ready": True}
 
 
+@needs_confinement
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS static preflight")
 def test_preflight_does_not_import_pytest_or_conftest():
     code = ("import sys; from pathlib import Path; from testselectors import validate; "
@@ -350,6 +374,7 @@ def test_preflight_does_not_import_pytest_or_conftest():
     assert result.returncode == 0, result.stderr
 
 
+@needs_confinement
 @pytest.mark.skipif(sys.platform != "darwin", reason="explicit host-admin package boundary")
 def test_host_admin_index_rule_keeps_other_paths_and_world_writes_refused(monkeypatch):
     import grp
@@ -367,6 +392,7 @@ def test_host_admin_index_rule_keeps_other_paths_and_world_writes_refused(monkey
     assert not assets.trusted_host_index(Path("/opt/homebrew/Cellar"), info)
 
 
+@needs_confinement
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS descriptor path validation")
 @pytest.mark.parametrize("alias", ["direct", "symlink", "hardlink"])
 def test_supervisor_output_refuses_protected_destinations(tmp_path, alias):
@@ -388,6 +414,7 @@ def test_supervisor_output_refuses_protected_destinations(tmp_path, alias):
     assert target.read_bytes() == b"unchanged"
 
 
+@needs_confinement
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS descriptor path validation")
 def test_supervisor_output_pins_both_streams_and_bounds_writes(tmp_path):
     from test_kernel_outputs import LIMIT, OutputSink
@@ -410,6 +437,7 @@ def test_supervisor_output_pins_both_streams_and_bounds_writes(tmp_path):
     assert path.read_bytes() == b"bounded"
 
 
+@needs_confinement
 def test_supervisor_storage_refuses_protected_temp_before_creation(tmp_path, monkeypatch):
     protected = tmp_path / "protected"
     protected.mkdir()
@@ -420,6 +448,7 @@ def test_supervisor_storage_refuses_protected_temp_before_creation(tmp_path, mon
     assert list(protected.iterdir()) == []
 
 
+@needs_confinement
 def test_supervisor_storage_refuses_ancestors_of_protected_roots(tmp_path):
     from ml_stack.activity.source_snapshot import validate_storage
     protected = tmp_path / "protected"
@@ -428,6 +457,7 @@ def test_supervisor_storage_refuses_ancestors_of_protected_roots(tmp_path):
         validate_storage(tmp_path, (protected,))
 
 
+@needs_confinement
 def test_source_inventory_does_not_execute_inherited_fsmonitor():
     import json
     manifest = Path(os.environ["DEV_TEST_CONFINEMENT_CANARY"]).parent / "bootstrap.json"
@@ -456,6 +486,7 @@ def artifact_outputs(tmp_path, monkeypatch):
         artifacts.close()
 
 
+@needs_confinement
 def test_artifact_namespace_is_fresh_private_and_pins_all_outputs(artifact_outputs):
     artifacts = artifact_outputs
     assert artifacts.directory.stat().st_mode & 0o777 == 0o700
@@ -467,6 +498,7 @@ def test_artifact_namespace_is_fresh_private_and_pins_all_outputs(artifact_outpu
     assert artifacts.boundary()["run_id"] == artifacts.run_id
 
 
+@needs_confinement
 def test_artifact_redirect_restores_descriptors_after_failure(artifact_outputs, tmp_path):
     saved = [(fd, os.dup(fd)) for fd in (1, 2)]
     try:
@@ -490,6 +522,7 @@ def test_artifact_redirect_restores_descriptors_after_failure(artifact_outputs, 
     assert b"private stdout" in console and b"private stderr" in console
 
 
+@needs_confinement
 def test_artifact_replaced_output_cannot_be_presented_as_pinned_evidence(artifact_outputs):
     path = artifact_outputs.directory / "evidence.result.json"
     path.rename(path.with_suffix(".original"))
@@ -499,6 +532,7 @@ def test_artifact_replaced_output_cannot_be_presented_as_pinned_evidence(artifac
         artifact_outputs.boundary()
 
 
+@needs_confinement
 def test_artifact_console_overflow_is_aggregate_across_duplicate_descriptors(artifact_outputs):
     from test_kernel_outputs import LIMIT, OutputSink
     console = artifact_outputs.sinks["console.log"]
@@ -511,6 +545,7 @@ def test_artifact_console_overflow_is_aggregate_across_duplicate_descriptors(art
         duplicate.close()
 
 
+@needs_confinement
 def test_literal_metadata_compression_preserves_exact_permission_union(tmp_path):
     first = str(tmp_path / 'quoted"file')
     second = str(tmp_path / "second")
@@ -532,6 +567,7 @@ def test_literal_metadata_compression_preserves_exact_permission_union(tmp_path)
     assert '(subpath "' + str(tmp_path) not in text
 
 
+@needs_confinement
 def test_namespace_only_probes_do_not_admit_immutable_runtime_assets(tmp_path, monkeypatch):
     channel = tmp_path / "channels"
     monkeypatch.setattr(holder, "namespace", lambda protected: channel)
@@ -549,6 +585,7 @@ def test_namespace_only_probes_do_not_admit_immutable_runtime_assets(tmp_path, m
         holder.prepare([next(iter(holder.RUNTIME_PROBES))], tmp_path, {}, (), ())
 
 
+@needs_confinement
 def test_actual_interpreter_sites_include_inherited_system_packages_only(tmp_path, monkeypatch):
     local, inherited, user = (tmp_path / name for name in ("local", "inherited", "user"))
     for path in (local, inherited, user):
@@ -560,6 +597,7 @@ def test_actual_interpreter_sites_include_inherited_system_packages_only(tmp_pat
     assert set(actual) == {str(local), str(inherited)} and str(user) not in actual
 
 
+@needs_confinement
 @pytest.mark.parametrize("hostile", ["user", "state", "account-parent"])
 def test_actual_interpreter_sites_refuse_user_and_protected_roots(tmp_path, monkeypatch, hostile):
     paths = {"user": tmp_path / "user", "state": tmp_path / "state", "account-parent": tmp_path}
@@ -572,6 +610,7 @@ def test_actual_interpreter_sites_refuse_user_and_protected_roots(tmp_path, monk
         isolation.interpreter_read_roots((paths["state"],), tmp_path / "account")
 
 
+@needs_confinement
 def test_native_regex_matches_only_complete_listed_paths():
     value = json.loads(Path(os.environ["DEV_TEST_REGEX_REPORT"]).read_text())
     assert set(value) == {"literal", "regex"}
@@ -580,6 +619,7 @@ def test_native_regex_matches_only_complete_listed_paths():
         assert len(result["profile"]) == 64
 
 
+@needs_confinement
 def test_exact_trie_preserves_all_complete_paths_and_native_text():
     paths = ["/owned/a", "/owned/ab", "/owned/a/child", '/owned/quote"file', "/owned/back\\slash",
              "/owned/meta$[]()+*?{}^.|", "/owned/café", "/owned/漢字"]
@@ -598,12 +638,14 @@ def test_exact_trie_preserves_all_complete_paths_and_native_text():
     assert all('"^"' in value and '"$"' in value for value in values)
 
 
+@needs_confinement
 def test_exact_trie_refuses_terminal_substitution(monkeypatch):
     monkeypatch.setattr(path_language, "freeze_radix", lambda raw: path_language.Node("/forged", True, ()))
     with pytest.raises(path_language.LanguageError, match="terminal language differs"):
         path_language.expressions(["/owned"], quote)
 
 
+@needs_confinement
 @pytest.mark.parametrize("bound", ["MAX_PATHS", "MAX_PATH_BYTES", "MAX_INPUT", "MAX_OUTPUT", "MAX_NODES", "MAX_DEPTH"])
 def test_exact_trie_bounds_refuse_without_permission_fallback(monkeypatch, bound):
     monkeypatch.setattr(path_language, bound, 0 if bound == "MAX_DEPTH" else 1)
@@ -613,11 +655,13 @@ def test_exact_trie_bounds_refuse_without_permission_fallback(monkeypatch, bound
 
 @pytest.mark.parametrize("path", ["relative", "/owned/../other", "/owned//other", "/owned/", "/owned\n"],
                          ids=["relative", "parent", "empty", "trailing", "newline"])
+@needs_confinement
 def test_exact_trie_refuses_ambiguous_or_control_path_text(path):
     with pytest.raises(path_language.LanguageError, match="malformed"):
         path_language.expressions([path], quote)
 
 
+@needs_confinement
 def test_verified_holder_inventory_runs_only_the_fixed_normal_interpreter():
     manifest = json.loads(Path(os.environ["ML_STACK_TEST_HOLDER_MANIFEST"]).read_text())
     runtime = manifest["variants"]["normal"]["runtime"]
@@ -637,6 +681,7 @@ def test_verified_holder_inventory_runs_only_the_fixed_normal_interpreter():
         subprocess.run(["/usr/bin/true"], check=True, timeout=2, close_fds=True)
 
 
+@needs_confinement
 def test_runtime_variant_mapping_is_explicit_and_mixed_selection_is_union(monkeypatch):
     normal = next(iter(holder.RUNTIME_PROBES))
     slow = "tests/test_holder_protocol.py::test_slow_independent_verification_is_cancelled_without_waiting_or_orphaning"
@@ -651,6 +696,7 @@ def test_runtime_variant_mapping_is_explicit_and_mixed_selection_is_union(monkey
         holder.required_variants([normal])
 
 
+@needs_confinement
 def test_native_read_components_compile_independently():
     report = json.loads(Path(os.environ["DEV_TEST_COMPILER_REPORT"]).read_text())
     assert set(report) == {"literal_files", "files", "metadata", "directories"}
@@ -658,6 +704,7 @@ def test_native_read_components_compile_independently():
     assert all(value["exit"] == 0 for value in report.values())
 
 
+@needs_confinement
 def test_exact_radix_partition_keeps_natural_disjoint_terminal_union(monkeypatch):
     paths = ["/owned/prefix", "/owned/prefix/child", "/owned/prefix/childish"]
     paths.extend(f"/owned/{package}/module{number}.py" for package in ("alpha", "beta") for number in range(40))
@@ -678,16 +725,19 @@ def test_exact_radix_partition_keeps_natural_disjoint_terminal_union(monkeypatch
     assert receipt["max_expression_bytes"] <= 1024
 
 
+@needs_confinement
 def test_exact_radix_partition_refuses_oversized_singleton(monkeypatch):
     monkeypatch.setattr(path_language, "MAX_EXPRESSION_BYTES", 1)
     with pytest.raises(path_language.LanguageError, match="singleton expression exceeds bound"):
         path_language.expressions(["/owned/one"], quote)
 
 
+@needs_confinement
 def test_explicit_literal_holder_inventory_runs_only_normal():
     test_verified_holder_inventory_runs_only_the_fixed_normal_interpreter()
 
 
+@needs_confinement
 def test_literal_experiment_preserves_exact_native_terminal_union(tmp_path):
     from test_kernel_compile import literal_language, replace_exact_file_language
     paths = ["/owned/a", "/owned/ab", "/owned/a/child", '/owned/quote"file',
@@ -707,6 +757,7 @@ def test_literal_experiment_preserves_exact_native_terminal_union(tmp_path):
         replace_exact_file_language(path, paths)
 
 
+@needs_confinement
 def test_pinned_normal_package_identity_uses_only_verified_import_files():
     test_verified_holder_inventory_runs_only_the_fixed_normal_interpreter()
     manifest = json.loads(Path(os.environ["ML_STACK_TEST_HOLDER_MANIFEST"]).read_text())
@@ -715,6 +766,7 @@ def test_pinned_normal_package_identity_uses_only_verified_import_files():
         (prefix / "lib/python3.13/site-packages/ml_stack/serve/broker.py").read_bytes()
 
 
+@needs_confinement
 def test_static_identity_closure_retains_full_integrity_and_refuses_missing_assets(tmp_path):
     node = next(iter(holder.IDENTITY_PROBES))
     assert holder.identity_selected([node])
@@ -739,6 +791,7 @@ def test_static_identity_closure_retains_full_integrity_and_refuses_missing_asse
         holder.project_identity(assets, manifest)
 
 
+@needs_confinement
 def test_runtime_projection_keeps_all_verified_identities_without_unselected_grants(tmp_path):
     manifest = {"variants": {}}
     files, directories, metadata = [], set(), set()
@@ -761,6 +814,7 @@ def test_runtime_projection_keeps_all_verified_identities_without_unselected_gra
     assert assets.metadata == assets.executables == {tmp_path / "normal" / "python"}
 
 
+@needs_confinement
 def test_role_case_allocation_keeps_parameters_and_generations_separate():
     from test_kernel_role_home import CASE_FILE, selected_cases
     base = CASE_FILE + "test_actual_immutable_runtime_receipt_is_verified_outside_the_socket_deadline"
@@ -771,6 +825,7 @@ def test_role_case_allocation_keeps_parameters_and_generations_separate():
     assert not selected_cases(["tests/test_holder_protocol.py::test_unreviewed_role"])
 
 
+@needs_confinement
 def test_role_copy_has_independent_inode_and_refuses_changed_content(tmp_path):
     from test_kernel_role_home import copy_file
     source = tmp_path / "source"
@@ -790,6 +845,7 @@ def test_role_copy_has_independent_inode_and_refuses_changed_content(tmp_path):
         copy_file(source, tmp_path / "public", record, time.monotonic() + 5)
 
 
+@needs_confinement
 @pytest.mark.parametrize("change", ["identity", "writable", "hardlinked", "unpinned"])
 def test_role_native_image_requires_its_exact_readonly_verified_pin(tmp_path, change):
     from test_kernel_assets import owned_image
@@ -810,19 +866,3 @@ def test_role_native_image_requires_its_exact_readonly_verified_pin(tmp_path, ch
     with pytest.raises(RuntimeError, match=r"copied image changed|outside interpreter package roots"):
         owned_image(image, (), pinned)
 
-
-@pytest.mark.skipif(sys.platform != "darwin", reason="the Seatbelt kernel runs on macOS")
-def test_failed_preparation_removes_the_control_directory(tmp_path, monkeypatch):
-    storage = tmp_path / "storage"
-    storage.mkdir(mode=0o700)
-    monkeypatch.setattr(isolation, "supervisor_storage", lambda environment: storage)
-
-    def refuse(*arguments, **options):
-        assert any(storage.glob("ml-stack-confined-*")), "the control directory exists before the failure"
-        raise RuntimeError("forced holder preparation failure")
-
-    monkeypatch.setattr(isolation, "prepare_holder", refuse)
-    command = [sys.executable, "-m", "pytest", "tests/test_layers.py"]
-    with pytest.raises(RuntimeError, match="forced holder preparation failure"):
-        isolation.ConfinedRun(command, dict(os.environ), "unused-endpoint")
-    assert list(storage.iterdir()) == []

@@ -356,7 +356,8 @@ def _rpc_socket(server, token):
     import socket
     connection = socket.create_connection(server.server_address, timeout=5)
     stream = connection.makefile("rwb")
-    stream.write(json.dumps({"token": token, "operation": "acquire", "label": "rpc proof"}).encode() + b"\n")
+    stream.write(json.dumps({"token": token, "operation": "acquire", "label": "rpc proof", "parent": None,
+                                  "phase": "test", "heavy": False}).encode() + b"\n")
     stream.flush()
     return connection, stream
 
@@ -369,7 +370,7 @@ def test_invalid_rpc_token_cannot_acquire_capacity(tmp_path, monkeypatch):
     try:
         server.admitted.set()
         server.collected.set()
-        connection, stream = _rpc_socket(server, "invalid")
+        connection, stream = _rpc_socket(server, "0" * 48)
         with connection, stream:
             assert "invalid admission token" in json.loads(stream.readline())["error"]
         assert rpc.testslots.status()["in_use"] == 0
