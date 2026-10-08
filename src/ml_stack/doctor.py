@@ -31,7 +31,7 @@ __all__ = ["HOOKS", "STALE_BUILD_DAYS", "ahead_of", "bench_of", "builds_of",
 STALE_BUILD_DAYS = 14
 """A managed llama.cpp older than this is noted."""
 
-HOOKS = ("pre-commit", "commit-msg", "pre-push")
+HOOKS = ("pre-commit", "commit-msg", "pre-push", "post-merge")
 """The git hooks every repository here installs, from the directory it ships them in."""
 
 _SHIPPED = ("scripts/hooks", "services/hooks")

@@ -1,7 +1,7 @@
 {
- "surfaces": 812,
+ "surfaces": 814,
  "by_status": {
-  "covered": 488,
+  "covered": 490,
   "partial": 197,
   "uncovered": 53,
   "n/a": 74,
@@ -79,7 +79,7 @@
    "unmapped": 0
   },
   "parser": {
-   "covered": 75,
+   "covered": 76,
    "partial": 0,
    "uncovered": 49,
    "n/a": 0,
@@ -100,7 +100,7 @@
    "unmapped": 0
   },
   "spawn": {
-   "covered": 56,
+   "covered": 57,
    "partial": 60,
    "uncovered": 0,
    "n/a": 2,
@@ -7695,6 +7695,23 @@
    "note": ""
   },
   {
+   "id": "parser:workspace/person_transcript.py",
+   "kind": "parser",
+   "source": "workspace/person_transcript.py",
+   "trust": "files, pages and archives from outside",
+   "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_person_statement.py::test_no_typed_phrasing_becomes_an_authorization",
+    "tests/test_person_hooks.py::test_a_prompt_the_person_did_not_type_leaves_no_record",
+    "tests/test_person_hooks.py::test_a_missing_transcript_entry_fails_closed_after_a_bounded_wait",
+    "tests/test_person_hooks.py::test_an_unreadable_transcript_and_a_mismatched_text_fail_closed",
+    "tests/test_person_hooks.py::test_a_transcript_the_calling_agent_wrote_elsewhere_records_nothing",
+    "tests/test_person_hooks.py::test_a_hundred_megabyte_transcript_is_read_from_its_tail_within_the_hook_budget"
+   ],
+   "note": "a transcript entry that is not a typed human prompt on a pinned Claude Code version, is missing, unreadable or differs from the hook prompt records nothing; a forged line by a same-user process is the documented threat-model limit"
+  },
+  {
    "id": "parser:workspace/project_connection.py",
    "kind": "parser",
    "source": "workspace/project_connection.py",
@@ -11743,6 +11760,19 @@
     "tests/test_redteam_spawn.py::test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line"
    ],
    "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
+  },
+  {
+   "id": "spawn:workspace/person_targets.py:_run",
+   "kind": "spawn",
+   "source": "workspace/person_targets.py:_run",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_person_hooks.py::test_another_commit_another_repository_or_another_remote_does_not_match",
+    "tests/test_person_guards.py::test_an_approval_covers_exactly_one_fast_forward_to_the_approved_commit"
+   ],
+   "note": "fixed git argument vectors with a timeout; the repository, remote, commit and tree an authorization binds are read from git, never from prompt or model text"
   },
   {
    "id": "spawn:worktreerules.py:_branch",
