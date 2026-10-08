@@ -146,7 +146,7 @@ def resume(ws, token, name, number, reason):
         if prior.get('owner') != (agent.identity or name):
             raise Denied('the blocked projection belongs to another worker')
         if any(node['attrs'].get('issue', {}).get('key') == key for node in graph.nodes('issue-dispatch')):
-            raise Denied('use canonical TaskBoard resume with its existing retry budget')
+            raise Denied('use TaskBoard resume with its existing retry budget')
         before, decision = f'issue-attempt:{uuid4().hex}', f'issue-recovery:{uuid4().hex}'
         graph.upsert_node({'id': before, 'kind': 'issue-attempt', 'label': key, 'attrs': prior})
         graph.upsert_node({'id': decision, 'kind': 'issue-recovery', 'label': key,
@@ -259,7 +259,7 @@ def pick(ws, agent, *, fetcher=fetch, clock=time.time, exclude=frozenset()):
 
 
 def finish(ws, issue, agent, result, *, clock=time.time):
-    """Project a proposed or blocked canonical outcome without completion credit."""
+    """Project a proposed or blocked outcome without completion credit."""
     kind, text = result
     with held(ws.base / "issue-backlog.lock"), _store(ws) as graph:
         record = _record(graph, issue["key"])

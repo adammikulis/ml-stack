@@ -1,4 +1,4 @@
-"""Canonical structured tasks and linked outcomes in the workspace coordination graph."""
+"""Structured tasks and linked outcomes in the workspace coordination graph."""
 
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ class TaskBoard:
 
     def _task(self, graph: GraphStore, ident: str) -> dict[str, Any]:
         if type(ident) is not str or not TASK_ID.fullmatch(ident):
-            raise ValueError('a canonical task ID is required')
+            raise ValueError('a task ID is required')
         task = record(graph, ident, 'task')
         if fingerprint({key: task[key] for key in SPEC_FIELDS}) != task['spec_hash']:
             raise ValueError('the task specification changed after creation')

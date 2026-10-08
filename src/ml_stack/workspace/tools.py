@@ -239,7 +239,7 @@ def workspace_file_save(handle: str, path: str) -> dict[str, Any]:
 
 
 def workspace_tasks() -> dict[str, Any]:
-    """List authorized canonical tasks and verified progress metrics."""
+    """List authorized tasks and verified progress metrics."""
     return TaskBoard(_workspace()).list(_token())
 
 

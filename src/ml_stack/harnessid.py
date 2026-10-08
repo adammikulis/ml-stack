@@ -58,7 +58,7 @@ def brief(name: str, alias: str, harness: str, parent: str, orders_from: Sequenc
 
 def invite(name: str, project_dir: Path, parent: str, say: Callable[[str], None],
            *, claim: tuple[str, str] = ("", "")) -> Seat:
-    """Connect a local or canonical project agent under its authenticated authority."""
+    """Connect a local or project agent under its authenticated authority."""
     if not valid_name(name):
         say(f"error: {name!r} is not a usable agent id (a-z, 0-9, . _ -; up to {LONGEST})")
         raise ValueError("the coding agent needs a usable workspace identity")

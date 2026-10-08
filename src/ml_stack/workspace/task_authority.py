@@ -23,7 +23,7 @@ def authorize(ws, token, worker, task):
     if caller.role == HUMAN or child.role == HUMAN or caller.id == child.id:
         raise Denied('task management requires separate authenticated agents and a registered parent or task creator')
     if type(task) is not str or not TASK_ID.fullmatch(task):
-        raise ValueError('a canonical task ID is required')
+        raise ValueError('a task ID is required')
     with held(ws.base / 'coordination.lock'), GraphStore(ws.base / 'coordination.db') as graph:
         spec = record(graph, task, 'task')
         if fingerprint({key: spec[key] for key in SPEC_FIELDS}) != spec['spec_hash']:
@@ -41,7 +41,7 @@ def authorize(ws, token, worker, task):
         raise Denied('the worker must already take orders from the task creator')
     status = la.status_of(ws, runner.name)
     if status.get('state') == 'working' and status.get('task') and status['task'] != task:
-        raise Denied('the worker is executing another canonical task')
+        raise Denied('the worker is executing another task')
     if spec['state'] not in ('queued', 'working', 'blocked', 'review', 'accepted'):
         raise Denied('the task is no longer active')
     return runner, spec

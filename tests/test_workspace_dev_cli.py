@@ -52,9 +52,9 @@ def test_cli_enrolls_authenticated_local_agent_without_manual_metadata(monkeypat
     monkeypatch.setattr(project_connection, "RemoteWorkspace", lambda *a, **kw: remote)
     monkeypatch.setattr(project_connection, "CanonicalWorkspace", lambda remote, token: (remote, token))
     args = SimpleNamespace(agent="worker", token_file="")
-    canonical, token = cli._context(args, choice)
+    board_ws, token = cli._context(args, choice)
     assert enrolled == [(tmp_path, "worker", (model, harness), choice)]
-    assert canonical == (remote, token) and token == "project-token"
+    assert board_ws == (remote, token) and token == "project-token"
     assert args.agent == "worker-device"
 
 
@@ -396,7 +396,7 @@ def test_setup_saved_standard_agent_attaches_without_device_registration(tmp_pat
     assert not (kit.base / 'device-accounts.db').exists()
 
 
-def test_saved_canonical_git_grant_refuses_another_repository(repository, tmp_path, monkeypatch):
+def test_saved_git_grant_refuses_another_repository(repository, tmp_path, monkeypatch):
     import json
 
     from workspace_kit import Kit, clean_env
@@ -421,18 +421,18 @@ def test_saved_canonical_git_grant_refuses_another_repository(repository, tmp_pa
              '-c', 'commit.gpgsign=false', 'commit', '-m', 'fixture'], cwd=foreign)
     with pytest.raises(Denied, match='not authorized'), device_agent.owned_project_session(
             kit.ws, token, 'worker', foreign):
-        pytest.fail('another repository received canonical project authorization')
+        pytest.fail('another repository received project authorization')
     (foreign / '.ml-stack-project.json').write_text(json.dumps({
         'kind': 'project-checkout', 'project_id': grant['key']}))
     with pytest.raises(Denied, match='not authorized'), device_agent.owned_project_session(
             kit.ws, token, 'worker', foreign):
-        pytest.fail('forged checkout metadata received canonical project authorization')
+        pytest.fail('forged checkout metadata received project authorization')
     monkeypatch.setenv('GIT_DIR', str(repository / '.git'))
     monkeypatch.setenv('GIT_WORK_TREE', str(repository))
     monkeypatch.setenv('GIT_COMMON_DIR', str(repository / '.git'))
     with pytest.raises(Denied, match='not authorized'), device_agent.owned_project_session(
             kit.ws, token, 'worker', foreign):
-        pytest.fail('inherited Git selectors received canonical project authorization')
+        pytest.fail('inherited Git selectors received project authorization')
 
 
 @pytest.mark.slow

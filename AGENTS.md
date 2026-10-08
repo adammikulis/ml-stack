@@ -158,7 +158,7 @@ that would serialize unrelated changes.
 A clean checkout can fast-forward or switch to an exact independently reviewed commit under
 its physical worktree and branch claims. Do not reserve every incoming source file for that
 baseline move. Preserve unique branch history before switching. New source edits, custom
-staging and conflict resolutions still require their named canonical source-area claims.
+staging and conflict resolutions still require their named source-area claims.
 
 Overlap checks and handoffs are atomic. Record the authenticated owner, actual process identity
 and birth time, source commit and environment where the maintained allocation supports them.
@@ -324,7 +324,7 @@ retained primary checkout is never removed as temporary-worktree cleanup.
 Whoever merges, prunes: the lander removes its own worktree and branch in the same step. A merge
 is not finished until `git worktree list` shows only trees with live work in them.
 
-Canonical coding tasks own their worktree lifecycle: assignment reserves the path and branch,
+Coding tasks own their worktree lifecycle: assignment reserves the path and branch,
 claiming creates the checkout, independent review accepts the proposal, and gated integration
 lands the work and verifies cleanup before completion. Use the maintained task lifecycle
 ([docs/tasks.md](docs/tasks.md)); a worker report cannot bypass its completion gate.

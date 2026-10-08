@@ -41,7 +41,7 @@ class WorkLedger:
         return self.sealed.edit(change)
 
     def record_contribution(self, evidence: dict[str, Any]) -> dict[str, Any]:
-        """Persist one independently reviewed canonical attempt, with infrastructure excluded from ratings."""
+        """Persist one independently reviewed attempt, with infrastructure excluded from ratings."""
         ident = 'contribution:' + hashlib.sha256(
             f"{evidence['workspace']}:{evidence['completion']}".encode()).hexdigest()
         def change(graph):
@@ -83,7 +83,7 @@ class WorkLedger:
         if len(previous) != 64 or any(char not in '0123456789abcdef' for char in previous) \
                 or not current.startswith('workspace:') or len(current) != 42 \
                 or any(char not in '0123456789abcdef' for char in current[10:]):
-            raise ValueError('migration needs an old path digest and canonical coordinator ID')
+            raise ValueError('migration needs an old path digest and coordinator ID')
         def change(graph):
             _namespace_collisions(graph, previous, current)
             count = 0

@@ -1,4 +1,4 @@
-"""Project publication, hostile archives and canonical checkout authority."""
+"""Project publication, hostile archives and checkout authority."""
 
 import hashlib
 import io

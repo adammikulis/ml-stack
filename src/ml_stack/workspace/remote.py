@@ -152,11 +152,11 @@ class RemoteWorkspace:
         return result
 
     def native_reserve(self, name: str, resources: list, label: str = "") -> list:
-        """Atomically reserve canonical project areas and branches for the selected worker."""
+        """Atomically reserve project areas and branches for the selected worker."""
         return self.call("native.reserve", self.token(agent=name), resources, label=label)
 
     def native_release(self, name: str, kind: str, relativekey: str) -> dict:
-        """Release the selected worker's canonical project resource."""
+        """Release the selected worker's project resource."""
         return self.call("native.release", self.token(agent=name), kind, relativekey)
 
     def token(self, *, agent: str = "", token_file: str = "") -> str:

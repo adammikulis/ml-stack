@@ -54,7 +54,7 @@ def _seconds(value: str) -> float | None:
 OPTIONS = [
     flag("action", choices=ACTIONS, help="start a local model as an agent, stop one, or list them"),
     flag("target", nargs="?", default="", metavar="NAME", help="stop: the agent to stop"),
-    flag("--task", default="", help="existing assigned canonical task authorizing worker management"),
+    flag("--task", default="", help="existing assigned task authorizing worker management"),
     flag("--model", default=localmodel.AUTO, metavar="auto|ID",
          help="auto: the best downloaded Qwen model that fits this machine, or the id "
               "of a downloaded model"),
@@ -216,7 +216,7 @@ def run(args: argparse.Namespace, ws: Workspace) -> int:
         repo = args.repo or (backlog.repository(project) if project else "")
         backlog.configure(ws, token, args.target, repo, project)
         issuepump.start(ws, token, args.target)
-        say(f"{args.target} is pulling open issues from {repo} into its canonical task queue")
+        say(f"{args.target} is pulling open issues from {repo} into its task queue")
         return 0
     provenance.told(args.lease_for)
     handler: Any = _start if args.action == "start" else _stop
