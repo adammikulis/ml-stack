@@ -181,7 +181,8 @@ def test_job_done_survives_any_error_from_the_board():
 
 def test_acting_survives_any_error_from_the_workspace(monkeypatch):
     monkeypatch.setattr(testboard.cli, "_context", lambda args: (_ for _ in ()).throw(ZeroDivisionError("x")))
-    assert testboard.acting("someone") is None
+    monkeypatch.setenv("ML_STACK_WORKSPACE_AGENT", "someone")
+    assert testboard.acting() is None
 
 
 # -- N6: an error that belongs to no file is not a pass -----------------------------------------------------
