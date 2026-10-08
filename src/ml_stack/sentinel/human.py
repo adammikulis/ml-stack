@@ -53,16 +53,23 @@ class HumanGrant:
 
 def mint(action: str, subject: str, *, typed: Callable[[str], str] = input,
          terminal: tuple[bool, bool] | None = None,
-         env: Mapping[str, str] | None = None, gate: str = "") -> HumanGrant:
+         env: Mapping[str, str] | None = None) -> HumanGrant:
     """A grant for ``action`` on ``subject`` when a person is at a terminal and types the
     subject back (``terminal`` is stdin and stdout being terminals, read from the process
-    when not given). With a delegable ``gate`` a lead agent is granted without the typed
-    confirmation while the gate is delegated. Refused when stdin or stdout is not a terminal,
-    when the environment carries an agent marker, or when the typed text differs."""
-    if gate and authority.require(gate, action, terminal, env) == authority.DELEGATED:
+    when not given). Refused when stdin or stdout is not a terminal, when the environment
+    carries an agent marker, or when the typed text differs."""
+    require_person(action, terminal, env)
+    if typed(f"type {subject} to {action} it: ").strip() != subject:
+        raise HumanRequired(f"{action} not confirmed")
+    return HumanGrant(action, subject, time.time() + GRANT_TTL_S, _MINT)
+
+
+def mint_gated(gate: str, action: str, subject: str, *, typed: Callable[[str], str] = input,
+               terminal: tuple[bool, bool] | None = None) -> HumanGrant:
+    """A grant as `mint`, except that a lead agent is granted without the typed confirmation
+    while ``gate`` is delegated."""
+    if authority.require(gate, action, terminal) == authority.DELEGATED:
         return HumanGrant(action, subject, time.time() + GRANT_TTL_S, _MINT)
-    if not gate:
-        require_person(action, terminal, env)
     if typed(f"type {subject} to {action} it: ").strip() != subject:
         raise HumanRequired(f"{action} not confirmed")
     return HumanGrant(action, subject, time.time() + GRANT_TTL_S, _MINT)

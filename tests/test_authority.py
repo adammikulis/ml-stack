@@ -114,11 +114,11 @@ def test_a_delegated_quarantine_gate_grants_without_the_typed_confirmation(monke
     def typed(prompt):
         raise AssertionError("asked a person to type")
 
-    grant = human.mint("release", "q1", typed=typed, terminal=(False, False), gate="sentinel.quarantine")
+    grant = human.mint_gated("sentinel.quarantine", "release", "q1", typed=typed, terminal=(False, False))
     grant.check("release", "q1")
     authority.set_state(["sentinel.quarantine"], authority.PERSON, by="lead")
     with pytest.raises(HumanRequired):
-        human.mint("release", "q1", typed=typed, terminal=(False, False), gate="sentinel.quarantine")
+        human.mint_gated("sentinel.quarantine", "release", "q1", typed=typed, terminal=(False, False))
 
 
 def wired_call(env, via):

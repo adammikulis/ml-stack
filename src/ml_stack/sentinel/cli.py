@@ -128,7 +128,7 @@ def _show(args: argparse.Namespace) -> int:
     record = _find(args.subject)
     data = record.to_json()
     if args.text or args.html:
-        grant = human.mint("inspect", record.id, gate="sentinel.quarantine")
+        grant = human.mint_gated("sentinel.quarantine", "inspect", record.id)
         text = sentinel.default().store.read(record.id, grant)
         say(inert.render_html(record.id, text) if args.html else inert.render_text(text))
         return 0
@@ -137,14 +137,14 @@ def _show(args: argparse.Namespace) -> int:
 
 def _release(args: argparse.Namespace) -> int:
     record = _find(args.subject)
-    done = sentinel.default().store.release(record.id, human.mint("release", record.id, gate="sentinel.quarantine"))
+    done = sentinel.default().store.release(record.id, human.mint_gated("sentinel.quarantine", "release", record.id))
     say(f"{done.id} released ({done.kind}:{done.key})")
     return 0
 
 
 def _purge(args: argparse.Namespace) -> int:
     record = _find(args.subject)
-    done = sentinel.default().store.purge(record.id, human.mint("purge", record.id, gate="sentinel.quarantine"))
+    done = sentinel.default().store.purge(record.id, human.mint_gated("sentinel.quarantine", "purge", record.id))
     say(f"{done.id} purged: what was held is deleted, the record stays")
     return 0
 
@@ -270,7 +270,7 @@ def mode(args: argparse.Namespace) -> int:
         say(sentinel.default().mode.value)
         return 0
     try:
-        grant = human.mint("mode", "sentinel", gate="sentinel.policy")
+        grant = human.mint_gated("sentinel.policy", "mode", "sentinel")
     except human.HumanRequired as exc:
         warn(f"ml-stack security: {exc}")
         return 2

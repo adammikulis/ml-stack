@@ -18,8 +18,8 @@ from types import SimpleNamespace
 import pytest
 from workspace_kit import SRC, STRIPPED, clean_env
 
-from ml_stack.briefing import REQUIRED_BRIEFING
 from ml_stack import authority
+from ml_stack.briefing import REQUIRED_BRIEFING
 from ml_stack.workspace import Workspace, coordinator_config, guide, onboard, project, tokens
 from ml_stack.workspace.identity import Denied
 

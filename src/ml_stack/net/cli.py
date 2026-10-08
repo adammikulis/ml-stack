@@ -95,7 +95,7 @@ def hosts(args: argparse.Namespace) -> int:
 def approve_host(args: argparse.Namespace) -> int:
     """Record an approval for one exact host name (a person at a terminal)."""
     try:
-        human.mint("approve-host", args.host, gate="sentinel.policy")
+        human.mint_gated("sentinel.policy", "approve-host", args.host)
     except human.HumanRequired as exc:
         warn(f"ml-stack security: {exc}")
         return 2
@@ -138,7 +138,7 @@ def scan_policy(args: argparse.Namespace) -> int:
             warn("ml-stack security: say what to do: refuse, warn or allow (on or off for scan_models)")
             return 2
         try:
-            human.mint("scan-policy", args.category, gate="sentinel.policy")
+            human.mint_gated("sentinel.policy", "scan-policy", args.category)
         except human.HumanRequired as exc:
             warn(f"ml-stack security: {exc}")
             return 2
