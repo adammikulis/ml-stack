@@ -105,6 +105,21 @@ def test_a_name_from_the_graph_is_refused(tmp_path):
     assert "Wren Halloway" in said
 
 
+def test_a_merge_is_checked_for_what_it_adds_not_for_what_the_other_parent_brought(tmp_path):
+    where = repo(tmp_path, PEOPLE)
+    git = lambda *a: subprocess.run(["git", *a], cwd=where, check=True, capture_output=True)  # noqa: E731
+    commit(where, {"base.txt": "clean\n"}, "base")
+    git("checkout", "-q", "-b", "other")
+    commit(where, {"theirs.txt": "Ask Wren Halloway about the kiln.\n"}, "theirs")
+    git("checkout", "-q", "-")
+    commit(where, {"ours.txt": "clean too\n"}, "ours")
+    git("merge", "--no-commit", "--no-ff", "other")
+    said = io.StringIO()
+    assert hook.main(env=wiring(tmp_path), root=where, stdout=said) == 0, said.getvalue()
+    code, said = check(where, tmp_path, added="Ask Wren Halloway about the kiln.\n")
+    assert code == 1 and "Wren Halloway" in said
+
+
 def test_a_short_real_name_keeps_its_protection(tmp_path):
     """Li, Bo, Ng, Wu are names. A length floor meant for guessed-at handles dropped anything
     under four characters out of the list entirely, so the shortest real names -- which a
