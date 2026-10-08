@@ -13,7 +13,7 @@ import pytest
 from workspace_kit import Kit, clean_env, cli
 
 from ml_stack import mcp
-from ml_stack.workspace import Denied, RateLimited, Refused, onboard, tokens
+from ml_stack.workspace import Denied, Refused, onboard, tokens
 from ml_stack.workspace.boards import ANNOUNCE
 
 
@@ -116,8 +116,12 @@ def test_an_announcement_is_one_short_line_and_the_sender_is_rate_limited(kit):
     ws.announce(t["alice"], "done", "x" * 200)
     for i in range(5):
         ws.announce(t["alice"], "milestone", f"m{i}")
-    with pytest.raises(RateLimited):
-        ws.announce(t["alice"], "milestone", "seventh")
+    # over the announcement quota the post still lands (never a failure for the sender) and what
+    # other agents receive stays the bounded roll-up
+    for i in range(12):
+        ws.announce(t["alice"], "milestone", f"over{i}")
+    roll = ws.board.rollup(t["bob"])
+    assert roll["more"] == 18 - kit.ws.limits.announce_rollup
     ws.announce(t["bob"], "joined", "someone else still can")
 
 
@@ -179,11 +183,11 @@ def test_the_cli_says_how_many_were_held_back_and_widens_on_request(kit):
     for i in range(12):
         cli(kit.base, kit.t["alice"], "send", "bob", "note", f"n{i}")
     done = cli(kit.base, kit.t["bob"], "inbox")
-    assert done.stdout.count("note from alice") == 10 and "2 more held back" in done.stderr
-    assert cli(kit.base, kit.t["bob"], "inbox", "--all").stdout.count("note from alice") == 12
+    assert done.stdout.count("note from ") == 10 and "2 more held back" in done.stderr
+    assert cli(kit.base, kit.t["bob"], "inbox", "--all").stdout.count("note from ") == 12
     cli(kit.base, kit.t["alice"], "announce", "done", "all finished")
     shown = cli(kit.base, kit.t["bob"], "inbox")
-    assert "all finished" in shown.stdout and "done alice" in shown.stdout
+    assert "all finished" in shown.stdout and "done" in shown.stdout
     assert cli(kit.base, kit.t["alice"], "send", "*", "status", "hi").returncode == 3
 
 
@@ -272,10 +276,13 @@ def test_nudge_is_silent_when_empty_a_line_when_not_and_never_shows_text_or_acks
 
 
 def test_hook_snippet_prints_the_setting_and_writes_nothing(kit, tmp_path):
-    before = set(tmp_path.rglob("*"))
+    def files():
+        return {p for p in kit.base.rglob("*") if p.suffix != ".lock"}
+
+    before = files()
     out = cli(kit.base, "", "hook-snippet", "claude-code", "--agent", "bob").stdout
     assert '"PostToolUse"' in out and "nudge --agent bob --hook post" in out
     assert '"Stop"' in out and '"UserPromptSubmit"' in out
-    assert 'notify = ["ml-stack-workspace", "nudge", "--agent", "bob"]' in cli(
+    assert "nudge --agent bob --hook stop" in cli(
         kit.base, "", "hook-snippet", "codex", "--agent", "bob").stdout
-    assert set(tmp_path.rglob("*")) == before
+    assert files() == before

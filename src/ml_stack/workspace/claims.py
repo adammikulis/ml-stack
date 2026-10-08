@@ -49,12 +49,16 @@ def alive(pid: int) -> bool:
 
 
 def _holder_alive(claim: dict[str, Any]) -> bool:
-    """Whether the claim's pid runs and did not start after the claim was taken (a reused pid did)."""
-    pid = int(claim["pid"])
+    """Whether the claim's pid runs and did not start after the claim was taken (a reused pid did).
+    A native-harness reservation names its session as ``owner_pid`` with ``owner_started``."""
+    pid = int(claim.get("pid") or claim.get("owner_pid") or 0)
+    if not pid:
+        return True
     if not alive(pid):
         return False
     seen = started_at(pid)
-    return seen is None or seen <= float(claim["since"]) + 1.0
+    taken = float(claim["since"]) if claim.get("pid") else float(claim.get("owner_started") or claim["since"])
+    return seen is None or seen <= taken + 1.0
 
 
 def normal(kind: str, key: str) -> str:
@@ -125,7 +129,7 @@ class Claims:
         now = self.clock()
         dead = [{**c, "reason": "expired" if c["expires"] <= now else "dead-pid"}
                 for c in claims.values()
-                if c["expires"] <= now or (c["pid"] and not _holder_alive(c))]
+                if c["expires"] <= now or ((c["pid"] or c.get("owner_pid")) and not _holder_alive(c))]
         for claim in dead:
             claims.pop(f"{claim['kind']}:{claim['key']}", None)
             if self.on_swept:

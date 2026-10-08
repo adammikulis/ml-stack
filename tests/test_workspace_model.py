@@ -195,6 +195,15 @@ def test_a_helper_label_has_its_own_model_or_inherits_the_parents(kit):
     assert ws.model_of(child) == ("claude-sonnet-5-5", "inherited")
 
 
+def test_a_twenty_first_helper_evicts_the_oldest_instead_of_failing(kit):
+    ws, token = kit.ws, kit.tokens["alice"]
+    for i in range(25):
+        ws.claim_model(token, "claude-haiku-5", label=f"h{i}")
+    assert ws.model_of("alice", "h24")[0] == "claude-haiku-5"
+    assert ws.model_of("alice", "h4") == ("", "") or ws.model_of("alice", "h4")[1] == "inherited"
+    assert ws.model_of("alice", "h5")[1] == "claimed"
+
+
 def test_the_output_is_byte_stable(kit):
     ws = kit.ws
     ws.claim_model(kit.tokens["alice"], "gpt-5.1", "codex")

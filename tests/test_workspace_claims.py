@@ -242,6 +242,25 @@ def test_a_claim_is_released_when_its_process_dies(kit):
             child.wait()
 
 
+def test_a_native_harness_reservation_is_released_when_its_session_dies(kit):
+    """A closed terminal leaves a reservation naming `owner_pid`; the next look takes it over."""
+    a, b = kit.agent("alpha"), kit.agent("beta")
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
+    try:
+        target = str(kit.base / "shared.txt")
+        kit.ws.claims.reserve(kit.ws.auth(a), [("file", target)], {"owner_pid": child.pid,
+                                                      "owner_started": claims.started_at(child.pid)})
+        with pytest.raises(Conflict):
+            kit.ws.claim(b, "file", target)
+        child.kill()
+        child.wait(timeout=30)
+        assert kit.ws.claim(b, "file", target)["owner"] == "beta"
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.wait()
+
+
 @pytest.mark.skipif(os.name != "nt", reason="native Windows process probes")
 @pytest.mark.redteam
 def test_windows_claim_process_probe_never_sends_a_signal(monkeypatch):

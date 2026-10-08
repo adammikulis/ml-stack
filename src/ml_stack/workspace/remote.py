@@ -18,7 +18,7 @@ from ml_stack.graph.store import GraphStore
 from ml_stack.http import ServerError, open_stream
 from ml_stack.workspace import coordinator_client, device_metadata, tokens
 from ml_stack.workspace.chain import held
-from ml_stack.workspace.identity import Denied, valid_id
+from ml_stack.workspace.identity import BoardUnavailable, Denied, valid_id
 
 
 class RemoteWorkspace:
@@ -55,7 +55,7 @@ class RemoteWorkspace:
             peers = Peer.discover(key=key, timeout_s=2)
             matched = [peer for peer in peers if device_address(peer, self.host)]
             if len(matched) != 1:
-                raise Denied("the project host was not authenticated by cluster discovery; check its address and cluster")
+                raise BoardUnavailable("the project host was not authenticated by cluster discovery; check its address and cluster")
             self.device_cert = matched[0].beacon.cert if matched[0].beacon else ""
             if self.device_cert:
                 http.pin(parts.netloc, tls.pinned_context(self.device_cert))
@@ -89,8 +89,10 @@ class RemoteWorkspace:
                 return result
         except ServerError as exc:
             if exc.status in {404, 501}:
-                raise Denied("this host has no shared project board endpoint; upgrade or select its board host") from exc
-            raise Denied(f"project board unavailable: {exc}") from exc
+                raise BoardUnavailable("this host has no shared project board endpoint; upgrade or select its board host") from exc
+            # a refusal the board answered (400, 429...) is the board's word; no answer is an outage
+            outage = exc.status is None or exc.status >= 500
+            raise (BoardUnavailable if outage else Denied)(f"project board unavailable: {exc}") from exc
 
     def join(self, code: str, name: str, *, model: str = "", harness: str = "") -> dict:
         self._prepare_storage()
