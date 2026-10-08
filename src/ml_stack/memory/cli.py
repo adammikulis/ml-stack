@@ -10,6 +10,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from ml_stack import authority
 from ml_stack.command import Group, flag, option
 from ml_stack.log import say, warn
 from ml_stack.memory.facts import KINDS, SOURCES, Fact, Refused
@@ -17,8 +18,7 @@ from ml_stack.memory.project import SCOPES, at
 from ml_stack.memory.store import FACT_LINKS, Setup, Store, Tampered
 from ml_stack.memory.union import Memory
 from ml_stack.memory.vault import KeyUnavailable
-from ml_stack.person import is_terminal
-from ml_stack.sentinel.human import HumanRequired, require_person
+from ml_stack.person import HumanRequired, is_terminal
 
 __all__ = ["COMMAND"]
 
@@ -39,8 +39,8 @@ def _guarded(fn: Handler, *, writes: bool) -> Callable[[argparse.Namespace], int
     command that writes also needs a terminal on stdin and stdout."""
     def run(args: argparse.Namespace) -> int:
         try:
-            require_person(f"ml-stack-memory {args.cmd}",
-                           (is_terminal(sys.stdin), True if not writes else is_terminal(sys.stdout)))
+            authority.require("memory.admin", f"ml-stack-memory {args.cmd}",
+                              (is_terminal(sys.stdin), True if not writes else is_terminal(sys.stdout)))
         except HumanRequired as exc:
             warn(str(exc))
             return DENIED

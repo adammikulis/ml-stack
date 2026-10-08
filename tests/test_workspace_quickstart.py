@@ -19,7 +19,7 @@ import pytest
 from workspace_kit import SRC, STRIPPED, clean_env
 
 from ml_stack.briefing import REQUIRED_BRIEFING
-from ml_stack.sentinel import human
+from ml_stack import authority
 from ml_stack.workspace import Workspace, coordinator_config, guide, onboard, project, tokens
 from ml_stack.workspace.identity import Denied
 
@@ -41,8 +41,8 @@ def base(monkeypatch, tmp_path):
 
 
 def at_terminal(monkeypatch):
-    real = human.require_person
-    monkeypatch.setattr(human, "require_person",
+    real = authority.require_person
+    monkeypatch.setattr(authority, "require_person",
                         lambda action, terminal=None, env=None: real(action, (True, True), env))
 
 
@@ -53,7 +53,7 @@ def ws(base):
 
 def test_agent_connect_initializes_without_person_identity(base, ws, monkeypatch, tmp_path):
     monkeypatch.setenv("ML_STACK_NONINTERACTIVE", "1")
-    monkeypatch.setattr(human, "require_person", lambda *a, **k: pytest.fail("person flow"))
+    monkeypatch.setattr(authority, "require_person", lambda *a, **k: pytest.fail("person flow"))
     found = project.describe(str(tmp_path))
     connected = guide.agent_connect(ws, "worker", found)
     assert connected["id"] == "worker" and connected["state"] == "connected"

@@ -9,7 +9,7 @@ import time
 import pytest
 from workspace_kit import Kit, clean_env, cli
 
-from ml_stack.sentinel import human
+from ml_stack import authority
 from ml_stack.workspace import onboard
 from ml_stack.workspace.remote_protocol import METHODS
 
@@ -107,8 +107,8 @@ def test_hooks_print_nothing_and_exit_zero_when_the_workspace_is_unreachable(tmp
 
 def test_the_installer_adds_the_three_hooks_idempotently_and_keeps_other_hooks(monkeypatch, tmp_path):
     clean_env(monkeypatch, tmp_path)
-    real = human.require_person
-    monkeypatch.setattr(human, "require_person", lambda a, terminal=None, env=None: real(a, (True, True), env))
+    real = authority.require_person
+    monkeypatch.setattr(authority, "require_person", lambda a, terminal=None, env=None: real(a, (True, True), env))
     path = tmp_path / "settings.json"
     path.write_text(json.dumps({"model": "x", "hooks": {
         "PostToolUse": [

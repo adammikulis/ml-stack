@@ -388,10 +388,10 @@ class TestSeat:
 
     @pytest.fixture
     def person(self, monkeypatch):
-        from ml_stack.sentinel import human
+        from ml_stack import authority
 
-        real = human.require_person
-        monkeypatch.setattr(human, "require_person",
+        real = authority.require_person
+        monkeypatch.setattr(authority, "require_person",
                             lambda action, terminal=None, env=None: real(action, (True, True), env))
 
     def test_the_name_is_local_model_harness_cleaned_to_what_an_id_allows(self):

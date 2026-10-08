@@ -9,8 +9,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ml_stack import authority
 from ml_stack.briefing import REQUIRED_BRIEFING
-from ml_stack.sentinel import human
 from ml_stack.workspace import agent_invites, device_metadata, tokens
 from ml_stack.workspace.identity import AGENT, HUMAN, LEAD, Denied, Identity, valid_name
 from ml_stack.workspace.modelid import CLAIMED, clean_harness, clean_model
@@ -57,7 +57,7 @@ def install_hooks(settings: Path, name: str) -> list[str]:
     """Write the PostToolUse, Stop and UserPromptSubmit nudge hooks for ``name`` into the Claude
     Code ``settings`` file, replacing earlier nudge hooks and keeping every other one. A person
     at a terminal only. Returns the events written."""
-    human.require_person("workspace install-hooks")
+    authority.require("workspace.setup", "workspace install-hooks")
     check_names([name])
     data = json.loads(settings.read_text()) if settings.exists() else {}
     hooks = data.setdefault("hooks", {})
@@ -234,7 +234,7 @@ def join(ws: Workspace, code: str, wanted: str, ttl_s: float = 0.0,
 def setup(ws: Workspace, names: list[str], rotate: list[str], ttl_s: float) -> Outcome:
     """Initialise the workspace if needed and give each of ``names`` a token file; an agent that
     already has one keeps it unless it is in ``rotate``. A person at a terminal only."""
-    human.require_person("workspace setup")
+    authority.require("workspace.setup", "workspace setup")
     wanted = [*dict.fromkeys([*names, *rotate])]
     check_names(wanted)
     for name in wanted:
@@ -265,7 +265,7 @@ def setup(ws: Workspace, names: list[str], rotate: list[str], ttl_s: float) -> O
 
 def hello(ws: Workspace, name: str) -> dict[str, object]:
     """Put the first message in ``name``'s inbox; a person at a terminal only."""
-    human.require_person("workspace hello")
+    authority.require("workspace.setup", "workspace hello")
     sent = ws.post(GREETER, name, "status", HELLO)
     return {"to": name, "seq": sent["seq"]}
 
@@ -313,7 +313,7 @@ def _round_trip(ws: Workspace) -> Finding:
 
 def doctor(ws: Workspace) -> list[Finding]:
     """Check the whole setup; each failed finding says what to run. A person at a terminal only."""
-    human.require_person("workspace doctor")
+    authority.require("workspace.setup", "workspace doctor")
     if not ws.registry.ids():
         return [Finding(False, "the workspace is not initialised", "ml-stack-workspace setup")]
     found = [Finding(True, "the workspace is initialised")]

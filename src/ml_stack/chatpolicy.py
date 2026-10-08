@@ -10,7 +10,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from ml_stack import home
+from ml_stack import authority, home
 from ml_stack.command_capture import captured
 from ml_stack.guard.untrusted import EXTERNAL
 from ml_stack.interventions import Base, Call, Context, Deny, Proceed, Verdict
@@ -99,7 +99,10 @@ def catalog() -> dict[str, str]:
 
 
 def refusal_for(text: str) -> tuple[str, str] | None:
-    """``(what, command)`` when ``text`` asks for an action only a person can take."""
+    """``(what, command)`` when ``text`` asks for an action only a person can take; none while
+    the ``chat.policy`` gate is delegated."""
+    if authority.state_of("chat.policy") == authority.DELEGATED:
+        return None
     for what, pattern, command in HUMAN_ONLY:
         if pattern.search(text):
             return what, command

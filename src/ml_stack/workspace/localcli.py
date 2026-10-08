@@ -7,10 +7,9 @@ import math
 import time
 from typing import Any
 
-from ml_stack import roles
+from ml_stack import authority, roles
 from ml_stack.command import flag
 from ml_stack.log import say, warn
-from ml_stack.sentinel import human
 from ml_stack.serve import provenance
 from ml_stack.workspace import (
     backlog,
@@ -200,14 +199,14 @@ def run(args: argparse.Namespace, ws: Workspace) -> int:
         if args.agent:
             token = tokens.load(ws.base, args.agent)
         else:
-            human.require_person("supersede a repository issue")
+            authority.require("workspace.agents", "supersede a repository issue")
             token = tokens.read_file(tokens.directory(ws.base) / tokens.OWNER_FILE)
         decision = backlog.supersede if args.action == "supersede-issue" else backlog.resume
         decision(ws, token, args.target, args.issue, args.reason)
         say(f"issue {args.issue}: {args.action} decision recorded")
         return 0
     if not (args.agent and args.action in ("start", "stop")):
-        human.require_person(f"{args.action} a local agent")
+        authority.require("workspace.agents", f"{args.action} a local agent")
     if args.action == "backlog":
         if not args.target:
             raise ValueError("agent backlog needs the existing worker's name")

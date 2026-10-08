@@ -8,7 +8,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, TypedDict, Unpack
 
-from ml_stack.sentinel import human
+from ml_stack import authority
 from ml_stack.workspace import (
     agent_display,
     agent_invites,
@@ -261,7 +261,7 @@ class Workspace:
                   **process: Unpack[ProcessOptions]) -> None:
         """Record ``name``'s model from a launcher or a person at a terminal; ``verified`` says
         ml-stack itself started the agent and knows the model. Refused from an agent's process."""
-        human.require_person("recording an agent's model", process.get("terminal"), process.get("env"))
+        authority.require("workspace.model", "recording an agent's model", process.get("terminal"), process.get("env"))
         clean_model(model)
         self._record_model(name, model, harness, VERIFIED if verified else CLAIMED)
 

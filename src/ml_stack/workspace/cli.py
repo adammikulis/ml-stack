@@ -14,12 +14,14 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from ml_stack import authority
 from ml_stack.command import Group, flag, option
 from ml_stack.http import ServerError
 from ml_stack.log import say, warn
 from ml_stack.sentinel import human
 from ml_stack.sentinel.human import HumanRequired
 from ml_stack.workspace import (
+    authority_cli,
     automatic_connection,
     backlog,
     chat,
@@ -596,6 +598,8 @@ TABLE: tuple[tuple[str, str, list[Any], Handler], ...] = (
      enforcement_cli.WHOAMI, enforcement_cli.whoami),
     ("enforcement", "show, check, set, promote or demote a project's task enforcement mode (open or strict)",
      enforcement_cli.OPTIONS, enforcement_cli.run),
+    ("authority", "show, set or preset which gates a lead agent may pass instead of a person (preset dev|prod)",
+     authority_cli.OPTIONS, authority_cli.run),
     ("main-session", "register main-session presentation; grants no rights", [flag("--harness", default="")],
      lambda args, ws, token: ws.register_session(token, onboard.device_metadata.current(), args.harness)),
     ("hello-model", "record the model a helper LABEL of yours runs (claimed)", [
@@ -847,7 +851,7 @@ for _name, _help, _options, _handler in TABLE:
 def _coordinator(args):
     base = limits.root()
     if args.action == 'host':
-        human.require_person("choose the workspace coordinator")
+        authority.require("workspace.coordinator", "choose the workspace coordinator")
         ws = Workspace()
         if coordinator_config.load(base).get("mode") == "remote":
             raise Denied("this device follows another coordinator; hosting would split its authority")

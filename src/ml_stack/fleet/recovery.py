@@ -10,7 +10,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from ml_stack import home, keystore
+from ml_stack import authority, home, keystore
 from ml_stack.files import read_json, write_json
 from ml_stack.log import say, warn
 from ml_stack.platform import private_file
@@ -147,7 +147,7 @@ def run(args: argparse.Namespace) -> int:
                 return 1
             say(words)
         elif args.op == "export":
-            human.require_person("recovery export")
+            authority.require("fleet.recovery", "recovery export")
             held = export_recovery(args.file, args.group, path)
             say(f"wrote the key for cluster '{held.group}' to {args.file}")
             say("Anyone holding that file can run commands on every machine in the cluster.")

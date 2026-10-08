@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ml_stack import home
+from ml_stack import authority, home
 from ml_stack.person import AGENT_MARKERS, HumanRequired, require_person
 
 __all__ = ["AGENT_MARKERS", "GRANT_TTL_S", "HumanGrant", "HumanRequired", "agent_may", "mint", "mint_clicked", "mint_pressed", "protect", "require_person"]
@@ -23,6 +23,7 @@ _FORBIDDEN = (
     "ml-stack security", "ml-stack-security", "ml_stack.sentinel", "ml_stack/sentinel",
     "ml_stack_sentinel", "sentinel.release", "sentinel.purge", "sentinel/state",
     "ml-stack-requests", "ml_stack.requests", "ml_stack/requests", "ml-stack/requests", "ml_stack_requests", "ml_stack.inbox", "ml_stack/inbox",
+    "authority.json", "authority-audit", "ml_stack.authority",
     "ml-stack-log", "ml_stack.activity", "ml_stack/activity", "ml-stack/activity", "ml_stack_activity", "activity.log",
 )
 _PROTECTED: set[str] = set()
@@ -52,12 +53,16 @@ class HumanGrant:
 
 def mint(action: str, subject: str, *, typed: Callable[[str], str] = input,
          terminal: tuple[bool, bool] | None = None,
-         env: Mapping[str, str] | None = None) -> HumanGrant:
+         env: Mapping[str, str] | None = None, gate: str = "") -> HumanGrant:
     """A grant for ``action`` on ``subject`` when a person is at a terminal and types the
     subject back (``terminal`` is stdin and stdout being terminals, read from the process
-    when not given). Refused when stdin or stdout is not a terminal, when the environment
-    carries an agent marker, or when the typed text differs."""
-    require_person(action, terminal, env)
+    when not given). With a delegable ``gate`` a lead agent is granted without the typed
+    confirmation while the gate is delegated. Refused when stdin or stdout is not a terminal,
+    when the environment carries an agent marker, or when the typed text differs."""
+    if gate and authority.require(gate, action, terminal, env) == authority.DELEGATED:
+        return HumanGrant(action, subject, time.time() + GRANT_TTL_S, _MINT)
+    if not gate:
+        require_person(action, terminal, env)
     if typed(f"type {subject} to {action} it: ").strip() != subject:
         raise HumanRequired(f"{action} not confirmed")
     return HumanGrant(action, subject, time.time() + GRANT_TTL_S, _MINT)

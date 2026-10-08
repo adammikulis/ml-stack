@@ -11,6 +11,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from ml_stack import authority
 from ml_stack.activity import query, view, writer
 from ml_stack.activity.log import ActivityLog
 from ml_stack.activity.schema import Entry
@@ -18,7 +19,7 @@ from ml_stack.command import Group, flag
 from ml_stack.files import write_text
 from ml_stack.keystore import KeystoreError
 from ml_stack.log import say, warn
-from ml_stack.sentinel.human import AGENT_MARKERS, HumanRequired, require_person
+from ml_stack.sentinel.human import AGENT_MARKERS, HumanRequired
 
 __all__ = ["COMMAND", "main", "viewer"]
 
@@ -126,7 +127,7 @@ def _verify(args: argparse.Namespace, log: ActivityLog) -> int:
 
 def _export(args: argparse.Namespace, log: ActivityLog) -> int:
     try:
-        require_person("ml-stack-log export", (sys.stdin.isatty(), sys.stdout.isatty()))
+        authority.require("activity.export", "ml-stack-log export", (sys.stdin.isatty(), sys.stdout.isatty()))
     except HumanRequired as exc:
         warn(str(exc))
         return DENIED
