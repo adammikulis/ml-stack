@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ml_stack import home
+from ml_stack import home, private_path
 from ml_stack.workspace import (
     automatic_connection,
     cli,
@@ -81,7 +81,7 @@ def test_independent_threads_join_distinctly_and_resume_without_reenrollment(ses
     saved = project_connection._saved()[str(root)]
     assert saved["agent"] == "legacy-agent" and len(saved["sessions"]) == 2
     assert "fixture-thread-one" not in json.dumps(saved)
-    assert tokens.problem(home.state("workspace-connections.json")) == ""
+    assert private_path.problem(home.state("workspace-connections.json")) == ""
 
 
 def test_revoked_session_is_not_replaced(sessions, monkeypatch):

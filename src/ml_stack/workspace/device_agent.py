@@ -1,7 +1,7 @@
 """Trusted installed-device accounts bind local worker identities independently of models."""
 from contextlib import contextmanager
 
-from ml_stack import worktreerules
+from ml_stack import private_path, worktreerules
 from ml_stack.fleet.projects import git_identity
 from ml_stack.graph.store import GraphStore
 from ml_stack.home import device_id
@@ -76,7 +76,7 @@ def _owned_parent(ws, token, device):
         raise Denied('local device membership requires an authenticated local launcher agent')
     for path in (ws.base, ws.registry.path, tokens.directory(ws.base),
                  tokens.directory(ws.base) / parent.id):
-        if tokens.problem(path):
+        if private_path.problem(path):
             raise Denied('local device membership requires private owned workspace state')
     if tokens.load(ws.base, parent.id) != token:
         raise Denied('local device membership requires the saved launcher session')
@@ -103,12 +103,12 @@ def owned_project_session(ws, token, name, root):
         raise Denied('project attachment requires a named top-level standard agent')
     paths = (ws.base, ws.registry.path, tokens.directory(ws.base),
              tokens.directory(ws.base) / name)
-    if any(tokens.problem(path) for path in paths):
+    if any(private_path.problem(path) for path in paths):
         raise Denied('project attachment requires private owned workspace state')
     existing = account_for(ws, name) if (ws.base / 'device-accounts.db').exists() else None
     device = device_id() if existing else ''
     lock = ws.registry.path.with_name('agents.lock')
-    why = tokens.problem(lock)
+    why = private_path.problem(lock)
     if why not in {'', 'missing'}:
         raise Denied('project attachment requires a private registry lock')
     with held(lock):
@@ -116,7 +116,7 @@ def owned_project_session(ws, token, name, root):
         entry = ws.registry._load().get(actor.id, {})
         if (actor.id != name or actor.role != AGENT or actor.parent or entry.get('session_device')):
             raise Denied('project attachment requires this saved top-level standard agent')
-        if any(tokens.problem(path) for path in paths) or tokens.load(ws.base, name) != token:
+        if any(private_path.problem(path) for path in paths) or tokens.load(ws.base, name) != token:
             raise Denied('project attachment requires the saved private agent session')
         if existing and (existing['device_id'] != device
                          or ws.registry.info(existing['base_id'])['revoked']):

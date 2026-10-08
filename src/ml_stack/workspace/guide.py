@@ -11,7 +11,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ml_stack import authority
+from ml_stack import authority, private_path
 from ml_stack.files import read_json, write_json
 from ml_stack.log import say
 from ml_stack.workspace import (
@@ -196,7 +196,7 @@ def agent_connect(ws: Workspace, name: str, found: dict[str, str]) -> dict[str, 
     if os.name == "nt":
         tokens.prepare(ws.base)
     for path in (ws.base, ws.registry.path):
-        if (path.exists() or path.is_symlink()) and (why := tokens.problem(path)):
+        if (path.exists() or path.is_symlink()) and (why := private_path.problem(path)):
             raise Denied(f"workspace storage {path}: {why}")
     tokens.prepare(ws.base)
     with held(ws.base / "agent-connect.lock"):
@@ -206,7 +206,7 @@ def agent_connect(ws: Workspace, name: str, found: dict[str, str]) -> dict[str, 
             who = ws.auth(token)
         except Denied as failure:
             slot = tokens.directory(ws.base) / name.replace("/", "~")
-            if (slot.exists() or slot.is_symlink()) and (why := tokens.problem(slot)):
+            if (slot.exists() or slot.is_symlink()) and (why := private_path.problem(slot)):
                 raise Denied(f"agent credential storage {slot}: {why}") from failure
             if isinstance(failure, tokens.ActorMismatch):
                 entry = ws.registry._load().get(name, {})

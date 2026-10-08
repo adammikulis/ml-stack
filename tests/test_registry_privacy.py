@@ -5,18 +5,18 @@ import sys
 
 import pytest
 
-from ml_stack.workspace import tokens
+from ml_stack import private_path
 from ml_stack.workspace.identity import AGENT, Denied, Registry
 
 
 def test_registry_creation_and_replacement_are_private_and_hash_only(tmp_path):
     registry = Registry(tmp_path / 'workspace')
     credential = registry._add('local-account', 'agent', AGENT, 0)
-    assert tokens.problem(registry.path.parent) == ''
-    assert tokens.problem(registry.path) == ''
+    assert private_path.problem(registry.path.parent) == ''
+    assert private_path.problem(registry.path) == ''
     assert credential.split('.', 2)[-1] not in registry.path.read_text()
     registry.record_model('agent', 'claimed-model', 'codex', 'claimed')
-    assert tokens.problem(registry.path) == ''
+    assert private_path.problem(registry.path) == ''
     assert registry.authenticate(credential).id == 'agent'
 
 
@@ -27,7 +27,7 @@ def test_failed_registry_serialization_preserves_private_file(tmp_path):
     with pytest.raises(TypeError):
         registry._save({'invalid': object()})
     assert registry.path.read_bytes() == before
-    assert tokens.problem(registry.path) == ''
+    assert private_path.problem(registry.path) == ''
     assert sorted(path.name for path in registry.path.parent.iterdir()) == ['agents.json']
 
 

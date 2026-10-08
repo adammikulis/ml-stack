@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 from test_project_source import repository  # noqa: F401
 
-from ml_stack import home, http
+from ml_stack import home, http, private_path
 from ml_stack.fleet import tls
 from ml_stack.fleet.api import Daemon, make_handler
 from ml_stack.fleet.daemon import ALL_INTERFACES
@@ -205,8 +205,8 @@ def test_recovery_refuses_unsafe_credential_storage(tmp_path, monkeypatch, unsaf
     remote = RemoteWorkspace.__new__(RemoteWorkspace)
     remote.base, remote.project_id = tmp_path / "sessions", PROJECT
     credential = tokens.store(remote.base, "worker", "mlws1.worker.saved")
-    original = tokens.problem
-    monkeypatch.setattr(tokens, "problem", lambda path: unsafe if path == credential else original(path))
+    original = private_path.problem
+    monkeypatch.setattr(private_path, "problem", lambda path: unsafe if path == credential else original(path))
     monkeypatch.setattr(remote, "_device_transport", lambda: None)
     monkeypatch.setattr(remote, "_request", lambda *a: pytest.fail("unsafe storage recovery"))
     from ml_stack.workspace.identity import Denied
@@ -307,7 +307,7 @@ def test_first_use_accepts_directory_created_by_another_client(tmp_path, monkeyp
     remote = RemoteWorkspace.__new__(RemoteWorkspace)
     remote.base, remote.project_id = tmp_path / "sessions", PROJECT
     tokens.prepare(remote.base)
-    assert tokens.problem(remote.base) == ""
+    assert private_path.problem(remote.base) == ""
     existing = type(remote.base).exists
     monkeypatch.setattr(type(remote.base), "exists", lambda path: False if path == remote.base else existing(path))
     monkeypatch.setattr(remote, "_device_transport", lambda: None)
@@ -581,8 +581,8 @@ def test_fresh_remote_capability_storage_is_private_before_request(tmp_path, mon
     remote.base, remote.host, remote.project_id = tmp_path / 'remote', 'http://127.0.0.1:9', PROJECT
     remote.cluster, remote.cluster_id = 'fixture', 'c' * 64
     def request(operation, payload):
-        assert tokens.problem(remote.base) == ''
-        assert tokens.problem(tokens.directory(remote.base)) == ''
+        assert private_path.problem(remote.base) == ''
+        assert private_path.problem(tokens.directory(remote.base)) == ''
         if remote_module.os.name != 'nt':
             assert remote.base.stat().st_mode & 0o777 == 0o700
             assert tokens.directory(remote.base).stat().st_mode & 0o777 == 0o700
@@ -591,7 +591,7 @@ def test_fresh_remote_capability_storage_is_private_before_request(tmp_path, mon
     result = (remote.join('invitation', 'worker') if action == 'join' else
               remote.enroll('worker', model='fixture', harness='codex'))
     path = tokens.directory(remote.base) / 'worker'
-    assert tokens.problem(path) == ''
+    assert private_path.problem(path) == ''
     if remote_module.os.name != 'nt':
         assert path.stat().st_mode & 0o777 == 0o600
     assert tokens.read_file(path) == 'mlws1.worker.fixture'

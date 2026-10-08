@@ -9,7 +9,7 @@ import re
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from ml_stack import home, http, sealing
+from ml_stack import home, http, private_path, sealing
 from ml_stack.fleet import tls
 from ml_stack.fleet.discovery import derive_token, load_cluster_key, memberships
 from ml_stack.fleet.onboard.lan import require_local_url
@@ -185,14 +185,14 @@ class RemoteWorkspace:
 
     def _safe_storage(self, path: Path) -> None:
         for candidate in (self.base, tokens.directory(self.base), path):
-            why = tokens.problem(candidate)
+            why = private_path.problem(candidate)
             if why not in {"", "missing"}:
                 raise Denied(f"project session storage {candidate}: {why}")
 
     def _session_token(self, name: str) -> str:
         path = self.base / "remote-sessions.db"
         session = {}
-        why = tokens.problem(path)
+        why = private_path.problem(path)
         if why not in {"", "missing"} and not why.startswith("mode "):
             raise Denied(f"project session records {path}: {why}")
         if path.exists():
@@ -237,7 +237,7 @@ class RemoteWorkspace:
             if credential.startswith(tokens.PREFIX):
                 name = credential[len(tokens.PREFIX):].rsplit(".", 1)[0].split("/", 1)[0]
                 path = self.base / "remote-sessions.db"
-                why = tokens.problem(path)
+                why = private_path.problem(path)
                 if why not in {"", "missing"} and not why.startswith("mode "):
                     raise Denied(f"project session records {path}: {why}")
                 if path.exists():

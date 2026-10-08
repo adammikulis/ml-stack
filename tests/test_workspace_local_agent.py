@@ -18,7 +18,7 @@ from types import SimpleNamespace
 import pytest
 from workspace_kit import Kit, clean_env, cli
 
-from ml_stack import roles
+from ml_stack import private_path, roles
 from ml_stack.hub.discover import ModelInfo
 from ml_stack.hub.probe import MachineMemory
 from ml_stack.testing.fakes import reply_from
@@ -146,7 +146,7 @@ def test_start_mints_a_private_token_records_the_pid_and_a_second_start_changes_
     try:
         assert got.name == "local-agent" and not got.already
         tok = tokens.directory(kit.base) / got.name
-        assert tokens.problem(tok) == ""
+        assert private_path.problem(tok) == ""
         assert kit.ws.auth(tok.read_text().strip()).role == "agent"
         again = ls.start(kit.ws, ls.Ask(), pick=PICK, spawn=spawn)
         assert again.already and again.pid == got.pid and len(spawned) == 1

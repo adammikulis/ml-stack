@@ -14,7 +14,16 @@ from pathlib import Path
 import pytest
 from workspace_kit import Kit, clean_env
 
-from ml_stack import claude, codex, coding, harnesshook, harnessid, harnessing, requests
+from ml_stack import (
+    claude,
+    codex,
+    coding,
+    harnesshook,
+    harnessid,
+    harnessing,
+    private_path,
+    requests,
+)
 from ml_stack.harnesspolicy import decide
 from ml_stack.workspace import tokens
 from ml_stack.workspace.project import describe
@@ -169,7 +178,7 @@ class TestSessionFiles:
             assert tree not in path.parents and files.path not in (tree, *tree.parents)
             assert not os.access(path, os.W_OK)
             if os.name == "nt":
-                assert tokens.problem(files.path) == ""
+                assert private_path.problem(files.path) == ""
                 with pytest.raises(PermissionError):
                     path.write_text("replace protected settings")
             else:
@@ -410,7 +419,7 @@ class TestSeat:
         ws = Workspace()
         assert seat.persistent and not seat.minted and ws.registry.role_of("local-test-codex") == "agent"
         token_file = tokens.directory(ws.base) / "local-test-codex"
-        assert tokens.problem(token_file) == ""
+        assert private_path.problem(token_file) == ""
         secret = token_file.read_text().strip()
         assert secret not in "".join(said) and seat.flags() == ["--agent", "local-test-codex"]
         assert seat.revoke() is False and token_file.exists()
