@@ -308,6 +308,12 @@ def in_person_store(path: str) -> bool:
     return real == root or root in real.parents or any(PERSON_STORE.search(p) for p in (path, str(real)))
 
 
+PROTECTED = re.compile(
+    r"(^|/)(src/ml_stack/workspace/person_\w+\.py|scripts/hooks/(claude-user-prompt|person-consume|claude-bash-guard"
+    r"|claude-edit-guard|pre-push|rules_loader\.py)|\.claude/settings(\.local)?\.json)$")
+"""The code and settings that make the person record: only a person at a terminal changes them."""
+
+
 def main() -> int:
     switched = rules_loader.guard_off()
     try:
@@ -320,6 +326,10 @@ def main() -> int:
     given = event.get("tool_input") or {}
     if in_person_store(str(given.get("file_path") or given.get("notebook_path") or "")):
         return refuse("the person record is written only by the harness hooks when the person types", hard=True)
+    target = str(given.get("file_path") or given.get("notebook_path") or "")
+    if target and any(PROTECTED.search(p) for p in (target, str(Path(target).resolve()))):
+        return refuse("the person-record code, the guards and the hook settings are changed by a person at a "
+                      "terminal", hard=True)
     if switched:
         return ALLOWED
     rules = rules_loader.load()

@@ -448,7 +448,9 @@ Library decisions:
   the session holds an approval.
 - The session of a guard is the one whose recorded harness process is its ancestor; `ML_STACK_SESSION_ID` is not
   trusted.
-- The hard rules of both guards ignore `MLSTACK_GUARD=off`: the guards run only for an agent's tool calls.
+- The hard rules of both guards ignore `MLSTACK_GUARD=off`: the guards run only for an agent's tool calls. The
+  edit guard refuses edits to the person-record modules, the hook scripts, the guards, `pre-push`, `rules_loader.py`
+  and `.claude/settings*.json`; edits through the shell are not covered and stay a same-user matter.
 - Forgeable by the same user: the hook entry points can be run by an agent, and a same-user process can write
   the store, its key or a transcript. Detection, not prevention: the chain and seal are verified before every
   use, the transcript path is validated, each statement records its transcript folder and the Claude Code

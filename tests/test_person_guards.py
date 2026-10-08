@@ -239,6 +239,18 @@ def test_nothing_writes_the_person_store_through_a_path_a_link_or_a_moved_root(t
             assert done.returncode == 2 and "no switch opens this rule" in done.stderr, (path, env)
 
 
+@pytest.mark.parametrize("path", ["src/ml_stack/workspace/person_hook.py", "src/ml_stack/workspace/person_release.py",
+                                  "scripts/hooks/claude-user-prompt", "scripts/hooks/person-consume",
+                                  "scripts/hooks/claude-bash-guard", "scripts/hooks/claude-edit-guard",
+                                  "scripts/hooks/pre-push", "scripts/hooks/rules_loader.py",
+                                  ".claude/settings.json", ".claude/settings.local.json"])
+def test_the_code_and_settings_that_make_the_record_are_not_an_agents_to_edit(tmp_path, path):
+    for env in ({}, {"MLSTACK_GUARD": "off", **AGENT}):
+        done = edit(ROOT / path, tmp_path / "state", **env)
+        assert done.returncode == 2 and "no switch opens this rule" in done.stderr, (path, env)
+    assert edit(ROOT / "src/ml_stack/workspace/notes.py", tmp_path / "state", **AGENT).returncode == 0
+
+
 def test_an_ordinary_file_and_the_soft_switch_still_work(tmp_path):
     assert edit(tmp_path / "x.txt", tmp_path / "state").returncode == 0
     assert edit(tmp_path / "x.txt", tmp_path / "state", MLSTACK_GUARD="off", **AGENT).returncode == 0
