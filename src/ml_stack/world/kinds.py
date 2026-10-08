@@ -147,7 +147,7 @@ def _company(b: _Build, n: int, offices: list[str]) -> dict[str, Any]:
     counts = _split(rng, n - len(executives), [DEPARTMENTS[d]["weight"] for d in names], 3)
     seniors: list[str] = []
     juniors: list[str] = []
-    for dept, count in zip(names, counts):
+    for dept, count in zip(names, counts, strict=False):
         elsewhere = [s for d in names if d != dept for s in DEPARTMENTS[d]["skills"]]
         lines, senior, junior = _department(b, dept, units[dept], count, hire,
                                             heads.get(dept, ceo), elsewhere)
@@ -271,7 +271,7 @@ def _university(b: _Build, n: int, offices: list[str]) -> dict[str, Any]:
     counts = _split(rng, n - 1, [1] * len(fields), 4)
     faculty: list[str] = []
     students: list[str] = []
-    for field, count in zip(fields, counts):
+    for field, count in zip(fields, counts, strict=False):
         dept = departments[field]
         pool = ACADEMIC[field]["skills"]
         elsewhere = [s for f in fields if f != field for s in ACADEMIC[f]["skills"]]
@@ -499,7 +499,7 @@ def _nonprofit(b: _Build, n: int, offices: list[str]) -> dict[str, Any]:
     staff: list[str] = []
     juniors: list[str] = []
     parents: dict[str, str] = {}
-    for (prog, _d, _s), count in zip(chosen, counts):
+    for (prog, _d, _s), count in zip(chosen, counts, strict=False):
         lines, paid, volunteers = _programme(b, prog, units[prog], count, join, director,
                                              skills_of)
         parents.update(lines)

@@ -78,7 +78,7 @@ def rings(n: int, src: list[int], dst: list[int]) -> list[list[int]]:
 
     outgoing: list[list[int]] = [[] for _ in range(n)]
     incoming: list[list[int]] = [[] for _ in range(n)]
-    for u, v in zip(src, dst):
+    for u, v in zip(src, dst, strict=False):
         outgoing[u].append(v)
         incoming[v].append(u)
 

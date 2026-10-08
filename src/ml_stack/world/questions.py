@@ -269,7 +269,7 @@ def _buckets(t: _Truth, rng: random.Random) -> dict[str, list[dict[str, Any]]]:
             crowd = sorted({p for p in crowd if t.kind(p) == "person"})
             if anchor == t.org or not 2 <= len(crowd) <= 8:
                 continue
-            for a, c in zip(crowd[::2], crowd[1::2]):
+            for a, c in zip(crowd[::2], crowd[1::2], strict=False):
                 if anchor not in (a, c):
                     b.setdefault("path", []).append(
                         _q(f"How is {t.label(a)} connected to {t.label(c)}?", [a, anchor, c]))
@@ -280,7 +280,7 @@ def _buckets(t: _Truth, rng: random.Random) -> dict[str, list[dict[str, Any]]]:
     narrow = [e for e in t.edges if e["target"] != t.org and e["source"] != t.org
               and t.kind(e["target"]) != t.unit_kind]
     pairs = rng.sample(people, min(len(people), 24))
-    for a, c in zip(pairs[::2], pairs[1::2]):
+    for a, c in zip(pairs[::2], pairs[1::2], strict=False):
         path = between(narrow, a, c)
         if 3 <= len(path) <= 6:
             b.setdefault("path", []).append(_q(f"How is {t.label(a)} connected to {t.label(c)}?", path))

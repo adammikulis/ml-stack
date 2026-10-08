@@ -125,7 +125,7 @@ class CypherStore:
         if isinstance(result, list):  # a multi-statement query returns one result each
             result = result[-1]
         names = result.get_column_names()
-        return [dict(zip(names, row)) for row in result.get_all()]
+        return [dict(zip(names, row, strict=False)) for row in result.get_all()]
 
     def _run(self, cypher: str, params: Mapping[str, Any] | None) -> Any:
         """Execute one statement, prepared afresh whenever it carries values."""

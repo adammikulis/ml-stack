@@ -97,7 +97,7 @@ def _near_edges(placed: list[tuple[str, float, float]], near: int) -> list[dict[
     close = knn_edges(on_sphere, int(near))
     made: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
-    for u, v in zip(close.src.tolist(), close.dst.tolist()):
+    for u, v in zip(close.src.tolist(), close.dst.tolist(), strict=False):
         a, b = placed[int(u)], placed[int(v)]
         pair = (min(a[0], b[0]), max(a[0], b[0]))
         if a[0] == b[0] or pair in seen:

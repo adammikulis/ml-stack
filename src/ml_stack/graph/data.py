@@ -46,7 +46,7 @@ class Graph:
 
         src, dst = _to_list(self.src), _to_list(self.dst)
         weights = _to_list(self.w) if self.w is not None else None
-        for i, (u, v) in enumerate(zip(src, dst)):
+        for i, (u, v) in enumerate(zip(src, dst, strict=False)):
             graph.add_edge(int(u), int(v), weight=float(weights[i]) if weights else 1.0)
         return graph
 

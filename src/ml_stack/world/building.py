@@ -119,7 +119,7 @@ def _tree(rng: random.Random, members: list[str], head: str,
             takers = level
             shares = [rng.randint(low, high) for _ in level]
         nxt = []
-        for parent, share in zip(takers, shares):
+        for parent, share in zip(takers, shares, strict=False):
             for _ in range(share):
                 if not left:
                     break

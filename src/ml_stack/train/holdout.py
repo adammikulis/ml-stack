@@ -64,8 +64,8 @@ def by_group[T](
     rng.shuffle(shuffled)
     held = set(shuffled[: max(1, int(len(unique) * fraction))])
 
-    train = [r for r, g in zip(rows, groups) if str(g) not in held]
-    holdout = [r for r, g in zip(rows, groups) if str(g) in held]
+    train = [r for r, g in zip(rows, groups, strict=False) if str(g) not in held]
+    holdout = [r for r, g in zip(rows, groups, strict=False) if str(g) in held]
     return Split(train=train, holdout=holdout)
 
 
