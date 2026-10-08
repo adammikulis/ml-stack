@@ -92,7 +92,7 @@ def project(board, tmp_path, monkeypatch, request):
     (source / '.task.patch').write_bytes(patch)
     (source / '.task-report.md').write_text('ready\n')
     repo.git(source, 'add', '--', '.task.patch', '.task-report.md')
-    repo.git(source, 'commit', '-m', 'chore: record canonical task artifacts')
+    repo.git(source, 'commit', '-m', 'chore: record task artifacts')
     artifacts = {name: hashlib.sha256(repo.git(source, 'show', f'HEAD:{name}', binary=True)).hexdigest()
                  for name in ('sim.py', '.task.patch', '.task-report.md')}
     proposal = board.board.submit(board.child, board.task['id'],

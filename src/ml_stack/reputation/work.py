@@ -83,7 +83,7 @@ class WorkLedger:
         if len(previous) != 64 or any(char not in '0123456789abcdef' for char in previous) \
                 or not current.startswith('workspace:') or len(current) != 42 \
                 or any(char not in '0123456789abcdef' for char in current[10:]):
-            raise ValueError('migration needs an old path digest and canonical coordinator ID')
+            raise ValueError('migration needs an old path digest and coordinator ID')
         def change(graph):
             _namespace_collisions(graph, previous, current)
             count = 0

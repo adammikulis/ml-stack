@@ -146,7 +146,7 @@ def step(ws, token, name):
     identity = agent.identity or name
     child = ws.auth(tokens.load(ws.base, identity))
     if child.parent != who.id:
-        raise Denied('canonical repository intake requires the registered worker parent')
+        raise Denied('repository intake requires the registered worker parent')
     task_scheduler.integrate_completed(ws, token, identity)
     board = TaskBoard(ws)
     board.flush_notifications(token)

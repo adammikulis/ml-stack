@@ -28,7 +28,7 @@ def execute(board, identity: str, task_id: str, allocation_id: str, run: Callabl
         return tokens.load(board.ws.base, identity)
     task = board.get(token(), task_id)
     if task['state'] != 'queued':
-        raise ValueError('only a queued canonical task may start')
+        raise ValueError('only a queued task may start')
     limits = [value for value in (task['limits'].get('max_wall_s'), settings.wall_s) if value is not None]
     seconds = min(limits) if limits else None
     board.claim(token(), task_id, allocation_id)

@@ -147,14 +147,14 @@ def test_tls_launch_and_local_loop_exchange_on_the_canonical_board(devices):
     def execute(agent, row, why, stopped):
         executed.append(row)
         cancel.set()
-        return 'answer', 'Worker replied from the canonical project Board', 1
+        return 'answer', 'Worker replied from the project Board', 1
     settings = localloop.Settings(cancel=cancel, execute=execute,
                                  serve=lambda agent: localloop.Held(None, {'id': 'test-lease'}))
     assert localloop.run(worker, 'local-qwen', settings) == 0
     assert len(executed) == 1
     replies = state.caller.call('inbox', state.token, ack=False, raw=True)
     assert any(row['from'] == result['identity'] and row['type'] == 'answer'
-               and 'canonical project Board' in row['raw'] for row in replies)
+               and 'project Board' in row['raw'] for row in replies)
     assert state.local.inbox(tokens.load(state.local.base, agent.identity), ack=False) == []
 
 

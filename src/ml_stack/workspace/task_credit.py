@@ -17,13 +17,13 @@ def verify_task(ws, token, task_id, *, ledger=None):
         raise Denied('the task belongs to a different coordinator workspace')
     proposal, review = task.get('proposal'), task.get('review')
     if not proposal or not review:
-        raise Denied('a canonical task needs an independently authenticated review')
+        raise Denied('a task needs an independently authenticated review')
     outcome = review['outcome']
     if outcome not in ('accepted', 'rejected', 'blocked_infrastructure') \
             or (outcome == 'accepted') != review['accepted']:
-        raise Denied('the canonical review outcome is inconsistent')
+        raise Denied('the review outcome is inconsistent')
     if outcome == 'accepted' and task['state'] != 'completed':
-        raise Denied('only a completed canonical task earns completion credit')
+        raise Denied('only a completed task earns completion credit')
     worker = proposal['worker']
     if who.id == worker or review['verifier'] != who.id:
         raise Denied('only the authenticated independent reviewer can award this task')

@@ -152,7 +152,7 @@ def test_new_session_preserves_existing_authority(sessions, monkeypatch):
     root, choice, enrolled, _ = sessions
     monkeypatch.setenv("CODEX_THREAD_ID", "fixture-thread")
     monkeypatch.setattr(automatic_connection, "discover", lambda root: {**choice, "host": "https://other.invalid"})
-    with pytest.raises(Denied, match="another canonical Board"):
+    with pytest.raises(Denied, match="another Board"):
         join(root)
     assert not enrolled
 

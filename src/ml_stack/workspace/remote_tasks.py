@@ -20,10 +20,10 @@ PRIVATE = frozenset({"resource", "execution_config", "interpreter", "environment
 class Parser:
     def parse_args(self, argv):
         if len(argv) != 2 or argv[0] not in FIELDS:
-            raise ValueError("unsupported canonical task command")
+            raise ValueError("unsupported task command")
         payload = json.loads(argv[1])
         if type(payload) is not dict or set(payload) - FIELDS[argv[0]]:
-            raise ValueError("unsupported canonical task command fields")
+            raise ValueError("unsupported task command fields")
         return SimpleNamespace(agent="", token_file="", payload=payload, id=payload.get("id"), json=True)
 
 
@@ -31,14 +31,14 @@ def scope(ws, token, project_id):
     who = ws.auth(token)
     grant = ws.registry.info(ws.registry.root_of(who.id))["project"]
     if not grant or grant.get("key") != project_id:
-        raise Denied("canonical tasks require this exact existing project grant")
+        raise Denied("tasks require this exact existing project grant")
     return grant
 
 
 def checked(board, token, ident, grant):
     task = board.get(token, ident)
     if task.get("project") != grant:
-        raise Denied("canonical task belongs to another project grant")
+        raise Denied("task belongs to another project grant")
     return task
 
 
@@ -47,7 +47,7 @@ def dispatch(ws, token, grant, action, payload):
     if action == "tasks":
         limit = payload.get("limit", 50)
         if type(limit) is not int or not 1 <= limit <= 100:
-            raise ValueError("canonical task listing limit is 1-100")
+            raise ValueError("task listing limit is 1-100")
         rows = [task for task in board.list(token)["tasks"] if task.get("project") == grant]
         return {"tasks": rows[:limit], "metrics": {"states": dict(Counter(row["state"] for row in rows)),
                                                    "total": len(rows)}}
@@ -83,19 +83,19 @@ def public(value, roots):
     if isinstance(value, str):
         for root in roots:
             if root:
-                value = value.replace(root, "[canonical private path]")
+                value = value.replace(root, "[private path]")
     return value
 
 
 def command(ws, token, project, document):
     if type(document) is not dict or set(document) != {"action", "payload", "request_id"}:
-        raise ValueError("canonical task command requires action, payload and stable request_id")
+        raise ValueError("task command requires action, payload and stable request_id")
     action, payload = document["action"], document["payload"]
     if type(action) is not str or action not in FIELDS or type(payload) is not dict:
-        raise ValueError("unsupported typed canonical task command")
+        raise ValueError("unsupported typed task command")
     grant = scope(ws, token, project.id)
     if set(payload) - FIELDS[action]:
-        raise ValueError("unsupported canonical task command fields")
+        raise ValueError("unsupported task command fields")
     if action == "task-create":
         spec = payload.get("spec")
         if type(spec) is not dict or spec.get("project", grant) != grant:

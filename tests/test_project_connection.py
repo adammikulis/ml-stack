@@ -66,14 +66,14 @@ def test_connected_project_uses_nearest_root_and_refuses_other_authority(project
     assert connection.selected(nested)["agent"] == "mac"
     other = Remote()
     other.host = "http://127.0.0.1:8771"
-    with pytest.raises(Denied, match="another canonical board"):
+    with pytest.raises(Denied, match="another board"):
         connection.bind(other, project, "mac")
 
 
 def test_unconfigured_shared_checkout_never_uses_local_workspace(project):
     write_json(project / ".ml-stack-project.json", {"kind": "project-checkout", "project_id": PROJECT,
                                                    "authority": {}})
-    with pytest.raises(Denied, match="no canonical board"):
+    with pytest.raises(Denied, match="no board"):
         connection.selected(project)
 
 
@@ -81,7 +81,7 @@ def test_offline_canonical_connection_does_not_fall_back(project, monkeypatch):
     connection.bind(Remote(), project, "mac")
     monkeypatch.chdir(project)
     def offline(*args, **kwargs):
-        raise Denied("canonical host offline")
+        raise Denied("host offline")
     monkeypatch.setattr(connection, "RemoteWorkspace", offline)
     monkeypatch.setattr(cli, "Workspace", RejectLocalWorkspace)
     assert cli._runner(cli._agents)(SimpleNamespace(cmd="agents", agent="", token_file="", json=True)) == 3

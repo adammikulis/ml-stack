@@ -187,7 +187,7 @@ def test_unshared_canonical_workspace_is_selected_and_team_messages_render(chat_
     ws = host.workspace(project)
     owner = tokens.read_file(tokens.directory(ws.base) / tokens.OWNER_FILE)
     worker = ws.mint(owner, 'canonical-demo-helper')
-    ws.send(worker, '#general', 'note', 'The canonical team experiment is ready.')
+    ws.send(worker, '#general', 'note', 'The team experiment is ready.')
     monkeypatch.setattr(project_client, 'peers', lambda ui: [])
     monkeypatch.setattr(project_source, 'build', lambda *args: pytest.fail('Board chooser published source'))
     served, page = chat_browser
@@ -207,7 +207,7 @@ def test_unshared_canonical_workspace_is_selected_and_team_messages_render(chat_
     expect(board.get_by_role('button', name='Join workspace as person')).to_be_visible()
     assert all('person_project' not in row for row in ws.registry._load().values())
     board.get_by_role('button', name='Join workspace as person').click()
-    expect(board.locator('.msg pre')).to_contain_text('The canonical team experiment is ready.')
+    expect(board.locator('.msg pre')).to_contain_text('The team experiment is ready.')
     assert registry.get(project).shared is False
     assert registry.list() == []
     assert not (tmp_path / 'registry' / 'project-bundles').exists()

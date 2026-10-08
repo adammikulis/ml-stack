@@ -41,7 +41,7 @@ def run(args):
     completion = ((action == 'send' and len(values) >= 2 and values[1] == 'done')
                   or (action == 'announce' and values and values[0] == 'done'))
     if (action in {'claim', 'release', 'heartbeat'} or completion) and not args.agent:
-        raise Denied('direct canonical claims and completion require an explicit agent identity')
+        raise Denied('direct claims and completion require an explicit agent identity')
     token = remote.token(agent=args.agent, token_file=args.token_file)
     if action == "connection":
         if values:

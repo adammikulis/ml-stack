@@ -192,7 +192,7 @@ def test_interrupted_projection_preserves_canonical_task_without_duplicate_dispa
     monkeypatch.setattr(backlog, 'pick', lambda ws, a, **kw: original(ws, a, fetcher=lambda _: [issue()], **kw))
     previous = issuepump._status
     def interrupted(*args, **kwargs):
-        raise RuntimeError('Projection interrupted after canonical commit')
+        raise RuntimeError('Projection interrupted after commit')
     monkeypatch.setattr(issuepump, '_status', interrupted)
     with pytest.raises(RuntimeError, match='Projection interrupted'):
         issuepump.step(kit.ws, parent, agent.name)
@@ -236,7 +236,7 @@ def test_parent_resume_preserves_failed_attempt_and_consumes_one_retry(setup):
     kit, parent, agent, _ = setup
     first, _ = backlog.pick(kit.ws, agent, fetcher=lambda _: [issue(8)])
     backlog.finish(kit.ws, first, agent, ('status', 'Legacy approval expired'))
-    resumed = backlog.resume(kit.ws, parent, agent.name, 8, 'Canonical runtime replaces legacy execution')
+    resumed = backlog.resume(kit.ws, parent, agent.name, 8, 'Runtime replaces legacy execution')
     assert resumed['failures'] == 1 and resumed['retry_budget'] == 1
     with backlog._store(kit.ws) as graph:
         before = graph.nodes('issue-attempt')[0]['attrs']
@@ -266,7 +266,7 @@ def test_issue_resume_refuses_unblocked_foreign_and_child_requests(setup):
 def test_issue_resume_cannot_bypass_canonical_task_retry_budget(setup):
     kit, parent, agent, _ = setup
     job, _ = backlog.pick(kit.ws, agent, fetcher=lambda _: [issue(8)])
-    backlog.finish(kit.ws, job, agent, ('status', 'Blocked canonical task'))
+    backlog.finish(kit.ws, job, agent, ('status', 'Blocked task'))
     with backlog._store(kit.ws) as graph:
         graph.upsert_node({'id': 'dispatch', 'kind': 'issue-dispatch', 'attrs': {'issue': job}})
     with pytest.raises(Denied, match='existing retry budget'):

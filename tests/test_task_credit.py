@@ -28,7 +28,7 @@ board = _board_fixture
 @pytest.fixture
 def ledger(tmp_path):
     held = WorkLedger(SealedGraph(tmp_path / 'credit.enc',
-                      keys=vault.PassphraseKeys(lambda _: 'isolated canonical credit key')))
+                      keys=vault.PassphraseKeys(lambda _: 'isolated credit key')))
     yield held
     held.sealed.close()
 
@@ -280,6 +280,6 @@ def test_model_switch_binds_live_family_without_moving_historical_awards(board, 
 def test_accepted_native_task_earns_nothing_before_integration_completes(board, ledger):
     proposed(board)
     board.board.review(board.parent, board.task['id'], accepted())
-    with pytest.raises(Denied, match='completed canonical task'):
+    with pytest.raises(Denied, match='completed task'):
         task_credit.verify_task(board.ws, board.parent, board.task['id'], ledger=ledger)
     assert ledger.standings(work_reputation.scope(board.ws)) == []

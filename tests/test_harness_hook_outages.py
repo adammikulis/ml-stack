@@ -52,7 +52,7 @@ def test_diagnostic_redacts_credentials(secret, monkeypatch):
 @pytest.mark.parametrize('role', ['read-only', 'approve-first', 'plan-and-go'])
 def test_launcher_keeps_normal_role_policy_without_canonical_admission(monkeypatch, tmp_path, role):
     def no_canonical(*args, **kwargs):
-        pytest.fail('resource-free launcher requested canonical mutation authority')
+        pytest.fail('resource-free launcher requested mutation authority')
     monkeypatch.setattr(harnesshook.harness_remote, 'context', no_canonical)
     monkeypatch.setattr(harnesshook, '_ask', lambda *args, **kwargs: (False, 'test declined'))
     args = {'command': 'ml-stack --no-browser'}

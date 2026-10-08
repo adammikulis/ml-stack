@@ -47,7 +47,7 @@ def task_spec(value: Any) -> dict[str, Any]:
         raise ValueError('at least one acceptance criterion is required')
     deps = words(value.get('deps', []), 'deps')
     if any(not TASK_ID.fullmatch(dep) for dep in deps):
-        raise ValueError('dependencies must be canonical task IDs')
+        raise ValueError('dependencies must be task IDs')
     limits = value.get('limits', {})
     if type(limits) is not dict or set(limits) - {'model', 'max_wall_s', 'max_retries'}:
         raise ValueError('unsupported task limits')

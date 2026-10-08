@@ -27,16 +27,16 @@ def context(actor, cwd, roots, *, require_claim=True):
     for root in roots:
         found = project_connection.selected(Path(root))
         if not found or any(found.get(key) != selected.get(key) for key in ('host', 'project_id')):
-            raise Denied('native roots must belong to the selected canonical project')
+            raise Denied('native roots must belong to the selected project')
     remote = project_connection.RemoteWorkspace(
         selected['host'], selected['project_id'], cluster=selected.get('cluster', ''),
         cluster_key=Path(selected['cluster_key']) if selected.get('cluster_key') else None)
     info = remote.call('whoami', remote.token(agent=actor))
     if info.get('id') != actor or info.get('role') != AGENT or info.get('project', {}).get('key') != remote.project_id:
-        raise Denied('native ownership requires the launcher-bound canonical agent identity')
+        raise Denied('native ownership requires the launcher-bound agent identity')
     who = Identity(actor, AGENT, info.get('parent', ''), tuple(info.get('can', ())))
     if require_claim and 'claim' not in who.can:
-        raise Denied('canonical agent capability has no mutation claim permission')
+        raise Denied('agent capability has no mutation claim permission')
     return remote, who
 
 
@@ -62,18 +62,18 @@ def source_resources(remote, required, *, branch_only=False):
             target = Path(key)
             found = worktreerules.checkouts(target.parent if target.is_file() else target)
             if not found:
-                raise Denied('canonical source mutation requires a Git checkout')
+                raise Denied('source mutation requires a Git checkout')
             bound = project_connection.selected(found[0])
             if not bound or (bound.get('host'), bound.get('project_id')) != (remote.host, remote.project_id):
-                raise Denied('mutation target belongs to another canonical project')
+                raise Denied('mutation target belongs to another project')
             relative = target.relative_to(found[0]).as_posix()
             if kind == 'worktree' and branch_only:
                 branch = repo.git(found[0], 'branch', '--show-current')
                 if not branch:
-                    raise Denied('canonical Git mutations require a named branch')
+                    raise Denied('Git mutations require a named branch')
                 source.append(('branch', branch))
             elif kind == 'worktree' or relative == '.':
-                raise Denied('canonical mutations must name bounded source paths')
+                raise Denied('mutations must name bounded source paths')
             else:
                 source.append(('area', relative))
     return list(dict.fromkeys(source))
@@ -106,7 +106,7 @@ def inspect_shell(name, args):
     commands, findings = segments(_shell_line(name, args))
     if findings or any(has_expansion(word) or has_glob(word) for command in commands
                        for word in (*command.argv, *(target for _, target in command.redirects))):
-        raise Denied('canonical shell mutations require fixed inspectable targets')
+        raise Denied('shell mutations require fixed inspectable targets')
 
 
 def reserve(remote, who, required, fields, *, branch_only=False):
@@ -197,7 +197,7 @@ def local_command(remote, who, args):
     if args.cmd == 'release':
         return {'released': [store.release(principal, kind, key)]}
     if args.ttl or args.pid:
-        raise Denied('canonical reservation uses bounded defaults; renew TTL with heartbeat')
+        raise Denied('reservation uses bounded defaults; renew TTL with heartbeat')
     store.reserve(principal, [(kind, key)], {'note': args.note})
     return {'reserved': [{'kind': kind, 'key': key}]}
 
@@ -209,25 +209,25 @@ def cli_command(remote, token, args):
     expected = args.agent or (selected or {}).get('agent', '')
     if (not expected or info.get('id') != expected or info.get('role') != AGENT
             or info.get('project', {}).get('key') != remote.project_id):
-        raise Denied('canonical claims require the selected exact agent identity')
+        raise Denied('claims require the selected exact agent identity')
     who = Identity(expected, AGENT, info.get('parent', ''), tuple(info.get('can', ())))
     if args.cmd == 'worktrees':
         if getattr(args, 'cleanup', ''):
             if 'claim' not in who.can:
-                raise Denied('canonical capability has no claim permission')
+                raise Denied('capability has no claim permission')
             principal = physical_owner(remote, who)
             store = claims()
             target = str(Path(args.cleanup).resolve())
             claim = store.who('worktree', target)
             if not claim or claim['owner'] != principal.id:
-                raise Denied('cleanup requires the live checkout claim of this canonical worker')
+                raise Denied('cleanup requires the live checkout claim of this worker')
             return worktree_lifecycle.cleanup(remote.base, who.id, target, store, claim_owner=principal.id)
         return worktree_lifecycle.pending(remote.base, who.id, args.label)
     if args.cmd in ('announce', 'send'):
         require_clean(remote, who)
         return None
     if 'claim' not in who.can:
-        raise Denied('canonical capability has no claim permission')
+        raise Denied('capability has no claim permission')
     if args.cmd == 'heartbeat':
         rows = remote.call('native.heartbeat', token, ttl_s=args.ttl)
         local = claims().renew(physical_owner(remote, who), args.ttl)
@@ -237,7 +237,7 @@ def cli_command(remote, token, args):
     if kind in LOCAL_KINDS:
         return local_command(remote, who, args)
     if kind not in ('branch', 'area', 'file', 'worktree'):
-        raise Denied('canonical CLI claims require a branch, a bounded checkout path, a port, a server or an install')
+        raise Denied('CLI claims require a branch, a bounded checkout path, a port, a server or an install')
     required = [(kind, key)]
     if kind == 'area':
         required = [('file', str((Path.cwd() / key).resolve()))]
@@ -254,6 +254,6 @@ def cli_command(remote, token, args):
         release_revoked(remote, who.id, snapshot)
         return {'released': rows}
     if args.ttl or args.pid:
-        raise Denied('canonical reservation uses bounded defaults; renew TTL with heartbeat')
+        raise Denied('reservation uses bounded defaults; renew TTL with heartbeat')
     reserve(remote, who, required, {'note': args.note}, branch_only=kind == 'worktree')
     return {'reserved': [{'kind': k, 'key': v} for k, v in source]}

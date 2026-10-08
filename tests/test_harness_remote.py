@@ -104,7 +104,7 @@ def test_concurrent_changed_claim_survives_rollback(setup):
 def test_actual_target_must_belong_to_canonical_binding(setup, monkeypatch):
     monkeypatch.setattr(harness_remote.project_connection, 'selected',
                         lambda root: {**setup.binding, 'project_id': 'b' * 32})
-    with pytest.raises(Denied, match='another canonical project'):
+    with pytest.raises(Denied, match='another project'):
         harness_remote.reserve(setup.remote, setup.who, [('file', str(setup.checkout / 'source.py'))], {})
     assert not harness_remote.claims().path.exists()
 

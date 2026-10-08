@@ -31,6 +31,6 @@ def adopt(base: Path, history: dict) -> dict:
     path = base / "adopted-history.json"
     previous = read_json(path, {})
     if previous and previous.get("digest") != digest:
-        raise ValueError("this canonical board already has different adopted history")
+        raise ValueError("this board already has different adopted history")
     write_json(path, {"board": board, "digest": digest, "messages": selected})
     return {"messages": len(selected), "digest": digest, "authority": "none"}

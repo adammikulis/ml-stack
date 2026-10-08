@@ -299,7 +299,7 @@ class WorkspaceHost:
             result = _reputation(ws, token, args, kwargs)
         elif operation == "task.command":
             if len(args) != 1 or kwargs:
-                raise ValueError("canonical task operation takes one typed command")
+                raise ValueError("task operation takes one typed command")
             result = remote_tasks.command(ws, token, self.projects.get(project_id), args[0])
         elif operation in {"native.reserve", "native.release", "native.heartbeat"}:
             ws._may(who, "claim")

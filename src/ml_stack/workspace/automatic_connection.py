@@ -67,7 +67,7 @@ def _other_local_actor(args, connection, local_token, workspace, requested):
             raise Denied('automatic Dev enrollment requires the saved standard agent capabilities')
         if prior and prior.get('local_agent') == requested:
             if (prior['host'], prior['project_id']) != (connection['host'], connection['project_id']):
-                raise Denied('this agent names another canonical Board')
+                raise Denied('this agent names another Board')
             remote._safe_storage(tokens.directory(remote.base) / prior['agent'])
             args.agent = prior['agent']
             return bind(remote, root, prior['agent'], connection['cluster'], local_agent=requested,
@@ -82,7 +82,7 @@ def _other_local_actor(args, connection, local_token, workspace, requested):
         if choice is None:
             raise Denied('this Dev cluster does not advertise the shared project Board')
         if (choice['host'], choice['project_id']) != (connection['host'], connection['project_id']):
-            raise Denied('this project already names another canonical Board')
+            raise Denied('this project already names another Board')
         attached = attach(root, actor.id, choice,
                           claim=(getattr(args, 'model', '') or metadata['model'],
                                  getattr(args, 'harness', '') or metadata['harness']))
@@ -220,12 +220,12 @@ def discover(root: Path, *, cluster_key=None, cluster="", port=None):
         return None
     declared = {row["board_host"] for _, row in found if row["board_host"]}
     if len(declared) > 1:
-        raise Denied("this project has competing canonical Board authorities")
+        raise Denied("two different boards claim this project")
     if declared:
         board = next(iter(declared))
         hosts = [(peer, row) for peer, row in found if device_address(peer, board)]
         if len(hosts) != 1:
-            raise Denied("the canonical Board address does not match exactly one authenticated device")
+            raise Denied("the Board address does not match exactly one authenticated device")
         peer, row = hosts[0]
     else:
         peer, row = min(found, key=lambda item: (item[1]["machine"], item[0].base_url))
@@ -263,7 +263,7 @@ def attach(root: Path, name: str, choice: dict, *, claim=("", "")):
 def _attach(root: Path, name: str, choice: dict, *, claim):
     prior = selected(root)
     if prior and (prior["host"], prior["project_id"]) != (choice["host"], choice["project_id"]):
-        raise Denied("this project already names another canonical Board")
+        raise Denied("this project already names another Board")
     remote = RemoteWorkspace(choice["host"], choice["project_id"],
                              cluster_key=Path(choice["cluster_key"]) if choice.get("cluster_key") else None,
                              cluster=choice["cluster"])
@@ -291,9 +291,9 @@ def startup(root: Path, name: str, parent: str = "", *, claim=("", "")) -> Seat 
     if choice is None and prior is None:
         return None
     if prior and prior["project_id"] != identity(root):
-        raise Denied("this checkout does not match its canonical Board project")
+        raise Denied("this checkout does not match its Board project")
     if prior and choice and (prior["host"], prior["project_id"]) != (choice["host"], choice["project_id"]):
-        raise Denied("this project already names another canonical Board")
+        raise Denied("this project already names another Board")
     configuration = prior or choice
     remote = RemoteWorkspace(configuration["host"], configuration["project_id"],
                              cluster=configuration.get("cluster", ""),
@@ -301,7 +301,7 @@ def startup(root: Path, name: str, parent: str = "", *, claim=("", "")) -> Seat 
                              if configuration.get("cluster_key") else None)
     agent_started = bool(person.marked())
     if agent_started and not prior:
-        raise Denied("an agent-started native session requires its parent's canonical Board connection")
+        raise Denied("an agent-started native session requires its parent's Board connection")
     if prior and prior.get("agent"):
         actor = parent if agent_started else prior["agent"]
         if agent_started and actor != prior["agent"]:

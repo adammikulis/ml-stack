@@ -72,7 +72,7 @@ class TaskManager(Manager):
     def _process(self, turn, command, environment, context):
         harness = context[1]
         if harness not in ('pi', 'claude'):
-            raise ValueError('canonical coding needs a supported coding harness')
+            raise ValueError('coding needs a supported coding harness')
         if harness == 'pi':
             return super()._process(turn, command, environment, context)
         caps = localloop.caps_of(self.agent)
@@ -143,7 +143,7 @@ def perform(ws, agent, task, project, control):
 
     watcher = threading.Thread(target=supervise, daemon=True)
     watcher.start()
-    prompt = ('Complete the canonical task in this assigned worktree. Test your own changes using scripts/test '
+    prompt = ('Complete the task in this assigned worktree. Test your own changes using scripts/test '
               'with affected selectors; the main agent handles shared gates and full end-to-end checks. '
               'Linux testing is on hold. Commit named changed files on the assigned task branch after '
               'affected local checks; do not push. Finish with a concise final answer describing changes, '
@@ -176,7 +176,7 @@ def _proposal(agent, task, project, turn, environment):
     report = project / '.task-report.md'
     report.write_text(turn.text, encoding='utf-8')
     git.run(['add', '--', '.task.patch', '.task-report.md'], cwd=project)
-    git.run(['commit', '-m', 'chore: record canonical task artifacts'], cwd=project)
+    git.run(['commit', '-m', 'chore: record task artifacts'], cwd=project)
     paths = git.run(['diff', '--name-only', baseline, 'HEAD'], cwd=project).stdout.splitlines()
     artifacts = {}
     for name in sorted(paths):

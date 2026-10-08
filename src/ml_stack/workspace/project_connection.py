@@ -30,7 +30,7 @@ def _saved() -> dict:
             raise ValueError("invalid connections")
         return connections
     except (OSError, ValueError) as exc:
-        raise Denied("canonical board connection record is unreadable; local fallback is disabled") from exc
+        raise Denied("board connection record is unreadable; local fallback is disabled") from exc
 
 
 def bind(remote: RemoteWorkspace, root: Path, agent: str, cluster: str = "", **options: str) -> dict:
@@ -57,7 +57,7 @@ def bind(remote: RemoteWorkspace, root: Path, agent: str, cluster: str = "", **o
     if metadata.get("kind") == "project-checkout" and (
             metadata.get("project_id") != remote.project_id
             or (authority.get("host") and authority["host"] != remote.host)):
-        raise Denied("this checkout already names another canonical board")
+        raise Denied("this checkout already names another board")
     made = {"host": remote.host, "project_id": remote.project_id, "agent": agent,
             "cluster": cluster, "cluster_key": remote.cluster_key}
     if who.get("project", {}).get("cluster_id"):
@@ -74,7 +74,7 @@ def bind(remote: RemoteWorkspace, root: Path, agent: str, cluster: str = "", **o
         connections = _saved()
         existing = connections.get(str(root))
         if existing and (existing["host"], existing["project_id"]) != (made["host"], made["project_id"]):
-            raise Denied("this project already uses another canonical board")
+            raise Denied("this project already uses another board")
         if session:
             existing = existing or made.copy()
             sessions = existing.setdefault("sessions", {})
@@ -117,7 +117,7 @@ def selected(cwd: Path | None = None, *, local_agent: str = "") -> dict | None:
             if authority.get("host"):
                 return {"host": authority["host"], "project_id": metadata["project_id"],
                         "agent": "", "cluster": authority.get("cluster", ""), "root": str(root)}
-            raise Denied("this shared checkout has no canonical board connection; attach it before using workspace commands")
+            raise Denied("this shared checkout has no board connection; attach it before using workspace commands")
         if configured:
             return {**configured, "root": str(root)}
     checkout = worktreerules.checkouts(current)
@@ -186,7 +186,7 @@ class Operations:
     def __getattr__(self, name):
         operation = self.prefix + name
         if operation not in METHODS:
-            raise Denied(f"{operation} is unavailable on the canonical board; local fallback is disabled")
+            raise Denied(f"{operation} is unavailable on the board; local fallback is disabled")
         return lambda token, *args, **kwargs: self.parent.remote.call(operation, token, *args, **kwargs)
 
 

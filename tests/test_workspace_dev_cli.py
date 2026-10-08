@@ -421,18 +421,18 @@ def test_saved_canonical_git_grant_refuses_another_repository(repository, tmp_pa
              '-c', 'commit.gpgsign=false', 'commit', '-m', 'fixture'], cwd=foreign)
     with pytest.raises(Denied, match='not authorized'), device_agent.owned_project_session(
             kit.ws, token, 'worker', foreign):
-        pytest.fail('another repository received canonical project authorization')
+        pytest.fail('another repository received project authorization')
     (foreign / '.ml-stack-project.json').write_text(json.dumps({
         'kind': 'project-checkout', 'project_id': grant['key']}))
     with pytest.raises(Denied, match='not authorized'), device_agent.owned_project_session(
             kit.ws, token, 'worker', foreign):
-        pytest.fail('forged checkout metadata received canonical project authorization')
+        pytest.fail('forged checkout metadata received project authorization')
     monkeypatch.setenv('GIT_DIR', str(repository / '.git'))
     monkeypatch.setenv('GIT_WORK_TREE', str(repository))
     monkeypatch.setenv('GIT_COMMON_DIR', str(repository / '.git'))
     with pytest.raises(Denied, match='not authorized'), device_agent.owned_project_session(
             kit.ws, token, 'worker', foreign):
-        pytest.fail('inherited Git selectors received canonical project authorization')
+        pytest.fail('inherited Git selectors received project authorization')
 
 
 @pytest.mark.slow
