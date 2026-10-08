@@ -26,7 +26,10 @@ data-view, training-view, tools-view, benchmarks-view, gym-view { display: conte
 (function(){
  const M=window.fleetModel,E=M.el;
  const W=window.workspaceModel={};
- W.api=async(path,opts={})=>{const r=await M.api(path,opts); if(M.refused(r))throw Error('Sign in to continue.'); if(!r.ok)throw Error(r.error||`Request failed (${r.status})`); return r;};
+ W.api=async(path,opts={})=>{const r=await M.api(path,opts);
+  if(!r.ok)throw Object.assign(Error(M.refused(r)?'Sign in to continue.':r.error||`Request failed (${r.status})`),
+    {status:r.status,personSetupRequired:r.person_setup_required===true});
+  return r;};
  W.button=(text,fn)=>E('button',{type:'button',onclick:async(e)=>{try{await fn(e);}catch(error){const note=e.currentTarget.closest('.workspace')?.querySelector('.status');if(note)W.status(note,error);}}},text);
  W.field=(host,label,tag='input',attrs={})=>{const id='field-'+Math.random().toString(36).slice(2);const n=E(tag,{id,...attrs});host.append(E('label',{for:id},label),n);return n;};
  W.visible=(input,visible)=>{input.hidden=!visible;if(input.previousElementSibling?.tagName==='LABEL')input.previousElementSibling.hidden=!visible;};

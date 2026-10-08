@@ -93,8 +93,14 @@ class TasksView extends HTMLElement{
    this.rows=data.tasks||[];this.metrics=data.metrics||{};this.overview=data.overview;this.loadError='';this.paint();
    this.note.textContent=`Updated ${new Date(this.overview.as_of*1000).toLocaleTimeString()}`;
    const project=this.projects.find(row=>row.id===selected);this.querySelector('.task-authority').textContent=project?`Canonical workspace · ${project.authority_machine||'authority not configured'}`:'';
-  }catch(error){if(selected!==this.project.value)return;this.rows=[];this.overview=null;this.loadError=error.message||String(error);this.paint();this.note.replaceChildren(E('span',{},`Task data unavailable: ${this.loadError} Use Refresh to try again, or check the project workspace. `),W.button('Open Projects',()=>M.go('projects')));}
+  }catch(error){if(selected!==this.project.value)return;this.rows=[];this.overview=null;this.loadError=error.message||String(error);this.paint();this.note.replaceChildren(E('span',{},`Task data unavailable: ${this.loadError} Use Refresh to try again, or check the project workspace. `),W.button('Open Projects',()=>M.go('projects')));if(error.personSetupRequired===true){const button=E('button',{type:'button',onclick:()=>this.joinProject(selected,button)},'Join workspace as person');this.note.append(button);}}
   finally{this.loading=false;if(this.reloadAfterLoad){this.reloadAfterLoad=false;this.load();}}
+ }
+ async joinProject(selected,button){
+  if(selected!==this.project.value)return;button.disabled=true;
+  try{await W.post(`/ui/projects/${encodeURIComponent(selected)}/board/connect`,{});if(selected===this.project.value)await this.load();}
+  catch(error){if(selected===this.project.value)W.status(this.note,error);}
+  finally{button.disabled=false;}
  }
  summary(){
   const value=this.overview,metrics=this.querySelector('.task-metrics');
