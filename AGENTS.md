@@ -36,8 +36,9 @@ hardware. Commits, tests, prepared builds and handoffs are checkpoints. Name any
 activation or live proof and keep the work unfinished. A receiving activation owner must
 acknowledge the handoff; until then the current owner retains responsibility.
 
-Commit bounded verified work promptly and hand it to the sole development coordinator for
-review, integration and synchronization. Carry activation through a safe boundary that
+Commit bounded verified work promptly, obtain independent review, then integrate and push it
+yourself under a short-lived development-branch claim. Do not wait for a designated publisher.
+Carry activation through a safe boundary that
 preserves active jobs and models. Do not hold delivery behind unrelated development, cleanup
 or background broad suites; do not impose broad development holds. Keep authorization,
 independent review and required checks intact. Managed workers perform only their assigned task
@@ -248,12 +249,15 @@ git branch -d <branch>
 git worktree prune
 ```
 
-**Commit, merge and sync continuously.** Every worker commits completed, bounded pieces by named
-files in its claimed branch and promptly sends the coordinator the commits, affected-check
-results and review request. The coordinator reviews and lands ready batches throughout the task,
-then fetches and pushes development immediately after each verified integration. A worker assigned
-integration follows the same review, claims and combined-gate requirements. Keep one coordinator
-for the shared development branch; other workers continue independently in their claimed trees.
+**Commit, merge and sync continuously.** Every agent commits completed, bounded pieces by named
+files in its claimed branch and promptly obtains independent review and affected checks.
+Authorized main agents integrate and push their reviewed batches themselves; no designated
+publisher or coordinator acknowledgment is required. Serialize development mutations with a
+short-lived checked branch claim, fetch before integration and again before push, reconcile
+remote advancement, and run the required combined gates. Release the claim promptly after
+sync. A busy claim delays only that integration; continue useful work in the claimed leaf tree.
+Managed subagents retain their assigned permissions and send ready commits to their parent;
+the parent carries integration and pushing through without waiting for another publisher.
 Do not accumulate ready branches or local-only commits until the end of a session, wait for every
 worker to finish, or defer publication behind cleanup, unrelated work or background full suites.
 After publication, promptly complete the merged branch's maintained worktree cleanup.
