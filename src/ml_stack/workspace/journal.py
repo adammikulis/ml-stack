@@ -10,12 +10,14 @@ from typing import Any, Protocol
 from uuid import uuid4
 
 from ml_stack.files import read_json, write_json
-from ml_stack.workspace import journal_merge as rules
+from ml_stack.workspace import journal_merge as rules, plain
 from ml_stack.workspace.chain import ChainLog, held
 
 __all__ = ["Journals", "Signing", "Table"]
 
 VERSION = 1
+MAX_ORIGINS = 64
+MAX_JOURNAL_ROWS = 200_000
 
 
 class Signing(Protocol):
@@ -28,7 +30,7 @@ class Signing(Protocol):
 
 
 class Table:
-    """A small map kept in one versioned JSON file; callers serialise writers."""
+    """A small map kept in one versioned JSON file; writers hold a lock file beside it."""
 
     def __init__(self, path: Path) -> None:
         self.path = Path(path)
@@ -43,11 +45,21 @@ class Table:
         """The entry for ``key``."""
         return self.all().get(key, default)
 
+    def update(self, change: Callable[[dict[str, Any]], Any]) -> Any:
+        """Run ``change`` on the entries under the lock and store them; returns its result."""
+        with held(self.path.with_name(self.path.name + ".lock")):
+            entries = self.all()
+            result = change(entries)
+            write_json(self.path, {"version": VERSION, "entries": entries})
+            return result
+
     def put(self, key: str, value: Any) -> None:
         """Set the entry for ``key``."""
-        entries = self.all()
-        entries[key] = value
-        write_json(self.path, {"version": VERSION, "entries": entries})
+        self.update(lambda entries: entries.__setitem__(key, value))
+
+    def drop(self, key: str) -> None:
+        """Remove the entry for ``key``."""
+        self.update(lambda entries: entries.pop(key, None))
 
 
 class Journals:
@@ -73,7 +85,7 @@ class Journals:
             with held(self.lock):
                 path = self.directory / "origin.json"
                 doc = read_json(path, {})
-                if not isinstance(doc, dict) or not doc.get("origin"):
+                if not isinstance(doc, dict) or not rules.valid_origin(doc.get("origin")):
                     doc = {"version": VERSION, "origin": uuid4().hex}
                     write_json(path, doc)
                 self._origin = str(doc["origin"])
@@ -85,6 +97,8 @@ class Journals:
 
     def log(self, origin: str) -> ChainLog:
         """The chained file of ``origin``'s journal."""
+        if not rules.valid_origin(origin):
+            raise ValueError("origin is not a journal id")
         if origin not in self._logs:
             self._logs[origin] = ChainLog(self.directory / f"{origin}.jsonl", self.clock)
         return self._logs[origin]
@@ -95,7 +109,8 @@ class Journals:
 
     def origins(self) -> list[str]:
         """Every origin with a journal held here."""
-        return sorted(p.stem for p in self.directory.glob("*.jsonl")) if self.directory.exists() else []
+        found = (p.stem for p in self.directory.glob("*.jsonl")) if self.directory.exists() else ()
+        return sorted(o for o in found if rules.valid_origin(o))
 
     def vector(self) -> dict[str, dict[str, Any]]:
         """For each held origin, the sequence number and hash of its last row."""
@@ -149,29 +164,59 @@ class Journals:
                 "sig": base64.b64encode(signature).decode()}})
 
     # -- copies of other journals --
-    def ingest(self, origin: str, incoming: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def ingest(self, origin: str, incoming: list[dict[str, Any]], authoritative: bool = False) -> list[dict[str, Any]]:
         """Store the rows of another device's journal that verify; returns the rows stored.
-        A forged or forked copy marks the origin damaged and raises `Damaged`."""
+        A forged or forked copy raises `Damaged`; it marks the origin damaged only when the
+        copy came from the device that owns the origin."""
+        if not rules.valid_origin(origin):
+            raise ValueError("origin is not a journal id")
         if origin == self.origin:
             return []
         if origin in self.damaged():
             raise rules.Damaged(f"journal {origin} was refused: {self.damaged()[origin]}")
-        log = self.log(origin)
+        if origin not in self.origins() and len(self.origins()) >= MAX_ORIGINS:
+            raise rules.Quota("this device holds as many journals as it will")
         with held(self.lock):
-            have = log.rows()
-            pin = self.keys.get(origin)
             try:
-                took = rules.accept(origin, have, incoming, base64.b64decode(pin) if pin else None, self.pool)
+                return self._store(origin, incoming, authoritative)
             except rules.Damaged as bad:
-                self.refused.put(origin, str(bad))
+                if authoritative:
+                    self.refused.put(origin, plain.line(bad, 200))
                 raise
-            if not took.rows:
-                return []
-            log.extend(took.rows)
-            if not pin:
-                self.keys.put(origin, base64.b64encode(took.public).decode())
-            self._observe(took.rows)
-            return took.rows
+
+    def _store(self, origin: str, incoming: list[dict[str, Any]], authoritative: bool) -> list[dict[str, Any]]:
+        log = self.log(origin)
+        have = log.rows()
+        pin = self.keys.get(origin)
+        public = base64.b64decode(pin["public"]) if pin else None
+        try:
+            took = rules.accept(origin, have, incoming, public, self.pool)
+        except rules.Damaged:
+            if not (pin and authoritative and not pin["bound"]):
+                raise
+            self._reset(origin)
+            pin, have = None, []
+            took = rules.accept(origin, have, incoming, None, self.pool)
+        if len(have) + len(took.rows) > MAX_JOURNAL_ROWS:
+            raise rules.Quota("this journal is past the rows a device keeps")
+        if not took.rows:
+            return []
+        log.extend(took.rows)
+        if not pin or (authoritative and not pin["bound"]):
+            self.keys.put(origin, {"public": base64.b64encode(took.public).decode(), "bound": authoritative})
+        self._observe(took.rows)
+        return took.rows
+
+    def _reset(self, origin: str) -> None:
+        self.log(origin).path.unlink(missing_ok=True)
+        self._logs.pop(origin, None)
+
+    def forgive(self, origin: str) -> None:
+        """Drop the refusal of ``origin`` and the copy held, so it is fetched again."""
+        with held(self.lock):
+            self._reset(origin)
+            self.refused.drop(origin)
+            self.keys.drop(origin)
 
     def _observe(self, rows: list[dict[str, Any]]) -> None:
         now_ms = int(self.clock() * 1000)

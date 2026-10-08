@@ -13,7 +13,7 @@ from ml_stack.sentinel.store import Holding
 from ml_stack.workspace.chain import ChainLog
 from ml_stack.workspace.identity import HUMAN, Denied, Identity
 
-__all__ = ["Quarantine"]
+__all__ = ["PLACEHOLDER", "Quarantine"]
 
 logger = logging.getLogger("ml_stack.workspace")
 logger.addHandler(logging.NullHandler())
@@ -28,6 +28,9 @@ def _sentinel_hold(kind: str, key: str, reason: str, text: str) -> bool:
         logger.warning("sentinel refused the hold: %s", err)
         return False
     return True
+
+
+PLACEHOLDER = "[held in quarantine as {qid}: {why}. A person releases it; until then it is not shown]"
 
 
 class Quarantine:

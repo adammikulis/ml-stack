@@ -484,12 +484,27 @@ note = "an agent, subagent or forged token cannot choose host mode; only a perso
 match = ["parser:workspace/mesh_sync.py", "human:workspace/mesh_fold.py:*"]
 status = "covered"
 tests = [
-  "tests/test_journal.py::test_a_forged_head_signature_marks_the_origin_damaged_and_stores_nothing",
-  "tests/test_journal.py::test_a_head_signed_by_another_key_than_the_pinned_one_is_refused",
-  "tests/test_journal.py::test_replaying_an_older_journal_changes_nothing_and_a_fork_is_refused",
+  "tests/test_journal.py::test_a_relay_cannot_append_rows_under_a_replayed_head",
+  "tests/test_journal.py::test_a_head_must_sign_the_row_directly_before_it",
+  "tests/test_journal.py::test_an_origin_that_is_not_32_lower_case_hex_never_reaches_the_file_system",
+  "tests/test_journal.py::test_the_upper_case_form_of_this_devices_origin_cannot_reach_its_journal",
+  "tests/test_journal.py::test_a_forged_copy_marks_an_origin_damaged_only_when_its_owner_presented_it",
+  "tests/test_journal.py::test_an_origin_bound_by_a_relay_is_rebound_to_the_key_its_owner_presents",
+  "tests/test_journal.py::test_a_device_holds_no_more_journals_than_the_origin_cap",
+  "tests/test_mesh_attacks.py::test_a_person_role_or_any_other_role_string_is_stored_as_an_agent",
+  "tests/test_mesh_attacks.py::test_a_foreign_post_may_only_target_general_or_announcements",
+  "tests/test_mesh_attacks.py::test_unknown_fields_of_a_foreign_message_reject_it",
+  "tests/test_mesh_attacks.py::test_a_note_body_cannot_choose_the_operation_that_is_appended",
+  "tests/test_mesh_attacks.py::test_newlines_and_unusable_names_are_rejected",
+  "tests/test_mesh_attacks.py::test_a_sender_named_like_a_local_agent_is_rejected",
+  "tests/test_mesh_attacks.py::test_flagged_text_from_another_device_is_quarantined_not_shown",
+  "tests/test_mesh_attacks.py::test_one_malformed_row_does_not_block_the_rows_after_it",
+  "tests/test_mesh_attacks.py::test_acknowledgements_count_only_for_a_row_whose_hash_matches",
+  "tests/test_mesh.py::test_a_person_role_in_a_row_from_another_device_is_stored_as_an_agent",
   "tests/test_mesh.py::test_a_peer_serving_a_head_under_another_key_is_refused_and_nothing_of_it_is_folded",
+  "tests/test_mesh.py::test_an_agent_token_cannot_start_a_sync",
 ]
-note = "journal rows from a paired device are stored only when chain and head signature verify"
+note = "journal rows from a paired device are stored only after the chain, a head over the row before it and an origin id of 32 lower-case hex characters verify, then folded as an agent under a local device name through the local size, screen and quarantine checks"
 
 [[group]]
 match = ["human:*"]

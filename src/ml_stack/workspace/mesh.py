@@ -9,12 +9,13 @@ from typing import Any
 
 from ml_stack import home
 from ml_stack.fleet.onboard.signing import SigningKeys
-from ml_stack.workspace import coordinator_client
+from ml_stack.workspace import coordinator_client, plain
 from ml_stack.workspace.journal import Journals, Signing, Table
 from ml_stack.workspace.journal_merge import row_id
 
 __all__ = ["Mesh", "device_signer", "paired_fingerprints"]
 
+MAX_REJECTED = 200
 SIGNING_ERRORS = (RuntimeError, OSError, ValueError)
 
 
@@ -38,7 +39,9 @@ class Mesh:
         directory = Path(base) / "mesh"
         self.journals = Journals(directory / "journal", signer or device_signer, clock)
         self.roster = roster or paired_fingerprints
-        self.peers, self.acks, self.applied = (Table(directory / f"{name}.json") for name in ("peers", "acks", "applied"))
+        names = ("peers", "acks", "applied", "labels", "rejected")
+        self.peers, self.acks, self.applied, self.labels, self.rejected = (
+            Table(directory / f"{name}.json") for name in names)
 
     @property
     def origin(self) -> str:
@@ -61,11 +64,8 @@ class Mesh:
         if not seq.isdigit() or origin != self.origin:
             return "local"
         acks = self.acks.all()
-        peers = self.peers.all()
-        for fingerprint in self.roster():
-            held = acks.get(peers.get(fingerprint, ""), {})
-            if int(held.get(self.origin, 0)) < int(seq):
-                return "provisional"
+        if any(int(acks.get(fingerprint, 0)) < int(seq) for fingerprint in self.roster()):
+            return "provisional"
         return "synced"
 
     def seal(self) -> bool:
@@ -76,14 +76,36 @@ class Mesh:
             return False
         return True
 
-    def note_peer(self, fingerprint: str, origin: str) -> None:
-        """Remember which origin a paired device writes."""
-        if fingerprint and self.peers.get(fingerprint) != origin:
-            self.peers.put(fingerprint, origin)
+    def bind_peer(self, fingerprint: str, origin: str) -> bool:
+        """Tie a paired device to the origin it writes the first time it is seen; False when the
+        device already writes a different one."""
+        return self.peers.update(lambda entries: entries.setdefault(fingerprint, origin)) == origin
 
-    def acknowledge(self, peer_origin: str, vector: dict[str, Any]) -> list[str]:
-        """Record what a peer holds; returns the origins where it holds less than it did before."""
-        before = self.acks.get(peer_origin, {})
-        now = {origin: int(entry["seq"]) for origin, entry in vector.items()}
-        self.acks.put(peer_origin, {o: max(now.get(o, 0), int(before.get(o, 0))) for o in {*now, *before}})
-        return sorted(o for o in before if now.get(o, 0) < int(before[o]))
+    def owns(self, fingerprint: str, origin: str) -> bool:
+        """Whether the paired device ``fingerprint`` is the writer of ``origin``."""
+        return bool(fingerprint) and self.peers.get(fingerprint) == origin
+
+    def acknowledge(self, fingerprint: str, vector: object) -> bool:
+        """Record how much of this device's journal the paired device holds, when its hash for
+        that row is the one held here; True when it holds less than it claimed before."""
+        entry = vector.get(self.origin) if isinstance(vector, dict) else None
+        rows = self.journals.rows(self.origin)
+        seq = entry.get("seq") if isinstance(entry, dict) else 0
+        if type(seq) is not int or not 0 < seq <= len(rows) or rows[seq - 1]["hash"] != entry.get("hash"):
+            seq = 0
+        before = int(self.acks.get(fingerprint, 0))
+        if seq > before:
+            self.acks.put(fingerprint, seq)
+        return seq < before
+
+    def label(self, origin: str) -> str:
+        """The local name of a device's origin, `d1`, `d2`, in the order they were first seen."""
+        return self.labels.update(lambda entries: entries.setdefault(origin, f"d{len(entries) + 1}"))
+
+    def reject(self, jid: str, reason: str) -> None:
+        """Record a foreign row that was not folded, keeping the last few."""
+        def keep(entries: dict[str, Any]) -> None:
+            entries[jid] = plain.line(reason, 200)
+            for old in list(entries)[:-MAX_REJECTED]:
+                del entries[old]
+        self.rejected.update(keep)

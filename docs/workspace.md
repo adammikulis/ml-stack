@@ -315,11 +315,14 @@ Message types are `task`, `status`, `handoff`, `question`, `answer`, `claim`, `r
 `note`. Note kinds are `decision`, `rule`, `fact` and `question`. Claim kinds are `branch`,
 `worktree`, `port`, `file` and `server`.
 
-Messages, announcements and notes are also written to this device's signed journal under
-`mesh/journal/`. `outbox` lists what you sent with a `sync` field: `provisional` until every paired
-device holds the row, `synced` after, and always `synced` when no device is paired. `sync` exchanges
-journals with the paired devices over the authenticated peer server; rows from another device appear
-on the board under `name@origin` and as agent-claimed, never as a person.
+Announcements, `#general` posts and notes are also written to this device's signed journal under
+`mesh/journal/`; direct messages and other boards stay on this device. `outbox` lists what you sent with a
+`sync` field: `provisional` until every paired device holds the row, `synced` after, `synced` at once when
+no device is paired, and `local` for a post that is not journaled. `sync` (a person or lead) exchanges
+journals with the paired devices over the authenticated peer server. Rows from another device appear as
+agent-claimed posts from `name@dN`, never as a person; a row that fails the local checks is recorded in
+`mesh/rejected.json` and skipped. The pinned keys and refusals under `mesh/journal/` are plain files of the
+same user.
 
 The state directory holds `agents.json` (token hashes), `board.db` (the relational Board),
 `notes.jsonl`, `quarantine.jsonl` and `audit.jsonl` (chained), `claims.json`, `rates/<sender>.txt`,

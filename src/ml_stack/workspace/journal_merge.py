@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -10,15 +11,39 @@ from typing import Any
 from ml_stack.fleet.onboard.manifest import Signer
 from ml_stack.workspace.chain import GENESIS, _digest
 
-__all__ = ["HEAD", "SKEW_MAX_MS", "Accepted", "Damaged", "Gap", "accept", "head_message", "held_back",
-           "merge", "row_id", "tick", "total_order"]
+__all__ = [
+    "HEAD",
+    "SKEW_MAX_MS",
+    "Accepted",
+    "Damaged",
+    "Gap",
+    "Quota",
+    "accept",
+    "head_message",
+    "held_back",
+    "merge",
+    "row_id",
+    "tick",
+    "total_order",
+    "valid_origin",
+]
 
 HEAD = "head"
 SKEW_MAX_MS = 300_000
+ORIGIN = re.compile(r"[0-9a-f]{32}")
+
+
+def valid_origin(origin: object) -> bool:
+    """Whether ``origin`` is a journal origin id: 32 lower-case hexadecimal characters."""
+    return type(origin) is str and ORIGIN.fullmatch(origin) is not None
 
 
 class Damaged(ValueError):
     """A journal copy that is forged, forked or broken."""
+
+
+class Quota(ValueError):
+    """A journal that would exceed what a device keeps."""
 
 
 class Gap(ValueError):
@@ -63,12 +88,12 @@ def head_message(pool: str, origin: str, seq: int, digest: str) -> bytes:
 
 def merge(journals: Mapping[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
     """Every journal's rows in one total order, heads dropped and a repeated idempotency key
-    of one actor kept only at its first row."""
+    of one actor on one origin kept only at its first row."""
     rows = sorted((r for journal in journals.values() for r in journal if r["kind"] != HEAD), key=total_order)
-    seen: set[tuple[str, str]] = set()
+    seen: set[tuple[str, str, str]] = set()
     kept: list[dict[str, Any]] = []
     for row in rows:
-        key = (row["actor"], row["idem"])
+        key = (row["origin"], row["actor"], row["idem"])
         if row["idem"] and key in seen:
             continue
         seen.add(key)
@@ -115,8 +140,8 @@ def _heads(new: list[dict[str, Any]], tops: dict[int, str], pinned: bytes | None
             raise Damaged(f"head at row {row['seq']} is malformed") from None
         if public is not None and key != public:
             raise Damaged(f"head at row {row['seq']} is signed by a different key")
-        if tops.get(target) != digest or target >= row["seq"]:
-            raise Damaged(f"head at row {row['seq']} names a row that is not in the journal")
+        if target != row["seq"] - 1 or tops.get(target) != digest:
+            raise Damaged(f"head at row {row['seq']} does not sign the row before it")
         if not Signer.check_bytes(key, head_message(pool, row["origin"], target, digest), signature):
             raise Damaged(f"head at row {row['seq']} has a bad signature")
         public, last = key, row["seq"]
@@ -128,8 +153,12 @@ def accept(origin: str, held: list[dict[str, Any]], incoming: list[dict[str, Any
     """The rows of ``incoming`` to append to the ``held`` copy of ``origin``'s journal: those
     past what is held, through the last row a verified head covers. Raises `Damaged` for a
     fork, a broken chain or a forged head and `Gap` when the rows start after the held end."""
+    if not valid_origin(origin):
+        raise Damaged("origin is not a journal id")
     if not incoming:
         return Accepted([], pinned or b"")
+    if not all(isinstance(r, dict) for r in incoming):
+        raise Damaged("a journal is a list of rows")
     first = incoming[0].get("seq")
     if type(first) is not int or first < 1:
         raise Damaged("rows carry no sequence number")
