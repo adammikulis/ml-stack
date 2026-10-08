@@ -213,6 +213,23 @@ class EventLog:
                 except (ValueError, KeyError, TypeError):
                     continue
 
+    def raw(self) -> list[dict[str, Any]]:
+        """Every readable record as written, oldest first; a damaged line is skipped."""
+        out: list[dict[str, Any]] = []
+        for file in self.files():
+            for line in file.read_text(encoding="utf-8", errors="replace").splitlines():
+                try:
+                    record = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(record, dict):
+                    out.append(record)
+        return out
+
+    def mac(self, data: bytes) -> str:
+        """An HMAC of ``data`` under the key kept beside the log."""
+        return self._head.mac(data)
+
     def head(self) -> str:
         """``count hash``: the line to write down somewhere an attacker cannot reach."""
         chain = self._chain()

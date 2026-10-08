@@ -175,7 +175,7 @@ def test_actual_hooks_record_claimed_metadata_and_authenticated_subagent_brief(t
     git.run(['-c', 'user.name=Hook fixture', '-c', 'user.email=fixture@example.invalid',
              'commit', '--allow-empty', '-m', 'fixture project'], cwd=repository)
     ws = Workspace(tmp_path / 'ws')
-    guide.agent_connect(ws, 'claude', project.describe(str(repository)), host_coordinator=False)
+    guide.agent_connect(ws, 'claude', project.describe(str(repository)))
     monkeypatch.chdir(repository)
     done = invoke('claude-session-start', {'model': 'claude-sonnet-4-6'})
     assert done.returncode == 0 and not done.stderr

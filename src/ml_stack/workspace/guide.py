@@ -15,7 +15,6 @@ from ml_stack import authority
 from ml_stack.files import read_json, write_json
 from ml_stack.log import say
 from ml_stack.workspace import (
-    coordinator_bootstrap,
     coordinator_client,
     coordinator_config,
     onboard,
@@ -192,8 +191,7 @@ def _ensure(ws: Workspace) -> None:
         say(f"First use: created the workspace in {ws.base}. No secret is shown on screen.")
 
 
-def agent_connect(ws: Workspace, name: str, found: dict[str, str], *,
-                  host_coordinator: bool = True) -> dict[str, str]:
+def agent_connect(ws: Workspace, name: str, found: dict[str, str]) -> dict[str, str]:
     """Initialize a local project agent or authenticate its saved identity."""
     if os.name == "nt":
         tokens.prepare(ws.base)
@@ -238,8 +236,6 @@ def agent_connect(ws: Workspace, name: str, found: dict[str, str], *,
         if not any(board["project"] == found["key"] and (who.parent or who.id) in board["members"]
                    for board in boards.values()):
             raise Denied("this identity has no membership in the project board")
-        if host_coordinator and entry.get("minted_by") == "local-account" and not entry.get("session_device"):
-            coordinator_bootstrap.ensure_host(ws, token)
         return {"id": who.id, "project": scope["name"], "state": "connected"}
 
 

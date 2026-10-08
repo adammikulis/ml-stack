@@ -1,0 +1,29 @@
+#!/usr/bin/env python3
+"""The guards' side of the person record, run from the pre-push hook and the Bash guard.
+
+    person-consume consume REMOTE   pre-push input on stdin: use the release-main approval for exactly that push
+    person-consume peek             exit 0 when this session holds a live release-main approval for this repository
+    person-consume propose [SHA]    print the approval question git supports for main (default: local main)
+    person-consume harness          exit 0 when an ancestor process is an agent harness
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
+from ml_stack.workspace import person_release
+
+
+def main(argv: list[str]) -> int:
+    """Return the command's exit code; its output goes to stdout when it succeeds and stderr otherwise."""
+    code, text = person_release.run(argv[1:], sys.stdin.read() if argv[1:2] == ["consume"] else "", os.getcwd())
+    if text:
+        (sys.stdout if code == 0 else sys.stderr).write(text + "\n")
+    return code
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))

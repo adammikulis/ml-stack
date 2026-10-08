@@ -1,8 +1,8 @@
 {
- "surfaces": 811,
+ "surfaces": 816,
  "by_status": {
-  "covered": 486,
-  "partial": 198,
+  "covered": 492,
+  "partial": 197,
   "uncovered": 53,
   "n/a": 74,
   "unmapped": 0
@@ -37,7 +37,7 @@
    "unmapped": 0
   },
   "egress": {
-   "covered": 46,
+   "covered": 47,
    "partial": 48,
    "uncovered": 0,
    "n/a": 0,
@@ -51,7 +51,7 @@
    "unmapped": 0
   },
   "human": {
-   "covered": 110,
+   "covered": 112,
    "partial": 0,
    "uncovered": 0,
    "n/a": 0,
@@ -79,7 +79,7 @@
    "unmapped": 0
   },
   "parser": {
-   "covered": 75,
+   "covered": 76,
    "partial": 0,
    "uncovered": 49,
    "n/a": 0,
@@ -100,8 +100,8 @@
    "unmapped": 0
   },
   "spawn": {
-   "covered": 55,
-   "partial": 61,
+   "covered": 57,
+   "partial": 60,
    "uncovered": 0,
    "n/a": 2,
    "unmapped": 0
@@ -1330,9 +1330,9 @@
    "note": ""
   },
   {
-   "id": "desktop:fleet/autostart.py:_ask_and_run",
+   "id": "desktop:fleet/autostart.py:_windows_install",
    "kind": "desktop",
-   "source": "fleet/autostart.py:_ask_and_run",
+   "source": "fleet/autostart.py:_windows_install",
    "trust": "names of peers, sessions, files",
    "attacker": "attacker text reaches a dialog, notification or shell command",
    "status": "n/a",
@@ -1340,9 +1340,9 @@
    "note": "fixed scripts that read the battery, focus or login item; no text from outside"
   },
   {
-   "id": "desktop:fleet/autostart.py:_windows_install",
+   "id": "desktop:fleet/autostart_backends.py:elevated",
    "kind": "desktop",
-   "source": "fleet/autostart.py:_windows_install",
+   "source": "fleet/autostart_backends.py:elevated",
    "trust": "names of peers, sessions, files",
    "attacker": "attacker text reaches a dialog, notification or shell command",
    "status": "n/a",
@@ -1801,6 +1801,20 @@
     "tests/test_net_no_bypass.py"
    ],
    "note": "loopback and LAN calls to servers the person configured; the net-no-bypass scan keeps public hosts out, answers from a hostile server (oversized, slow, malformed JSON) are not sent"
+  },
+  {
+   "id": "egress:fleet/autostart_apply.py:healthy",
+   "kind": "egress",
+   "source": "fleet/autostart_apply.py:healthy",
+   "trust": "addresses and redirects named by pages, repositories and peers",
+   "attacker": "a redirect or address sends the request somewhere the person did not choose",
+   "status": "covered",
+   "tests": [
+    "tests/test_autostart_hostile.py::test_an_error_or_a_non_json_answer_is_not_healthy",
+    "tests/test_autostart_hostile.py::test_a_slow_answer_is_not_healthy",
+    "tests/test_autostart_hostile.py::test_nothing_listening_is_not_healthy"
+   ],
+   "note": "the health probe reads one loopback URL from the verified manifest; an error status, non-JSON body, slow answer or closed port is an unhealthy unit, never an exception"
   },
   {
    "id": "egress:fleet/chat.py:stream",
@@ -2951,6 +2965,60 @@
    "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
   },
   {
+   "id": "human:fleet/autostart_apply.py:install",
+   "kind": "human",
+   "source": "fleet/autostart_apply.py:install",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_redteam_human_floor.py::test_no_tool_an_agent_is_offered_is_a_human_only_action",
+    "tests/test_autostart_apply.py::test_an_agent_is_refused_install_and_rollback_before_anything_is_read",
+    "tests/test_autostart_apply.py::test_no_terminal_means_no_install",
+    "tests/test_autostart_apply.py::test_the_person_must_type_the_manifest_id",
+    "tests/test_autostart_apply.py::test_an_expired_manifest_is_refused_and_nothing_is_written",
+    "tests/test_autostart_apply.py::test_a_manifest_prepared_on_another_device_is_refused",
+    "tests/test_autostart_apply.py::test_replaying_an_installed_manifest_is_refused",
+    "tests/test_autostart_apply.py::test_changing_a_staged_unit_between_prepare_and_install_is_refused",
+    "tests/test_autostart_apply.py::test_a_unit_and_manifest_edited_together_still_differ_from_what_prepare_renders",
+    "tests/test_autostart_apply.py::test_a_destination_outside_the_allowed_set_is_refused",
+    "tests/test_autostart_apply.py::test_a_symlinked_unit_directory_is_refused",
+    "tests/test_autostart_apply.py::test_a_symlinked_destination_file_is_refused",
+    "tests/test_autostart_apply.py::test_a_manifest_edited_to_run_something_else_is_refused",
+    "tests/test_autostart_apply.py::test_a_missing_or_replaced_exec_target_is_refused_at_install"
+   ],
+   "note": "install and rollback refuse any agent marker or missing terminal before reading the manifest; an expired, replayed, other-device, tampered or redirected manifest writes nothing"
+  },
+  {
+   "id": "human:fleet/autostart_apply.py:rollback",
+   "kind": "human",
+   "source": "fleet/autostart_apply.py:rollback",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_redteam_human_floor.py::test_no_tool_an_agent_is_offered_is_a_human_only_action",
+    "tests/test_autostart_apply.py::test_an_agent_is_refused_install_and_rollback_before_anything_is_read",
+    "tests/test_autostart_apply.py::test_no_terminal_means_no_install",
+    "tests/test_autostart_apply.py::test_the_person_must_type_the_manifest_id",
+    "tests/test_autostart_apply.py::test_an_expired_manifest_is_refused_and_nothing_is_written",
+    "tests/test_autostart_apply.py::test_a_manifest_prepared_on_another_device_is_refused",
+    "tests/test_autostart_apply.py::test_replaying_an_installed_manifest_is_refused",
+    "tests/test_autostart_apply.py::test_changing_a_staged_unit_between_prepare_and_install_is_refused",
+    "tests/test_autostart_apply.py::test_a_unit_and_manifest_edited_together_still_differ_from_what_prepare_renders",
+    "tests/test_autostart_apply.py::test_a_destination_outside_the_allowed_set_is_refused",
+    "tests/test_autostart_apply.py::test_a_symlinked_unit_directory_is_refused",
+    "tests/test_autostart_apply.py::test_a_symlinked_destination_file_is_refused",
+    "tests/test_autostart_apply.py::test_a_manifest_edited_to_run_something_else_is_refused",
+    "tests/test_autostart_apply.py::test_a_missing_or_replaced_exec_target_is_refused_at_install"
+   ],
+   "note": "install and rollback refuse any agent marker or missing terminal before reading the manifest; an expired, replayed, other-device, tampered or redirected manifest writes nothing"
+  },
+  {
    "id": "human:fleet/onboard/share_cli.py:_confirm_licences",
    "kind": "human",
    "source": "fleet/onboard/share_cli.py:_confirm_licences",
@@ -4086,17 +4154,11 @@
    "attacker": "an agent or a forged grant takes an action only a person may take",
    "status": "covered",
    "tests": [
-    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
-    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
-    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
-    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item",
-    "tests/test_requests_floor.py::test_the_request_commands_refuse_a_process_an_agent_started",
-    "tests/test_redteam_requests.py::test_a_model_cannot_answer_its_own_request_by_any_tool_name_or_command_text",
-    "tests/test_workspace_model.py::test_only_a_person_or_launcher_process_records_a_verified_model",
-    "tests/test_workspace_model.py::test_an_agent_cannot_verify_itself_or_overwrite_a_verified_model_or_set_anothers",
-    "tests/test_workspace_model.py::test_a_claimed_model_changes_no_right"
+    "tests/test_standing_device_policy.py::test_an_agent_token_cannot_choose_host_mode_for_itself_a_subagent_or_a_forged_parent",
+    "tests/test_standing_device_policy.py::test_only_protected_own_local_identity_selects_authority",
+    "tests/test_standing_device_policy.py::test_a_person_cannot_host_over_a_followed_coordinator"
    ],
-   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+   "note": "an agent, subagent or forged token cannot choose host mode; only a person selects what the device hosts"
   },
   {
    "id": "human:workspace/device_agent.py:bind_worker",
@@ -7665,6 +7727,23 @@
    "note": ""
   },
   {
+   "id": "parser:workspace/person_transcript.py",
+   "kind": "parser",
+   "source": "workspace/person_transcript.py",
+   "trust": "files, pages and archives from outside",
+   "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_person_statement.py::test_no_typed_phrasing_becomes_an_authorization",
+    "tests/test_person_hooks.py::test_a_prompt_the_person_did_not_type_leaves_no_record",
+    "tests/test_person_hooks.py::test_a_missing_transcript_entry_fails_closed_after_a_bounded_wait",
+    "tests/test_person_hooks.py::test_an_unreadable_transcript_and_a_mismatched_text_fail_closed",
+    "tests/test_person_hooks.py::test_a_transcript_the_calling_agent_wrote_elsewhere_records_nothing",
+    "tests/test_person_hooks.py::test_a_hundred_megabyte_transcript_is_read_from_its_tail_within_the_hook_budget"
+   ],
+   "note": "a transcript entry that is not a typed human prompt on a pinned Claude Code version, is missing, unreadable or differs from the hook prompt records nothing; a forged line by a same-user process is the documented threat-model limit"
+  },
+  {
    "id": "parser:workspace/project_connection.py",
    "kind": "parser",
    "source": "workspace/project_connection.py",
@@ -10416,18 +10495,6 @@
    "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
   },
   {
-   "id": "spawn:fleet/autostart.py:_ask_and_run",
-   "kind": "spawn",
-   "source": "fleet/autostart.py:_ask_and_run",
-   "trust": "arguments built from model output, peer messages or file names",
-   "attacker": "attacker text becomes a command line, environment or working directory",
-   "status": "partial",
-   "tests": [
-    "tests/test_redteam_spawn.py::test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line"
-   ],
-   "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
-  },
-  {
    "id": "spawn:fleet/autostart.py:_mac_install",
    "kind": "spawn",
    "source": "fleet/autostart.py:_mac_install",
@@ -10536,6 +10603,21 @@
     "tests/test_redteam_spawn.py::test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line"
    ],
    "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
+  },
+  {
+   "id": "spawn:fleet/autostart_backends.py:run",
+   "kind": "spawn",
+   "source": "fleet/autostart_backends.py:run",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_autostart_hostile.py::test_run_hands_every_argument_to_the_program_unchanged",
+    "tests/test_autostart_hostile.py::test_run_reports_a_program_that_cannot_start_as_a_failure",
+    "tests/test_autostart_hostile.py::test_run_bounds_a_program_that_never_exits",
+    "tests/test_autostart_prepare.py::test_arguments_with_spaces_quotes_and_percent_stay_single_argv_elements"
+   ],
+   "note": "service-manager commands are argument lists with no shell; hostile characters in an argument reach the program as one literal element, and a program that hangs or cannot start is a failure"
   },
   {
    "id": "spawn:fleet/device.py:_ram_used_gb",
@@ -11710,6 +11792,19 @@
     "tests/test_redteam_spawn.py::test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line"
    ],
    "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
+  },
+  {
+   "id": "spawn:workspace/person_targets.py:_run",
+   "kind": "spawn",
+   "source": "workspace/person_targets.py:_run",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_person_hooks.py::test_another_commit_another_repository_or_another_remote_does_not_match",
+    "tests/test_person_guards.py::test_an_approval_covers_exactly_one_fast_forward_to_the_approved_commit"
+   ],
+   "note": "fixed git argument vectors with a timeout; the repository, remote, commit and tree an authorization binds are read from git, never from prompt or model text"
   },
   {
    "id": "spawn:worktreerules.py:_branch",

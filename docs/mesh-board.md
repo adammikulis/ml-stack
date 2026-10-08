@@ -74,7 +74,7 @@ written only by the fold. Settled: every active member's published vector covers
   or migration; a device with history keeps its journal as one origin. The same path adds the hundredth.
 - **Two pools meeting.** A `pool-merge` row signed by both sides names the lower pool id (the founding
   row's hash) as the survivor; all journals stay as origins.
-- **Cost shape.** Sync work per device per interval is bounded by fan-out k (section 5), not N. Storage is
+- **Cost shape.** Sync work per device per interval is bounded by fan-out k (section 5) and does not grow with N; storage is
   O(live state + retained tail + N). O(N) and unavoidable: membership, one presence summary per device, the
   version vector.
 
@@ -408,7 +408,7 @@ The device group is a pool. Identifiers that say cluster for this concept, with 
 | Today | Becomes |
 |---|---|
 | `ml-stack-cluster` (`pyproject.toml:162`, `fleet/join.py:main`) | `ml-stack-pool` |
-| `cluster_key`, `--cluster-key`, `ML_STACK_CLUSTER_KEY`, `cluster.key` (`fleet/discovery.py:75-80`) | `pool_key`, `--pool-key`, `ML_STACK_POOL_KEY`, `pool.key` |
+| `cluster_key`, `--cluster-key`, `ML_STACK_CLUSTER_KEY`, `cluster.key` (`fleet/discovery.py:75-80`) | `pool_key`, `--pool-key`, the matching pool-key environment variable, `pool.key` |
 | `cluster_id` (project connections, `workspace/remote.py`, `project_connection.py`) | `pool_id` |
 | `cluster`, `--cluster` in the project record shown by `whoami` | `pool`, `--pool` |
 | `mint_cluster`, `cluster_group`, `Membership` group fields (`fleet/discovery.py`) | `mint_pool`, `pool_group` |

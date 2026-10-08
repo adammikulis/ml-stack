@@ -444,7 +444,7 @@ def test_claude_first_command_and_saved_codex_session_share_dev_without_pairing(
     import sys
     from pathlib import Path
 
-    from ml_stack.workspace import coordinator_bootstrap, coordinator_client, guide, project, tokens
+    from ml_stack.workspace import coordinator_client, guide, project, tokens
 
     devices, project_id = dev_pair
     device = devices[0]
@@ -455,24 +455,22 @@ def test_claude_first_command_and_saved_codex_session_share_dev_without_pairing(
     monkeypatch.setenv('CODEX_THREAD_ID', 'existing-main-session')
     monkeypatch.setattr(automatic_connection, 'HTTP_PORT', device.local_port)
     monkeypatch.chdir(device.checkout)
-    monkeypatch.setattr(coordinator_bootstrap, 'ensure_host', lambda *a: pytest.fail('legacy coordinator hosting'))
     monkeypatch.setattr(coordinator_client, '_device_peer', lambda *a: pytest.fail('paired-device credential'))
     codex_args = SimpleNamespace(agent='codex', token_file='')
     codex_board, codex_token = cli._context(codex_args)
     if expired:
         local = cli.Workspace()
-        guide.agent_connect(local, 'claude', project.describe(), host_coordinator=False)
+        guide.agent_connect(local, 'claude', project.describe())
         entries = local.registry._load()
         entries['claude']['expires'] = local.clock() - 1
         local.registry._save(entries)
     source = '''import sys
-from ml_stack.workspace import automatic_connection, cli, coordinator_bootstrap, coordinator_client
+from ml_stack.workspace import automatic_connection, cli, coordinator_client
 from ml_stack.fleet import discovery
 original_destinations = discovery._destinations
 discovery._destinations = lambda group, port: [(address, interface) for address, interface in original_destinations(group, port) if address[0] != discovery.LOOPBACK and interface != discovery.LOOPBACK]
 def forbidden(*args, **kwargs):
     raise AssertionError("legacy credential or host path")
-coordinator_bootstrap.ensure_host = forbidden
 coordinator_client._device_peer = forbidden
 automatic_connection.HTTP_PORT = int(sys.argv[1])
 raise SystemExit(cli.main(["whoami", "--agent", "claude", "--json"]))
@@ -506,7 +504,7 @@ def test_different_dev_local_actor_cannot_escape_existing_authority(repository, 
 
     local = Workspace(tmp_path / 'private-local')
     found = project.describe(str(repository))
-    guide.agent_connect(local, 'claude', found, host_coordinator=False)
+    guide.agent_connect(local, 'claude', found)
     token = tokens.load(local.base, 'claude')
     entries = local.registry._load()
     entry = entries['claude']

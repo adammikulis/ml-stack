@@ -3,10 +3,17 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+
+
+def guard_off() -> bool:
+    """Whether MLSTACK_GUARD=off turns the soft rules off; the hooks run only for an agent's calls, so the hard
+    rules stay in force."""
+    return os.environ.get("MLSTACK_GUARD") == "off"
 
 
 def load():

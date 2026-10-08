@@ -1,4 +1,4 @@
-"""Who is writing: per-agent capability tokens, minted by a person or the lead."""
+"""Who is writing: per-agent capability tokens, minted by a person."""
 
 from __future__ import annotations
 
@@ -46,7 +46,7 @@ TOKEN_ENV = "ML_STACK_WORKSPACE_TOKEN"  # noqa: S105
 PREFIX = "mlws1."
 HUMAN, LEAD, AGENT = "human", "lead", "agent"
 ROLES = (HUMAN, LEAD, AGENT)
-MINTS = {HUMAN: frozenset(ROLES), LEAD: frozenset({AGENT}), AGENT: frozenset()}
+MINTS = {HUMAN: frozenset(ROLES), LEAD: frozenset(), AGENT: frozenset()}
 AGENT_MARKERS = ("CLAUDECODE", "ML_STACK_AGENT", "ML_STACK_NONINTERACTIVE")
 RESERVED = frozenset({"*", "all", "everyone", "workspace", "system", "human", "owner-token"})
 NAME = re.compile(r"^[a-z0-9][a-z0-9._-]{0,47}$")

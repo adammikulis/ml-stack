@@ -170,6 +170,75 @@ python packaging/build.py            # wheels into dist/
 python packaging/build.py --bundle   # and the app for this platform (needs Rust, node)
 ```
 
+## Starting at login and keeping the runtime current
+
+Units that start ml-stack for you are prepared by a command anyone (or any agent) can run and
+installed by you, at your own terminal, with one command it prints. Nothing writes to
+`~/Library/LaunchAgents`, `~/.config/systemd/user` or a system directory until you run that
+command.
+
+```
+python -m ml_stack.fleet.autostart prepare --launchers <launcher directory> --role pool-daemon --role runtime-ensure
+python -m ml_stack.fleet.autostart install --manifest <the path prepare printed>
+```
+
+`prepare` takes `--launchers DIR`, the directory `ml-stack runtime ensure --launchers` keeps
+its stable launchers in, and `--system` to stage the system-wide location instead of your own. It writes the unit files and a
+`manifest.json` under `~/.ml-stack/autostart/staging/`. The manifest holds the role, platform, destination path, the
+sha256 of each unit, the exec argv (the launcher's absolute path and its options, never a shell
+string), a path-only environment, the working directory, the restart policy, the log paths, who
+prepared it, the device it is for and a 24-hour expiry.
+
+`install` shows what it will do, asks you to type the manifest id, then refuses unless the
+manifest has not expired, was prepared for this device, names a launcher the runtime tooling
+wrote (not a checkout, not an editable install), and every staged unit still has the recorded
+hash and is what `prepare` would write today. It backs up each file it replaces, writes the unit,
+loads it, checks that it is loaded and that the daemon answers its health probe, records the
+install in the authority audit log, and prints the command that undoes it:
+
+```
+python -m ml_stack.fleet.autostart rollback
+```
+
+`--system` installs to `/Library/LaunchDaemons` or `/etc/systemd/system` through the operating
+system's own administrator prompt. ml-stack never sees the password and never writes a `sudoers`
+rule. The unit still runs as you.
+
+`python -m ml_stack.fleet.autostart status` (also `verify`, which exits 1 unless current) prints
+`autostart: current | stale | missing | drifted | not-prepared`. `ml-stack-workspace status` and
+the device report carry the same word. *stale* means a newer preparation differs from what is
+installed; *drifted* means a unit was edited or removed, the launcher is missing or no longer
+a runtime launcher, or the service manager does not hold the unit.
+
+| Role | Runs | Restart |
+|---|---|---|
+| `pool-daemon` | the daemon, at login | restart on failure, 30 s apart, at most five starts in five minutes (systemd), a throttle interval (launchd), a retry count (Windows) |
+| `runtime-ensure` | `ml-stack runtime ensure` at load and hourly, with no agent identity in its environment | a schedule, not a resident process |
+
+The daemon holds a per-root lock, so a second start exits instead of competing, and rotates the
+log files under `~/.ml-stack/autostart/logs` when one passes 5 MiB (three copies kept; systemd
+units log to the journal instead). A unit points at the launcher path, whose contents `ensure`
+switches atomically when it selects a new runtime, so a runtime upgrade needs no reinstall.
+The units carry no tokens and no secrets, and there is no unit for landing work: landing needs
+an agent identity (claims, board posts, push rules), so it stays in an agent session.
+
+`runtime-ensure` runs `ml-stack runtime ensure` as no agent: it takes the build lock only,
+claims nothing and posts nothing to the board (see *Following the source checkout*). It needs
+the checkout a first `ensure` recorded, and `prepare` refuses a role whose
+`ml-stack` launcher is not there.
+
+Checking a reboot is manual, because a test cannot reboot a machine:
+
+1. `prepare`, `install`, then `status` prints `autostart: current`.
+2. Reboot, log in, wait a minute. `status` prints `autostart: current` and
+   `ml-stack-peers ls` from another machine lists this one.
+3. Kill the daemon process: it returns within the restart interval; kill it six times in
+   five minutes and the manager stops restarting it (systemd), which `status` shows as drifted.
+4. Edit the unit file: `status` prints `drifted`. `rollback` restores the file it replaced.
+5. Linux only: with the user unit installed, `loginctl show-user $USER -p Linger` says
+   `Linger=yes`, so the unit starts at boot before you log in.
+6. macOS and Windows: let a log pass 5 MiB and confirm it is copied aside and emptied.
+
 Everything is adjustable later:
 
 ![Settings](images/settings.jpg)
