@@ -1,4 +1,4 @@
-"""Local human controls for the canonical project board."""
+"""Local human controls for the project board."""
 
 import re
 import shlex

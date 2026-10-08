@@ -31,7 +31,7 @@ def inspection(task, now):
 
 
 def overview(tasks, now):
-    """Summarize canonical task records at one server timestamp."""
+    """Summarize task records at one server timestamp."""
     states = Counter(task['state'] for task in tasks)
     remaining = sum(task['state'] not in ('completed', 'rejected') for task in tasks)
     workers = []

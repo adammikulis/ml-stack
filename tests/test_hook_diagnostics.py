@@ -10,8 +10,8 @@ from ml_stack.workspace.identity import Denied
 
 @pytest.mark.parametrize("reason, expected", [
     ("the token expired", "Denied: the token expired"),
-    ("native roots must belong to the selected canonical project",
-     "Denied: native roots must belong to the selected canonical project"),
+    ("native roots must belong to the selected project",
+     "Denied: native roots must belong to the selected project"),
     ("token file /fixture/session: secret-token-value",
      "Denied: token file /fixture/session:"),
     ("project board unavailable: https://private-host/?token=secret-token-value",

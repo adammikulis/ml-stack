@@ -1,4 +1,4 @@
-"""Parent-authorized recovery of unchanged inactive canonical task checkouts."""
+"""Parent-authorized recovery of unchanged inactive task checkouts."""
 
 from pathlib import Path
 from uuid import uuid4
@@ -45,7 +45,7 @@ def dematerialize(ws, token: str, ident: str, reason: str) -> dict:
         scope = record(graph, 'task-worktree:' + ident.removeprefix('task:'), 'task-worktree')
         state = scope.get('state')
         if scope['task'] != ident or state not in ('active', 'reserved', None):
-            raise Denied('the task has no recoverable canonical checkout')
+            raise Denied('the task has no recoverable checkout')
         parent = ws.registry.info(scope['worker']).get('parent')
         if who.role != HUMAN and not (who.id == scope['owner'] == parent):
             raise Denied('only the actual registered task parent or person can recover its checkout')
@@ -53,7 +53,7 @@ def dematerialize(ws, token: str, ident: str, reason: str) -> dict:
         source, target = Path(scope['source_project']), Path(scope['project'])
         checkout = worktreerules.checkouts(source)
         if not checkout or checkout[0] != source.resolve():
-            raise Denied('the canonical source repository changed')
+            raise Denied('the source repository changed')
         primary = checkout[1]
         with ws.claims.inactive_worktree(who, scope):
             if state is None and not target.is_dir():

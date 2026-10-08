@@ -1,4 +1,4 @@
-"""Metadata-only project registration and canonical authority checks."""
+"""Metadata-only project registration and authority checks."""
 
 from types import SimpleNamespace
 

@@ -85,7 +85,7 @@ def test_presented_agents_children_and_internal_senders_are_read_only(kit, monke
     assert not child['coordinator_eligible']
 
 
-def test_canonical_registration_preserves_model_and_rights_and_refuses_child(host):
+def test_registration_preserves_model_and_rights_and_refuses_child(host):
     from test_workspace_remote import call, joined
 
     from ml_stack.workspace.coordinator_calls import READS, WRITES
@@ -106,7 +106,7 @@ def test_canonical_registration_preserves_model_and_rights_and_refuses_child(hos
     assert 'main-session' in WRITES and 'main-session' not in READS
 
 
-def test_canonical_brief_uses_authenticated_parent_instead_of_codex_alias(kit, monkeypatch, capsys):
+def test_brief_uses_authenticated_parent_instead_of_codex_alias(kit, monkeypatch, capsys):
     from types import SimpleNamespace
 
     from ml_stack.workspace import cli
@@ -147,7 +147,7 @@ def test_expired_and_restricted_main_have_no_coordinator_eligibility(kit):
     assert not metadata(kit.ws.registry, 'codex-restricted')['coordinator_eligible']
 
 
-def test_cli_main_session_uses_canonical_mutation_rpc(host, monkeypatch, capsys):
+def test_cli_main_session_uses_mutation_rpc(host, monkeypatch, capsys):
     from types import SimpleNamespace
 
     from test_workspace_remote import call, joined
@@ -163,7 +163,7 @@ def test_cli_main_session_uses_canonical_mutation_rpc(host, monkeypatch, capsys)
         return result['result']
 
     workspace = project_connection.CanonicalWorkspace(SimpleNamespace(call=invoke), agent['token'])
-    monkeypatch.setattr(cli, '_project_connection', lambda: {'host': 'canonical'})
+    monkeypatch.setattr(cli, '_project_connection', lambda: {'host': 'board'})
     monkeypatch.setattr(cli, '_context', lambda args, connection: (workspace, agent['token']))
     handler = next(entry[3] for entry in cli.TABLE if entry[0] == 'main-session')
     args = SimpleNamespace(cmd='main-session', json=True, request_id='', harness='codex')

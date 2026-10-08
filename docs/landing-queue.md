@@ -40,7 +40,7 @@ a delegate and never a person). `submit` is idempotent: the record id is
 | `budgets` | metric deltas from `scripts/budgets` |
 | `claims` | the agent's live claims (`ws.claims.listing`) |
 | `review` | reviewer id and state when a task review exists, else `none` |
-| `task` | the task id when the branch belongs to a canonical task |
+| `task` | the task id when the branch belongs to a task |
 
 An accepted task needs no `submit`: `reviewed()` already proves acceptance, the exact proposal and
 review hashes, and a released execution lease, and the tip is the worktree's `source_commit`. The

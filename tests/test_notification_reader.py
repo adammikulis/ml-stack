@@ -152,9 +152,9 @@ def test_explicit_parent_hook_preserves_launcher_root(monkeypatch):
     captured = []
     monkeypatch.setattr(harnesshook.harness_remote, 'context', lambda *a, **kw: (_ for _ in ()).throw(Denied('offline')))
     monkeypatch.setattr(harnesshook, 'nudge', lambda label, rail: captured.append((label, rail.roots)) or '')
-    assert harnesshook.run(['post', '--label', 'canonical-parent', '--root', '/launcher-root'],
+    assert harnesshook.run(['post', '--label', 'project-parent', '--root', '/launcher-root'],
                            io.StringIO('{"cwd":"/unrelated"}'), io.StringIO()) == 0
-    assert captured == [('canonical-parent', ['/launcher-root'])]
+    assert captured == [('project-parent', ['/launcher-root'])]
 
 
 def test_checkout_authority_mismatch_is_refused(saved):

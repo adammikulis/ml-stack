@@ -418,6 +418,9 @@ def _staged(root: str | None, rules: Shapes, against: str | None = None) -> list
                       f"{against}...HEAD").split("\n")
     else:
         listed = _git(root, "diff", "--cached", "--name-only", "--diff-filter=ACMR").split("\n")
+        if _git(root, "rev-parse", "-q", "--verify", "MERGE_HEAD").strip():  # a merge adds only what differs from both parents
+            theirs = _git(root, "diff", "--cached", "--name-only", "--diff-filter=ACMR", "MERGE_HEAD").split("\n")
+            listed = [f for f in listed if f in theirs]
     return [f for f in listed if f and not f.endswith(rules.skip_suffixes)]
 
 

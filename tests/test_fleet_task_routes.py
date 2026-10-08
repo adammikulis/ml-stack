@@ -1,4 +1,4 @@
-"""Actual Fleet sockets enforce person authority before canonical task mutations."""
+"""Actual Fleet sockets enforce person authority before task mutations."""
 
 from types import SimpleNamespace
 

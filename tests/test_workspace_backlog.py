@@ -133,7 +133,7 @@ def test_assigned_and_blocked_issues_are_skipped_and_fetch_failures_are_visible(
     assert "blocked" in detail and "GitHub unavailable" in detail
 
 
-def test_idle_dispatch_creates_canonical_task_and_notifies_worker_in_its_inbox(setup, monkeypatch):
+def test_idle_dispatch_creates_task_and_notifies_worker_in_its_inbox(setup, monkeypatch):
     kit, parent, agent, project = setup
     monkeypatch.setattr(backlog, "fetch", lambda _: [issue()])
     monkeypatch.setattr(la, "alive", lambda _: True)
@@ -184,7 +184,7 @@ def test_producer_keeps_ahead_of_the_worker_with_a_durable_queue(setup, monkeypa
     assert all(task['state'] == 'queued' for task in tasks)
 
 
-def test_interrupted_projection_preserves_canonical_task_without_duplicate_dispatch(setup, monkeypatch):
+def test_interrupted_projection_preserves_task_without_duplicate_dispatch(setup, monkeypatch):
     kit, parent, agent, _ = setup
     monkeypatch.setattr(la, "alive", lambda _: True)
     la.Status(kit.ws, agent.name).update(state="idle")
@@ -192,7 +192,7 @@ def test_interrupted_projection_preserves_canonical_task_without_duplicate_dispa
     monkeypatch.setattr(backlog, 'pick', lambda ws, a, **kw: original(ws, a, fetcher=lambda _: [issue()], **kw))
     previous = issuepump._status
     def interrupted(*args, **kwargs):
-        raise RuntimeError('Projection interrupted after canonical commit')
+        raise RuntimeError('Projection interrupted after commit')
     monkeypatch.setattr(issuepump, '_status', interrupted)
     with pytest.raises(RuntimeError, match='Projection interrupted'):
         issuepump.step(kit.ws, parent, agent.name)
@@ -236,7 +236,7 @@ def test_parent_resume_preserves_failed_attempt_and_consumes_one_retry(setup):
     kit, parent, agent, _ = setup
     first, _ = backlog.pick(kit.ws, agent, fetcher=lambda _: [issue(8)])
     backlog.finish(kit.ws, first, agent, ('status', 'Legacy approval expired'))
-    resumed = backlog.resume(kit.ws, parent, agent.name, 8, 'Canonical runtime replaces legacy execution')
+    resumed = backlog.resume(kit.ws, parent, agent.name, 8, 'Runtime replaces legacy execution')
     assert resumed['failures'] == 1 and resumed['retry_budget'] == 1
     with backlog._store(kit.ws) as graph:
         before = graph.nodes('issue-attempt')[0]['attrs']
@@ -263,10 +263,10 @@ def test_issue_resume_refuses_unblocked_foreign_and_child_requests(setup):
         assert graph.nodes('issue-recovery') == []
 
 
-def test_issue_resume_cannot_bypass_canonical_task_retry_budget(setup):
+def test_issue_resume_cannot_bypass_task_retry_budget(setup):
     kit, parent, agent, _ = setup
     job, _ = backlog.pick(kit.ws, agent, fetcher=lambda _: [issue(8)])
-    backlog.finish(kit.ws, job, agent, ('status', 'Blocked canonical task'))
+    backlog.finish(kit.ws, job, agent, ('status', 'Blocked task'))
     with backlog._store(kit.ws) as graph:
         graph.upsert_node({'id': 'dispatch', 'kind': 'issue-dispatch', 'attrs': {'issue': job}})
     with pytest.raises(Denied, match='existing retry budget'):

@@ -158,7 +158,7 @@ that would serialize unrelated changes.
 A clean checkout can fast-forward or switch to an exact independently reviewed commit under
 its physical worktree and branch claims. Do not reserve every incoming source file for that
 baseline move. Preserve unique branch history before switching. New source edits, custom
-staging and conflict resolutions still require their named canonical source-area claims.
+staging and conflict resolutions still require their named source-area claims.
 
 Overlap checks and handoffs are atomic. Record the authenticated owner, actual process identity
 and birth time, source commit and environment where the maintained allocation supports them.
@@ -328,7 +328,7 @@ retained primary checkout is never removed as temporary-worktree cleanup.
 Whoever merges, prunes: the lander removes its own worktree and branch in the same step. A merge
 is not finished until `git worktree list` shows only trees with live work in them.
 
-Canonical coding tasks own their worktree lifecycle: assignment reserves the path and branch,
+Coding tasks own their worktree lifecycle: assignment reserves the path and branch,
 claiming creates the checkout, independent review accepts the proposal, and gated integration
 lands the work and verifies cleanup before completion. Use the maintained task lifecycle
 ([docs/tasks.md](docs/tasks.md)); a worker report cannot bypass its completion gate.
@@ -504,7 +504,7 @@ agent's own session, and nothing is posted when no agent is configured.
 The maintained tiers are `fast` (neither slow nor heavy), `full` (not slow), `slow` (only slow)
 and `all` (including slow). `tests/README.md` describes their mechanics; the policy above
 controls when each is authorized. Run the relevant slow tests for packaging, page and Fleet
-changes. Scoped runs default to one worker. Use `-n 1` for sequential ordering; explicit `-n 0`
+changes. Scoped runs default to an automatic pool of what the broker grants. Use `-n 1` for sequential ordering; explicit `-n 0`
 requests an automatic pool up to broker capacity. Explicit worker ceilings remain effective.
 Never run bare `pytest -n N` outside maintained admission.
 

@@ -172,9 +172,9 @@ match = ["human:workspace/backlog.py:resume"]
 status = "covered"
 tests = ["tests/test_workspace_backlog.py::test_parent_resume_preserves_failed_attempt_and_consumes_one_retry",
          "tests/test_workspace_backlog.py::test_issue_resume_refuses_unblocked_foreign_and_child_requests",
-         "tests/test_workspace_backlog.py::test_issue_resume_cannot_bypass_canonical_task_retry_budget"]
+         "tests/test_workspace_backlog.py::test_issue_resume_cannot_bypass_task_retry_budget"]
 count = 1
-note = "Authenticated person or actual parent recovery preserves the failed projection and grants one intake attempt; child, foreign parent, unblocked projections and canonical budget bypasses are refused"
+note = "Authenticated person or actual parent recovery preserves the failed projection and grants one intake attempt; child, foreign parent, unblocked projections and budget bypasses are refused"
 
 [[group]]
 match = ["human:workspace/backlog.py:supersede"]
@@ -522,14 +522,14 @@ tests = [
   "tests/test_fleet_board_routes.py::test_page_cannot_post_announcements_or_use_agent_owner_file",
   "tests/test_fleet_board_routes.py::test_oversized_post_and_unsupported_methods_do_not_mutate",
   "tests/test_fleet_board_routes.py::test_ack_marks_only_an_existing_visible_message_in_its_scope",
-  "tests/test_project_board_ui.py::test_selected_canonical_project_messages_and_person_post",
-  "tests/test_project_board_ui.py::test_canonical_person_board_rejects_foreign_requests",
+  "tests/test_project_board_ui.py::test_selected_project_messages_and_person_post",
+  "tests/test_project_board_ui.py::test_person_board_rejects_foreign_requests",
   "tests/test_project_board_ui.py::test_missing_remote_or_unconfigured_project_never_falls_back",
   "tests/test_project_board_ui.py::test_person_identity_is_required_and_never_created",
-  "tests/test_project_board_ui.py::test_canonical_person_board_refuses_unsupported_methods",
-  "tests/test_project_board_ui.py::test_canonical_person_threads_direct_messages_and_ack",
-  "tests/test_project_board_ui.py::test_canonical_person_post_accepts_exact_browser_origin",
-  "tests/test_project_board_ui.py::test_canonical_person_post_rejects_different_browser_origin",
+  "tests/test_project_board_ui.py::test_person_board_refuses_unsupported_methods",
+  "tests/test_project_board_ui.py::test_person_threads_direct_messages_and_ack",
+  "tests/test_project_board_ui.py::test_person_post_accepts_exact_browser_origin",
+  "tests/test_project_board_ui.py::test_person_post_rejects_different_browser_origin",
   "tests/test_redteam_board.py::test_the_route_never_writes_and_refuses_other_hosts_sites_and_traversal",
   "tests/test_redteam_board.py::test_an_agent_cannot_read_another_board_or_pair_through_any_command",
   "tests/test_redteam_board.py::test_boards_and_subscriptions_cannot_be_made_without_limit",
@@ -542,7 +542,7 @@ tests = [
   "tests/test_workspace_model.py::test_a_hostile_model_or_harness_is_refused_everywhere",
   "tests/test_redteam_board.py::test_following_and_the_live_route_give_an_agent_nothing_it_could_not_already_read",
 ]
-note = "Fleet and exact registered local canonical projects delegate to the maintained person-only Board parser; HTTP and HTTPS exact browser origins, membership, visible acknowledgements, malformed and oversized bodies, missing UI authority, foreign projects and agent owner credentials are exercised without identity creation"
+note = "Fleet and exact registered local projects delegate to the maintained person-only Board parser; HTTP and HTTPS exact browser origins, membership, visible acknowledgements, malformed and oversized bodies, missing UI authority, foreign projects and agent owner credentials are exercised without identity creation"
 
 [[group]]
 match = ["route:fleet/api.py:/companion/*", "route:fleet/companion_routes.py:/companion/*",
@@ -562,10 +562,10 @@ match = ["route:fleet/api.py:/workspace/v1/*"]
 status = "covered"
 count = 1
 tests = ["tests/test_redteam_device_transport.py::test_daemon_project_dispatch_refuses_invalid_device_requests",
-         "tests/test_device_agent_bootstrap.py::test_canonical_project_bootstrap_has_same_device_boundary",
+         "tests/test_device_agent_bootstrap.py::test_project_bootstrap_has_same_device_boundary",
          "tests/test_device_agent_bootstrap.py::test_http_device_session_recovery_and_revocation",
          "tests/test_workspace_remote.py::test_signed_sealed_fleet_and_agent_capabilities_both_required"]
-note = "Real daemon project requests reject missing, revoked and cluster-only device proof, unsealed bodies and malformed JSON before host dispatch; canonical project operations require both paired-device and agent authority"
+note = "Real daemon project requests reject missing, revoked and cluster-only device proof, unsealed bodies and malformed JSON before host dispatch; project operations require both paired-device and agent authority"
 
 [[group]]
 match = ["route:fleet/invite_routes.py:/ui/fleet/android-devices"]
@@ -1064,6 +1064,17 @@ status = "covered"
 tests = ["tests/test_onboard_tailnet.py", "tests/test_onboard_transfer.py"]
 
 [[group]]
+match = ["egress:client/rerank.py:*"]
+status = "covered"
+count = 2
+tests = ["tests/test_rerank.py::test_a_hostile_reranker_answer_raises_rerank_error",
+         "tests/test_rerank.py::test_an_oversized_answer_is_refused_without_reading_it_all",
+         "tests/test_rerank.py::test_a_server_that_never_answers_hits_the_timeout",
+         "tests/test_rerank.py::test_a_server_that_drips_its_answer_cannot_outlast_the_deadline",
+         "tests/test_rerank.py::test_a_server_error_status_is_a_rerank_error_that_keeps_the_status"]
+note = "a real hostile socket server: oversized, slow or dripping replies, non-JSON, wrong shapes, bool, negative, out-of-range or non-int indexes, null, string, NaN or infinite scores all raise RerankError"
+
+[[group]]
 match = ["egress:*"]
 status = "partial"
 tests = ["tests/test_net_no_bypass.py"]
@@ -1161,8 +1172,8 @@ count = 1
 tests = [
   "tests/test_project_board_ui.py::test_person_connect_rejects_invalid_content_length_without_registry_mutation",
   "tests/test_project_board_ui.py::test_person_connect_rejects_invalid_json_without_registry_mutation",
-  "tests/test_project_board_ui.py::test_canonical_person_board_rejects_foreign_requests",
-  "tests/test_project_board_ui.py::test_canonical_person_post_rejects_different_browser_origin",
+  "tests/test_project_board_ui.py::test_person_board_rejects_foreign_requests",
+  "tests/test_project_board_ui.py::test_person_post_rejects_different_browser_origin",
 ]
 note = "person joins reject hostile length and JSON bodies without registry mutation; browser session and origin remain checked"
 

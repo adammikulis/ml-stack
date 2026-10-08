@@ -215,7 +215,7 @@ class Claims:
             return dict(claim)
 
     def return_worktree(self, who: Identity, scope: dict[str, Any]) -> dict[str, Any]:
-        """Return one child's exact claim after its canonical acceptance was independently checked."""
+        """Return one child's exact claim after its acceptance was independently checked."""
         key = normal('worktree', scope['project'])
         if who.role != HUMAN and who.id != scope['owner']:
             raise Denied('only the registered task parent or person may return its reviewed worktree')

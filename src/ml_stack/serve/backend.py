@@ -236,6 +236,9 @@ class ServerSpec:
     device: str = ""
     parallel: int = 1
     embedding: bool = False
+    # A reranker (llama-server --reranking, serving /v1/rerank): it scores a query against
+    # documents, so it never shares a server with chat or embedding.
+    reranking: bool = False
     mmproj: str | Path | None = None
     flash_attn: bool = True
     jinja: bool = True
@@ -563,7 +566,7 @@ class LlamaServerBackend(ServerBackend):
         defaults = families.thinkingcap_defaults(spec.model)
         overridden = any(flag.split("=", 1)[0] == "--chat-template-kwargs"
                          for flag in spec.extra_args)
-        if defaults and spec.jinja and not spec.embedding and not overridden:
+        if defaults and spec.jinja and not spec.embedding and not spec.reranking and not overridden:
             argv += ["--chat-template-kwargs", json.dumps(defaults, separators=(",", ":"))]
         argv += list(spec.extra_args)
         return argv
@@ -592,6 +595,8 @@ class LlamaServerBackend(ServerBackend):
         argv += ["-np", str(max(1, spec.parallel))]
         if spec.embedding:
             argv += ["--embeddings", "--pooling", "mean"]
+        if spec.reranking:
+            argv += ["--reranking"]
         return argv
 
     @staticmethod
@@ -693,7 +698,7 @@ class LlamaServerBackend(ServerBackend):
         argv: list[str] = []
         if spec.flash_attn:
             argv += ["-fa", "on"]
-        if spec.jinja and not spec.embedding:
+        if spec.jinja and not spec.embedding and not spec.reranking:
             argv += ["--jinja"]
         if spec.cache_type_k:
             argv += ["--cache-type-k", str(spec.cache_type_k)]

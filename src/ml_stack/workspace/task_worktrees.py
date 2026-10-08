@@ -18,12 +18,12 @@ from ml_stack.workspace.task_schema import TASK_ID
 
 
 def prepare(ws, token: str, worker: str, task: str) -> dict:
-    """Reserve a claimed checkout and committed baseline for one canonical task."""
+    """Reserve a claimed checkout and committed baseline for one task."""
     caller, child = ws.auth(token), ws.auth(tokens.load(ws.base, worker))
     if caller.role != HUMAN and child.parent != caller.id:
         task_authority.authorize(ws, token, worker, task)
     if not TASK_ID.fullmatch(task):
-        raise ValueError('a canonical task ID is required')
+        raise ValueError('a task ID is required')
     runners = [localagent.load(ws, name) for name in localagent.names(ws)]
     matches = [row for row in runners if row and (row.identity or row.name) == worker]
     if len(matches) != 1:
@@ -43,7 +43,7 @@ def prepare(ws, token: str, worker: str, task: str) -> dict:
     with held(ws.base / 'coordination.lock'), GraphStore(ws.base / 'coordination.db') as graph:
         spec = next((row['attrs'] for row in graph.nodes('task') if row['id'] == task), None)
         if not spec or spec['state'] != 'queued' or not task_scope.eligible(ws, child, spec):
-            raise Denied('the worker must be eligible for the queued canonical task')
+            raise Denied('the worker must be eligible for the queued task')
         old = next((row['attrs'] for row in graph.nodes('task-worktree') if row['id'] == key), None)
         if old:
             if old['worker'] != worker or old['source_project'] != str(source):
@@ -55,15 +55,15 @@ def prepare(ws, token: str, worker: str, task: str) -> dict:
                 old = {**old, 'baseline_commit': baseline}
                 graph.upsert_node({'id': key, 'kind': 'task-worktree', 'label': task, 'attrs': old})
             if old.get('state') == 'reserved' and not old_target.exists():
-                ws.claim(token, 'worktree', old['project'], ttl_s=86400, note=f'Canonical task {task}')
-                ws.claim(token, 'branch', old['branch'], ttl_s=86400, note=f'Canonical task {task}')
+                ws.claim(token, 'worktree', old['project'], ttl_s=86400, note=f'Task {task}')
+                ws.claim(token, 'branch', old['branch'], ttl_s=86400, note=f'Task {task}')
             return old
         if why := worktreerules.worktree_refusal(target, source):
             raise Denied(why)
         if target.exists():
             raise Denied('the task worktree path already exists without an assignment')
-        ws.claim(token, 'worktree', str(target), ttl_s=86400, note=f'Canonical task {task}')
-        ws.claim(token, 'branch', branch, ttl_s=86400, note=f'Canonical task {task}')
+        ws.claim(token, 'worktree', str(target), ttl_s=86400, note=f'Task {task}')
+        ws.claim(token, 'branch', branch, ttl_s=86400, note=f'Task {task}')
         record = {'id': key, 'task': task, 'worker': worker, 'owner': caller.id,
                   'project': str(target), 'source_project': str(source), 'baseline_commit': baseline,
                   'branch': branch, 'state': 'reserved'}

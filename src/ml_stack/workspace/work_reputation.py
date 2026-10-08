@@ -1,4 +1,4 @@
-"""Read-only model-family standings from authenticated canonical reviews and historical evidence."""
+"""Read-only model-family standings from authenticated reviews and historical evidence."""
 
 from __future__ import annotations
 

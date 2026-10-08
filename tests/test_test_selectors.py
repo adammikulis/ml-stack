@@ -43,8 +43,8 @@ def test_xdist_empty_explicit_node_is_an_error_even_for_quick(monkeypatch):
     assert status == 4 and module.clean(status) == 4
 
 
-@pytest.mark.parametrize(('options', 'workers'), [([], 1), (['-n', '0'], 0), (['-n', '3'], 3)])
-def test_runner_defaults_to_one_worker_and_preserves_explicit_limits(monkeypatch, options, workers):
+@pytest.mark.parametrize(('options', 'workers'), [([], 0), (['-n', '0'], 0), (['-n', '1'], 1), (['-n', '3'], 3)])
+def test_runner_defaults_to_the_brokers_automatic_pool_and_preserves_explicit_limits(monkeypatch, options, workers):
     module = runner()
     calls = []
     monkeypatch.setenv('DEV_TEST_JOB', 'inline')

@@ -1,4 +1,4 @@
-"""Authenticated same-project canonical Board selection."""
+"""Authenticated same-project Board selection."""
 
 from contextlib import nullcontext
 from types import SimpleNamespace

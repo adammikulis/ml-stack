@@ -57,7 +57,10 @@ def parser_of(command: str) -> argparse.ArgumentParser:
     def grab(self: argparse.ArgumentParser, *_: object, **__: object) -> None:
         raise _Captured(self)
 
-    with mock.patch.object(argparse.ArgumentParser, "parse_known_args", grab):
+    # A launcher forwards to the machine's selected runtime by exec, which on a machine that
+    # has one would replace the test process; reading a parser must never do that.
+    with (mock.patch.object(argparse.ArgumentParser, "parse_known_args", grab),
+          mock.patch("ml_stack.runtime.forward", return_value=False)):
         try:
             _main_of(command)([])
         except _Captured as caught:

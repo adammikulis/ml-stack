@@ -66,7 +66,7 @@ def assign(ws, token, worker, task, lease_id):
         task_worktrees.prepare(ws, token, worker, task)
     with held(ws.base / "coordination.lock"), GraphStore(ws.base / "coordination.db") as graph:
         if not graph.has(task):
-            raise ValueError("the canonical task does not exist")
+            raise ValueError("the task does not exist")
         if runner.profile == 'coding':
             scope = task_worktrees.binding(graph, worker, task)
             allocation.update({key: scope[key] for key in ('project', 'source_project', 'baseline_commit')})

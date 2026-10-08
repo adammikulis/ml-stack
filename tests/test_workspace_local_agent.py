@@ -728,7 +728,7 @@ def test_start_records_the_configured_model_as_claimed(kit, monkeypatch):
         ls.stop(kit.ws, got.name, release=lambda lease: True, wait_s=5)
 
 
-def test_coding_entrypoint_uses_canonical_worker(kit, monkeypatch):
+def test_coding_entrypoint_uses_worker(kit, monkeypatch):
     from ml_stack.workspace import localcoding
 
     seen = []
