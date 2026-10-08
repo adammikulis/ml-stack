@@ -63,7 +63,7 @@ def _argv_problem(role: Role, platform: str) -> str:
     problem = launcher_problem(want)
     if problem:
         return problem
-    ok = rest == ("ensure", "--unattended") if role.role == "runtime-ensure" else all(_POOL_ARG.fullmatch(a) for a in rest)
+    ok = rest == ("runtime", "ensure") if role.role == "runtime-ensure" else all(_POOL_ARG.fullmatch(a) for a in rest)
     return "" if ok else f"{role.role} takes only its own options, not {list(rest)}"
 
 

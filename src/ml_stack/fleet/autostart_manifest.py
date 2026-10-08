@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ml_stack import home
+from ml_stack import home, runtime
 
 __all__ = [
     "DAEMON_PORT", "ENV_ALLOWED", "ROLES", "TTL_S", "VERSION", "Manifest", "ManifestError", "Role",
@@ -25,12 +25,12 @@ DAEMON_PORT = 8770
 ENV_ALLOWED = ("HF_HOME", "HOME", "ML_STACK_CACHE", "ML_STACK_HOME", "PATH")
 PLATFORMS = ("darwin", "linux", "win32")
 SCOPES = ("user", "system")
-LAUNCHER_HEAD = "#!/usr/bin/env python3\nimport glob,json,os,subprocess,sys,time\nroot = "
+LAUNCHER_HEAD = runtime.LAUNCHER.partition("{root!r}")[0]
 ROLE_INFO: dict[str, dict[str, Any]] = {
     "pool-daemon": {"label": "com.ml-stack.traind", "service": "ml-stack-traind",
                     "launcher": "ml-stack-traind", "kinds": ("service",)},
     "runtime-ensure": {"label": "com.ml-stack.runtime-ensure", "service": "ml-stack-runtime-ensure",
-                       "launcher": "ml-stack-runtime", "kinds": ("service", "timer")},
+                       "launcher": "ml-stack", "kinds": ("service", "timer")},
 }
 _ID = re.compile(r"[0-9a-f]{12}")
 _HEX = re.compile(r"[0-9a-f]{64}")

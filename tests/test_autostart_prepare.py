@@ -84,8 +84,9 @@ def staged_dir(manifest) -> Path:
 
 def test_unattended_ensure_takes_only_its_own_arguments(tmp_path, user):
     done = staged(tmp_path, roles=("runtime-ensure",), platform="linux")
-    assert done.manifest.roles[0].argv[1:] == ("ensure", "--unattended")
-    assert "--agent" not in " ".join(done.manifest.roles[0].argv)
+    role = done.manifest.roles[0]
+    assert role.argv[1:] == ("runtime", "ensure") and Path(role.argv[0]).name == "ml-stack"
+    assert not {"ML_STACK_WORKSPACE_AGENT", "ML_STACK_WORKSPACE_TOKEN"} & set(role.environment)
 
 
 def test_arguments_with_spaces_quotes_and_percent_stay_single_argv_elements(tmp_path, user):
@@ -142,6 +143,27 @@ def test_a_launcher_inside_a_checkout_or_outside_the_runtime_directory_is_refuse
     odd = write_launcher(home.state("bin"), "ml-stack-traind")
     odd.write_text(odd.read_text().replace(str(home.state("runtimes")), "/opt/elsewhere"))
     assert "outside" in launcher_problem(odd)
+
+
+def test_the_launcher_the_runtime_tooling_writes_is_accepted(tmp_path, user):
+    from ml_stack import runtime
+
+    path = home.state("bin") / "ml-stack"
+    path.parent.mkdir(parents=True)
+    path.write_text(runtime.LAUNCHER.format(root=str(runtime.directory()), python="/x/bin/python",
+                                            arguments=repr(["-m", "ml_stack.cli"]), name="ml-stack"))
+    path.chmod(0o700)
+    assert launcher_problem(path) == ""
+
+
+def test_prepare_uses_the_launcher_directory_the_runtime_tooling_recorded(tmp_path, user):
+    from ml_stack import runtime_store
+
+    with pytest.raises(PrepareError, match="no launcher directory"):
+        prepare(Spec(("pool-daemon",), platform="linux"))
+    runtime_store.write_state({"launchers": str(launchers(home.state("bin")))})
+    done = prepare(Spec(("pool-daemon",), platform="linux"))
+    assert Path(done.manifest.roles[0].argv[0]).parent == home.state("bin")
 
 
 def test_a_relative_launcher_directory_is_refused(tmp_path, user):

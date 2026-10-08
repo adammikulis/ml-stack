@@ -182,10 +182,10 @@ python -m ml_stack.fleet.autostart prepare --role pool-daemon --role runtime-ens
 python -m ml_stack.fleet.autostart install --manifest <the path prepare printed>
 ```
 
-`prepare` takes `--launchers DIR` (default `~/.ml-stack/bin`), the directory the runtime
-tooling keeps its stable launchers in, and `--system` to stage the system-wide location instead
-of your own. It writes the unit files and a `manifest.json` under `~/.ml-stack/autostart/staging/`
-and lists nothing else to do. The manifest holds the role, platform, destination path, the
+`prepare` takes `--launchers DIR` (default: the directory `ml-stack runtime ensure --launchers`
+recorded), the directory the runtime tooling keeps its stable launchers in, and `--system` to
+stage the system-wide location instead of your own. It writes the unit files and a
+`manifest.json` under `~/.ml-stack/autostart/staging/`. The manifest holds the role, platform, destination path, the
 sha256 of each unit, the exec argv (the launcher's absolute path and its options, never a shell
 string), a path-only environment, the working directory, the restart policy, the log paths, who
 prepared it, the device it is for and a 24-hour expiry.
@@ -214,7 +214,7 @@ a runtime launcher, or the service manager does not hold the unit.
 | Role | Runs | Restart |
 |---|---|---|
 | `pool-daemon` | the daemon, at login | restart on failure, 30 s apart, at most five starts in five minutes (systemd), a throttle interval (launchd), a retry count (Windows) |
-| `runtime-ensure` | `ml-stack-runtime ensure --unattended` at load and hourly | a schedule, not a resident process |
+| `runtime-ensure` | `ml-stack runtime ensure` at load and hourly, with no agent identity in its environment | a schedule, not a resident process |
 
 The daemon holds a per-root lock, so a second start exits instead of competing, and rotates the
 log files under `~/.ml-stack/autostart/logs` when one passes 5 MiB (three copies kept; systemd
@@ -223,10 +223,10 @@ switches atomically when it selects a new runtime, so a runtime upgrade needs no
 The units carry no tokens and no secrets, and there is no unit for landing work: landing needs
 an agent identity (claims, board posts, push rules), so it stays in an agent session.
 
-`runtime-ensure` depends on the runtime tooling: the launcher directory, the stable
-`ml-stack-runtime` launcher, and an `ensure --unattended` mode that takes only its build lock,
-posts nothing to the board and acts as no agent. `prepare` refuses a role whose launcher is not
-there.
+`runtime-ensure` runs `ml-stack runtime ensure` as no agent: it takes the build lock only,
+claims nothing and posts nothing to the board (see *Following the source checkout*). It needs
+the checkout and launcher directory a first `ensure` recorded, and `prepare` refuses a role whose
+`ml-stack` launcher is not there.
 
 Checking a reboot is manual, because a test cannot reboot a machine:
 
