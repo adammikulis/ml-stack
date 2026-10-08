@@ -36,6 +36,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 import affected
+import testphases
 import testselectors
 import testslots_runner
 import testtime
@@ -71,7 +72,11 @@ def run(command: list[str], env: dict[str, str] | None = None, tier: str = "") -
     index = shown.index("-n")
     want = int(shown[index + 1])
     shown[index + 1] = "{workers}"
-    shown.extend(["-p", "testslots_pytest"])
+    shown.extend(["-p", "testslots_pytest", "-p", "testphases"])
+    phases_fd, phases_name = tempfile.mkstemp(suffix=".phases.json")
+    os.close(phases_fd)
+    phases_file = Path(phases_name)
+    environment[testphases.PHASES_ENV] = phases_name
     executed_tree = tree_hash(ROOT)
     began = time.monotonic()
     load = os.getloadavg()[0] if hasattr(os, "getloadavg") else 0.0
@@ -83,6 +88,10 @@ def run(command: list[str], env: dict[str, str] | None = None, tier: str = "") -
         print("test: source tree changed during the run", file=sys.stderr)
         status = 4
     wall = time.monotonic() - began
+    phases = testphases.read(phases_file)
+    phases_file.unlink(missing_ok=True)
+    if phases is not None:
+        print(testphases.line(phases), flush=True)
     if junit is not None and tier in ("full", "all") and not [a for a in command if a.startswith("tests/") or a == "-k"]:
         measured(command, junit, wall, load)
     if junit is not None:
