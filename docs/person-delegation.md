@@ -4,6 +4,7 @@ Design note. Slice 1a (section 12) is implemented; the rest is not. Owner decisi
 pushes need no authorization, and the only authorizable kind is `release-main`, created only by the structured
 approval question (sections 7 and 12). Sections 5.1 to 5.3 describe the earlier prose design: typed words now
 only revoke, refuse, or ask for the approval question.
+Slice 1b-i (`delegate` removed from the CLI, `mint` person-only) is implemented; section 8 lists what remains.
 
 ## Invariants
 
@@ -288,33 +289,26 @@ reply. A sentence naming one of the others is answered with a refusal that says 
 identity with a label taken from the SubagentStart event (`agent_id`, `agent_type`), the
 shape CLAUDE.md already describes ("a subagent acts as that parent with a label").
 
-Callers audit (grep of `src`, `scripts`, `docs`, `tests`):
+Done in slice 1b-i: the `delegate` command line verb is gone, `mint` belongs to a person
+alone (a lead mints nothing), a labelled helper is displayed as `parent (label)`, and
+`tests/test_redteam_no_synthetic_identity.py` pins the reviewed identity-creating call sites,
+the verbs, the invite role and the people-looking names.
 
-- CLI verb: `workspace/cli.py:666` (`delegate`).
-- Service: `service.py:142` `Workspace.delegate`; registry `identity.py:540`
-  `Registry.delegate`; `person_session.py:96` (refusal stub, delete).
-- Remote: `remote.py:137`, `remote_host.py:309` (operation `delegate`) and `:349`
-  (`remote.delegate` audit).
-- Subagent identity: `harnessid.py:95`, `localstart.py:158`,
-  `automatic_connection.py:311-319` ("native sessions delegate from their authenticated
-  project agent"). These are the real consumers: they obtain `parent/name` tokens for
-  SubagentStart and local launches.
-- Renewal: `child_renewal.py` and `task_scheduler.py:31` (`renew` of worker seats); worker
-  seats that are delegated children.
-- Docs: `docs/workspace.md:122-139`, `docs/local-agent.md:45`; `localagent.py:188-206`
-  ("a delegate of ...").
-- Tests: 81 references across about 30 files, including `test_child_renewal.py`,
-  `test_redteam_human_floor.py` (several `delegate` cases), `test_workspace_agent_invites.py`,
-  `test_automatic_project_connection.py`, `test_device_agent*.py`, `test_harness_rails.py`,
-  `test_taskboard.py`, `test_workspace_board.py`, `test_agent_display.py`.
+Remaining (slice 1b-ii), consumers that still obtain `parent/name` tokens:
 
-This is the largest part of slice 1: `Identity` gains a `label` (display and audit only,
-not a capability), the SubagentStart hook supplies it, `parent/name` as a registry entry
-with its own secret disappears, `child_renewal.py` is deleted (nothing to renew), worker
-seats for tasks become labelled uses of the worker's own agent identity, and the board shows
-"Subagent · label (parent P)" from the event. If the diff proves too large to review at once,
-split slice 1 into 1a (hook, log, `push-dev`, reserved names) and 1b (`delegate` removal);
-both are scheduled now, 1b is not deferred.
+| Consumer | Needs |
+|---|---|
+| `service.py` `Workspace.delegate`, `identity.py` `Registry.delegate`, `person_session.py` stub | delete with the last caller |
+| `remote.py` `delegate`, `remote_host.py` operation `delegate` and its audit | delete; native sessions become a parent seat with a label |
+| `automatic_connection.py` native session start, `harnessid.py` local harness start | `Seat(label, parent=...)`; `harnesshook`, `harness_claims`, `harness_remote` and `notification_reader` key their identity and physical claim owner by the seat name today |
+| `localstart.py` `_worker_identity`, `child_renewal.py`, `task_scheduler.py`, `device_agent.bind_worker` | worker seats for tasks |
+| `task_worktrees`, `resource_allocations`, `backlog`, `issuepump`, `claim_handoff`, `task_integration`, `task_source_recovery`, `task_worktree_recovery`, `task_scope`, `taskboard`, `task_actions` | authorize by `child.parent == caller` where the worker holds its own token |
+| tests | about 25 files build a delegated worker through `ws.delegate` (`taskboard_kit`, `test_child_renewal`, `test_workspace_quickstart`, `test_device_agent*`, `test_automatic_project_connection`, `test_enrollment`) |
+
+Open design question: a local-model worker is a separate process. Under the parent-plus-label
+model it would hold its parent's token and so its parent's rights, and the task checks that
+separate a worker from its coordinator (`child.parent`, the independent reviewer) would reduce
+to label comparisons.
 
 `mint`: a human mints any role; a lead mints `agent`. A lead minting a new `agent` identity
 is the same synthetic-identity shape. It is removed from agent-reachable flows: only a person
