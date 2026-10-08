@@ -1,18 +1,8 @@
 #!/usr/bin/env python3
-"""Refuse the shell commands that should have been ml-stack commands.
-
-CLAUDE.md says a shell one-liner, a script in a scratchpad, or a step done by hand twice is
-a missing command -- and saying so has not been enough. Every rule below was written after
-the thing it refuses actually happened and cost real time:
-
-  - two `until ! pgrep` waiters spun for an afternoon because `pgrep -f` matched the waiting
-    shell itself; the draft-head comparison queued behind them never ran, and said nothing
-  - GGUFs were hunted with `find` before `ml-stack-models` existed
-  - a free port was picked by hand after a lease was refused
-  - `nohup ... &` jobs died silently with nobody watching the log
+"""A PreToolUse hook on Bash that refuses shell commands that should be ml-stack commands.
 
 Claude Code runs this before every Bash call. Exit 2 blocks the command and hands the
-message back, so the correction arrives while the work is happening rather than afterwards.
+message back.
 Set MLSTACK_GUARD=off to disable it for a session.
 
 Wire it in as a PreToolUse hook on Bash in a project's `.claude/settings.json`:
