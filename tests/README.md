@@ -189,3 +189,23 @@ Import them like the tests already do: `from conftest import write_gguf`.
   sequence passes anything), and a `try: ... except Exception: pass` around the call under
   test (assert the seam was reached instead).
 - Name a test after the behaviour it pins, as a sentence.
+
+## Writes under the real state root
+
+Tests run with `HOME`, `ML_STACK_HOME` and `ML_STACK_CACHE` moved to a temporary directory, so a
+write under the real `~/.ml-stack` can only come from a bug that bypasses home resolution. The
+session fixture `_real_home` snapshots that tree before the run and judges it after
+(`tests/state_attribution.py`). Brokers, the keystore, `ml-stack-bench prepare` and the sentinel of
+other sessions write there too, so the rule is:
+
+1. Ignored: zero-byte `*.lock` files (an mtime change on one is not a state write), the
+   top-level `LIVE_WRITERS`, the `LIVE_PATHS` logs, and files a live outside process is proven to
+   own (`_external_state_write`).
+2. A remaining changed file **fails** the run when no other live ml-stack process (a console
+   script `ml-stack-*` or `python -m ml_stack...` outside this pytest session's own process tree)
+   was seen at the start or at the end of the run: CI, a calibration run, a quiet machine.
+3. When one was seen, the same files are a **warning**, printed once at teardown with the files
+   and the writers seen, because the run cannot tell its own write from theirs.
+
+`tests/test_state_attribution.py` pins both outcomes with a child process that ignores the moved
+`HOME`, against a temporary directory standing in for the real root.
