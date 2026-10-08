@@ -37,7 +37,7 @@ from ml_stack.harnesspolicy import (
 )
 from ml_stack.keystore import ENV_NONINTERACTIVE
 from ml_stack.workspace import harness_remote, notification_reader, tokens, worktree_lifecycle
-from ml_stack.workspace.identity import Denied
+from ml_stack.workspace.identity import BoardUnavailable, Denied
 from ml_stack.workspace.service import Workspace
 
 __all__ = ["FAILURES", "WAIT_S", "Rail", "nudge", "post", "pre", "run"]
@@ -94,10 +94,15 @@ def pre(payload: dict[str, Any], rail: Rail, inbox: requests.Inbox | None = None
     role, label, roots, protected, wait_s = rail.role, rail.label, rail.roots, rail.protected, rail.wait_s
     event = HOOK_EVENTS["pre"]
     args = payload.get("tool_input")
+    warning = ""
     try:
         name = str(payload.get("tool_name", ""))
         inputs = args if isinstance(args, dict) else None
-        ownership = harness_claims.conflict(name, inputs, str(payload.get('cwd') or (roots[0] if roots else Path.cwd())), label, roots)
+        try:
+            ownership = harness_claims.conflict(name, inputs, str(payload.get('cwd') or (roots[0] if roots else Path.cwd())), label, roots)
+        except BoardUnavailable as error:  # no board to ask: local work goes on, with a warning
+            ownership = ""
+            warning = f" (ownership not checked: {hook_diagnostics.record(error, 'pre', 'claim', metadata=hook_bootstrap.timings())})"
         decision = (Decision('deny', 'destructive', ownership) if ownership else None) or (primary_decision(name, inputs, str(payload.get("cwd", "")))
                     or workspace_authority(_shell_line(name, inputs), label)
                     or decide(role, name, inputs, roots=roots, protected=protected))
@@ -106,7 +111,7 @@ def pre(payload: dict[str, Any], rail: Rail, inbox: requests.Inbox | None = None
     except FAILURES as error:
         decision = Decision("deny", "unsure", f"the call could not be classified: {hook_diagnostics.record(error, 'pre', 'classification', metadata=hook_bootstrap.timings())}")
     if decision.action == "allow":
-        return _owned_answer(payload, rail, event, f"ml-stack: {decision.label}")
+        return _owned_answer(payload, rail, event, f"ml-stack: {decision.label}{warning}")
     if decision.action == "deny":
         return _answer(event, "deny", f"ml-stack: {decision.reason}")
     approved, state = _ask(payload, decision, label, wait_s, inbox)
@@ -120,6 +125,9 @@ def _owned_answer(payload, rail, event, reason):
         harness_claims.reserve(str(payload.get('tool_name', '')), payload.get('tool_input'),
                                str(payload.get('cwd') or (rail.roots[0] if rail.roots else Path.cwd())),
                                rail.label, rail.roots)
+    except BoardUnavailable as error:
+        note = hook_diagnostics.record(error, 'pre', 'claim', metadata=hook_bootstrap.timings())
+        return _answer(event, 'allow', f"{reason} (ownership not recorded: {note})")
     except FAILURES as error:
         return _answer(event, 'deny', f"ml-stack: ownership refused: {hook_diagnostics.record(error, 'pre', 'claim', metadata=hook_bootstrap.timings())}")
     return _answer(event, 'allow', reason)
@@ -191,6 +199,9 @@ def stop(rail: Rail) -> dict[str, Any]:
         if who.id != rail.label:
             raise Denied('completion requires the launcher-bound identity')
         worktree_lifecycle.require_clean(ws.base, who.id, within=tuple(rail.roots))
+    except BoardUnavailable as error:  # nothing to check completion against: record it, never block
+        hook_diagnostics.record(error, "stop", "completion", metadata=hook_bootstrap.timings())
+        return {}
     except (Denied, OSError, RuntimeError) as error:
         return {"decision": "block", "reason": hook_diagnostics.record(error, "stop", "completion", metadata=hook_bootstrap.timings())}
     return {}

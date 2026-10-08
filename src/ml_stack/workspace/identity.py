@@ -36,6 +36,7 @@ __all__ = [
     "HUMAN",
     "LEAD",
     "TOKEN_ENV",
+    "BoardUnavailable",
     "Denied",
     "Identity",
     "Registry",
@@ -57,6 +58,11 @@ CAPS = ("send", "read", "claim")
 
 class Denied(PermissionError):
     """The token is missing, wrong, expired or revoked, or its role may not do this."""
+
+
+class BoardUnavailable(Denied):
+    """The project board could not be reached or authenticated: local work carries on with a
+    warning, and the claim records attribute once it is back."""
 
 
 @dataclass(frozen=True, slots=True)

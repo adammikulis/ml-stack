@@ -5,11 +5,11 @@ import json
 import pytest
 
 from ml_stack import harnesshook
-from ml_stack.workspace.identity import Denied
+from ml_stack.workspace.identity import BoardUnavailable, Denied
 
 
 def unavailable(*args, **kwargs):
-    raise Denied('project board unavailable: connection refused')
+    raise BoardUnavailable('project board unavailable: connection refused')
 
 
 def test_post_outage_does_not_reverse_a_completed_tool(monkeypatch, capsys):
@@ -22,19 +22,33 @@ def test_post_outage_does_not_reverse_a_completed_tool(monkeypatch, capsys):
     assert 'connection refused' in capsys.readouterr().err
 
 
-def test_stop_remains_blocked_when_authority_is_unavailable(monkeypatch):
+def test_stop_is_not_blocked_when_the_board_is_unavailable(monkeypatch):
     monkeypatch.setattr(harnesshook.harness_remote, 'context', unavailable)
+    assert harnesshook.stop(harnesshook.Rail('plan-and-go', 'worker', ['/project'])) == {}
+
+
+def test_stop_stays_blocked_by_a_real_refusal(monkeypatch):
+    def refused(*args, **kwargs):
+        raise Denied('completion refused')
+    monkeypatch.setattr(harnesshook.harness_remote, 'context', refused)
     result = harnesshook.stop(harnesshook.Rail('plan-and-go', 'worker', ['/project']))
-    assert result['decision'] == 'block' and 'connection refused' in result['reason']
+    assert result['decision'] == 'block' and 'completion refused' in result['reason']
 
 
-def test_pre_outage_is_a_structured_denial_with_a_reason(monkeypatch):
-    monkeypatch.setattr(harnesshook.harness_claims, 'conflict', unavailable)
+def test_pre_outage_degrades_to_a_warning_and_a_real_denial_still_denies(monkeypatch):
     payload = {'tool_name': 'Write', 'tool_input': {'file_path': '/project/test.py'}, 'cwd': '/project'}
-    result = harnesshook.pre(payload, harnesshook.Rail('plan-and-go', 'worker', ['/project']))
-    answer = result['hookSpecificOutput']
-    assert answer['permissionDecision'] == 'deny'
+    rail = harnesshook.Rail('plan-and-go', 'worker', ['/project'])
+    monkeypatch.setattr(harnesshook.harness_claims, 'conflict', unavailable)
+    monkeypatch.setattr(harnesshook.harness_claims, 'reserve', unavailable)
+    answer = harnesshook.pre(payload, rail)['hookSpecificOutput']
+    assert answer['permissionDecision'] == 'allow'
     assert 'connection refused' in answer['permissionDecisionReason']
+
+    def refused(*args, **kwargs):
+        raise Denied('another agent owns this')
+    monkeypatch.setattr(harnesshook.harness_claims, 'conflict', refused)
+    answer = harnesshook.pre(payload, rail)['hookSpecificOutput']
+    assert answer['permissionDecision'] == 'deny' and 'another agent owns this' in answer['permissionDecisionReason']
 
 
 @pytest.mark.parametrize('secret', ['mlws1.worker.' + 'a' * 43, 'mlws1.worker.one/child.two.' + 'b' * 43,
@@ -63,13 +77,13 @@ def test_launcher_keeps_normal_role_policy_without_canonical_admission(monkeypat
     assert action == ('allow' if expected.action == 'allow' else 'deny')
 
 
-def test_launcher_suffix_does_not_bypass_canonical_mutation_authority(monkeypatch, tmp_path):
+def test_a_board_outage_never_waives_the_destructive_call_guard(monkeypatch, tmp_path):
     monkeypatch.setattr(harnesshook.harness_remote, 'context', unavailable)
+    monkeypatch.setattr(harnesshook, '_ask', lambda *args, **kwargs: (False, 'test declined'))
     args = {'command': f'ml-stack --no-browser; rm -rf {tmp_path / "owned"}'}
     result = harnesshook.pre({'tool_name': 'Bash', 'tool_input': args, 'cwd': str(tmp_path)},
                             harnesshook.Rail('plan-and-go', 'worker', [str(tmp_path)]))
     assert result['hookSpecificOutput']['permissionDecision'] == 'deny'
-    assert 'connection refused' in result['hookSpecificOutput']['permissionDecisionReason']
 
 
 @pytest.mark.parametrize('error', [Denied('board offline'), OSError('connection refused'),
