@@ -89,6 +89,14 @@ def _hash(secret: str) -> str:
     return hashlib.sha256(secret.encode()).hexdigest()
 
 
+def _outranks(stored: dict, incoming: dict) -> bool:
+    """Whether a stored record rests on observation or an authenticated pairing that an agent's
+    own report must not replace. A report that is itself paired by the daemon may refresh it."""
+    if incoming.get('verification') != 'agent-reported' or incoming.get('peer_verification') == 'paired':
+        return False
+    return stored.get('verification') in ('paired', 'local-observed') or stored.get('peer_verification') == 'paired'
+
+
 class Registry:
     """The agents that may write, held as ``agents.json`` with a hash of each secret."""
 
@@ -235,6 +243,27 @@ class Registry:
         who = self.authenticate(token)
         self._record_device(who.id, device_metadata.reported(metadata, observed_at=self.clock()))
 
+    def record_profile(self, token: str, device: dict | None = None, harness: str = '') -> dict:
+        """Record the authenticated agent's own reported device and harness facts in one step."""
+        clean_harness(harness)
+        reported = None if device is None else device_metadata.reported(device, observed_at=self.clock())
+        with held(self.path.with_name('agents.lock')):
+            who = self.authenticate(token)
+            if who.role != AGENT:
+                raise Denied('profile reporting requires an agent capability')
+            agents = self._load()
+            entry = agents[who.id]
+            state = entry.get('harness_state', entry.get('model_state', '') if entry.get('harness') else '')
+            if harness and state == VERIFIED and entry.get('harness') != harness:
+                raise Denied('the harness was recorded by its launcher; a report cannot replace it')
+            if reported is not None and not _outranks(entry.get('device', {}), reported):
+                entry['device'] = reported
+            if harness:
+                entry['harness'] = harness
+                entry['harness_state'] = VERIFIED if state == VERIFIED else CLAIMED
+            self._save(agents)
+        return {'id': who.id, **self.info(who.id)}
+
     def _record_device(self, name: str, metadata: dict) -> None:
         """Persist normalized device provenance supplied by the trusted registration adapter."""
         device = device_metadata.normalize(metadata)
@@ -242,6 +271,8 @@ class Registry:
             agents = self._load()
             if not self._live(agents, agents.get(name)):
                 raise Denied('device provenance requires a live registered actor')
+            if _outranks(agents[name].get('device', {}), device):
+                return
             if agents[name].get('device') != device:
                 agents[name]['device'] = device
                 self._save(agents)

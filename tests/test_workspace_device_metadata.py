@@ -141,3 +141,113 @@ def test_unknown_profile_is_nonempty_and_missing_parent_does_not_invent_device(k
     assert shown['device']['hostname'] == ''
     assert shown['harness'] == ''
     assert registry.path.read_bytes() == before
+
+
+def test_own_profile_updates_child_harness_without_promoting_or_changing_model(kit):
+    token = kit.agent('parent')
+    kit.ws.registry._record_device('parent', device())
+    child = kit.ws.delegate(token, 'helper')
+    own = tokens.load(kit.ws.base, child['id'])
+    before = kit.ws.registry.info(child['id'])
+    shown = kit.ws.record_profile(own, None, 'codex')
+    assert shown['id'] == child['id']
+    assert shown['device']['inherited_from'] == 'parent'
+    assert shown['harness'] == 'codex' and shown['harness_state'] == 'claimed'
+    for key in ('parent', 'can', 'project', 'expires', 'model', 'model_state', 'presentation'):
+        assert shown[key] == before[key]
+    with pytest.raises(Denied, match='top-level'):
+        kit.ws.register_session(own)
+    again = kit.ws.record_profile(own, None, '')
+    assert again['harness'] == 'codex'
+
+
+@pytest.mark.redteam
+def test_own_profile_report_is_atomic_when_verified_harness_refuses_change(kit):
+    token = kit.agent('worker')
+    kit.ws._record_model('worker', 'Qwen3.8-Flash', 'codex', 'verified')
+    before = kit.ws.registry.info('worker')
+    with pytest.raises(Denied, match='launcher'):
+        kit.ws.record_profile(token, device('Windows'), 'claude-code')
+    assert kit.ws.registry.info('worker') == before
+    shown = kit.ws.record_profile(token, device(), 'codex')
+    assert shown['harness_state'] == 'verified'
+    assert shown['device']['verification'] == 'agent-reported'
+    assert shown['model'] == 'Qwen3.8-Flash'
+
+
+@pytest.mark.redteam
+@pytest.mark.parametrize('report', ['claim', 'profile'])
+def test_an_agent_report_never_sets_the_stable_device_or_machine_identity(kit, report):
+    token = kit.agent('worker')
+    forged = {**device(), 'machine_id': 'b' * 16, 'peer_id': 'c' * 64, 'peer_verification': 'paired',
+              'verification': 'paired', 'source': 'fleet-pairing'}
+    if report == 'claim':
+        kit.ws.registry.record_device_claim(token, forged)
+    else:
+        kit.ws.record_profile(token, forged, '')
+    shown = kit.ws.registry.info('worker')['device']
+    assert shown['device_id'] is None and shown['machine_id'] is None and shown['peer_id'] is None
+    assert shown['verification'] == 'agent-reported' and shown['peer_verification'] == 'unknown'
+    assert shown['hostname'] == 'workstation'
+
+
+@pytest.mark.redteam
+@pytest.mark.parametrize('stronger', [
+    {'verification': 'local-observed', 'source': 'local-runtime'},
+    {'verification': 'agent-reported', 'source': 'agent-report', 'peer_id': 'd' * 64, 'peer_verification': 'paired'},
+    {'verification': 'paired', 'source': 'fleet-pairing', 'peer_id': 'd' * 64, 'peer_verification': 'paired'},
+])
+@pytest.mark.parametrize('report', ['claim', 'profile'])
+def test_a_profile_report_does_not_replace_a_stronger_record(kit, stronger, report):
+    token = kit.agent('worker')
+    kit.ws.registry._record_device('worker', {**device(), **stronger})
+    before = kit.ws.registry.info('worker')['device']
+    if report == 'claim':
+        kit.ws.registry.record_device_claim(token, device('Windows'))
+    else:
+        kit.ws.record_profile(token, device('Windows'), 'codex')
+    assert kit.ws.registry.info('worker')['device'] == before
+
+
+def test_a_report_may_replace_an_inherited_or_an_earlier_agent_report(kit):
+    token = kit.agent('parent')
+    kit.ws.registry._record_device('parent', device())
+    child = kit.ws.delegate(token, 'helper')
+    own = tokens.load(kit.ws.base, child['id'])
+    assert kit.ws.registry.info(child['id'])['device']['verification'] == 'inherited'
+    kit.ws.record_profile(own, device('macOS'), '')
+    kit.ws.record_profile(own, device('Windows'), '')
+    shown = kit.ws.registry.info(child['id'])['device']
+    assert shown['os'] == 'Windows' and shown['verification'] == 'agent-reported'
+
+
+def test_runtime_commit_stays_and_the_installed_revision_duplicate_is_gone():
+    shown = device_metadata.normalize({**device(), 'runtime_commit': 'a' * 40, 'machine_id': 'b' * 16})
+    assert shown['runtime_commit'] == 'a' * 40 and shown['machine_id'] == 'b' * 16
+    assert 'installed_revision' not in shown
+    assert {'inherited_from', 'parent_verification', 'peer_verification'} <= set(shown)
+
+
+@pytest.mark.parametrize('field,value', [('machine_id', 'invalid'), ('runtime_commit', 'abc'),
+                                         ('observed_at', float('nan')), ('observed_at', True),
+                                         ('architecture', 'bad\nvalue'), ('peer_verification', 'paired')])
+def test_extended_profile_fields_are_bounded(field, value):
+    with pytest.raises(ValueError):
+        device_metadata.normalize({**device(), field: value})
+
+
+def test_autofill_names_wsl_and_fleet_machine_identity(monkeypatch):
+    monkeypatch.setattr(device_metadata, 'device_id', lambda: 'a' * 64)
+    monkeypatch.setattr(device_metadata, 'machine_id', lambda: 'b' * 16)
+    monkeypatch.setattr(device_metadata.platform, 'system', lambda: 'Linux')
+    monkeypatch.setattr(device_metadata.platform, 'release', lambda: '6.6-microsoft-standard-WSL2')
+    monkeypatch.setattr(device_metadata.platform, 'machine', lambda: 'x86_64')
+    device_metadata.current.cache_clear()
+    try:
+        profile = device_metadata.current()
+        assert profile['os'] == 'Linux (WSL)'
+        assert profile['machine_id'] == 'b' * 16
+        assert profile['architecture'] == 'x86_64'
+        assert profile['observed_at'] > 0
+    finally:
+        device_metadata.current.cache_clear()
