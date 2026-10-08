@@ -44,7 +44,8 @@ def test_mcp_claim_checkpoint_submit_and_pending_review_share_actual_graph(board
     monkeypatch.setattr(task_outcomes.task_credit, 'verify_task', locked)
     result = tools.workspace_task_review(board.task['id'], accepted())
     assert result['outcome'] == 'accepted' and result['credit']['state'] == 'pending'
-    assert tools.workspace_task(board.task['id'])['state'] == 'completed'
+    # the task has a worktree, so it is accepted and only cleanup that proves the landing completes it
+    assert tools.workspace_task(board.task['id'])['state'] == 'accepted'
     assert tools.workspace_task_credit(board.task['id'])['state'] == 'pending'
 
 
