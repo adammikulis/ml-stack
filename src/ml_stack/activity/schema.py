@@ -49,6 +49,7 @@ KINDS: dict[str, str] = {
     "reputation.*": "a source's standing changed",
     "model.lease": "a model server was started for someone (model, quant, flags, GPU share)",
     "net.download": "a download or pull (host, size, hash, outcome)",
+    "runtime.deploy": "a runtime ensure or rollback and its result (commit, command, agent, whether a person ran it)",
     "bench.run": "a bench, jevbench or decide run (command, model, build, result summary, path)",
     "test.result": "a test run on a tree: pass and fail counts, duration",
     "activity.off": "the person turned the log off for a process",
