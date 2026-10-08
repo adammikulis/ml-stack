@@ -120,3 +120,16 @@ def persist_session(environment: dict) -> None:
             os.close(descriptor)
     except (OSError, ValueError, AttributeError) as error:
         warning('SessionStart', error)
+
+
+def person(value: dict, stage: str) -> int:
+    """Hands a hook event to the person-record handlers; never blocks, so every failure is a warning."""
+    try:
+        from ml_stack.workspace import person_hook
+        output = person_hook.on_event(value)
+    except (ImportError, OSError, ValueError, KeyError, TypeError, AttributeError, RuntimeError) as error:
+        warning(stage, error)
+        return 0
+    if output:
+        print(json.dumps(output))
+    return 0
