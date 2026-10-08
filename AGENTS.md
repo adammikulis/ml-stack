@@ -84,6 +84,13 @@ may nominate an eligible main session. Readable labels never add permissions or 
 workspace authority. Register main-session presentation through the authenticated
 `ml-stack-workspace main-session --agent ID` flow; subagent briefs use the actual parent identity.
 
+**The lowest tier never coordinates.** The lowest model tier a vendor offers (Haiku, Luna and the
+like) is never a coordinator or eligible for promotion to one. A model that is not listed in the
+tier table is not eligible either. When only lowest-tier agents are present, one of them spawns a
+subagent at a suitable level (Sonnet 5.5 is acceptable) to coordinate, and that subagent hands
+coordination back when a higher-tier main session joins. Tier is read from the exact model
+identifier in the registry through a maintained table, never from a display name or a label.
+
 **Say which model you are.** Agents are identified by the specific model they run. A lead joining
 passes its own model id (`--model <id>`), and each subagent runs
 `ml-stack-workspace hello-model LABEL MODEL` once with the model it was started as (it inherits
