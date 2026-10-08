@@ -73,6 +73,9 @@ training-view .training-review-actions{display:flex;gap:12px;flex-wrap:wrap;marg
        ['rl', 'Reinforcement learning']].forEach(([value, text]) => this.mode.append(E('option', {value}, text)));
       this.recipe = W.field(b, 'Recipe', 'select');
       this.size = W.field(b, 'Model size', 'select');
+      this.framework = W.field(b, 'Training backend', 'select');
+      this.framework.append(E('option', {value:'torch'}, 'Torch · Hugging Face'), E('option', {value:'mlx'}, 'MLX · Apple silicon'));
+      this.framework.onchange = () => { this.frameworkChoice = this.framework.value; this.paintActions(); };
       this.requirements = E('p', {class:'intro'});
       this.parameters = E('div');
       b.append(this.requirements, this.parameters);
@@ -179,6 +182,8 @@ training-view .training-review-actions{display:flex;gap:12px;flex-wrap:wrap;marg
       try {
         const result = await W.api('/ui/workspace/recipes');
         this.recipes = result.recipes || [];
+        try { this.libraries = (await W.api('/ui/libraries')).libraries || []; this.libraryError = ''; }
+        catch (error) { this.libraries = []; this.libraryError = error.message; this.retryButton.hidden = false; }
         try { this.environments = (await W.api('/ui/gym/catalogue')).environments || []; this.environmentError = ''; }
         catch (error) { this.environmentError = error.message; this.environments = []; }
         this.buildOptions();
@@ -201,6 +206,12 @@ training-view .training-review-actions{display:flex;gap:12px;flex-wrap:wrap;marg
       this.buildFields();
     }
 
+    chooseBackend() {
+      const recipe = (this.recipes || []).find(item => item.id === this.recipe.value);
+      const chosen = recipe?.sizes?.[this.size.value]?.framework;
+      this.framework.value = this.frameworkChoice || chosen || 'torch';
+    }
+
     buildFields() {
       this.drafts ||= new Map();
       if (this.fieldKey && this.inputs) this.drafts.set(this.fieldKey,
@@ -212,6 +223,7 @@ training-view .training-review-actions{display:flex;gap:12px;flex-wrap:wrap;marg
       W.visible(this.data, !rl); W.visible(this.out, !rl); W.visible(this.name, !rl);
       W.visible(this.size, this.mode.value === 'recipe');
       W.visible(this.lora, this.mode.value === 'recipe' && this.recipe.value === 'tool-calls');
+      W.visible(this.framework, this.mode.value === 'recipe' && this.recipe.value === 'tool-calls');
       let fields = [];
       if (this.mode.value === 'recipe') {
         const recipe = (this.recipes || []).find(item => item.id === this.recipe.value);
@@ -220,6 +232,7 @@ training-view .training-review-actions{display:flex;gap:12px;flex-wrap:wrap;marg
         this.size.replaceChildren(...Object.entries(recipe.sizes || {}).map(([key, size]) =>
           E('option', {value:key}, `${key} · ${size.needs_gb} GB`)));
         if ([...this.size.options].some(option => option.value === chosen)) this.size.value = chosen;
+        this.chooseBackend();
         this.requirements.textContent = `${recipe.blurb} Dataset fields: ${recipe.data.fields.join(', ')}. Minimum ${recipe.data.min_rows} rows.`;
         const defaults = recipe.sizes[this.size.value]?.defaults || {};
         fields = recipe.fields.filter(field => field.name !== 'lora').map(field => ({...field, default:defaults[field.name] ?? field.default}));
@@ -269,8 +282,20 @@ training-view .training-review-actions{display:flex;gap:12px;flex-wrap:wrap;marg
       this.dry.options[0].textContent = recipe ? '20-step training smoke' : 'Check configuration';
       const available = !rl || (this.environments || []).some(item => item.id === this.recipe.value && item.available);
       this.reviewButton.disabled = this.startButton.disabled = !!this.pending || !this.recipe.value || !available;
-      this.runtimeNote.hidden = available;
-      this.runtimeNote.textContent = available ? '' : this.requirements.textContent;
+      const mlx = this.mode.value === 'recipe' && this.recipe.value === 'tool-calls' && this.framework.value === 'mlx';
+      const contract = (this.recipes || []).find(item => item.id === this.recipe.value);
+      const libraryId = mlx ? contract?.requires?.libraries?.mlx : '';
+      const library = (this.libraries || []).find(item => item.name === libraryId);
+      const missing = mlx && library?.installed !== true;
+      this.startButton.disabled ||= missing;
+      this.runtimeNote.hidden = available && !missing;
+      this.runtimeNote.textContent = missing ? library
+        ? `Install ${library.title} in Settings → Libraries before training this adapter.`
+        : this.libraryError ? 'Could not verify the MLX fine-tuning runtime. Open Settings → Libraries or retry loading workflows.'
+        : 'MLX fine-tuning is not available on this device. Choose Torch or a supported Apple device.'
+        : available ? '' : this.requirements.textContent;
+      this.lora.options[1].disabled = mlx;
+      if (mlx) this.lora.value = 'adapter';
       this.form.setAttribute('aria-busy', String(!!this.pending));
       this.updateSummary();
       this.startButton.textContent = this.pending ? 'Working…'
@@ -313,7 +338,7 @@ training-view .training-review-actions{display:flex;gap:12px;flex-wrap:wrap;marg
         if (this.recipe.value === 'tool-calls' && this.lora.value === 'adapter') args.push('--lora');
         if (this.size.value) args.push('--size', this.size.value);
         for (const [key, input] of Object.entries(this.inputs)) args.push('--set', `${key}=${input.value}`);
-        if (this.recipe.value === 'tool-calls') args.push('--set', `lora=${this.lora.value === 'adapter'}`);
+        if (this.recipe.value === 'tool-calls') args.push('--set', `lora=${this.lora.value === 'adapter'}`, '--set', `framework=${this.framework.value}`);
       }
       if (this.mode.value === 'decider') for (const [key, input] of Object.entries(this.inputs)) args.push('--' + key.replaceAll('_', '-'), input.value);
       if (this.dry.value === 'true' && this.mode.value !== 'rl') args.push('--dry-run');

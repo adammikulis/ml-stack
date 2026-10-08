@@ -282,7 +282,7 @@ class TestRecipe:
     def test_the_loss_is_on_the_assistant_turn_only(self, dataset):
         from transformers import AutoTokenizer
 
-        from ml_stack.train.recipes.tool_calls import IGNORE, render
+        from ml_stack.train.recipes.conversations import IGNORE, render
 
         data, base = dataset
         tokenizer = AutoTokenizer.from_pretrained(base)
@@ -302,7 +302,7 @@ class TestRecipe:
     def test_a_row_the_context_cuts_off_entirely_is_dropped_not_taught(self, dataset):
         from transformers import AutoTokenizer
 
-        from ml_stack.train.recipes.tool_calls import render
+        from ml_stack.train.recipes.conversations import render
 
         data, base = dataset
         tokenizer = AutoTokenizer.from_pretrained(base)
@@ -638,7 +638,7 @@ class TestFromBench:
     def test_a_directory_out_is_a_dataset_the_recipe_reads(self, tmp_path):
         """The same rows the synthesiser writes, so the two sources mix in one directory
         and `ml-stack-train-run --recipe tool-calls --data` reads either."""
-        from ml_stack.train.recipes.tool_calls import read_conversations
+        from ml_stack.train.recipes.conversations import read_conversations
         from ml_stack.train.tools import from_bench, write_dataset
 
         rows = from_bench(_kept_run([_traced_row(q) for q in

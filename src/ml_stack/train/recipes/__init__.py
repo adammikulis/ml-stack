@@ -84,6 +84,8 @@ def validate(recipe_id: str, config: dict[str, Any]) -> dict[str, Any]:
         raise ValueError(f"{recipe_id} has no size {size!r}; it has {sorted(sizes)}")
     # A size's defaults fill in only where the caller said nothing, so --set always wins.
     by_size = dict(sizes.get(size, {}).get("defaults", {})) if size else {}
+    if not out["framework"]:
+        out["framework"] = sizes.get(size, {}).get("framework", "")
 
     for name, f in fields.items():
         if name not in out or out[name] is None:
