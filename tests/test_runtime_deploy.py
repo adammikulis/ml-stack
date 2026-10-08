@@ -322,3 +322,13 @@ def test_a_launcher_with_no_usable_runtime_says_so_and_exits(world):
     runtime.directory().mkdir(parents=True)
     done = subprocess.run([sys.executable, str(launchers / "ml-stack-workspace")], capture_output=True, text=True, timeout=60)
     assert done.returncode != 0 and "no usable ml-stack runtime" in done.stderr
+
+
+def test_a_command_without_a_recorded_or_named_launcher_directory_or_checkout_writes_nothing(world, capsys, tmp_path):
+    repo, launchers, _ = world
+    commit(repo, "a")
+    assert runtime_cli.main(["ensure", "--checkout", str(repo)]) == 1
+    assert "pass --launchers" in capsys.readouterr().err
+    assert runtime_cli.main(["ensure", "--checkout", str(tmp_path), "--launchers", str(launchers)]) == 1
+    assert "not a git checkout" in capsys.readouterr().err
+    assert not list(launchers.iterdir()) and not runtime.directory().exists()

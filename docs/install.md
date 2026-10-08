@@ -185,7 +185,7 @@ ml-stack-runtime status [--json]
 ml-stack-runtime rollback [--to COMMIT]
 ```
 
-`ensure` does nothing when the selection already names the commit. Otherwise it takes the build lock, then `claim install` on the new tree, the launcher directory and the selection file, and:
+The first `ensure` names `--launchers DIR` (the directory holding the console launchers) and `--checkout`; both are recorded for later runs. `ensure` does nothing when the selection already names the commit. Otherwise it takes the build lock, then `claim install` on the new tree, the launcher directory and the selection file, and:
 
 1. builds the commit into a new tree beside the old ones;
 2. smokes it: the package imports under `-I`, its stamped commit equals the commit, `ml-stack-workspace --help` runs through freshly written launchers, and `claude-session-start`, `claude-subagent-start` and `claude-subagent-stop` from that commit run against a temporary home and state root;

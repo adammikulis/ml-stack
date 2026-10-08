@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import subprocess
 import sys
-import sysconfig
 import time
 from pathlib import Path
 
@@ -19,7 +18,12 @@ from ml_stack.platform import detached_kwargs
 
 
 def _checkout(named: str) -> Path:
-    for candidate in (named, runtime_store.read_state().get("checkout"), runtime_wheel.source_checkout(),
+    if named:
+        found = expand(named)
+        if not (found / ".git").exists():
+            raise runtime_deploy.DeployError(f"{found} is not a git checkout")
+        return found
+    for candidate in (runtime_store.read_state().get("checkout"), runtime_wheel.source_checkout(),
                       (worktreerules.checkouts(Path.cwd()) or (None, None))[1]):
         found = expand(str(candidate)) if candidate else None
         if found is not None and (found / ".git").exists():
@@ -28,11 +32,11 @@ def _checkout(named: str) -> Path:
 
 
 def _launchers(named: str) -> Path:
-    if named:
-        return expand(named)
     recorded = runtime_store.read_state().get("launchers")
-    base = sys.base_prefix
-    return Path(str(recorded)) if recorded else Path(sysconfig.get_path("scripts", vars={"base": base, "platbase": base}))
+    chosen = named or (str(recorded) if recorded else "")
+    if not chosen:
+        raise runtime_deploy.DeployError("no launcher directory recorded: pass --launchers once")
+    return expand(chosen)
 
 
 def plan_from(args: argparse.Namespace) -> runtime_deploy.Plan:
