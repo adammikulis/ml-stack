@@ -178,13 +178,12 @@ installed by you, at your own terminal, with one command it prints. Nothing writ
 command.
 
 ```
-python -m ml_stack.fleet.autostart prepare --role pool-daemon --role runtime-ensure
+python -m ml_stack.fleet.autostart prepare --launchers <launcher directory> --role pool-daemon --role runtime-ensure
 python -m ml_stack.fleet.autostart install --manifest <the path prepare printed>
 ```
 
-`prepare` takes `--launchers DIR` (default: the directory `ml-stack runtime ensure --launchers`
-recorded), the directory the runtime tooling keeps its stable launchers in, and `--system` to
-stage the system-wide location instead of your own. It writes the unit files and a
+`prepare` takes `--launchers DIR`, the directory `ml-stack runtime ensure --launchers` keeps
+its stable launchers in, and `--system` to stage the system-wide location instead of your own. It writes the unit files and a
 `manifest.json` under `~/.ml-stack/autostart/staging/`. The manifest holds the role, platform, destination path, the
 sha256 of each unit, the exec argv (the launcher's absolute path and its options, never a shell
 string), a path-only environment, the working directory, the restart policy, the log paths, who
@@ -225,7 +224,7 @@ an agent identity (claims, board posts, push rules), so it stays in an agent ses
 
 `runtime-ensure` runs `ml-stack runtime ensure` as no agent: it takes the build lock only,
 claims nothing and posts nothing to the board (see *Following the source checkout*). It needs
-the checkout and launcher directory a first `ensure` recorded, and `prepare` refuses a role whose
+the checkout a first `ensure` recorded, and `prepare` refuses a role whose
 `ml-stack` launcher is not there.
 
 Checking a reboot is manual, because a test cannot reboot a machine:

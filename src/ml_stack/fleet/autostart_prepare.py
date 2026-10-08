@@ -15,7 +15,7 @@ import time
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-from ml_stack import home, runtime_store
+from ml_stack import home
 from ml_stack.files import write_json, writing
 
 from .autostart_manifest import (
@@ -175,10 +175,9 @@ def prepare(spec: Spec) -> Prepared:
     platform = platform_of(spec.platform)
     if spec.scope not in ("user", "system") or (spec.scope == "system" and platform == "win32"):
         raise PrepareError("scope is user, or system on macOS and Linux")
-    recorded = runtime_store.read_state().get("launchers")
-    launchers = spec.launchers or (Path(recorded) if recorded else None)
+    launchers = spec.launchers
     if launchers is None:
-        raise PrepareError("no launcher directory is recorded by ml-stack runtime ensure; pass --launchers")
+        raise PrepareError("name the directory holding the stable launchers with --launchers")
     now = spec.now or time.time()
     user = getpass.getuser()
     roles, files = [], {}

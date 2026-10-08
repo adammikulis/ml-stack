@@ -24,7 +24,7 @@ def add_commands(sub: argparse._SubParsersAction) -> None:
     prep = sub.add_parser("prepare", help="stage unit files and a manifest; nothing is installed")
     prep.add_argument("--role", action="append", choices=ROLES, required=True)
     prep.add_argument("--system", action="store_true", help="stage for the system-wide location")
-    prep.add_argument("--launchers", default="", help="the directory holding the stable launchers")
+    prep.add_argument("--launchers", required=True, help="the absolute directory holding the stable launchers")
     prep.add_argument("--slots", type=int, default=1)
     prep.add_argument("--label", action="append", default=[])
     prep.add_argument("--report", default="")

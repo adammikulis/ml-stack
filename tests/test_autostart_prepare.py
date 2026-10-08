@@ -156,14 +156,9 @@ def test_the_launcher_the_runtime_tooling_writes_is_accepted(tmp_path, user):
     assert launcher_problem(path) == ""
 
 
-def test_prepare_uses_the_launcher_directory_the_runtime_tooling_recorded(tmp_path, user):
-    from ml_stack import runtime_store
-
-    with pytest.raises(PrepareError, match="no launcher directory"):
+def test_prepare_needs_the_launcher_directory_named(tmp_path, user):
+    with pytest.raises(PrepareError, match="--launchers"):
         prepare(Spec(("pool-daemon",), platform="linux"))
-    runtime_store.write_state({"launchers": str(launchers(home.state("bin")))})
-    done = prepare(Spec(("pool-daemon",), platform="linux"))
-    assert Path(done.manifest.roles[0].argv[0]).parent == home.state("bin")
 
 
 def test_a_relative_launcher_directory_is_refused(tmp_path, user):
