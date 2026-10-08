@@ -166,6 +166,7 @@ chat-view #chat-activity-output { max-height:240px; overflow:auto; white-space:p
     }
     route(route) {
       this.active = route === 'board';
+      this.board?.setActive(this.active);
       this.mobile.setAttribute('aria-expanded', 'false');
       this.chat.box.dataset.sidebar = 'false';
       this.team.hidden = !this.active;
@@ -200,7 +201,10 @@ chat-view #chat-activity-output { max-height:240px; overflow:auto; white-space:p
       this.channels.textContent = 'Connecting to workspace…';
       this.board = M.el('ml-board', {endpoint:id === 'local' ? '/ui/board' : `/ui/projects/${id}/board`,
         'channel-feed':'', integrated:''});
-      this.board.addEventListener('board-navigation', event => this.navigation(event.detail));
+      this.board.addEventListener('board-navigation', event => {
+        this.navigation(event.detail);
+        if (!this.active) this.board.setActive(false);
+      });
       this.board.addEventListener('ml-board-open', () => M.go('board'));
       this.team.replaceChildren(this.board);
       try { localStorage.setItem('poolside.conversations.project', id); } catch {}

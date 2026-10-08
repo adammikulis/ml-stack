@@ -24,5 +24,8 @@ export const INTEGRATED_STYLES = `
 :host([integrated]) .who { font-size:.9286rem; }
 :host([integrated]) .meta { font-size:.8571rem; }
 :host([integrated]) .badge { font-size:.7857rem; }
+:host([integrated]) .history-controls { display:flex; gap:8px; padding:8px calc(28px * var(--ui-density,1)); flex-wrap:wrap; }
+:host([integrated]) .history-controls button { font:inherit; color:var(--ml-text); background:var(--ml-surface); border:1px solid var(--ml-line); border-radius:6px; padding:5px 10px; }
+:host([integrated]) .history-controls button:disabled { opacity:.5; }
 :host([integrated]) .state { padding:calc(30px * var(--ui-density,1)) calc(10px * var(--ui-density,1)); }
 `;

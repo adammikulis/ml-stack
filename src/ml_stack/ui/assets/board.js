@@ -2,6 +2,7 @@
    Every string from the route is shown as text after control and bidirectional characters are
    removed; nothing is parsed as markup and the only link is a file's download (an attachment, never shown inline). The page holds no token. */
 import { MlElement, define, h } from "./base.js";
+import { loadPage, messageRoute, pageControls, renderFeed } from "./board-pages.js";
 import { INTEGRATED_STYLES } from "./board-styles.js";
 import "./composer.js";
 
@@ -110,7 +111,8 @@ class MlBoard extends MlElement {
     this.nav = h("nav", { "aria-label": "Boards and conversations" });
     this.feed = h("div", { "aria-live": "polite" });
     this.compose = h("div", {});
-    this.main = h("main", {}, this.feed, this.compose);
+    this.history = h("div", {class:"history"});
+    this.main = h("main", {}, this.feed, this.history, this.compose);
     this.root.append(h("div", { class: "shell" }, this.nav, this.main));
   }
 
@@ -126,6 +128,17 @@ class MlBoard extends MlElement {
     this.loadRevision = (this.loadRevision || 0) + 1;
     clearTimeout(this.timer);
     for (const controller of this.requests) controller.abort();
+  }
+
+  setActive(active) {
+    if (this.stopped === !active) return;
+    this.stopped = !active;
+    clearTimeout(this.timer);
+    if (!active) {
+      this.loadRevision = (this.loadRevision || 0) + 1; this.viewRevision++;
+      for (const controller of this.requests) controller.abort();
+    }
+    else { this.load(); this.schedule(); }
   }
 
   base() {
@@ -169,6 +182,9 @@ class MlBoard extends MlElement {
 
   async request(route, params = {}, document = null) {
     const controller = new AbortController();
+    if (["messages", "threads", "thread", "dm"].includes(route)) {
+      this.viewRequest?.abort(); this.viewRequest = controller;
+    }
     this.requests.add(controller);
     const query = new URLSearchParams(params).toString();
     try {
@@ -219,6 +235,7 @@ class MlBoard extends MlElement {
       this.boards = b.boards ?? [];
       this.dms = d.conversations ?? [];
       try { this.agents = (await this.get("agents")).agents || []; } catch { this.agents = []; }
+      if (revision !== this.loadRevision || this.stopped) return;
       this.error = "";
       this.personSetupRequired = false;
       const view = this.view.kind === "none" && this.boards.length
@@ -244,11 +261,14 @@ class MlBoard extends MlElement {
     if (render) { this.loading = true; this.items = []; this.update(); }
     try {
       let items = [];
-      if (view.kind === "board") items = this.channelTab === "messages"
-        ? (await this.get("messages", {board:view.name})).messages
-        : (await this.get("threads", {board:view.name})).threads;
-      else if (view.kind === "thread") items = (await this.get("thread", {root:view.root})).messages;
-      else if (view.kind === "dm") items = (await this.get("dm", {a:view.a, b:view.b})).messages;
+      if (messageRoute(this)) {
+        if (render || !this.page?.has_newer) {
+          await loadPage(this, !render && this.items.length ? "newer" : "latest");
+        }
+        items = this.items;
+      } else if (view.kind === "board") {
+        items = (await this.get("threads", {board:view.name})).threads;
+      }
       if (revision !== this.viewRevision) return;
       this.items = items || [];
       this.error = "";
@@ -275,8 +295,12 @@ class MlBoard extends MlElement {
 
   update() {
     if (!this.nav) return;
-    this.emit("board-navigation", {boards:this.boards, dms:this.dms, agents:this.agents,
-      me:this.me, view:this.view, personSetupRequired:this.personSetupRequired === true, error:this.error || ""});
+    const navigation = {boards:this.boards, dms:this.dms, agents:this.agents,
+      me:this.me, view:this.view, personSetupRequired:this.personSetupRequired === true, error:this.error || ""};
+    const navigationKey = JSON.stringify(navigation);
+    if (navigationKey !== this.navigationKey) {
+      this.navigationKey = navigationKey; this.emit("board-navigation", navigation);
+    }
     const item = (label, count, current, onclick, title = "") => h("button", {title,
       type: "button", "aria-current": current ? "true" : null, onclick },
     h("span", {}, line(label, 160)), count ? h("span", { class: "count" }, String(count)) : null);
@@ -292,7 +316,9 @@ class MlBoard extends MlElement {
       ...(this.agents.length ? [h("h3", {}, "Agents"), ...this.agents.map(agent =>
         item(agent.display_name || agent.id, 0, this.view.kind === "dm" && [this.view.a, this.view.b].includes(agent.id),
           () => this.open({kind:"dm", a:this.me, b:agent.id}), `${agent.id} · ${agent.device?.verification || "unknown"}`))] : []));
-    this.feed.replaceChildren(...this.pane());
+    renderFeed(this, this.pane());
+    const controls = pageControls(this);
+    this.history.replaceChildren(...(controls ? [controls] : []));
     const key = JSON.stringify([this.target(), this.readonly, this.draft.error]);
     if (key !== this.composerKey) {
       this.composerKey = key;
@@ -410,7 +436,7 @@ class MlBoard extends MlElement {
 
   messages(first) {
     if (!this.items.length) return [h("p", { class: "state" }, "No messages.")];
-    return this.items.map((m) => h("article", { class: `msg${first && m.from === first ? " sent" : ""}` },
+    return this.items.map((m) => h("article", { class: `msg${first && m.from === first ? " sent" : ""}`, "data-seq":String(m.seq) },
       h("div", { class: "who", title:m.from }, `${line(m.display_name || m.from, 160)}`,
         m.role === "human" ? null : h("span", { class: "meta" }, ` (${m.model ? `${line(m.model, 80)}, ${line(m.model_state, 12)}` : "model unknown"})`),
         h("span", { class: "meta" }, `  ${line(m.type, 16)}, ${when(m.ts)}${m.held ? ", held in quarantine" : ""}`)),

@@ -382,3 +382,52 @@ def test_channel_history_scrolls_with_composer_visible_at_all_viewport_sizes(cha
     expect(board.get_by_role('button', name='Send', exact=True)).to_be_in_viewport()
     assert page.evaluate('document.documentElement.scrollHeight <= innerHeight')
     page.screenshot(path='/private/tmp/poolside-channel-fixed-mobile-expanded.png')
+
+def test_bounded_history_navigation_keeps_message_nodes_scroll_and_draft(chat_browser, monkeypatch, tmp_path):
+    from playwright.sync_api import expect
+
+    from ml_stack.workspace.board_pages import page as message_page
+
+    kit = Kit(clean_env(monkeypatch, tmp_path / 'workspace'))
+    tokens.store(kit.base, tokens.OWNER_FILE, kit.owner)
+    served, browser = chat_browser
+    rows = [{'seq': seq, 'from': 'owner', 'role': 'human', 'type': 'note',
+             'ts': 1, 'body': f'Message {seq}'} for seq in range(1, 100001)]
+    calls = []
+
+    def messages(route):
+        from urllib.parse import parse_qs, urlsplit
+        query = parse_qs(urlsplit(route.request.url).query)
+        after = int(query.get('after', ['0'])[0])
+        before = int(query.get('before', ['0'])[0])
+        calls.append((after, before))
+        route.fulfill(json=message_page(rows, lambda row: row, 100, after, before))
+
+    browser.route('**/ui/board/messages?*', messages)
+    browser.goto(f'http://127.0.0.1:{served.port}/ui#chat')
+    browser.get_by_label('Workspace', exact=True).select_option('local')
+    browser.locator('#conversation-channels').get_by_role('button', name='#general').click()
+    board = browser.locator('chat-view ml-board')
+    expect(board.locator('.msg')).to_have_count(100)
+    editor = board.get_by_role('textbox', name='Message', exact=True)
+    editor.fill('Keep this draft while reading history.')
+    board.evaluate('node => { node.retained = node.feed.querySelector("[data-seq=\\"99901\\"]"); node.feed.scrollTop = 90; node.anchor = [...node.feed.querySelectorAll("[data-seq]")].find(item => item.offsetTop >= node.feed.scrollTop); node.anchorDelta = node.anchor.offsetTop - node.feed.scrollTop; }')
+    board.get_by_role('button', name='Load older messages').click()
+    expect(board.locator('.msg')).to_have_count(200)
+    assert board.evaluate('node => node.retained === node.feed.querySelector("[data-seq=\\"99901\\"]")')
+    expect(editor).to_have_value('Keep this draft while reading history.')
+    assert board.evaluate('node => Math.abs(node.anchor.offsetTop - node.feed.scrollTop - node.anchorDelta)') <= 1, board.evaluate('node => ({top:node.feed.scrollTop,height:node.feed.clientHeight,total:node.feed.scrollHeight,anchor:node.anchor.offsetTop,delta:node.anchorDelta,main:node.main.clientHeight,host:node.clientHeight})')
+    board.get_by_role('button', name='Load older messages').click()
+    expect(board.locator('.msg').first).to_contain_text('Message 99701')
+    expect(board.locator('.msg')).to_have_count(200)
+    board.evaluate('node => node.load()')
+    expect(board.locator('.msg').first).to_contain_text('Message 99701')
+    expect(board.locator('.msg').last).to_contain_text('Message 99900')
+    board.get_by_role('button', name='Load newer messages').click()
+    expect(board.locator('.msg').last).to_contain_text('Message 100000')
+    expect(board.locator('.msg').first).to_contain_text('Message 99801')
+    assert (99900, 0) in calls
+    board.get_by_role('button', name='Jump to latest').click()
+    expect(board.locator('.msg').last).to_contain_text('Message 100000')
+    browser.locator('#chat-new').click()
+    assert board.evaluate('node => node.stopped')

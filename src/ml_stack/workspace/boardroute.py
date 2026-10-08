@@ -140,6 +140,8 @@ def _file(ws: Workspace, token: str, query: Mapping[str, list[str]]) -> Reply:
 
 def _answer(api: Any, token: str, route: str, query: Mapping[str, list[str]]) -> Any:
     limit = _number(query, "limit", 100, 200)
+    after = _number(query, "after", 0, 1 << 40)
+    before = _number(query, "before", 0, 1 << 40)
     if route == "boards":
         return {"me": api.ws.auth(token).id, "boards": api.list(token)}
     if route == "agents":
@@ -156,14 +158,14 @@ def _answer(api: Any, token: str, route: str, query: Mapping[str, list[str]]) ->
         activity.record("board.view", subject=found)
         return {"board": found, "threads": api.threads(token, found, limit)}
     if route == "messages":
-        return api.ui_read(token, _board(query), _number(query, "after", 0, 1 << 40), limit)
+        return api.ui_read(token, _board(query), after, limit, before)
     if route == "thread":
-        return api.ui_thread(token, _number(query, "root", 0, 1 << 40))
+        return api.ui_thread(token, _number(query, "root", 0, 1 << 40), limit, after, before)
     if route == "dms":
         return {"conversations": api.dm_list(token)}
     if route == "dm":
         a, b = (query.get("a") or [""])[0], (query.get("b") or [""])[0]
-        return {"a": a, "b": b, "messages": api.ui_dm(token, a, b, limit)}
+        return api.ui_dm_page(token, a, b, (limit, after, before))
     if route == "head":
         return {"seq": api.ws.news(token, 0, 0)}
     if route == "wait":
