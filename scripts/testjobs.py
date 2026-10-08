@@ -136,6 +136,7 @@ class Jobs:
         with_pid = int(status.get("pid", 0))
         if storage.alive(with_pid, float(status.get("started", 0))):
             os.kill(with_pid, signal.SIGTERM)
+        self.write(job, "status.json", {**status, "state": "cancelled", "exit": 130, "finished": time.time()})
         return f"job {job} cancelled"
 
     def result(self, job: str, root: Path) -> dict:

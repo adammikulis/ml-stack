@@ -28,9 +28,10 @@ class Hit:
 
 
 def process_start(pid: int) -> float:
-    """The start time of ``pid``, or 0.0 when it does not exist."""
+    """The start time of ``pid``, or 0.0 when it does not exist or has exited unreaped."""
     try:
-        return psutil.Process(pid).create_time()
+        process = psutil.Process(pid)
+        return 0.0 if process.status() == psutil.STATUS_ZOMBIE else process.create_time()
     except (psutil.Error, OSError):
         return 0.0
 

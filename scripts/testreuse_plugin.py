@@ -46,6 +46,15 @@ def _writing(mode: object, flags: object) -> bool:
     return isinstance(flags, int) and bool(flags & (os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_APPEND))
 
 
+def _write_ok(absolute: str) -> bool:
+    """Whether a write may happen: inside the checkout only to its cache directories, elsewhere only to temp."""
+    try:
+        rel = Path(absolute).resolve().relative_to(ROOT)
+    except (ValueError, OSError):
+        return absolute.startswith(WRITABLE)
+    return any(part.startswith(ALLOWED_ROOT_WRITES) for part in rel.parts)
+
+
 def _from_conftest() -> bool:
     """Whether the open comes from the suite's own isolation guard in ``tests/conftest.py``."""
     guard = str(ROOT / "tests" / "conftest.py")
@@ -65,8 +74,7 @@ def _audit(event: str, args: tuple) -> None:
         bucket = _entry(CURRENT[-1])
         absolute = os.path.abspath(path)
         if _writing(args[1], args[2]):
-            if not absolute.startswith(WRITABLE) and not (
-                    absolute.startswith(str(ROOT)) and any(p in absolute for p in ALLOWED_ROOT_WRITES)):
+            if not _write_ok(absolute):
                 bucket["violations"].add(f"wrote {absolute}")
         else:
             rel = _source_of(absolute)
