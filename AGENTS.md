@@ -559,20 +559,13 @@ chance to notice.
 
 ## 4. Models and GPU
 
-### One thing on the GPU at a time
+### One thing computing on the GPU at a time
 
-Never put two pieces of work on the GPU at once -- not a question beside a reading, not two
-benchmark rows, not a smoke test while a long run is going. Serve one slot and let the second
-request wait.
+Never put two pieces of work on a device's compute at once -- not a question beside a reading, not two benchmark rows, not a smoke test while a long run is going. A second request waits for the first.
 
-Two at once is more than twice as slow, and it takes the meaning out of every number either one
-produces: a row measured under load cannot be compared with a row measured alone, and neither can
-be trusted afterwards. Measured 2026-09-09, one machine, Qwen3.8-Flash-Next: a one-line reply
-asked on a second slot while an extraction ran took 81s, against a second or two alone, and the
-extraction was slowed too. So: `--parallel 1` unless something genuinely needs concurrent
-conversations, and a program that reads and answers over the same model does both through the
-same server, one after the other. `ml-stack-serve status` says how many slots a server has; check
-it before starting a run that will take hours.
+Models may be resident together as memory allows, in any role: several decision, embedding, generation or chat models at once, whether for testing them against each other or for serving different tiers. Residency is admitted against memory by the broker; compute is leased to one piece of work per device at a time. Any model may be placed on the CPU, where it runs beside GPU work.
+
+Two at once on one device is more than twice as slow, and it takes the meaning out of every number either one produces: a row measured under load cannot be compared with a row measured alone, and neither can be trusted afterwards. Measured 2026-09-09, one machine, Qwen3.8-Flash-Next: a one-line reply asked on a second slot while an extraction ran took 81s, against a second or two alone, and the extraction was slowed too. So: `--parallel 1` unless something genuinely needs concurrent conversations, and a program that reads and answers over the same model does both through the same server, one after the other. `ml-stack-serve status` says how many slots a server has and which models are resident; check it before starting a run that will take hours.
 
 ### Driving a model on this machine
 
@@ -743,13 +736,33 @@ needs more than that, the missing piece is a command or a parameter here.
 
 ## 6. Safety
 
-### System settings are human-only
+### System settings and the authority registry
 
-Changing a machine setting (the wired memory limit `iogpu.wired_limit_mb`, a boot-time daemon,
-a guard or sentinel policy, a role, a saved rule, a quarantine release) is done by a person at
-their own screen or terminal: never offered to a model, role, MCP or chat tool, workspace agent or
-channel message. A privileged step goes through the operating system's own administrator prompt;
-ml-stack never sees or stores the password, and never installs a passwordless `sudoers` rule.
+Changing a machine setting (the wired memory limit `iogpu.wired_limit_mb`, a sentinel policy, a
+quarantine release, a recovery export, a request answer) passes a named gate. The gates and their
+groups live in one registry, `ml_stack.authority`; each holds the state `person` or `delegated`.
+`ml-stack-workspace authority show` lists them, `authority set person|delegated ALL|GROUP|GATE
+[GATE ...] [--project KEY]` changes some, and `authority preset dev|prod` changes all of them
+together with the project's task enforcement mode.
+
+A `person` gate passes only a person at a terminal. A `delegated` gate passes a person or a lead
+agent acting on the owner's instruction (`CLAUDECODE` or `ML_STACK_AGENT` set, no helper label,
+no `parent/name` identity), and records each agent use in the authority audit log. A helper or
+child identity never passes a delegated gate and never flips the registry. A lead agent or a
+person flips it, and each flip records who, which gates, from and to in the authority log and the
+workspace audit log. The default state is the `dev` preset: every delegable gate is delegated and
+enforcement is `open`. `preset prod` leaves workspace setup, model recording and local agent
+verbs delegated, makes every other gate a person's and sets enforcement `strict`.
+`ML_STACK_AUTHORITY_FLOOR=person` reads every gate as a person's; it only tightens, and the test
+suite sets it.
+
+Three things are a person's whatever the registry says and are not in it: the keystore and
+secrets (unlock, the cluster passphrase and token, signing keys), a passwordless `sudoers` rule
+(ml-stack never installs one), and the human prompt that confirms a privileged operating-system
+step. The wired memory limit is the one machine setting an agent may request (gate
+`serve.wired-limit`): it goes through macOS's own administrator dialog, ml-stack never sees or
+stores the password, and `sudo` still needs a terminal. The identity bootstrap (`init`) and the
+review screen also stay a person's.
 
 ### Never a real person
 
