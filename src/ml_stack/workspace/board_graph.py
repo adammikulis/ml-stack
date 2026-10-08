@@ -50,7 +50,7 @@ class BoardGraph:
                 ):
                     nodes = coordination.nodes("workspace")
                     if len(nodes) > 1:
-                        raise ValueError("multiple canonical workspace identities")
+                        raise ValueError("multiple workspace identities")
                     workspace = nodes[0]["id"] if nodes else f"workspace:{uuid4().hex}"
                     if not nodes:
                         coordination.upsert_node({"id": workspace, "kind": "workspace"})

@@ -1,4 +1,4 @@
-"""Request-bound person authority for canonical browser workspaces."""
+"""Request-bound person authority for browser workspaces."""
 
 from ml_stack.fleet.session import parse_cookie
 from ml_stack.workspace import boardroute

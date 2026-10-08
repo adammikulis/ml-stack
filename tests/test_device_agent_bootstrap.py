@@ -146,7 +146,7 @@ def test_http_device_session_recovery_and_revocation(enrolled, tmp_path, monkeyp
         runner.shutdown()
 
 
-def test_canonical_project_bootstrap_has_same_device_boundary(enrolled):
+def test_project_bootstrap_has_same_device_boundary(enrolled):
     kit, device, projects, document = enrolled
     projects.workspace_base = lambda project_id: kit.base
     host = WorkspaceHost(projects)
@@ -236,7 +236,7 @@ def test_enrolled_device_never_creates_local_authority_without_unique_coordinato
     assert not coordinator_config.load(base)
 
 
-@pytest.mark.parametrize('surface', ['coordinator', 'canonical'])
+@pytest.mark.parametrize('surface', ['coordinator', 'board'])
 @pytest.mark.parametrize('change', ['unshared', 'other-authority'])
 def test_existing_session_loses_access_when_hosted_project_authorization_ends(enrolled, surface, change):
     kit, device, projects, document = enrolled
@@ -247,7 +247,7 @@ def test_existing_session_loses_access_when_hosted_project_authorization_ends(en
     host = WorkspaceHost(projects)
 
     def invoke():
-        if surface == 'canonical':
+        if surface == 'board':
             return host.answer(document['project']['key'], 'board', {
                 'agent_token': token, 'operation': 'whoami', 'args': [], 'kwargs': {}}, device=device)
         body = json.dumps({'workspace': identity, 'request_id': 'c' * 32, 'argv': ['whoami']}).encode()

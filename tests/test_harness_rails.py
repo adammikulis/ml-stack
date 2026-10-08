@@ -482,7 +482,7 @@ class TestSeat:
                 calls.append(("ensure", kwargs))
                 return "device-worker"
         remote = Remote()
-        canonical = authority != "coordinator"
+        via_board = authority != "coordinator"
         connection = {"host": "https://192.0.2.1", "project_id": "a" * 32}
         selected = connection if authority == "selected" else None
         monkeypatch.setattr(harnessid.project_connection, "selected", lambda *a: selected)
@@ -496,7 +496,7 @@ class TestSeat:
         seat = harnessid.invite("worker", tmp_path, "", lambda _: None)
         assert seat.name == "device-worker" and seat.persistent
         assert seat.record_model("test-model", "test-harness")
-        assert calls[-1][0] == ("claim_model" if canonical else "ensure")
+        assert calls[-1][0] == ("claim_model" if via_board else "ensure")
         assert not seat.revoke()
 
     def test_a_fake_endpoint_cannot_verify_a_delegated_agents_model(self, monkeypatch, tmp_path):

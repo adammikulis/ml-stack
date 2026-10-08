@@ -1,4 +1,4 @@
-"""Authenticated relocation of inactive canonical task source bindings."""
+"""Authenticated relocation of inactive task source bindings."""
 
 from contextlib import ExitStack
 from dataclasses import dataclass, replace
@@ -45,7 +45,7 @@ def _scopes(ws, graph, board, binding):
                      if node['attrs']['worker'] == child.id and node['attrs']['source_project'] == source],
                     key=lambda scope: scope['task'])
     if not scopes:
-        raise Denied('the worker has no pending canonical source bindings')
+        raise Denied('the worker has no pending source bindings')
     for scope in scopes:
         task = board._task(graph, scope['task'])
         if who.id != scope['owner'] or who.id != task['created_by']:

@@ -645,7 +645,7 @@ def test_the_acting_identity_is_the_workspace_agent_and_collides_with_its_harnes
             pass
 
 
-def test_the_canonical_acting_identity_is_the_physical_owner_and_needs_the_claim_capability(world, monkeypatch):
+def test_the_acting_identity_is_the_physical_owner_and_needs_the_claim_capability(world, monkeypatch):
     from types import SimpleNamespace
 
     from ml_stack.workspace import harness_remote, project_connection

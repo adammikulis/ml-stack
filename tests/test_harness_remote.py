@@ -1,4 +1,4 @@
-"""Canonical native ownership keeps physical claims and cleanup local."""
+"""Native ownership keeps physical claims and cleanup local."""
 
 from types import SimpleNamespace
 
@@ -44,7 +44,7 @@ def setup(tmp_path, monkeypatch):
 @pytest.mark.parametrize('change', [
     {'id': 'foreign'}, {'role': 'human'}, {'project': {'key': 'b' * 32}}, {'can': ['read']},
 ])
-def test_canonical_identity_and_mutation_permission_are_authenticated(setup, change):
+def test_identity_and_mutation_permission_are_authenticated(setup, change):
     setup.info.update(change)
     with pytest.raises(Denied):
         harness_remote.context('worker', str(setup.checkout), [str(setup.checkout)])
@@ -62,7 +62,7 @@ def test_remote_authentication_failure_has_no_local_credential_fallback(setup):
 
 
 @pytest.mark.redteam
-def test_physical_claims_conflict_across_canonical_authorities(setup):
+def test_physical_claims_conflict_across_authorities(setup):
     target = str(setup.checkout / 'source.py')
     harness_remote.reserve(setup.remote, setup.who, [('file', target)], {})
     setup.remote.project_id = 'b' * 32
@@ -101,10 +101,10 @@ def test_concurrent_changed_claim_survives_rollback(setup):
 
 
 @pytest.mark.redteam
-def test_actual_target_must_belong_to_canonical_binding(setup, monkeypatch):
+def test_actual_target_must_belong_to_binding(setup, monkeypatch):
     monkeypatch.setattr(harness_remote.project_connection, 'selected',
                         lambda root: {**setup.binding, 'project_id': 'b' * 32})
-    with pytest.raises(Denied, match='another canonical project'):
+    with pytest.raises(Denied, match='another project'):
         harness_remote.reserve(setup.remote, setup.who, [('file', str(setup.checkout / 'source.py'))], {})
     assert not harness_remote.claims().path.exists()
 
@@ -131,7 +131,7 @@ def test_reservation_reports_prior_keys_under_ownership_lock(setup):
 
 
 @pytest.mark.redteam
-def test_stop_uses_canonical_identity_for_local_durable_cleanup(setup):
+def test_stop_uses_identity_for_local_durable_cleanup(setup):
     harness_remote.reserve(setup.remote, setup.who, [('file', str(setup.checkout / 'source.py'))], {})
     assert worktree_lifecycle.pending(setup.remote.base, 'worker')[0]['path'] == str(setup.checkout)
     rail = harnesshook.Rail('plan-and-go', 'worker', roots=[str(setup.checkout)])
@@ -230,7 +230,7 @@ def test_unknown_nested_worktree_mutation_cannot_claim_the_wrong_area(setup):
     assert not harness_remote.claims().path.exists()
 
 
-def test_local_area_owner_blocks_canonical_file_reservation(setup):
+def test_local_area_owner_blocks_file_reservation(setup):
     target = str(setup.checkout / 'source.py')
     harness_remote.claims().reserve(Identity('other', AGENT), [('area', target)])
     with pytest.raises(Conflict):
@@ -238,7 +238,7 @@ def test_local_area_owner_blocks_canonical_file_reservation(setup):
 
 
 @pytest.mark.parametrize('command', ['echo x > "$TARGET"', 'touch *.py', 'touch $(pwd)/x'])
-def test_canonical_shell_targets_must_be_fixed(command):
+def test_shell_targets_must_be_fixed(command):
     with pytest.raises(Denied):
         harness_remote.inspect_shell('Bash', {'command': command})
 
@@ -249,13 +249,13 @@ def cli_args(**changes):
 
 
 @pytest.mark.parametrize('change', [{'agent': 'foreign'}, {'kind': 'tag'}, {'ttl': 5}, {'pid': 1}])
-def test_canonical_cli_refuses_unbound_or_unsupported_claims(setup, change):
+def test_cli_refuses_unbound_or_unsupported_claims(setup, change):
     args = cli_args(key=str(setup.checkout / 'source.py'), **change)
     with pytest.raises(Denied):
         harness_remote.cli_command(setup.remote, 'fixture', args)
 
 
-def test_canonical_cli_claim_maps_bounded_source_and_physical_area(setup):
+def test_cli_claim_maps_bounded_source_and_physical_area(setup):
     recorded = []
     setup.remote.native_reserve = lambda name, resources: recorded.extend(resources)
     target = str(setup.checkout / 'source.py')
@@ -265,7 +265,7 @@ def test_canonical_cli_claim_maps_bounded_source_and_physical_area(setup):
 
 
 @pytest.mark.parametrize('kind,key', [('port', '8123'), ('server', 'qwen-27b'), ('install', 'runtime-tree')])
-def test_canonical_cli_claims_device_local_resources_without_a_source_area(setup, kind, key):
+def test_cli_claims_device_local_resources_without_a_source_area(setup, kind, key):
     setup.remote.native_reserve = lambda *args: pytest.fail('board reservation for a local resource')
     owner = harness_remote.physical_owner(setup.remote, setup.who).id
     done = harness_remote.cli_command(setup.remote, 'fixture', cli_args(kind=kind, key=key))
@@ -278,7 +278,7 @@ def test_canonical_cli_claims_device_local_resources_without_a_source_area(setup
                                       cli_args(cmd='who', kind=kind, key=key)) == {'owner': None}
 
 
-def test_canonical_cli_heartbeat_preserves_requested_ttl(setup):
+def test_cli_heartbeat_preserves_requested_ttl(setup):
     calls = []
     def call(operation, token, **kwargs):
         calls.append((operation, kwargs))
@@ -289,7 +289,7 @@ def test_canonical_cli_heartbeat_preserves_requested_ttl(setup):
     assert result == {'renewed': 0, 'capped': []}
 
 
-def test_canonical_cli_release_exact_child_preserves_covering_parent(setup):
+def test_cli_release_exact_child_preserves_covering_parent(setup):
     store = harness_remote.claims()
     principal = harness_remote.physical_owner(setup.remote, setup.who)
     parent, child = str(setup.checkout), str(setup.checkout / 'source.py')
@@ -300,7 +300,7 @@ def test_canonical_cli_release_exact_child_preserves_covering_parent(setup):
     assert [(row['kind'], row['key']) for row in rows] == [('worktree', parent)]
 
 
-def test_canonical_cli_release_preserves_recreated_exact_claim(setup):
+def test_cli_release_preserves_recreated_exact_claim(setup):
     target = str(setup.checkout / 'source.py')
     harness_remote.reserve(setup.remote, setup.who, [('file', target)], {})
     def release(*args):

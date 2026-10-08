@@ -223,7 +223,7 @@ def test_native_heartbeat_does_not_renew_physical_or_foreign_area_claims(enrollm
     assert all(after[key] == expiry for key, expiry in before.items() if key[0] != "branch")
 
 
-def test_canonical_task_client_preserves_stable_request_and_json_stdin(monkeypatch):
+def test_task_client_preserves_stable_request_and_json_stdin(monkeypatch):
     calls = []
     remote = SimpleNamespace(call=lambda *args: calls.append(args) or {"id": "task:" + "a" * 32})
     args = SimpleNamespace(cmd="task-create", payload="-", request_id="e" * 32)
@@ -237,7 +237,7 @@ def test_canonical_task_client_preserves_stable_request_and_json_stdin(monkeypat
     assert document["payload"] == {"spec": {"title": "Typed task", "acceptance": ["Scoped outcome"]}}
 
 
-def test_canonical_task_client_claim_maps_only_existing_allocation_and_refuses_integration():
+def test_task_client_claim_maps_only_existing_allocation_and_refuses_integration():
     calls = []
     remote = SimpleNamespace(call=lambda *args: calls.append(args) or {})
     args = SimpleNamespace(cmd="task-claim", id="task:" + "a" * 32,

@@ -870,7 +870,7 @@ def test_host_discovery_failure_does_not_mint_or_remember_an_invite(base, ws, mo
     assert not ws.invites.path.exists()
 
 
-def test_canonical_dev_local_bootstrap_does_not_host_legacy_coordinator(base, ws, monkeypatch, tmp_path):
+def test_dev_local_bootstrap_does_not_host_legacy_coordinator(base, ws, monkeypatch, tmp_path):
     found = project.describe(str(tmp_path))
     guide.agent_connect(ws, 'claude', found)
     token = tokens.load(base, 'claude')

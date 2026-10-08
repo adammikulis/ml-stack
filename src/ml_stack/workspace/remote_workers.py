@@ -1,4 +1,4 @@
-"""Dev device worker launches and canonical Board message loops."""
+"""Dev device worker launches and Board message loops."""
 
 import hashlib
 import json
@@ -39,7 +39,7 @@ FIELDS = {'agent_token', 'cluster', 'cluster_id', 'name', 'model', 'effort', 'ma
           'ctx', 'max_output_tokens', 'task_caps'}
 OPTIONS = [option('json'), flag('--device', default='', help='discovered target device name'),
            flag('--project', default='.', help='local shared project checkout'),
-           flag('--agent', default='', help='your canonical Dev agent identity'),
+           flag('--agent', default='', help='your Dev agent identity'),
            flag('--name', default='local-qwen', help='worker name on the target device'),
            flag('--task', default='', help='post an initial task to the worker on the shared Board'),
            flag('--model', default=localmodel.AUTO, help='downloaded model ID or auto'),
@@ -108,7 +108,7 @@ def credential(remote, name, model, harness="ml-stack-agent"):
 def _remote(projects, project_id, cluster_key, cluster):
     project = projects.get(project_id)
     if not project.board_host:
-        raise Denied('the target project has no canonical Board authority')
+        raise Denied('the target project has no Board')
     remote = RemoteWorkspace(project.board_host, project_id, cluster_key=cluster_key, cluster=cluster)
     return project, remote
 
@@ -151,7 +151,7 @@ def start(projects, project_id, body, *, admission, cluster_key=None):
         scope = caller.get('project', {})
         if (caller.get('role') != AGENT or scope.get('key') != project_id
                 or scope.get('cluster_id') != cluster_id or scope.get('cluster') != cluster):
-            raise Denied('worker launch requires this canonical Dev project capability')
+            raise Denied('worker launch requires this Dev project capability')
         ws = Workspace()
         connection = la.folder(ws) / f'{name}.remote.json'
         with held(la.folder(ws) / 'remote-start.lock'):
@@ -160,7 +160,7 @@ def start(projects, project_id, body, *, admission, cluster_key=None):
             if agent and la.alive(agent):
                 if (prior.get('project_id') != project_id or prior.get('host') != remote.host
                         or prior.get('requested_by') != caller['id']):
-                    raise Denied('the running worker belongs to another canonical project or caller')
+                    raise Denied('the running worker belongs to another project or caller')
                 if body.get('model', localmodel.AUTO) not in (localmodel.AUTO, agent.model):
                     raise ValueError('stop the running worker before changing its model')
                 credential(remote, prior['identity'], localmodel.model_identity(agent.model_name))
@@ -255,7 +255,7 @@ class WorkerRemote:
 
 
 class BoardWorker(CanonicalWorkspace):
-    """Keep runtime files local while using the selected canonical agent capability."""
+    """Keep runtime files local while using the selected agent capability."""
 
     def __init__(self, local, record, name=""):
         cluster_key = Path(record['cluster_key']) if record['cluster_key'] else None
@@ -298,7 +298,7 @@ def run(args):
     root = Path(args.project).resolve()
     connection = selected(root) or automatic_connection.discover(root)
     if not connection:
-        raise Denied('no canonical project Board was discovered for this checkout')
+        raise Denied('no project Board was discovered for this checkout')
     cluster_key = Path(connection['cluster_key']) if connection.get('cluster_key') else None
     rows = memberships(cluster_key)
     members = rows[:1] if rows and rows[0].mode == 'dev' else []
@@ -313,7 +313,7 @@ def run(args):
         raise Denied('select one discovered remote device with --device NAME; found: ' + ', '.join(p.name for p in targets))
     authorities = [peer for peer in peers if peer.beacon and peer.beacon.cert == remote.device_cert]
     if len(authorities) != 1:
-        raise Denied('the canonical Board authority is not discoverable or is ambiguous')
+        raise Denied('the Board is not discoverable or is ambiguous')
     if args.agent:
         token = tokens.load(remote.base, args.agent)
         remote.renew(args.agent)

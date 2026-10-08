@@ -1,4 +1,4 @@
-"""Credits require canonical independent review evidence and stable coordinator scope."""
+"""Credits require independent review evidence and stable coordinator scope."""
 
 import hashlib
 import shutil
@@ -28,7 +28,7 @@ board = _board_fixture
 @pytest.fixture
 def ledger(tmp_path):
     held = WorkLedger(SealedGraph(tmp_path / 'credit.enc',
-                      keys=vault.PassphraseKeys(lambda _: 'isolated canonical credit key')))
+                      keys=vault.PassphraseKeys(lambda _: 'isolated credit key')))
     yield held
     held.sealed.close()
 
@@ -48,7 +48,7 @@ def reviewed(board, decision=None):
     return proposal, result
 
 
-def test_canonical_review_earns_once_from_independent_checks_not_worker_claims(board, ledger):
+def test_review_earns_once_from_independent_checks_not_worker_claims(board, ledger):
     proposal, review = reviewed(board, {**accepted(),
         'quality': [{'kind': 'validated', 'reason': 'Reviewer reproduced native replay.',
                      'checks': ['Replay passes'], 'artifacts': ['replay.json']}],
@@ -74,7 +74,7 @@ def test_canonical_review_earns_once_from_independent_checks_not_worker_claims(b
 
 
 @pytest.mark.redteam
-def test_worker_and_unrelated_verifier_cannot_award_canonical_completion(board, ledger):
+def test_worker_and_unrelated_verifier_cannot_award_completion(board, ledger):
     reviewed(board)
     for token in (board.child, board.agent('other'), ''):
         with pytest.raises(Denied):
@@ -137,7 +137,7 @@ def test_coordinator_id_survives_relocation_and_migration_preserves_award_identi
     assert coordination.workspace_id(third) != current
 
 
-def test_concurrent_canonical_award_and_outcome_record_once(board, ledger):
+def test_concurrent_award_and_outcome_record_once(board, ledger):
     from concurrent.futures import ThreadPoolExecutor
 
     reviewed(board)
@@ -156,7 +156,7 @@ def test_concurrent_canonical_award_and_outcome_record_once(board, ledger):
 
 
 @pytest.mark.parametrize('model, balance', [('Qwen3.8-27B', 20), ('gemma', 10)])
-def test_canonical_awards_follow_verified_model_family_not_device_or_worker_label(board, ledger, model, balance, monkeypatch):
+def test_awards_follow_verified_model_family_not_device_or_worker_label(board, ledger, model, balance, monkeypatch):
     from pathlib import Path
 
     from ml_stack.workspace import (
@@ -280,6 +280,6 @@ def test_model_switch_binds_live_family_without_moving_historical_awards(board, 
 def test_accepted_native_task_earns_nothing_before_integration_completes(board, ledger):
     proposed(board)
     board.board.review(board.parent, board.task['id'], accepted())
-    with pytest.raises(Denied, match='completed canonical task'):
+    with pytest.raises(Denied, match='completed task'):
         task_credit.verify_task(board.ws, board.parent, board.task['id'], ledger=ledger)
     assert ledger.standings(work_reputation.scope(board.ws)) == []

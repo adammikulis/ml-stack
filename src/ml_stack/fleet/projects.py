@@ -1,4 +1,4 @@
-"""Local project metadata, explicit publication and canonical workspace authority."""
+"""Local project metadata, explicit publication and workspace authority."""
 
 from __future__ import annotations
 
@@ -270,7 +270,7 @@ class ProjectRegistry:
         return bool(board_host) and board_host == self.host
 
     def claim_authority(self, identifier: str) -> Project:
-        """Select this device as the canonical workspace authority."""
+        """Select this device as the workspace authority."""
         with self.lock:
             project = self.get(identifier)
             if not self.host:

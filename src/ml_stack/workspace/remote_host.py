@@ -115,7 +115,7 @@ class WorkspaceHost:
         return self._person_request(request, project_id, dispatch)
 
     def person_tasks(self, request, project_id: str, *, project: dict) -> bool:
-        """Dispatch canonical project task requests from authenticated people."""
+        """Dispatch project task requests from authenticated people."""
         def dispatch(ws):
             ws.auth(ws._actor)
             return task_routes.route(request, workspace=ws, actor=ws._actor,
@@ -299,7 +299,7 @@ class WorkspaceHost:
             result = _reputation(ws, token, args, kwargs)
         elif operation == "task.command":
             if len(args) != 1 or kwargs:
-                raise ValueError("canonical task operation takes one typed command")
+                raise ValueError("task operation takes one typed command")
             result = remote_tasks.command(ws, token, self.projects.get(project_id), args[0])
         elif operation in {"native.reserve", "native.release", "native.heartbeat"}:
             ws._may(who, "claim")

@@ -1,4 +1,4 @@
-"""Dev worker launches retain local runtime state and one sealed canonical Board."""
+"""Dev worker launches retain local runtime state and one sealed Board."""
 
 import base64
 import hashlib
@@ -73,7 +73,7 @@ def devices(tmp_path, monkeypatch):
             return SimpleNamespace(**{**vars(project), 'root': str(roots[self.machine]), 'id': ident})
         def workspace_base(self, ident):
             self.get(ident)
-            return tmp_path / self.machine / 'canonical' / ident
+            return tmp_path / self.machine / 'board' / ident
     try:
         for machine in ('device-a', 'device-b'):
             root = tmp_path / machine / 'checkout'
@@ -125,7 +125,7 @@ def devices(tmp_path, monkeypatch):
             http.pin(urlsplit(peer.base_url).netloc, None)
 
 
-def test_tls_launch_and_local_loop_exchange_on_the_canonical_board(devices):
+def test_tls_launch_and_local_loop_exchange_on_the_board(devices):
     state = devices
     result = state.target._request('worker', state.body)
     assert result['project_id'] == PROJECT
@@ -146,14 +146,14 @@ def test_tls_launch_and_local_loop_exchange_on_the_canonical_board(devices):
     def execute(agent, row, why, stopped):
         executed.append(row)
         cancel.set()
-        return 'answer', 'Worker replied from the canonical project Board', 1
+        return 'answer', 'Worker replied from the project Board', 1
     settings = localloop.Settings(cancel=cancel, execute=execute,
                                  serve=lambda agent: localloop.Held(None, {'id': 'test-lease'}))
     assert localloop.run(worker, 'local-qwen', settings) == 0
     assert len(executed) == 1
     replies = state.caller.call('inbox', state.token, ack=False, raw=True)
     assert any(row['from'] == result['identity'] and row['type'] == 'answer'
-               and 'canonical project Board' in row['raw'] for row in replies)
+               and 'project Board' in row['raw'] for row in replies)
     assert state.local.inbox(tokens.load(state.local.base, agent.identity), ack=False) == []
 
 
@@ -297,7 +297,7 @@ def test_malformed_worker_alias_cannot_probe_paths_outside_session_storage(devic
         remote_workers.credential(devices.caller, 'malformed', 'Qwen3.8-test', 'device-a')
 
 
-def test_generic_canonical_adapter_does_not_supply_a_worker_token_hook(devices):
+def test_generic_adapter_does_not_supply_a_worker_token_hook(devices):
     devices.target._request('worker', devices.body)
     agent = localagent.load(devices.local, 'local-qwen')
     adapter = remote_workers.CanonicalWorkspace(devices.caller, devices.token)

@@ -136,7 +136,7 @@ def reserve(name, args, cwd, actor, roots):
     canonical = harness_remote.context(actor, cwd, roots)
     if canonical:
         harness_remote.inspect_shell(name, args)
-        harness_remote.reserve(*canonical, required, {'note': 'canonical native mutation', 'commit': commit,
+        harness_remote.reserve(*canonical, required, {'note': 'native mutation', 'commit': commit,
                                'owner_pid': os.getppid(), 'owner_started': started_at(os.getppid()),
                                'interpreter': str(Path(sys.executable).resolve()),
                                'environment': str(Path(sys.prefix).resolve())},

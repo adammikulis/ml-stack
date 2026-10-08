@@ -1,4 +1,4 @@
-"""Canonical model-family accounts linked to actual task model resources."""
+"""Model-family accounts linked to actual task model resources."""
 
 from ml_stack.client.families import GENERIC, for_model_id
 from ml_stack.graph.store import GraphStore

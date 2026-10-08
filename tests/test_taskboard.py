@@ -1,4 +1,4 @@
-"""Canonical graph tasks enforce native allocations, ownership and independent review."""
+"""Graph tasks enforce native allocations, ownership and independent review."""
 
 import concurrent.futures
 from pathlib import Path

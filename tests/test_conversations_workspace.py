@@ -56,7 +56,7 @@ def test_shared_sidebar_routes_channels_dms_threads_and_saved_model_chats(chat_b
     page.screenshot(path='/private/tmp/poolside-unified-conversations.png', full_page=True)
 
 
-def test_canonical_project_selection_never_falls_back_to_local_board(chat_browser):
+def test_project_selection_never_falls_back_to_local_board(chat_browser):
     from playwright.sync_api import expect
 
     served, page = chat_browser
@@ -168,7 +168,7 @@ def test_conversation_surfaces_consume_resolved_theme_tokens(chat_browser, monke
     page.screenshot(path=f'/private/tmp/poolside-conversations-theme-{theme}.png', full_page=True)
 
 
-def test_unshared_canonical_workspace_is_selected_and_team_messages_render(chat_browser, monkeypatch, tmp_path):
+def test_unshared_workspace_is_selected_and_team_messages_render(chat_browser, monkeypatch, tmp_path):
     from playwright.sync_api import expect
 
     from ml_stack.fleet import project_client, project_source
@@ -179,15 +179,15 @@ def test_unshared_canonical_workspace_is_selected_and_team_messages_render(chat_
     checkout = tmp_path / 'experiment-workspace'
     checkout.mkdir()
     git.run(['init'], cwd=checkout)
-    git.run(['remote', 'add', 'origin', 'https://code.example.invalid/team/canonical-demo.git'], cwd=checkout)
+    git.run(['remote', 'add', 'origin', 'https://code.example.invalid/team/team-demo.git'], cwd=checkout)
     registry = ProjectRegistry(tmp_path / 'registry', 'fixture-device', (checkout,), 'http://127.0.0.1:8770')
     project = identity(checkout)
     host = WorkspaceHost(registry)
     host.prepare(project)
     ws = host.workspace(project)
     owner = tokens.read_file(tokens.directory(ws.base) / tokens.OWNER_FILE)
-    worker = ws.mint(owner, 'canonical-demo-helper')
-    ws.send(worker, '#general', 'note', 'The canonical team experiment is ready.')
+    worker = ws.mint(owner, 'team-demo-helper')
+    ws.send(worker, '#general', 'note', 'The team experiment is ready.')
     monkeypatch.setattr(project_client, 'peers', lambda ui: [])
     monkeypatch.setattr(project_source, 'build', lambda *args: pytest.fail('Board chooser published source'))
     served, page = chat_browser
@@ -207,7 +207,7 @@ def test_unshared_canonical_workspace_is_selected_and_team_messages_render(chat_
     expect(board.get_by_role('button', name='Join workspace as person')).to_be_visible()
     assert all('person_project' not in row for row in ws.registry._load().values())
     board.get_by_role('button', name='Join workspace as person').click()
-    expect(board.locator('.msg pre')).to_contain_text('The canonical team experiment is ready.')
+    expect(board.locator('.msg pre')).to_contain_text('The team experiment is ready.')
     assert registry.get(project).shared is False
     assert registry.list() == []
     assert not (tmp_path / 'registry' / 'project-bundles').exists()
