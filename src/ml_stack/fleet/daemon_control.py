@@ -90,7 +90,7 @@ def request_replacement(root: Path, port: int, running: dict, expected: str, *, 
             raise ControlError('Daemon replacement cannot leave its owned loopback endpoint.')
         return url
 
-    if restart not in {'idle', 'preserve', 'force'}:
+    if restart not in {'idle', 'preserve'}:
         raise ControlError('Unknown daemon restart mode.')
     body = json.dumps({'version': 1, 'instance': instance, 'expected': expected, 'restart': restart}).encode()
     with open_stream(endpoint, method='POST', data=body, token=capability, timeout=10,
@@ -121,7 +121,7 @@ def _restart_mode(request):
     if 'version' in request and (type(request['version']) is not int or request['version'] != 1):
         raise ControlError('Unknown daemon replacement version.')
     restart = request.get('restart', 'idle')
-    if type(restart) is not str or restart not in {'idle', 'preserve', 'force'}:
+    if type(restart) is not str or restart not in {'idle', 'preserve'}:
         raise ControlError('Unknown daemon restart mode.')
     if restart != 'idle' and request.get('version') != 1:
         raise ControlError('Job-preserving restart requires version 1.')
