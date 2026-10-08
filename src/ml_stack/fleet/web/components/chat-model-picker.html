@@ -72,13 +72,15 @@ chat-view #chat-activity-output { max-height:240px; overflow:auto; white-space:p
         return { value: option.value, name: installed?.name || option.textContent,
           family: installed?.family || "Other models", status: live ? "Loaded" : installed ? "Installed" :
           option.disabled ? "Unavailable" : chat.coding.active ? "Installed" : "Loaded",
-          quant: installed?.quantization || "", disabled: option.disabled, installed };
-      });
+          quant: installed?.quantization || "", disabled: option.disabled, installed,
+          capabilities: live?.capabilities || installed?.capabilities };
+      }).filter((one) => one.capabilities?.chat !== false);
       if (!chat.coding.active) {
-        for (const installed of this.library.filter((one) => one.servable)) {
+        for (const installed of this.library.filter((one) => one.servable && one.capabilities?.chat !== false)) {
           if (rows.some((one) => one.installed?.path === installed.path || one.name === installed.name)) continue;
           rows.push({ value: installed.path, name: installed.name, family: installed.family || "Other models",
-            status: "Installed", quant: installed.quantization || "", installed, needsLoad: true });
+            status: "Installed", quant: installed.quantization || "", installed, needsLoad: true,
+            capabilities: installed.capabilities });
         }
       }
       return rows;
@@ -101,7 +103,8 @@ chat-view #chat-activity-output { max-height:240px; overflow:auto; white-space:p
           group.append(M.el("button", { type: "button", class: "chat-model-choice",
             ...(row.disabled ? { disabled: "" } : {}),
             "aria-pressed": String(chat.picker.value === row.value), onclick: () => this.choose(row) },
-          M.el("span", {}, row.name), M.el("small", {}, [row.status, row.quant].filter(Boolean).join(" · ")),
+          M.el("span", {}, row.name), M.el("small", {}, [row.status, row.quant,
+            row.capabilities?.chat === null ? "Chat capability unverified" : ""].filter(Boolean).join(" · ")),
           row.needsLoad ? M.el("small", {class:"chat-model-action"}, "Configure in Models →") : null));
         }
         this.list.append(group);

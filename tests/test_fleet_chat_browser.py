@@ -176,6 +176,32 @@ def test_model_picker_groups_and_searches_loaded_and_installed_models(chat_brows
     assert page.locator("chat-view textarea:visible").count() == 1
 
 
+def test_picker_excludes_known_non_chat_and_keeps_unknown_models(chat_browser):
+    from playwright.sync_api import expect
+
+    served, page = chat_browser
+    page.route('**/ui/models', lambda route: route.fulfill(json={'ok': True, 'library': [
+        {'path': '/models/embedding.gguf', 'name': 'Embedding model', 'family': 'Encoder',
+         'servable': True, 'capabilities': {'chat': False, 'embedding': True}},
+        {'path': '/models/speech', 'name': 'Speech model', 'family': 'Audio',
+         'servable': True, 'capabilities': {'chat': False, 'speech': True}},
+        {'path': '/models/future.gguf', 'name': 'Future decoder', 'family': 'Future',
+         'servable': True, 'capabilities': {'chat': None}},
+        {'path': '/models/chat.gguf', 'name': 'Chat decoder', 'family': 'Qwen',
+         'servable': True, 'capabilities': {'chat': True}}]}))
+    _open(served, page)
+    page.locator('chat-view #chat-model-button').click()
+    choices = page.locator('chat-view #chat-model-list')
+    expect(choices).to_contain_text('Future decoder')
+    expect(choices).to_contain_text('Chat capability unverified')
+    expect(choices).to_contain_text('Chat decoder')
+    expect(choices).not_to_contain_text('Embedding model')
+    expect(choices).not_to_contain_text('Speech model')
+    assert len(page.locator('chat-view').evaluate('node => node.modelPicker.library')) == 4
+    choices.get_by_role('button', name='Future decoder Installed · Chat capability unverified Configure in Models →', exact=True).click()
+    expect(page.locator('models-view #models')).to_be_visible()
+
+
 def test_installed_model_picker_remains_visible_with_no_loaded_server(chat_browser):
     from playwright.sync_api import expect
 
