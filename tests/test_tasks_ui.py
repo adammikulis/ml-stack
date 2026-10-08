@@ -133,10 +133,17 @@ def test_failed_previous_project_does_not_replace_current_project_status(tmp_pat
             viewer.get_by_label('Task project workspace').select_option(second)
             page.wait_for_timeout(50)
             assert len(pending) == 1
+            page.evaluate("""() => {
+                window.taskStatusHistory = [];
+                const note = document.querySelector('tasks-view .status');
+                new MutationObserver(() => window.taskStatusHistory.push(note.textContent))
+                    .observe(note, {childList:true, subtree:true, characterData:true});
+            }""")
             pending[0].fulfill(status=403, json={'error': 'Previous project denied'})
             expect(viewer.locator('.status')).to_contain_text('Updated ')
             expect(viewer.locator('.status')).not_to_contain_text('Previous project denied')
             expect(viewer.locator('.task-remaining-number')).to_have_text('0')
             expect(viewer.locator('.task-layout')).to_be_visible()
+            assert all('Previous project denied' not in text for text in page.evaluate('taskStatusHistory'))
     finally:
         server.close()
