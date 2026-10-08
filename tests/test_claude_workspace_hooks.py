@@ -152,7 +152,18 @@ def test_repository_claude_settings_wire_the_maintained_event_hooks():
 
 
 def test_actual_hooks_record_claimed_metadata_and_authenticated_subagent_brief(tmp_path, monkeypatch):
-    monkeypatch.setenv('PATH', str(Path(sys.executable).parent), prepend=os.pathsep)
+    # The hooks must run this tree's workspace CLI, not whatever ml-stack-workspace an install put on PATH.
+    shim_directory = tmp_path / 'shim'
+    shim_directory.mkdir()
+    shim = shim_directory / 'ml-stack-workspace'
+    shim.write_text(f'#!{sys.executable}\n'
+                    'import sys\n'
+                    "sys.argv[0] = 'ml-stack-workspace'\n"
+                    'from ml_stack.workspace.cli import main\n'
+                    'sys.exit(main())\n')
+    shim.chmod(0o700)
+    git_directory = str(Path(shutil.which('git')).parent)
+    monkeypatch.setenv('PATH', os.pathsep.join([str(shim_directory), str(Path(sys.executable).parent), git_directory]))
     monkeypatch.delenv('CODEX_THREAD_ID', raising=False)
     monkeypatch.delenv('CODEX_SESSION_ID', raising=False)
     monkeypatch.delenv('ML_STACK_AGENT', raising=False)
