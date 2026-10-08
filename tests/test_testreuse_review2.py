@@ -310,3 +310,13 @@ def test_library_code_that_uses_sqlite_does_not_bar_a_file_that_does_not(project
     (project / HELPER).write_text("import sqlite3\n\nVALUE = 1\n\n\ndef db():\n    return sqlite3.connect(':memory:')\n")
     attempt(project, store)
     assert hows(attempt(project, store)[0]) == ["reused"]
+
+
+def test_a_module_an_earlier_file_already_imported_is_still_in_a_later_files_manifest(project, tmp_path):
+    store = storage.Store(tmp_path / "store")
+    for name in ("a", "b"):
+        (project / f"tests/test_{name}.py").write_text(
+            "from ml_stack.helper import VALUE\n\n\ndef test_x():\n    assert VALUE == 1\n")
+    attempt(project, store, "tests/test_a.py", "tests/test_b.py")
+    (project / HELPER).write_text("VALUE = 1  # edited\n")
+    assert hows(attempt(project, store, "tests/test_a.py", "tests/test_b.py")[0]) == ["ran", "ran"]
