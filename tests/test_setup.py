@@ -639,8 +639,9 @@ def test_a_checkout_with_no_installed_metadata_reads_its_pyproject(monkeypatch, 
     assert setup._scripts() == ["ml-stack-newthing"]
 
 
-def test_a_fix_naming_a_hostile_path_runs_as_one_argument_and_no_shell(tmp_path):
+def test_a_fix_naming_a_hostile_path_runs_as_one_argument_and_no_shell(tmp_path, monkeypatch):
     """A path with shell metacharacters reaches the command as data: nothing it contains runs."""
+    monkeypatch.chdir(tmp_path)
     marker = tmp_path / "executed"
     hostile = tmp_path / "a; touch executed; $(touch executed) `touch executed` & b"
     hostile.mkdir()
