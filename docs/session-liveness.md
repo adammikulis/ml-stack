@@ -389,17 +389,18 @@ changed only through a normal commit; there is no runtime write path an agent ca
  "families": [
   {"family": "<vendor family name>",
    "tiers": [
-     {"rank": 1, "lowest": true,  "patterns": ["<exact-id glob>", "..."]},
-     {"rank": 2, "lowest": false, "patterns": ["..."]},
-     {"rank": 3, "lowest": false, "patterns": ["..."]}]}]}
+     {"lowest": true,  "id_globs": ["<exact-id glob>", "..."]},
+     {"lowest": false, "id_globs": ["..."]},
+     {"lowest": false, "id_globs": ["..."]}]}]}
 ```
 
-Rules: a model id matches a tier when it equals or globs (`fnmatch`, no regex) one pattern after
-`modelid.clean_model` normalisation; the first family and tier that match win; a pattern may not
-appear in two tiers (loader refuses the file). `lowest` is declared per family on exactly one tier.
-Higher `rank` is higher tier. No vendor name or model id is written in code; tests load a fixture
-table with invented family names. The loader is `workspace/model_tiers.py` (`tier_of(model_id) ->
-Tier | None`, `Tier(family, rank, lowest)`), consulted by `agent_display.metadata` and by promotion.
+Rules: tiers are listed low to high; a model id matches a tier when it equals or globs (`fnmatch`,
+case-sensitive, no regex) one `id_globs` entry; the first family and tier that match win; a glob may not
+appear in two tiers, and a literal id may not match another tier's glob (the loader refuses the file).
+`lowest` is declared per family on exactly one tier, the first. No vendor name or model id is written
+in code; tests load a substitute table with invented family names. The loader is `workspace/model_tiers.py`
+(`tier_of(model_id, state) -> Tier(family, index, lowest, coordinator_eligible, reason)`, an unknown
+result has index -1), consulted by `agent_display.metadata` and by promotion.
 
 ### 5.2 Unknown and unverified models
 

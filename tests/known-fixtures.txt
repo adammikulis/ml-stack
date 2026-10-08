@@ -273,3 +273,6 @@ Downstream Trade Policy
 Moonbase Zeta
 git config
 c. Agent
+node kind
+Slice 2
+Slice 4

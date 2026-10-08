@@ -192,7 +192,9 @@ def _text(value: Any) -> str:
     if isinstance(value, list) and value and all(
             isinstance(v, dict) and {"id", "role", "model_state", "last_acted"} <= v.keys() for v in value):
         return _block([f"{v.get('display_name', v['id'])}  {v['role']}  {describe(v['model'], v['model_state'])}"
-                       f"{'  ' + v['harness'] if v['harness'] else ''}" for v in value], "agents")
+                       f"{'  ' + v['harness'] if v['harness'] else ''}"
+                       f"{'  not a coordinator: ' + v['coordinator_reason'] if v.get('coordinator_reason') else ''}"
+                       for v in value], "agents")
     if isinstance(value, dict) and {"kind", "key", "owner", "expires_in_s"} <= value.keys():
         soon = ", expiring soon" if value.get("expiring_soon") else ""
         return f"{value['kind']} {value['key']}  {project_session.owner(value['owner'])}  expires in {value['expires_in_s']:.0f} s{soon}"

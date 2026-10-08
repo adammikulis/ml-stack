@@ -1,5 +1,9 @@
 """Readable agent presentation, independent of capability and routing identity."""
 from ml_stack.workspace.identity import AGENT, CAPS
+from ml_stack.workspace.model_tiers import LOWEST, tier_of
+
+SPAWN_NOTICE = ("no main session is eligible to coordinate and only lowest-tier sessions are present: "
+                "spawn a subagent at a suitable level (Sonnet 5.5 is acceptable) to coordinate")
 
 
 def family(model: str) -> str:
@@ -19,7 +23,7 @@ def metadata(registry, name, label=''):
     info = registry.info(name)
     if info['role'] != AGENT:
         return {'display_name': name, 'session_kind': 'person' if info['role'] == 'human' else 'unknown',
-                'coordinator_eligible': False}
+                'coordinator_eligible': False, 'coordinator_reason': 'not an agent session'}
     if not info['parent'] and not info.get('presentation', {}).get('ordinal'):
         registry.ensure_presentation(name)
         info = registry.info(name)
@@ -37,10 +41,25 @@ def metadata(registry, name, label=''):
         suffix = f"session {ordinal}" if ordinal else 'unregistered session'
         display = f"{model_family} · {system or device.get('hostname') or 'device unknown'} · {suffix}"
         kind = presentation.get('kind', 'unknown')
-    eligible = bool(not parent and kind == 'main' and registry.role_of(name) == AGENT
-                    and set(CAPS) <= set(info['can']))
+    if parent or kind != 'main':
+        reason = 'not a main session'
+    elif registry.role_of(name) != AGENT or not set(CAPS) <= set(info['can']):
+        reason = 'lacks the agent capabilities'
+    else:
+        reason = tier_of(*registry.model_of(name)).reason
+    eligible = not reason
     if label:
         display = f"{display} ({label})"
         kind = 'helper' if label in info.get('label_models', {}) else kind
-        eligible = False
-    return {'display_name': display, 'session_kind': kind, 'coordinator_eligible': eligible}
+        eligible, reason = False, 'a helper label is not a main session'
+    return {'display_name': display, 'session_kind': kind, 'coordinator_eligible': eligible,
+            'coordinator_reason': reason}
+
+
+def vacancy_notice(rows) -> str:
+    """What to do when main sessions exist and none may coordinate because all are lowest tier; empty otherwise."""
+    mains = [row for row in rows if row['session_kind'] == 'main' and not row['parent']]
+    if mains and not any(row['coordinator_eligible'] for row in mains) \
+            and any(row['coordinator_reason'] == LOWEST for row in mains):
+        return SPAWN_NOTICE
+    return ''

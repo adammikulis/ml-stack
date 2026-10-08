@@ -149,7 +149,8 @@ def _answer(api: Any, token: str, route: str, query: Mapping[str, list[str]]) ->
         return {"owner_id": me.id, "agents": [
             {"id": row["id"], "role": row["role"], "device": row["device"],
              "display_name": row["display_name"], "session_kind": row["session_kind"],
-             "parent": row["parent"], "coordinator_eligible": row["coordinator_eligible"]}
+             "parent": row["parent"], "coordinator_eligible": row["coordinator_eligible"],
+             "coordinator_reason": row["coordinator_reason"]}
             for row in api.ws.registered()[:200] if row["id"] != me.id]}
     if route == "threads":
         found = _board(query)

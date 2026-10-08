@@ -45,8 +45,9 @@ before tools run, and `claude-session-start`, `claude-subagent-start` and `claud
 around sessions and subagents. `MLSTACK_GUARD=off` turns both guards off.
 
 - The Bash guard refuses `git add -A`, `.` and `-u`, `git commit -a`, `llama-server` by hand, `ml-stack-serve up` flags that skip the lease,
-  a push to `main` without `ML_STACK_PUSH_MAIN=yes`, and a force push, a remote ref deletion,
-  `--all` or `--tags` pushes, past any `NAME=value` written in front of the command.
+  a push to `main` (a promotion is a pull request from a `promote/<date>` snapshot, merged only
+  under the owner's live `release-main` authorization; `ML_STACK_PUSH_MAIN=yes` opens nothing), and a force push,
+  a remote ref deletion, `--all` or `--tags` pushes, past any `NAME=value` written in front of the command.
 - The edit guard refuses, at the moment it is written, a function whose body already exists
   elsewhere, a raw HTTP call, a docstring over twelve lines, a signature over eight parameters,
   and a write that takes a file over its line limit or makes an already-over file longer. It

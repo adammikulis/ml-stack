@@ -5,6 +5,8 @@ from workspace_kit import Kit, clean_env
 from ml_stack.workspace.agent_display import metadata
 from ml_stack.workspace.identity import Denied
 
+PERSON = {'terminal': (True, True), 'env': {}}
+
 pytest_plugins = ["test_workspace_remote"]
 
 
@@ -23,6 +25,7 @@ def test_unknown_sessions_are_distinct_and_ordinals_survive_revoke_and_device_la
     assert not one['coordinator_eligible']
     registry.register_session(first)
     registry.register_session(second)
+    kit.ws.set_model('codex-second', 'claude-sonnet-5-5', **PERSON)
     saved = registry.info('codex-second')['presentation'].copy()
     kit.ws.revoke(kit.owner, 'codex-first')
     kit.agent('codex-third')
@@ -67,6 +70,7 @@ def test_presented_agents_children_and_internal_senders_are_read_only(kit, monke
 
     token = kit.agent('main-worker')
     kit.ws.register_session(token)
+    kit.ws.set_model('main-worker', 'claude-sonnet-5-5', **PERSON)
     kit.ws.registry.delegate(kit.ws.auth(token), 'helper', 600, ('read',), 10)
 
     def refuse_presentation(name):
@@ -92,7 +96,8 @@ def test_canonical_registration_preserves_model_and_rights_and_refuses_child(hos
     assert code == 200
     shown = shown['result']
     assert shown['display_name'] == 'Model unknown · Mac · session 1'
-    assert shown['coordinator_eligible']
+    assert not shown['coordinator_eligible']
+    assert shown['coordinator_reason'] == 'model not in the tier table'
     after = call(host, first, 'whoami')[1]['result']
     assert (after['model'], after['can'], after['parent']) == (before['model'], before['can'], before['parent'])
     assert call(host, first, 'register_session')[1]['result'] == shown
