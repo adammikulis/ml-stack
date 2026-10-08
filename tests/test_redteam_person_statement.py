@@ -5,11 +5,24 @@ from __future__ import annotations
 import functools
 
 import pytest
-from person_support import (PROPOSAL_TEXT, SESSION, assistant, consume, human, notification, peer, prompt_event,
-                            repository, rows, run_hook, say, transcript)
+from person_support import (
+    PROPOSAL_TEXT,
+    SESSION,
+    assistant,
+    consume,
+    human,
+    notification,
+    peer,
+    prompt_event,
+    repository,
+    rows,
+    run_hook,
+    say,
+    transcript,
+)
 
 PROPOSAL = assistant(PROPOSAL_TEXT)
-LATE = functools.partial(human, stamp="2026-10-08T19:20:00.000Z")
+LATE = functools.partial(human, timestamp="2026-10-08T19:20:00.000Z")
 TWO = assistant("I'll push the dev branch and then restart the daemon.")
 OTHER_QUESTION = assistant("Which test should I run first?", "msg_9")
 

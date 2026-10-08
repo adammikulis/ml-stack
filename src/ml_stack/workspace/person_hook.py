@@ -6,10 +6,17 @@ import hashlib
 import os
 import re
 import time
+from pathlib import Path
 from typing import Any
 
 from ml_stack.sentinel.events import EventLog
-from ml_stack.workspace import person_intent, person_record, person_store, person_targets, person_transcript
+from ml_stack.workspace import (
+    person_intent,
+    person_record,
+    person_store,
+    person_targets,
+    person_transcript,
+)
 
 __all__ = ["STALE_S", "echo_for", "on_answer", "on_boundary", "on_event", "on_prompt", "valid_session"]
 
@@ -60,19 +67,19 @@ def on_prompt(event: dict[str, Any], log: EventLog | None = None) -> dict[str, A
     if not turn.human:
         return None
     log = log or person_store.open_log()
-    cwd = str(event.get("cwd") or os.getcwd())
+    cwd = str(event.get("cwd") or str(Path.cwd()))
     project = person_targets.project_of(cwd)
     session = event["session_id"]
-    statement = person_record.record_statement(log, session_id=session, project=project, cwd=cwd,
-                                               prompt=prompt, prompt_id=prompt_id, claude_version=turn.version)
+    statement = person_record.record_statement(
+        log, person_record.Heard(session, project, cwd, prompt, prompt_id, turn.version))
     dev = person_targets.development_branch(cwd)
     proposal = person_intent.proposal_kinds(turn.proposal, dev) if not _stale(turn) else ()
     reading = person_intent.interpret(prompt, proposal, dev)
-    return _act(log, reading, statement, turn, cwd, dev)
+    return _act(log, reading, statement, turn, cwd)
 
 
 def _act(log: EventLog, reading: person_intent.Reading, statement: dict[str, Any],
-         turn: person_transcript.Turn, cwd: str, dev: str) -> dict[str, Any] | None:
+         turn: person_transcript.Turn, cwd: str) -> dict[str, Any] | None:
     session = statement["session_id"]
     if reading.action == "revoke":
         ended = person_record.revoke_session(log, session, reading.reason)
@@ -87,9 +94,9 @@ def _act(log: EventLog, reading: person_intent.Reading, statement: dict[str, Any
     if reading.action != "authorize" or not target:
         return None
     ident = turn.proposal_id if reading.how == "reply" else statement["prompt_sha256"]
-    made = person_record.record_authorization(log, statement=statement, kind=reading.kind, target=target,
-                                              how=reading.how,
-                                              proposal_sha256=_proposal_hash(reading.kind, target, ident))
+    made = person_record.record_authorization(
+        log, statement, person_record.Grant(reading.kind, target, reading.how,
+                                            _proposal_hash(reading.kind, target, ident)))
     return _context("UserPromptSubmit", f"authorization {made['id']} recorded for {reading.kind} on {target}, "
                     f"once, until {time.strftime('%H:%M', time.localtime(made['expires']))} (attested by hook)")
 
@@ -103,15 +110,15 @@ def on_answer(event: dict[str, Any], log: EventLog | None = None) -> dict[str, A
     if not isinstance(answers, dict) or not answers:
         return None
     log = log or person_store.open_log()
-    cwd = str(event.get("cwd") or os.getcwd())
+    cwd = str(event.get("cwd") or str(Path.cwd()))
     project = person_targets.project_of(cwd)
     annotated = bool((event.get("tool_response") or {}).get("annotations"))
     made = None
     for question, label in answers.items():
         if not (isinstance(question, str) and isinstance(label, str)):
             continue
-        row = person_record.record_answer(log, session_id=event["session_id"], project=project,
-                                         question=question, label=label, annotated=annotated)
+        row = person_record.record_answer(
+            log, person_record.Heard(event["session_id"], project, cwd, question), label, annotated)
         made = made or _from_echo(log, row, question, label, cwd)
     return _context("PostToolUse", made) if made else None
 
@@ -125,8 +132,8 @@ def _from_echo(log: EventLog, row: dict[str, Any], question: str, label: str, cw
         return ""
     if int(found["minutes"]) != person_store.DEFAULT_MINUTES or int(found["uses"]) != 1:
         return ""
-    made = person_record.record_authorization(log, statement=row, kind=found["kind"], target=target, how="asked",
-                                              proposal_sha256=row["question_sha256"])
+    made = person_record.record_authorization(
+        log, row, person_record.Grant(found["kind"], target, "asked", row["question_sha256"]))
     return f"authorization {made['id']} recorded for {made['kind']} on {target}, once (attested by hook)"
 
 

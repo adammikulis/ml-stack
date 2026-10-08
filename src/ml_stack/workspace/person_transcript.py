@@ -16,6 +16,7 @@ PINNED_VERSIONS = ("2.1.293", "2.1.294")
 HUMAN_SOURCES = ("typed", "queued")
 MAX_BYTES = 256 * 1024 * 1024
 LOOKBACK = 400
+RETRY_S = 0.1
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,8 +136,7 @@ def read_turn(path: Path, prompt_id: str, session_id: str, prompt: str) -> Turn:
                 compacted)
 
 
-def wait_for_turn(path: str, prompt_id: str, session_id: str, prompt: str, *, seconds: float = 2.0,
-                  interval: float = 0.1) -> Turn:
+def wait_for_turn(path: str, prompt_id: str, session_id: str, prompt: str, *, seconds: float = 2.0) -> Turn:
     """`read_turn`, retried for up to ``seconds`` because the transcript is written asynchronously."""
     deadline = time.monotonic() + seconds
     where = Path(path)
@@ -148,4 +148,4 @@ def wait_for_turn(path: str, prompt_id: str, session_id: str, prompt: str, *, se
             return turn
         if time.monotonic() >= deadline:
             return turn
-        time.sleep(interval)
+        time.sleep(RETRY_S)

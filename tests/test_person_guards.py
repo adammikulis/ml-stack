@@ -10,8 +10,19 @@ import subprocess
 import sys
 
 import pytest
-from person_support import (DEV, HOOKS, PROPOSAL_TEXT, ROOT, SESSION, assistant, environment, git, repository, rows,
-                            say)
+from person_support import (
+    DEV,
+    HOOKS,
+    PROPOSAL_TEXT,
+    ROOT,
+    SESSION,
+    assistant,
+    environment,
+    git,
+    repository,
+    rows,
+    say,
+)
 
 from ml_stack.workspace import person_store
 from ml_stack.workspace.graphlog import GraphLog

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import secrets
 import time
+from dataclasses import dataclass
 from typing import Any
 
 from ml_stack.sentinel.events import EventLog
@@ -12,7 +13,7 @@ from ml_stack.sentinel.redaction import redact
 from ml_stack.workspace import person_store
 from ml_stack.workspace.person_store import ATTESTATION, VERSION
 
-__all__ = ["EXCERPT_CHARS", "SOURCE", "expire_session", "mark_used", "prompt_hash", "record_answer",
+__all__ = ["EXCERPT_CHARS", "SOURCE", "Grant", "Heard", "expire_session", "mark_used", "prompt_hash", "record_answer",
            "record_authorization", "record_statement", "revoke_session"]
 
 SOURCE = "harness-hook:UserPromptSubmit"
@@ -33,33 +34,56 @@ def _append(log: EventLog, row: dict[str, Any]) -> dict[str, Any]:
                               "ts": round(time.time(), 3), **row})
 
 
-def record_statement(log: EventLog, *, session_id: str, project: str, cwd: str, prompt: str,
-                     prompt_id: str, claude_version: str) -> dict[str, Any]:
+@dataclass(frozen=True, slots=True)
+class Heard:
+    """What the hook received: the session, the project, the working directory, the text typed or asked,
+    its id and the Claude Code version that wrote it."""
+
+    session_id: str
+    project: str
+    cwd: str
+    text: str
+    ident: str = ""
+    version: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class Grant:
+    """What an authorization allows: a kind on a derived target, how it was spoken, its proposal hash,
+    its life in minutes (at most four hours) and its uses."""
+
+    kind: str
+    target: str
+    how: str
+    proposal_sha256: str = ""
+    minutes: int = person_store.DEFAULT_MINUTES
+    uses: int = 1
+
+
+def record_statement(log: EventLog, heard: Heard) -> dict[str, Any]:
     """Append what the person typed: its hash and a redacted excerpt, never the prompt itself."""
-    return _append(log, {"type": "statement", "session_id": session_id, "project": project, "cwd": cwd,
-                         "prompt_sha256": prompt_hash(prompt), "excerpt": _excerpt(prompt),
-                         "prompt_id": prompt_id, "claude_version": claude_version, "source": SOURCE})
+    return _append(log, {"type": "statement", "session_id": heard.session_id, "project": heard.project,
+                         "cwd": heard.cwd, "prompt_sha256": prompt_hash(heard.text),
+                         "excerpt": _excerpt(heard.text), "prompt_id": heard.ident,
+                         "claude_version": heard.version, "source": SOURCE})
 
 
-def record_answer(log: EventLog, *, session_id: str, project: str, question: str, label: str,
-                  annotated: bool) -> dict[str, Any]:
+def record_answer(log: EventLog, heard: Heard, label: str, annotated: bool) -> dict[str, Any]:
     """Append the person's answer to an AskUserQuestion: the question's hash and excerpt and the chosen label."""
-    return _append(log, {"type": "answer", "session_id": session_id, "project": project,
-                         "question_sha256": prompt_hash(question), "excerpt": _excerpt(question),
+    return _append(log, {"type": "answer", "session_id": heard.session_id, "project": heard.project,
+                         "question_sha256": prompt_hash(heard.text), "excerpt": _excerpt(heard.text),
                          "label": _excerpt(label), "annotated": annotated,
                          "source": "harness-hook:PostToolUse:AskUserQuestion"})
 
 
-def record_authorization(log: EventLog, *, statement: dict[str, Any], kind: str, target: str, how: str,
-                         proposal_sha256: str = "", minutes: int = person_store.DEFAULT_MINUTES,
-                         uses: int = 1) -> dict[str, Any]:
-    """Append an authorization spoken in ``statement``; it expires after ``minutes`` (at most four hours)."""
-    minutes = max(1, min(int(minutes), person_store.MAX_MINUTES))
+def record_authorization(log: EventLog, statement: dict[str, Any], grant: Grant) -> dict[str, Any]:
+    """Append an authorization spoken in ``statement``; it expires after ``grant.minutes`` (at most four hours)."""
+    minutes = max(1, min(int(grant.minutes), person_store.MAX_MINUTES))
     return _append(log, {"type": "authorization", "id": secrets.token_hex(6),
                          "statement_seq": statement["seq"], "session_id": statement["session_id"],
-                         "project": statement["project"], "kind": kind, "target": target,
-                         "target_rule": kind, "uses": uses, "how": how,
-                         "proposal_sha256": proposal_sha256,
+                         "project": statement["project"], "kind": grant.kind, "target": grant.target,
+                         "target_rule": grant.kind, "uses": grant.uses, "how": grant.how,
+                         "proposal_sha256": grant.proposal_sha256,
                          "expires": round(time.time() + minutes * 60, 3)})
 
 

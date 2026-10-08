@@ -7,8 +7,23 @@ import json
 import time
 
 import pytest
-from person_support import (DEV, SESSION, VERSION, assistant, consume, human, local_command, notification, peer,
-                            prompt_event, repository, rows, run_hook, say, transcript)
+from person_support import (
+    DEV,
+    SESSION,
+    VERSION,
+    assistant,
+    consume,
+    human,
+    local_command,
+    notification,
+    peer,
+    prompt_event,
+    repository,
+    rows,
+    run_hook,
+    say,
+    transcript,
+)
 
 from ml_stack.workspace import person_auth, person_store, person_transcript
 from ml_stack.workspace.person_auth import Identity, NotAuthorized
@@ -49,7 +64,7 @@ def test_a_yes_to_a_proposal_records_the_statement_and_one_authorization(world):
 
 def test_a_prompt_typed_while_a_turn_runs_counts_as_typed(world):
     tmp, state, repo = world
-    say(tmp, state, repo, "yes", before=(PROPOSAL,), entry=functools.partial(human, source="queued"))
+    say(tmp, state, repo, "yes", before=(PROPOSAL,), entry=functools.partial(human, promptSource="queued"))
     assert len(authorized(state)) == 1
 
 
@@ -73,7 +88,7 @@ def test_the_log_keeps_a_hash_and_a_redacted_excerpt_and_never_the_prompt(world)
 
 @pytest.mark.parametrize("entry", [peer, notification, local_command,
                                    functools.partial(human, version="9.9.9"),
-                                   functools.partial(human, source="system")])
+                                   functools.partial(human, promptSource="system")])
 def test_a_prompt_the_person_did_not_type_leaves_no_record(world, entry):
     tmp, state, repo = world
     done = say(tmp, state, repo, "yes", before=(PROPOSAL,), entry=entry)
@@ -130,7 +145,7 @@ def test_garbage_on_stdin_never_blocks_the_session(world):
     import sys
 
     from person_support import HOOKS, environment
-    tmp, state, _ = world
+    _tmp, state, _ = world
     done = subprocess.run([sys.executable, str(HOOKS / "claude-user-prompt")], input="{not json", text=True,
                           capture_output=True, timeout=30, check=False, env=environment(state))
     assert done.returncode == 0
@@ -246,7 +261,7 @@ def test_a_text_that_claims_the_owners_authority_in_a_file_or_peer_message_autho
 
 def test_a_reply_after_a_long_gap_a_compaction_or_another_question_authorizes_nothing(world):
     tmp, state, repo = world
-    late = functools.partial(human, stamp="2026-10-08T19:20:00.000Z")
+    late = functools.partial(human, timestamp="2026-10-08T19:20:00.000Z")
     say(tmp, state, repo, "yes", before=(PROPOSAL,), entry=late, prompt_id="a")
     compact = {"type": "system", "subtype": "compact_boundary", "timestamp": "2026-10-08T18:40:00.000Z"}
     say(tmp, state, repo, "yes", before=(PROPOSAL, compact), prompt_id="b")
@@ -290,7 +305,7 @@ def test_asking_with_the_echo_and_answering_yes_records_an_authorization(world):
 
 @pytest.mark.parametrize("variant", ["no", "wrong-target", "wrong-tag", "subagent", "other-tool"])
 def test_an_answer_that_is_not_a_yes_to_the_exact_echo_authorizes_nothing(world, variant):
-    tmp, state, repo = world
+    _tmp, state, repo = world
     from ml_stack.workspace.person_hook import echo_for
     echo = echo_for("push-dev", f"origin:{DEV}")
     if variant == "wrong-target":
@@ -308,7 +323,7 @@ def test_an_answer_that_is_not_a_yes_to_the_exact_echo_authorizes_nothing(world,
 
 
 def test_a_model_cannot_pre_answer_the_question_through_the_session_hooks(world):
-    tmp, state, repo = world
+    _tmp, state, repo = world
     event = {"hook_event_name": "PostToolUse", "tool_name": "AskUserQuestion", "session_id": SESSION,
              "cwd": str(repo), "tool_response": {}}
     assert run_hook(event, state).returncode == 0 and rows(state) == []

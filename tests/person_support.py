@@ -26,13 +26,12 @@ def environment(state: Path, **more: str) -> dict[str, str]:
     return env
 
 
-def human(prompt: str, prompt_id: str, *, source: str = "typed", version: str = VERSION,
-          session: str = SESSION, stamp: str = "2026-10-08T18:36:54.961Z") -> dict:
-    """A user entry the person typed."""
-    return {"type": "user", "promptId": prompt_id, "uuid": uuid.uuid4().hex, "sessionId": session,
-            "isSidechain": False, "origin": {"kind": "human"}, "promptSource": source, "turnOrigin": "human",
-            "version": version, "timestamp": stamp,
-            "message": {"role": "user", "content": prompt}}
+def human(prompt: str, prompt_id: str, **fields) -> dict:
+    """A user entry the person typed; ``fields`` replace entry keys such as promptSource, version or timestamp."""
+    return {"type": "user", "promptId": prompt_id, "uuid": uuid.uuid4().hex, "sessionId": SESSION,
+            "isSidechain": False, "origin": {"kind": "human"}, "promptSource": "typed", "turnOrigin": "human",
+            "version": VERSION, "timestamp": "2026-10-08T18:36:54.961Z",
+            "message": {"role": "user", "content": prompt}, **fields}
 
 
 def peer(prompt: str, prompt_id: str) -> dict:
@@ -82,9 +81,9 @@ def repository(where: Path, branch: str = DEV) -> Path:
     return where
 
 
-def prompt_event(prompt: str, prompt_id: str, path: Path, cwd: Path, *, session: str = SESSION, **more) -> dict:
+def prompt_event(prompt: str, prompt_id: str, path: Path, cwd: Path, **more) -> dict:
     """The input Claude Code gives a UserPromptSubmit hook."""
-    return {"hook_event_name": "UserPromptSubmit", "session_id": session, "transcript_path": str(path),
+    return {"hook_event_name": "UserPromptSubmit", "session_id": SESSION, "transcript_path": str(path),
             "cwd": str(cwd), "prompt": prompt, "prompt_id": prompt_id, **more}
 
 
@@ -103,11 +102,13 @@ def consume(cwd: Path, state: Path, *, session: str = SESSION, remote: str = "or
                           env=environment(state, ML_STACK_SESSION_ID=session))
 
 
-def say(tmp: Path, state: Path, repo: Path, prompt: str, *, before: tuple[dict, ...] = (),
-        entry=human, prompt_id: str = "p-1", **more) -> subprocess.CompletedProcess:
-    """A turn: ``before`` entries, then ``prompt`` written by ``entry``, then the hook run on it."""
+def say(tmp: Path, state: Path, repo: Path, prompt: str, **options) -> subprocess.CompletedProcess:
+    """A turn: the ``before`` entries, then ``prompt`` written by ``entry`` (default `human`), then the hook
+    run on it; ``prompt_id`` names the turn and any other option goes into the hook event."""
+    before, entry = options.pop("before", ()), options.pop("entry", human)
+    prompt_id = options.pop("prompt_id", "p-1")
     path = transcript(tmp / f"{prompt_id}.jsonl", *before, entry(prompt, prompt_id))
-    return run_hook(prompt_event(prompt, prompt_id, path, repo, **more), state)
+    return run_hook(prompt_event(prompt, prompt_id, path, repo, **options), state)
 
 
 def rows(state: Path) -> list[dict]:
