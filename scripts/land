@@ -1,0 +1,84 @@
+#!/usr/bin/env python3
+"""Land ready branches as one verified batch.
+
+    scripts/land plan [--cover] [BRANCH...]   unique patches, minimal cover, merge order, conflicts
+    scripts/land run [--dry-run] BRANCH...    merge in an integration worktree, verify once, eject failures
+    scripts/land finish [--apply]             fast-forward the target from the verified batch, clean up
+
+Never pushes, never touches main, never forces. Every test and gate runs through scripts/test.
+The last line of output is a JSON summary.
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+
+import land_check
+import land_finish
+import land_git as lg
+import land_plan
+import land_run
+
+
+def show_plan(plan: land_plan.Plan) -> dict:
+    """Print the plan and return its summary."""
+    for n, entry in enumerate(plan.order, 1):
+        flags = ", ".join(filter(None, [
+            "conflicts with " + plan.target if entry.conflicts_with_target else "",
+            "conflicts with earlier merges" if entry.conflicts_with_plan else "",
+            "dirty worktree" if entry.dirty else ""]))
+        print(f"{n}. {entry.branch}: {len(entry.patches)} commits, {entry.behind} behind, "
+              f"{len(entry.files)} files" + (f" [{flags}]" if flags else ""))
+        for path in entry.files[:8]:
+            print(f"     {path}")
+        for note in entry.warnings:
+            print(f"     warning: {note}")
+    for entry in plan.covered:
+        print(f"covered: {entry.branch} is contained in {entry.contained_in or 'the plan'}")
+    for name in plan.empty:
+        print(f"nothing to land: {name}")
+    for name in plan.dirty:
+        print(f"dirty worktree (left alone): {name}")
+    return {"command": "plan", "target": plan.target, "order": [e.view() for e in plan.order],
+            "covered": [e.branch for e in plan.covered], "empty": plan.empty, "dirty": plan.dirty}
+
+
+def main() -> int:
+    """Parse the command and run it."""
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("command", choices=["plan", "run", "finish"])
+    parser.add_argument("branches", nargs="*")
+    parser.add_argument("--cover", action="store_true", help="plan: every local branch with a worktree")
+    parser.add_argument("--dry-run", action="store_true", help="run: plan and predict, change nothing")
+    parser.add_argument("--apply", action="store_true", help="finish: do it (default is a dry run)")
+    parser.add_argument("--target", default=lg.TARGET, help="branch to land on")
+    parser.add_argument("--conflicts", choices=["eject", "stop"], default="eject")
+    parser.add_argument("-n", "--workers", type=int, default=1, help="affected-test worker ceiling")
+    parser.add_argument("--repo", type=Path, default=Path.cwd(), help="a checkout of the repository")
+    args = parser.parse_args()
+    root = lg.toplevel(args.repo)
+    try:
+        lg.refuse_protected(args.target, *args.branches)
+        if args.command == "finish":
+            status, summary = land_finish.finish(root, args.apply)
+        else:
+            names = land_plan.cover_branches(root, args.target) if args.cover else args.branches
+            if args.command == "plan":
+                status, summary = 0, show_plan(land_plan.build(root, args.target, names))
+            else:
+                status, summary = land_run.run(root, args.target, names, {
+                    "dry_run": args.dry_run, "conflicts": args.conflicts, "workers": args.workers})
+    except (ValueError, RuntimeError) as error:
+        print(f"land: {error}", file=sys.stderr)
+        status, summary = 4, {"command": args.command, "status": "error", "error": str(error)}
+    print(land_check.summary_json(summary))
+    return status
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -63,3 +63,39 @@ Native supervisors bind to loopback. The Linux runner installs dependencies
 under one setup permit, releases it, then starts supervised pytest. Serial
 execution through `scripts/test` uses `-n 1`. A directly supervised pytest command can use `-n 0`
 to run without xdist workers.
+
+## Landing a batch
+
+`scripts/land` (modules `scripts/land_*.py`) lands several ready branches with one verification.
+Every test and gate runs through `scripts/test`, so the broker admits them like any other run.
+
+- `plan [--cover] [BRANCH...]` lists each branch's unique patches (patch-id, `git cherry`
+  semantics), drops branches another one contains, orders the rest so each merges cleanly onto the
+  plan so far (`git merge-tree --write-tree`, no checkout), and reports files, commit and behind
+  counts, predicted conflicts and dirty worktrees. It warns past 50 commits or 20 behind.
+- `run [--dry-run] [--conflicts=eject|stop] [-n N] BRANCH...` merges with `--no-ff` and rerere in a
+  sibling `<repo>-land-<stamp>` worktree on `land/<stamp>`, keeping both sides of `HANDOFF.md`.
+  A documentation-only diff runs `scripts/budgets` and `git diff --check`. A code diff runs
+  `scripts/test gate` and `scripts/test all` on the selectors `scripts/affected.py` computes from the
+  combined diff. A diff touching `tests/conftest.py`, `scripts/test*`, `scripts/testslots*`,
+  `pyproject.toml` or `packaging/`, an unmapped path, or more than 120 files or 4000 changed lines
+  also starts one background `scripts/test full`; a second is refused while a land full run or a
+  broker entry labelled `full` is live.
+- A pass is recorded with `record_run` under the tree hash; the same tree and check later print
+  `reused from <id>`. A failing check is first run on a clean worktree of the base: failing there
+  too is reported as `baseline`. Otherwise the merge commits are bisected with only the failing
+  selectors, the branch is ejected, the integration branch is rebuilt without it, and the failed
+  checks run again. An ejection prints branch, check, evidence, owner (the tip's `Agent-Label`
+  trailer, else its worktree name) and commit count.
+- `finish [--apply]` is a dry run unless `--apply`. It fast-forwards the target only when the
+  primary checkout is clean and on the target, otherwise prints the command for the lead. It never
+  pushes. Then it removes each landed source branch's worktree and branch (never forced), keeping
+  dirty trees, trees holding the current directory and branches with unique patches, and the
+  integration tree while its background full run is alive.
+
+The last line of every command is a JSON summary.
+
+Pending: a `background` priority lane in the broker so landing runs yield to interactive selector
+runs. `scripts/testslots.py` needs a `priority` field in the lease record, `_grant` ordering
+interactive waiters before background ones, and `scripts/test` passing a `full:`/`land:` label so
+`other_full_run` in `scripts/land_check.py` can tell a full run from any other pytest coordinator.

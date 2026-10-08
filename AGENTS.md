@@ -295,6 +295,14 @@ local-only commit on the development branch is not left past the end of the task
   itself under the short branch claim (fetch, merge development, rerun only the selectors the
   merge touched, fast-forward, push, release). Batches needing the shared gates go through the lead.
 - If a combined gate fails, bisect to the branch, eject it to its owner, and land the rest.
+- `scripts/land` is the standard whenever more than one leaf is ready: `plan [--cover]` shows unique
+  patches, the minimal cover, merge order and predicted conflicts; `run` merges into a sibling
+  integration worktree, verifies once and ejects what fails; `finish --apply` fast-forwards the
+  clean primary checkout and removes landed trees. It never pushes; the lead pushes.
+- `scripts/land` is the standard whenever more than one leaf is ready: `plan [--cover]` shows unique
+  patches, the minimal cover, merge order and predicted conflicts; `run` merges into a sibling
+  integration worktree, verifies once and ejects what fails; `finish --apply` fast-forwards the
+  clean primary checkout and removes landed trees. It never pushes; the lead pushes.
 - Claims cover a step: heartbeat while working, release when idle, never hold one across a wait.
   Ask a stale claim's owner once, then use documented recovery.
 - A `HANDOFF.md` or log conflict keeps both sides and never holds a landing.
@@ -414,6 +422,10 @@ Gate cost is per batch: combine all ready leaves into one run and start it whene
 ready and no gate is in flight. Scale it to the diff: documentation-only or handoff-only batches
 need a clean diff and `scripts/budgets`. A background full-suite failure blocks only landings
 touching the failing surface and gets one named owner at once.
+`scripts/land run` applies this: documentation-only diffs get `scripts/budgets` and a clean diff; code
+diffs get `scripts/test gate` and the affected selectors of the combined diff, plus one background
+full run only for shared infrastructure or a large diff. A tree that already passed a check is not
+checked again (`reused from <id>`), and a failure that also fails on the clean target is `baseline`.
 
 Known failures remain named tasks with evidence and ownership. A scoped pass is not a full-suite
 pass. Fix a known relevant regression before the affected change lands. A missing cold selector
