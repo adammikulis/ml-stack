@@ -10,10 +10,11 @@ passes its own model id (`--model <id>`; `claude-sonnet-5-5` unless it knows oth
 
 ## Subagent model order
 
-Default to Haiku 5.5 (`claude-haiku-5-5`) for most subagent work. Use Sonnet 5.5
-(`claude-sonnet-5-5`) for more complicated work. Use Opus 5.5 (`claude-opus-5-5`) only after
-Sonnet has failed on the task. Fable is used only when the owner asks. Select within that order
-using the capability rules in AGENTS.md, "The main session and its agents".
+Use Haiku 5.5 (`claude-haiku-5-5`) for read-only search, summarising and narrow mechanical
+edits. Use Sonnet 5.5 (`claude-sonnet-5-5`) for anything that writes code or reviews it. Use
+Opus 5.5 (`claude-opus-5-5`) only after Sonnet has failed on the task. Fable is used only when
+the owner asks. The evidence is in docs/model-benchmarks.md. Select within that order using the
+capability rules in AGENTS.md, "The main session and its agents".
 
 ## Subagents and the Agent tool
 

@@ -423,25 +423,18 @@ kept to preserve an old path: tests move with the code in the same commit.
 | `install`/`sync` run by an agent | prints the plan, exits non-zero, writes nothing |
 | `person.agent-is-never-human` anywhere in a writable consumer file | tamper test fails |
 
-## 6. Questions for the owner
+## 6. Decisions
 
-1. Policy version: the package version (this note's choice) or its own stream?
-2. `MLSTACK_GUARD=off` today turns every guard off in a session. Should hard-rule guards ignore it
-   when an agent marker is set (the owner's own sessions also set `CLAUDECODE`, so this changes
-   a switch the owner uses), or must the owner unset the guard in a way the session cannot see?
-3. `sync` and `install` as a person-only command with the `policy.sync` gate fixed at `person`
-   in both presets: accepted, or may a lead agent apply a diff under the `dev` preset?
-4. Is `.ml-stack/policy.lock` committed in consumers? It is what makes drift visible; it is also
-   a file a consumer's agent can edit consistently with the rest.
-5. Generated block: summaries (about 40 lines) or the full rule prose? Summaries keep consumer
-   files short; the full text stays reachable by `explain`.
-6. Name: a new `ml-stack-policy` command and a `policy` group in `ml-stack-doctor`, or doctor
-   only?
-7. Shipping `scripts/gates` and the test runner as public library API in slice 5 makes them
-   things other repositories import. Acceptable before 1.0?
-8. No waivers at all (this note), or a dated, listed waiver for `required` non-hard rules?
-9. Confirm or edit the hard set in 2.3, in particular `runtime.immutable`, `claims.no-steal` and
-   `policy.tamper-protected`.
-10. Codex and local-model hook support is taken from `agent_hooks.py` (post, stop, prompt events
-    only) and not verified against current releases. Is in-process enforcement in
-    `ml-stack-agent` an acceptable substitute where a harness has no pre-tool event?
+1. The policy version is the package version.
+2. Hard-rule guards ignore `MLSTACK_GUARD=off` whenever an agent marker (`CLAUDECODE` or another
+   harness marker) is set. The switch still disables the soft guards.
+3. `install` and `sync` are person-only (`policy.sync` gate fixed at `person`).
+4. `.ml-stack/policy.lock` is committed in consumers.
+5. The generated block carries rule summaries and a link, not the full prose.
+6. The commands are a `policy` group in `ml-stack-doctor`; no new console script (the entry-points
+   budget does not rise).
+7. No waivers; debt goes in a ratchet file that only falls.
+8. Making `scripts/gates` and the test runner public library API before 1.0 is acceptable.
+9. The hard set is confirmed as proposed.
+10. In-process enforcement inside `ml-stack-agent` is acceptable for harnesses with no pre-tool
+    hook event.
