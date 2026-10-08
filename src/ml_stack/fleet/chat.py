@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack.http import ServerError, ServerUnreachable, open_stream
+from ml_stack.hub.capabilities import allows_chat
 
 __all__ = ["ChatError", "Target", "find", "reply_text", "stream", "targets"]
 
@@ -44,6 +45,8 @@ def targets(peers: list[dict[str, Any]], serving: Any = None,
     """Every model this machine can reach, its own and the ones on the network."""
     out: list[Target] = []
     for served in (serving.live() if serving is not None else []):
+        if not allows_chat(getattr(served, 'capabilities', None)):
+            continue
         for model in served.models:
             out.append(Target(model=model,
                               url=f"http://127.0.0.1:{served.port}{CHAT_PATH}",
@@ -56,6 +59,8 @@ def targets(peers: list[dict[str, Any]], serving: Any = None,
         if not base:
             continue
         for served in (beacon.get("device", {}).get("serving") or []):
+            if not allows_chat(served.get('capabilities')):
+                continue
             for model in (served.get("models") or []):
                 if model in here:
                     continue

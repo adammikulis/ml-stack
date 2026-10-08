@@ -109,7 +109,7 @@ def footprint_of(process: Any) -> int:
             if got:
                 return got
     except Exception:  # noqa: BLE001
-        pass
+        logger.debug('Process memory information is unavailable', exc_info=True)
     through_kernel = _rusage_footprint(int(getattr(process, "pid", 0) or 0))
     if through_kernel:
         return through_kernel
@@ -241,10 +241,10 @@ def every_server() -> list[dict]:
         if "llama-server" not in head and "llama-server" not in name:
             continue
 
-        def after(flag: str, short: str = "") -> str:
-            for i, a in enumerate(argv[:-1]):
+        def after(flag: str, short: str = "", arguments=tuple(argv)) -> str:
+            for i, a in enumerate(arguments[:-1]):
                 if a == flag or (short and a == short):
-                    return argv[i + 1]
+                    return arguments[i + 1]
                 if a.startswith(flag + "="):
                     return a.split("=", 1)[1]
             return ""
@@ -262,6 +262,7 @@ def every_server() -> list[dict]:
                     "defunct": state == psutil.STATUS_ZOMBIE,
                     "model": after("--model", "-m") or after("-hf") or "",
                     "binary": argv[0] if argv else name,
+                    "embedding": ('--embeddings' in argv or '--embedding' in argv) if argv else None,
                     "draft": after("--spec-draft-model", "-md") or after("--model-draft")
                              or after("-hfd"),
                     "spec_type": after("--spec-type"),

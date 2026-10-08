@@ -17,6 +17,7 @@ from ml_stack.client.counters import read_speculative
 from ml_stack.client.health import is_healthy, reported_models, serving_params
 from ml_stack.client.settings import Transport
 from ml_stack.files import write_json
+from ml_stack.hub.capabilities import capabilities
 from ml_stack.hub.probe import machine_memory
 from ml_stack.serve import LlamaServerBackend, ServerManager, ServerSpec, free_port
 from ml_stack.serve.estimate import DEFAULT_KV, Setup, estimate, verdict
@@ -50,6 +51,7 @@ class Served:
     spec_type: str = ""
     draft_status: str = "unknown"
     aliases: list[str] = field(default_factory=list)
+    capabilities: dict[str, Any] = field(default_factory=dict)
 
     def public(self) -> dict[str, Any]:
         return asdict(self)
@@ -95,7 +97,8 @@ class Serving:
                                   context=row.get("context"), slot_context=row.get("slot_context"),
                                   draft=str(row.get("draft") or ""), spec_type=str(row.get("spec_type") or ""),
                                   draft_status=str(row.get("draft_status") or "unknown"),
-                                  aliases=list(row.get("aliases") or [])))
+                                  aliases=list(row.get("aliases") or []),
+                                  capabilities=row.get('capabilities') if isinstance(row.get('capabilities'), dict) else {}))
             except (KeyError, TypeError, ValueError):
                 continue
         return out
@@ -308,8 +311,12 @@ def _identity(served: Served, process: dict) -> tuple[Served | None, bool]:
     spec_type = str(process.get("spec_type") or "")
     draft = str(process.get("draft") or "")
     state = "active" if counts and counts.drafted > 0 else "configured" if spec_type else "unknown"
+    model = next((Path(name) for name in names if Path(name).is_absolute()), None)
+    if model is None and params and params.model and Path(params.model).is_absolute():
+        model = Path(params.model)
+    observed = capabilities(model, embedding=process.get('embedding'))
     return Served(served.port, [_name(name) for name in names], slots, served.started_at,
-                  context, slot_context, Path(draft).name if draft else "", spec_type, state, names), True
+                  context, slot_context, Path(draft).name if draft else "", spec_type, state, names, observed), True
 
 
 def answers(port: int, *, timeout: float = PROBE_TIMEOUT) -> bool:

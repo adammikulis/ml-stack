@@ -98,6 +98,19 @@ def host(tmp_path, model_server):
 
 
 class TestPickingWhereToSend:
+    def test_known_non_chat_local_and_peer_targets_are_excluded(self):
+        from ml_stack.fleet.serving import Served as LocalServed
+
+        class Local:
+            def live(self):
+                return [LocalServed(port=9998, models=['embedding.gguf'], capabilities={'chat': False}),
+                        LocalServed(port=9999, models=['future-decoder.gguf'])]
+
+        peer = {'base_url': 'http://127.0.0.1:12345', 'name': 'peer', 'device': {'serving': [
+            {'models': ['speech'], 'capabilities': {'chat': False}},
+            {'models': ['remote-decoder'], 'capabilities': {'chat': True}}]}}
+        assert [row.model for row in targets([peer], Local())] == ['future-decoder.gguf', 'remote-decoder']
+
     def test_a_machine_serving_nothing_still_sees_a_peers_model(self, host):
         found = targets([host], serving=None, token="t")
         assert [t.model for t in found] == ["qwen3-4b.gguf"]
@@ -153,6 +166,16 @@ class TestChattingThroughTheInterface:
         assert status == 200
         assert [m["model"] for m in body["models"]] == ["qwen3-4b.gguf"]
         assert body["models"][0]["peer"] == "host"
+
+    def test_post_cannot_select_a_known_non_chat_server(self, bare):
+        ui, cookie = bare
+        peer = ui.ui._peers[1][0]
+        peer['device']['serving'][0]['capabilities'] = {'chat': False, 'embedding': True}
+        status, body, _ = ui.call('/ui/chat', cookie=cookie)
+        assert status == 200 and body['models'] == []
+        status, body, _ = ui.call('/ui/chat', method='POST', cookie=cookie,
+            body={'model': 'qwen3-4b.gguf', 'messages': [{'role': 'user', 'content': 'hello'}]})
+        assert status == 503 and 'no machine' in body['error']
 
     def test_a_machine_with_nothing_installed_holds_a_conversation(self, bare):
         ui, cookie = bare

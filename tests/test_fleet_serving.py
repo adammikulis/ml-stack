@@ -76,6 +76,18 @@ def wired(tmp_path, model):
         d.close()
 
 
+def test_live_registry_records_embedding_mode_and_preserves_it(tmp_path, model, monkeypatch):
+    from ml_stack.fleet import serving as serving_module
+
+    registry = Serving(tmp_path / 'serving.json')
+    registry.register(model.port, ['qwen3-4b.gguf'])
+    monkeypatch.setattr(serving_module, 'every_server', lambda: [{'port': model.port, 'embedding': True}])
+    found = registry.live(force=True)
+    assert len(found) == 1 and found[0].capabilities['chat'] is False
+    assert found[0].public()['capabilities']['evidence'] == 'server embedding mode'
+    assert registry.all()[0].capabilities == found[0].capabilities
+
+
 @contextmanager
 def metadata_server(body, *, redirect=""):
     class Handler(BaseHTTPRequestHandler):

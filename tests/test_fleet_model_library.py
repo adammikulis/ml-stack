@@ -50,6 +50,17 @@ def test_library_uses_canonical_discovery_without_changing_transfer_files(tmp_pa
     assert models.library_model(str(tmp_path / 'mtp-Qwen3-27B-Q8_0.gguf')) is None
 
 
+def test_non_chat_models_remain_in_library_with_operational_capabilities(tmp_path):
+    write_gguf(tmp_path / 'chat-looking.gguf', {'general.architecture': 'bert', 'bert.pooling_type': 2})
+    weights(tmp_path / 'qwen.gguf', 'Decoder')
+    rows = Models([tmp_path], tmp_path).library()
+    assert len(rows) == 2 and all(row['servable'] for row in rows)
+    embedding = next(row for row in rows if row['architecture'] == 'bert')
+    decoder = next(row for row in rows if row['architecture'] == 'llama')
+    assert embedding['capabilities']['chat'] is False
+    assert decoder['capabilities']['chat'] is True
+
+
 @pytest.mark.redteam
 def test_serving_refuses_missing_first_shard_and_outside_paths(joined, monkeypatch):
     monkeypatch.setattr(routes, '_can_serve', lambda: True)
