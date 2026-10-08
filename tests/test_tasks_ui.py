@@ -150,3 +150,55 @@ def test_failed_previous_project_does_not_replace_current_project_status(tmp_pat
             assert all('Task data unavailable:' not in text for text in page.evaluate('taskStatusHistory'))
     finally:
         server.close()
+
+
+@pytest.mark.parametrize('foreign_authority', [False, True])
+def test_tasks_join_selected_person_workspace_with_real_backend(tmp_path, playwright, monkeypatch, foreign_authority):
+    from ml_stack.fleet import project_client
+    from ml_stack.fleet.projects import ProjectRegistry, identity
+    from ml_stack.net import git
+    from ml_stack.workspace.remote_host import WorkspaceHost
+
+    checkout = tmp_path / 'experiment'
+    checkout.mkdir()
+    git.run(['init'], cwd=checkout)
+    git.run(['remote', 'add', 'origin', 'https://code.example.invalid/team/tasks.git'], cwd=checkout)
+    registry = ProjectRegistry(tmp_path / 'registry', 'fixture-device', (checkout,), 'http://127.0.0.1:8770')
+    project = identity(checkout)
+    host = WorkspaceHost(registry)
+    host.prepare(project)
+    ws = host.workspace(project)
+    monkeypatch.setattr(project_client, 'peers', lambda ui: [])
+    server = Serving(tmp_path / 'ui')
+    server.ui.settings.setup_done = True
+    server.ui.projects, server.ui.workspaces = registry, host
+    session = server.ui.sessions.open('task-person')
+    posts = []
+    try:
+        with playwright.chromium.launch(headless=True) as browser:
+            page = browser.new_page()
+            page.context.add_cookies([{'name': 'ml_stack_ui', 'value': session.sid,
+                                      'url': f'http://127.0.0.1:{server.port}/ui', 'httpOnly': True}])
+            page.on('request', lambda request: posts.append(request.url) if request.method == 'POST' and request.url.endswith('/board/connect') else None)
+            page.goto(f'http://127.0.0.1:{server.port}/ui/#tasks')
+            viewer = page.locator('tasks-view')
+            expect(viewer.get_by_label('Task project workspace')).to_have_value(project)
+            join = viewer.get_by_role('button', name='Join workspace as person', exact=True)
+            expect(join).to_be_visible()
+            assert not posts
+            assert all('person_project' not in row for row in ws.registry._load().values())
+            if foreign_authority:
+                registry.get(project).authority_machine = 'foreign-device'
+            join.click()
+            assert posts == [f'http://127.0.0.1:{server.port}/ui/projects/{project}/board/connect']
+            if foreign_authority:
+                expect(viewer.locator('.status')).to_contain_text('authority')
+                expect(viewer.locator('.task-layout')).to_be_hidden()
+                assert all('person_project' not in row for row in ws.registry._load().values())
+            else:
+                expect(viewer.locator('.task-layout')).to_be_visible()
+                expect(viewer.locator('.task-remaining-number')).to_have_text('0')
+                expect(join).to_have_count(0)
+            page.screenshot(path=f'/private/tmp/poolside-tasks-person-join-{foreign_authority}.png', full_page=True)
+    finally:
+        server.close()
