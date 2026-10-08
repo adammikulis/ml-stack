@@ -51,9 +51,10 @@ def canonical(tmp_path):
         cookie = options.get("cookie", cookie_value)
         ip = options.get("ip", "127.0.0.1")
         origin = options.get("origin", "http://127.0.0.1:8770")
-        raw = json.dumps(body).encode() if body is not None else b""
+        raw = options.get("raw", json.dumps(body).encode() if body is not None else b"")
         headers = {"Host": "127.0.0.1:8770", "Cookie": cookie, "Origin": origin,
-                   "Content-Type": "application/json", "Content-Length": str(len(raw))}
+                   "Content-Type": "application/json", "Content-Length": str(len(raw)),
+                   **options.get("headers", {})}
         codes = []
         handler = SimpleNamespace(path=options.get("path", f"/ui/projects/{project}/board/{suffix}"), command=method,
                                   client_address=(ip, 1000), headers=headers,
@@ -159,3 +160,32 @@ def test_canonical_person_task_create_rejects_other_project(canonical):
     status, _ = call('', path=path, method='POST', body={
         'spec': {'title': 'Foreign', 'acceptance': ['Denied'], 'project': {'key': OTHER}}})
     assert status == 403
+
+
+@pytest.mark.parametrize(('length', 'expected'), [('-1', 403), ('NaN', 403), (' 2', 400),
+                                               ('000000002', 400), ('1025', 400),
+                                               ('99999999', 403), ('\u0661', 403)])
+def test_person_connect_rejects_invalid_content_length_without_registry_mutation(canonical, length, expected):
+    call, workspaces, _ = canonical
+    ws = workspaces[PROJECT]
+    agents = ws.registry._load()
+    agents['demo-owner'].pop('person_project')
+    ws.registry._save(agents)
+    original = ws.registry.path.read_bytes()
+    status, _ = call('connect', method='POST', raw=b'{}', headers={'Content-Length': length})
+    assert status == expected
+    assert ws.registry.path.read_bytes() == original
+
+
+@pytest.mark.parametrize('raw', [b'{', b'', b'null', b'[]', b'"person"', b'{"role":"human"}',
+                               b'{"project_id":"foreign"}'])
+def test_person_connect_rejects_invalid_json_without_registry_mutation(canonical, raw):
+    call, workspaces, _ = canonical
+    ws = workspaces[PROJECT]
+    agents = ws.registry._load()
+    agents['demo-owner'].pop('person_project')
+    ws.registry._save(agents)
+    original = ws.registry.path.read_bytes()
+    status, _ = call('connect', method='POST', raw=raw)
+    assert status == 400
+    assert ws.registry.path.read_bytes() == original
