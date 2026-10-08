@@ -243,7 +243,10 @@ setup; do not interrupt another process's active work.
 `main` is the release branch: a commit that arrives there is a commit queued to publish. Work
 lands on the development branch, and promoting that to `main` is the owner's, as are tags and
 releases. The owner controls version numbers. Never commit or push `main` without the owner's
-explicit instruction. Never push with force, delete a remote ref or push tags.
+explicit instruction: an agent's push of `main` happens only after the person selects the approval
+in the AskUserQuestion that `scripts/hooks/person-consume propose` renders from git, and it covers one
+fast-forward to that one commit. Development pushes need no approval. Never push with force, delete a
+remote ref or push tags.
 
 Whoever made a branch finishes it. Fetch before preparing each integration batch and again
 immediately before pushing. Reconcile upstream advancement in an isolated integration worktree,
@@ -590,12 +593,13 @@ tool is a dependency, so a checker that cannot find its tool prints why and its 
 out rather than counted as zero.
 
 `scripts/hooks/pre-push` lets an agent push the development branch and nothing else, and lets the
-owner's own push through: an agent's shell carries a marker variable (Claude Code sets
-`CLAUDECODE` for every command it runs) and a terminal sets nothing. The development branch is
+owner's own push through: an agent is a process under the marker variable (Claude Code sets
+`CLAUDECODE` for every command it runs) or under a harness process, and a terminal is neither. The development branch is
 the one the primary checkout is on, and `main` is never it. A push to `main` publishes every
-commit on it at once, so it is the owner's, and an agent makes it only when asked, on a command
-that says so: `ML_STACK_PUSH_MAIN=yes git push origin main`. That opener opens `main` and
-nothing else -- never a force, a deletion, `--all` or `--tags`, and never another branch.
+commit on it at once, so it is the owner's, and an agent makes it only when the person has
+approved that one commit: the person's selected answer to the approval question (`scripts/hooks/person-consume
+propose` prints it) authorizes one fast-forward of `main` to one commit, once. Nothing an agent types
+or sets opens `main`, and a force, a deletion, `--all` or `--tags` are never authorized.
 
 Writes are refused when they add a function whose body already exists elsewhere, a raw HTTP
 call, a docstring over twelve lines, a signature over eight parameters, or a write that takes a
