@@ -139,14 +139,26 @@ def selection(root: Path | None = None) -> dict:
     return row if isinstance(row, dict) else {}
 
 
+def referenced(prefix: Path, root: Path | None = None) -> bool:
+    """Whether a console launcher in the recorded launcher directory names this tree."""
+    where = read_state(root).get("launchers")
+    if not where or not Path(str(where)).is_dir():
+        return False
+    for path in Path(str(where)).glob("ml-stack*"):
+        with contextlib.suppress(OSError, UnicodeError):
+            if path.is_file() and path.stat().st_size < 1 << 20 and str(prefix) in path.read_text(encoding="utf-8", errors="ignore"):
+                return True
+    return False
+
+
 def collect(protect: set[Path], *, keep: int = KEEP, root: Path | None = None) -> list[Path]:
-    """Delete verified runtimes beyond the newest `keep` and stale unverified ones, never one in use."""
+    """Delete only this tool's verified runtimes beyond the newest `keep` and stale unverified ones, never the selected, a launcher-named or an in-use one."""
     root = root or runtime.directory()
     kept = {chosen.prefix for chosen in candidates(root)[:keep]} | protect
     gone = []
     for prefix in (tree for tree in trees(root) if ours(tree)):
         stale = not verified_at(prefix) and time.time() - prefix.stat().st_mtime > UNVERIFIED_GRACE_S
-        if prefix in kept or not (stale or verified_at(prefix) or rejected(prefix)) or running_within(prefix):
+        if prefix in kept or not (stale or verified_at(prefix) or rejected(prefix)) or running_within(prefix) or referenced(prefix, root):
             continue
         discard(prefix)
         gone.append(prefix)

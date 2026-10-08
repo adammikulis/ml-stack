@@ -9,11 +9,19 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
-from ml_stack import jobs, runtime, runtime_board, runtime_deploy, runtime_store, runtime_trust
+from ml_stack import (
+    jobs,
+    runtime,
+    runtime_board,
+    runtime_coalesce,
+    runtime_deploy,
+    runtime_store,
+    runtime_trust,
+)
 from ml_stack.command import Group, flag
 from ml_stack.fleet import runtime_wheel
 from ml_stack.home import expand
-from ml_stack.lock import held_by
+from ml_stack.lock import Busy, held_by, only_one
 from ml_stack.log import say, warn
 from ml_stack.sentinel import human
 
@@ -57,13 +65,20 @@ def plan_from(args: argparse.Namespace, *, deploying: bool = True) -> runtime_de
 def _start_background(argv: list[str]) -> None:
     root = runtime_deploy.prepare_root()
     log = root / "ensure.log"
+    runtime_coalesce.rotate(log)
     os.close(os.open(log, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600))
     jobs.detach("ml_stack.runtime_cli", argv, log=log)
 
 
 def _building() -> str:
-    lock = runtime.directory() / "deploy.lock"
-    return held_by(lock) if lock.exists() else ""
+    for name in ("deploy.lock", SETTLE):
+        lock = runtime.directory() / name
+        if lock.exists() and (holder := held_by(lock)):
+            return holder
+    return ""
+
+
+SETTLE = "settle.lock"
 
 
 def _again(args: argparse.Namespace) -> list[str]:
@@ -72,7 +87,8 @@ def _again(args: argparse.Namespace) -> list[str]:
     for name in ("checkout", "launchers", "agent", "label"):
         if getattr(args, name):
             words += [f"--{name}", getattr(args, name)]
-    return words + [f"--{name.replace('_', '-')}" for name in ("force", "force_build") if getattr(args, name)]
+    return words + [f"--{name.replace('_', '-')}" for name in ("force", "force_build") if getattr(args, name)] \
+        + ([] if args.now else ["--settle"])
 
 
 def _audited(args: argparse.Namespace, command: str, plan: runtime_deploy.Plan, result: str, detail: str = "") -> None:
@@ -99,12 +115,28 @@ def _ensure(args: argparse.Namespace) -> int:
             say(f"runtime {plan.commit[:7]} is building in the background; log: {runtime.directory() / 'ensure.log'}")
         _audited(args, "ensure --background", plan, settled)
         return 0
+    if args.settle and not args.now:
+        return _settled(args)
+    return 0 if _run(args, plan).ok else 1
+
+
+def _run(args: argparse.Namespace, plan: runtime_deploy.Plan) -> runtime_deploy.Outcome:
     previous = str(runtime_store.selection().get("commit", ""))
     outcome = runtime_deploy.ensure(plan, force=args.force, force_build=args.force_build)
     _audited(args, "ensure", plan, outcome.action, outcome.detail)
     runtime_board.announce(outcome, previous, verb="ensure", agent=args.agent, label=args.label)
     say(f"{outcome.action} {outcome.commit[:7]} {outcome.detail}".strip())
-    return 0 if outcome.ok else 1
+    return outcome
+
+
+def _settled(args: argparse.Namespace) -> int:
+    """Wait until the tip has stopped moving, build only that tip, and build again only if it moved meanwhile."""
+    try:
+        with only_one(runtime_deploy.prepare_root() / SETTLE, wait=False, note="ensure waiting"):
+            return 0 if runtime_coalesce.coalesced(lambda: plan_from(args), lambda plan: _run(args, plan)).ok else 1
+    except Busy as exc:
+        say(f"runtime build already waiting or running: {exc}")
+        return 0
 
 
 def _rollback(args: argparse.Namespace) -> int:
@@ -165,8 +197,12 @@ def status_lines(plan: runtime_deploy.Plan) -> list[str]:
         lines.append(f"last failure {failure.get('commit', '')[:7]}: {failure.get('detail', '')[-300:]}")
     if _building():
         lines.append(f"building     {_building()}")
-    for tree in runtime_store.unmanaged(root):
+    foreign = runtime_store.unmanaged(root)
+    for tree in foreign:
         lines.append(f"unmanaged    {tree['path']}  {tree['bytes']} bytes  {'process inside' if tree['in_use'] else 'idle'}")
+    if foreign:
+        lines.append(f"note         {len(foreign)} tree(s), {sum(t['bytes'] for t in foreign)} bytes, were not created by this tool: "
+                     "it never removes them; you decide")
     return lines
 
 
@@ -196,6 +232,8 @@ GROUP.add("ensure", _reported(_ensure), help="make the checkout's commit the sel
     flag("--force", action="store_true", help="rebuild even when held or current"),
     flag("--allow-unmerged", action="store_true", help="deploy a commit that is not on the development branch (a person at a terminal only)"),
     flag("--force-build", action="store_true", help="build again at once after a failed build (needs an agent)"),
+    flag("--now", action="store_true", help="skip the stability delay before a background build"),
+    flag("--settle", action="store_true", help="wait until the tip has been unchanged for a few minutes, then build only the newest tip"),
     flag("--background", action="store_true", help="return at once; build in a detached process")])
 GROUP.add("status", _reported(_status), help="show the selected runtime, the fallbacks kept and unmanaged trees",
           options=[*COMMON, flag("--json", action="store_true")])

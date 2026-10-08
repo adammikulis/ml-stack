@@ -18,7 +18,7 @@ from ml_stack.files import writing
 from ml_stack.fleet.wheel_provenance import ORIGIN, stamp, wheel_commit
 from ml_stack.installed import extras
 from ml_stack.lock import only_one
-from ml_stack.net import packages
+from ml_stack.net import packages, uvinstall
 from ml_stack.safenames import unpack
 
 
@@ -130,13 +130,22 @@ def prepare(wheel: Path, commit: str, *, timeout: float, target: Target | None =
             _run([str(target.host or sys.executable), "-m", "venv", str(chosen.prefix)], timeout)
             cached = cache_wheel(wheel, commit, prefix=chosen.prefix)
             spec = f"ml-stack[{extras()}] @ {cached.as_uri()}"
-            _run([str(chosen.python), "-m", "pip", "install", spec], timeout)
+            _install(chosen.python, spec, timeout)
             runtime.verify(chosen)
             done = True
         finally:
             if not done:
                 shutil.rmtree(chosen.prefix, ignore_errors=True)
         return chosen
+
+
+def _install(python: Path, spec: str, timeout: float) -> None:
+    """Install the spec with uv's shared cache (cloned files, no bytecode written) when it can; otherwise with pip."""
+    done = uvinstall.install(python, spec, timeout=timeout, environment=runtime.installer_environment())
+    if done is None:
+        _run([str(python), "-m", "pip", "install", spec], timeout)
+    elif done.returncode:
+        raise ValueError(f"{done.stdout}{done.stderr}".strip() or f"uv exited {done.returncode}")
 
 
 def _run(argv: list[str], timeout: float) -> str:
