@@ -12,7 +12,7 @@ from typing import Any
 
 from ml_stack import worktreerules
 from ml_stack.files import read_json, write_json
-from ml_stack.serve.process import pid_exists
+from ml_stack.serve.process import pid_exists, started_at
 from ml_stack.workspace.chain import held
 from ml_stack.workspace.identity import AGENT, HUMAN, Denied, Identity
 
@@ -46,6 +46,15 @@ def alive(pid: int) -> bool:
     except PermissionError:
         return True
     return True
+
+
+def _holder_alive(claim: dict[str, Any]) -> bool:
+    """Whether the claim's pid runs and did not start after the claim was taken (a reused pid did)."""
+    pid = int(claim["pid"])
+    if not alive(pid):
+        return False
+    seen = started_at(pid)
+    return seen is None or seen <= float(claim["since"]) + 1.0
 
 
 def normal(kind: str, key: str) -> str:
@@ -116,7 +125,7 @@ class Claims:
         now = self.clock()
         dead = [{**c, "reason": "expired" if c["expires"] <= now else "dead-pid"}
                 for c in claims.values()
-                if c["expires"] <= now or (c["pid"] and not alive(int(c["pid"])))]
+                if c["expires"] <= now or (c["pid"] and not _holder_alive(c))]
         for claim in dead:
             claims.pop(f"{claim['kind']}:{claim['key']}", None)
             if self.on_swept:

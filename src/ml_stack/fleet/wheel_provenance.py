@@ -44,5 +44,3 @@ def stamp(wheel: Path, commit: str, checkout: Path) -> None:
     with zipfile.ZipFile(wheel, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for name, data in contents.items():
             archive.writestr(name, data)
-
-

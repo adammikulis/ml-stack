@@ -17,6 +17,7 @@ from collections.abc import Callable
 from importlib.metadata import entry_points
 from pathlib import Path
 
+from ml_stack import runtime_cli
 from ml_stack.cli.daemon import main as daemon_main
 from ml_stack.cli.reference import HELP
 from ml_stack.log import say, warn
@@ -141,6 +142,8 @@ def help_main(argv: list[str] | None = None) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
+    if argv[:1] == ["runtime"]:
+        return runtime_cli.main(argv[1:])
     table = commands()
     if argv and not argv[0].startswith("-"):
         for k in range(len(argv), 0, -1):

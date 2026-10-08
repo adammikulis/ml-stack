@@ -174,3 +174,42 @@ Everything is adjustable later:
 
 ![Settings](images/settings.jpg)
 
+
+## Following the source checkout
+
+`ml-stack runtime` keeps the installed runtime on the commit a source checkout's development branch is on. Each runtime is its own tree, `~/.ml-stack/runtimes/<platform>/<commit>/<id>`, built from `git archive <commit>` with the extras a full install asks for and never changed afterwards. Console launchers (`ml-stack-workspace` and the rest) are small files that exec the selected tree's interpreter with `-I`.
+
+```
+ml-stack runtime ensure [--checkout PATH] [--launchers DIR] [--ref REF] [--force] [--force-build] [--background] [--agent NAME]
+ml-stack runtime status [--json]
+ml-stack runtime rollback [--to COMMIT]
+```
+
+The first `ensure` names `--checkout` and, to have launchers rewritten, `--launchers DIR` (an absolute directory holding the console launchers); both are recorded for later runs. Without a launcher directory the selection changes and launchers are left alone. When an authenticated workspace agent is known (`--agent`, `ML_STACK_WORKSPACE_AGENT`, or the session's agent passed by the hooks), `ensure` takes its install claims and posts to the board as that agent. With none (launcher recovery, a hook outside an agent session) it takes no claim and posts nothing, relying on the build lock and writing `ensure.log`. `rollback` and `ensure --force-build` need an agent. `status` needs none and writes nothing. `ensure` does nothing when the selection already names the commit. Otherwise it takes the build lock, then `claim install` on the new tree, the launcher directory and the selection file, and:
+
+1. builds the commit into a new tree beside the old ones;
+2. smokes it: the package imports under `-I`, its stamped commit equals the commit, `ml-stack-workspace --help` runs through freshly written launchers, and `claude-session-start`, `claude-subagent-start` and `claude-subagent-stop` from that commit run against a temporary home and state root;
+3. rewrites every launcher with a temporary file and a rename, then publishes `selected.json`.
+
+A failed build or smoke removes the new tree, records the failure and leaves the previous runtime selected. Nothing waits for agents, jobs or models: running processes keep executing the tree they started from, and only new invocations see the new one. The daemon restarts onto the selected runtime at its own idle boundary (no job, no measurement, no loaded model).
+
+**Recovery.** A launcher whose tree is missing, has no importable `ml_stack`, or is marked `rejected` runs the newest verified runtime instead; with none left it starts `ensure` from the recorded source checkout (a valid checkout only, at most once a minute, output in `ensure.log`). The launcher prefers the tree `selected.json` names and skips the commit a rollback holds. `ensure` replaces a selection that does not verify with the newest verified fallback, then builds the commit. `packaging/runtime-floor` holds one integer; a runtime records the integer its own source held, and a runtime below the checkout's integer is replaced and marked `rejected`. Raising the integer is how a change retires older runtimes. A rollback hold never blocks recovery of a broken selection. Only trees this command created (a `created.json` naming `ml-stack-runtime`) are ever selected as a fallback, rejected or deleted; trees another tool made in the same directory are left alone and `status` lists them with their size and whether a process is inside. A selection that points at such a tree has epoch 0, so the first `ensure` replaces it. A commit whose build failed is not built again automatically for ten minutes; `ensure --force-build` builds it at once. The newest three of its verified trees besides the selected one are kept; the rest are deleted unless a live process runs from or has its working directory in them.
+
+**Triggers.** The Claude `SessionStart` hook, the `post-merge` git hook and the pre-push check run `ensure --background`, which returns within six seconds and builds in a detached process; one build runs at a time. `ML_STACK_RUNTIME_ENSURE=off` disables the triggers.
+
+**Rollback.** `rollback` selects the newest earlier verified runtime (or `--to`), rewrites the launchers and holds the commit it left; `ensure` skips a held commit until the branch moves, or with `--force`.
+
+**Board.** A switch posts a `milestone` to `#announcements` and a failed build or recovery posts `blocked` with the `ml-stack-doctor hooks` diagnostic id, as the agent in `ML_STACK_WORKSPACE_AGENT` (or `--agent`); the install claims are held by that agent and appear in `ml-stack-workspace claims`; each agent's device profile carries the commit of the runtime it runs.
+
+`status` prints:
+
+```
+runtimes     <state>/runtimes/<platform>
+source       <checkout> at <commit> (floor <commit>)
+selected     <commit> healthy  <tree>
+current      yes
+launchers    <directory>
+  * <commit>  verified <time>  <tree>
+```
+
+with `held`, `last failure` and `building` lines when they apply.

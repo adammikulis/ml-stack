@@ -7,6 +7,7 @@ from typing import Any
 
 from ml_stack.command import flag
 from ml_stack.workspace import enforcement, enforcement_check, project
+from ml_stack.workspace.identity import Denied
 from ml_stack.workspace.service import Workspace
 
 ACTIONS = ('show', 'check', 'set', 'promote', 'demote')
@@ -41,5 +42,13 @@ def whoami(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
     model, state = ws.model_of(who.id)
     info = ws.registry.info(who.id)
     return {'id': who.id, 'role': who.role, 'project': info['project'],
-            'enforcement': enforcement.mode(ws, info['project']),
+            'enforcement': _mode_or_unavailable(ws, info['project']),
             'model': model or 'unknown', 'model_state': state, 'harness': info['harness']}
+
+
+def _mode_or_unavailable(ws: Workspace, project: dict[str, str] | None) -> str:
+    """The project's enforcement mode, or `unavailable` when the board exposes no mode to this client."""
+    try:
+        return enforcement.mode(ws, project)
+    except Denied:
+        return 'unavailable'

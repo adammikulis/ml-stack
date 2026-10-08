@@ -3,6 +3,7 @@ import platform
 import re
 import socket
 from functools import lru_cache
+from pathlib import Path
 
 from ml_stack.home import device_id
 
@@ -25,9 +26,22 @@ def normalize(value):
     source = value.get('source', 'agent-report')
     if source not in ('fleet-pairing', 'agent-report', 'local-runtime', 'unknown'):
         raise ValueError('device source is unsupported')
+    commit = value.get('runtime_commit', '')
+    if type(commit) is not str or (commit and not re.fullmatch('[0-9a-f]{40}', commit)):
+        raise ValueError('runtime_commit is a full commit or empty')
     return {'device_id': identity, 'hostname': hostname, 'os': system,
             'label': ' · '.join(filter(None, (system, hostname))) or 'Unknown device',
-            'peer_id': peer, 'verification': state, 'source': source}
+            'peer_id': peer, 'verification': state, 'source': source, 'runtime_commit': commit}
+
+
+def runtime_commit():
+    """The commit the running ml-stack runtime was built from, or empty when it is unstamped."""
+    marker = Path(__file__).resolve().parents[1] / 'fleet' / 'built-from'
+    try:
+        found = marker.read_text(encoding='utf-8').strip()
+    except OSError:
+        return ''
+    return found if re.fullmatch('[0-9a-f]{40}', found) else ''
 
 
 @lru_cache(maxsize=1)
@@ -40,4 +54,4 @@ def current():
     return normalize({'device_id': identity, 'hostname': socket.gethostname()[:128],
                       'os': {'Darwin': 'macOS'}.get(platform.system(), platform.system()),
                       'verification': 'local-observed' if identity else 'unknown',
-                      'source': 'local-runtime'})
+                      'source': 'local-runtime', 'runtime_commit': runtime_commit()})

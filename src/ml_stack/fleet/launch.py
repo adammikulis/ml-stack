@@ -12,6 +12,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from ml_stack import runtime
 from ml_stack.http import ServerError, request_json
 from ml_stack.log import say, warn
 
@@ -125,6 +126,7 @@ def _open_when_ready(port: int, browser: bool, stopped: threading.Event) -> None
 
 def main(argv: list[str] | None = None, *,
          daemon_main: Callable[[list[str]], int] | None = None) -> int:
+    daemon_main is None and runtime.forward("ml_stack.fleet.launch", list(sys.argv[1:] if argv is None else argv))
     ap = argparse.ArgumentParser(
         prog="ml-stack",
         description="Start ml-stack on this machine and open it in your browser.")

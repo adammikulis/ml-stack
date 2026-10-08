@@ -51,6 +51,7 @@ _no_shadowing_tests_package()
 os.environ.setdefault("MLSTACK_GUARD_JUDGE", "off")
 sys.path.insert(0, str(REPO / "src"))
 os.environ["HF_HUB_OFFLINE"] = "1"
+os.environ["ML_STACK_RUNTIME_ENSURE"] = "off"
 sys.path.insert(0, str(REPO / "scripts"))
 
 
@@ -887,11 +888,11 @@ def points_at(link) -> str:
         return ""
 
 
-#: Names at the top of the real state root that a process outside the suite rewrites on
-#: its own: a running broker's holders, record and lock, the edit guard's cache, and the
-#: lease file and server logs, which `_real_cache_and_state_untouched` reads by content.
+#: Top-level names in the real state root that something outside the suite rewrites (a running
+#: broker's holders, record and lock, the edit guard's cache, the lease file and logs, which
+#: `_real_cache_and_state_untouched` reads) or that hold built environments, not state.
 LIVE_WRITERS = frozenset({"broker-leases.json", "broker.json", "broker.lock", "servers.json",
-                          "servers.lock", "logs", "guard"})
+                          "servers.lock", "logs", "guard", "runtimes", "traind/env", "spec-venv", "llama.cpp"})
 
 #: Paths below the state root that OTHER agents and test runs on the machine append to while this
 #: run is going (every `scripts/test` run ends by logging to `activity/`; every agent message lands
@@ -1048,8 +1049,8 @@ def file_mtimes(root: Path, skip: frozenset[str] = LIVE_WRITERS, *, attribute_ex
     out: dict[str, int] = {}
     for dirpath, dirnames, filenames in os.walk(root):
         rel = Path(dirpath).relative_to(root)
+        dirnames[:] = [d for d in dirnames if (rel / d).as_posix() not in skip]
         if not rel.parts:
-            dirnames[:] = [d for d in dirnames if d not in skip]
             filenames = [f for f in filenames if f not in skip]
         for name in filenames:
             if name.endswith(".tmp"):

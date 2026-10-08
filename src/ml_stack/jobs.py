@@ -13,14 +13,13 @@ import json
 import os
 import signal
 import subprocess
-import sys
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ml_stack import sentinel
+from ml_stack import runtime, sentinel
 from ml_stack.command import Group, flag
 from ml_stack.home import expand, state
 from ml_stack.lock import Busy
@@ -163,7 +162,12 @@ def detach(module: str, argv: Sequence[str], *, log: Path, lines: Sequence[str] 
 
     started = time.strftime("%FT%T")
     rest = [str(a) for a in argv]
-    command = [sys.executable, "-m", module, *rest]
+    chosen = runtime.available()
+    python = chosen.python if chosen is not None else runtime.python()
+    command = [str(python), *(["-I"] if chosen is not None else []), "-m", module, *rest]
+    environment = {**os.environ, "PYTHONUNBUFFERED": "1"}
+    if chosen is not None:
+        environment = runtime.environment(environment)
     log = Path(log)
     log.parent.mkdir(parents=True, exist_ok=True)
     head = [f"argv: {' '.join(rest)}", f"started: {started}", *lines]
@@ -172,7 +176,7 @@ def detach(module: str, argv: Sequence[str], *, log: Path, lines: Sequence[str] 
         out.flush()
         child = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=out,
                                  stderr=subprocess.STDOUT,
-                                 env=sentinel.default().scrub_env({**os.environ, "PYTHONUNBUFFERED": "1"}),
+                                 env=sentinel.default().scrub_env(environment),
                                  **detached_kwargs())
     if kind:
         record(kind, pid=child.pid, argv=rest, log=str(log), started=started, home=home)

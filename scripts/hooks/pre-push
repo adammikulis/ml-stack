@@ -28,7 +28,8 @@ here=$(cd "$(dirname "$self")" && pwd)
 input=$(cat)
 
 primary=$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")
-dev=$(git -C "$primary" branch --show-current)
+# git exports GIT_DIR to a hook: without unsetting it this reads the pushing worktree, not the primary
+dev=$(env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE git -C "$primary" branch --show-current)
 zero=0000000000000000000000000000000000000000
 
 refused=""
