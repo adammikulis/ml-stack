@@ -12,7 +12,9 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+import testqueue
 import testslots
+import testslots_policy as policy
 import testslots_rpc
 
 ARTIFACT_CONTEXT = contextvars.ContextVar("test_artifact_context", default=None)
@@ -61,18 +63,23 @@ def run_pytest(command: list[str], want: int = 0, label: str = "pytest", env: di
     if container:
         from test_container_launch import ContainerRun
         launch = ContainerRun(command, environment)
-    admission = testslots_rpc.UnixAdmission(False) if (confining(environment) or launch is not None) else testslots_rpc.Admission(False)
+    run_class = policy.environment_class(environment)
+    admission = (testslots_rpc.UnixAdmission(False, run_class) if (confining(environment) or launch is not None)
+                 else testslots_rpc.Admission(False, run_class))
+    estimate = environment.get("DEV_TEST_ESTIMATE_S")
+    record = testqueue.RunRecord(testslots.slots_dir(), label, run_class, float(estimate) if estimate else None, want)
     process = None
     confined = None
     output = None
     prepared = Preparation(want=want)
     try:
-        with testslots.lease(1, 1, label=f"{label}: coordinator"):
+        with testslots.lease(1, 1, label=f"{label}: coordinator", run_class=run_class):
             if launch is not None:
                 launch.prepare()
             command, environment = prepare_pytest(command, environment, admission, launch, prepared)
             confined = prepared.confined
-            process = subprocess.Popen(command, env=environment, cwd=Path(__file__).resolve().parent.parent,
+            record.update(state=testqueue.RUNNING, granted=int(environment["DEV_TEST_WORKERS"]), started=time.time())
+            process = subprocess.Popen(policy.lower_priority(command, run_class), env=environment, cwd=Path(__file__).resolve().parent.parent,
                                        close_fds=True, pass_fds=confined.bootstrap.pass_fds if confined is not None else (),
                                        stdin=subprocess.DEVNULL, start_new_session=True,
                                        stdout=subprocess.PIPE if confined is not None else None,
@@ -97,6 +104,7 @@ def run_pytest(command: list[str], want: int = 0, label: str = "pytest", env: di
             if process.poll() is None:
                 process.kill()
                 process.wait()
+        record.close()
         try:
             if launch is not None:
                 launch.close()
