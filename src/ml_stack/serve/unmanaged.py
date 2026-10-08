@@ -19,6 +19,7 @@ from typing import Any
 from ml_stack import limits
 from ml_stack.client.health import is_healthy
 from ml_stack.http import ServerError, request_json
+from ml_stack.serve import admission
 from ml_stack.serve.ports import DEFAULT_HOST, SERVER_BINARIES
 from ml_stack.serve.process import every_server, listener
 
@@ -53,6 +54,7 @@ class Examined:
     pid: int = 0
     model: str = ""
     rss: int = 0
+    device: str = "gpu"
 
 
 def _mine(found: Mapping[str, Any]) -> bool:
@@ -91,7 +93,7 @@ def examine(port: int, *, find: Callable[[int], dict[str, Any] | None] | None = 
     if not (isinstance(settings, dict) and isinstance(props.get("total_slots"), int)):
         return Examined(False, f"pid {pid}: /props is not a llama-server's", pid)
     return Examined(True, "", pid, str(props.get("model_path") or settings.get("model") or ""),
-                    int(found.get("rss") or 0))
+                    int(found.get("rss") or 0), admission.device_of(found))
 
 
 def adopt_entry(port: int, seen: Examined) -> dict[str, Any]:
@@ -99,4 +101,4 @@ def adopt_entry(port: int, seen: Examined) -> dict[str, Any]:
     the process ends, and marked ``unmanaged`` so nothing ml-stack does stops it."""
     return {"port": port, "pid": seen.pid, "backend": "llama.cpp", "model": seen.model,
             "owner_pid": seen.pid, "base_url": f"http://{DEFAULT_HOST}:{port}",
-            "pool": "gpu", "est_bytes": seen.rss, "unmanaged": True}
+            "device": seen.device, "est_bytes": seen.rss, "unmanaged": True}

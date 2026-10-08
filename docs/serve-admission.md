@@ -1,9 +1,9 @@
 # Admission control: one broker, any number of servers, one request at a time
 
 Any number of model servers may be up at once, as long as they fit the memory the machine
-allows. Requests to them run one at a time per accelerator pool. Every server start, reuse
+allows. Requests to them run one at a time per device. Every server start, reuse
 and release goes through the broker, and every generation request takes its turn in the
-pool's queue. None of this is something a consumer opts into.
+device's queue. None of this is something a consumer opts into.
 
 ## How a lease flowed before
 
@@ -47,7 +47,7 @@ caller -> ServerManager.lease(spec) -> broker.start(spec)
           Broker records the holder (pid, label) and returns ServerInfo(lease=...)
 
 caller -> request_json / request_stream / Client -> ml_stack.http
-            gate.turn(url)           FIFO queue of the pool the server is in
+            gate.turn(url)           FIFO queue of the device the server is in
 ```
 
 ### The broker is the only way in
@@ -106,14 +106,14 @@ specific port (`roam=False`) does not get another.
 
 `ml_stack.gate` queues generation and embedding requests (`/v1/chat/completions`,
 `/completion`, `/v1/embeddings`, `/embedding`, `/infill`, `/v1/messages`) to a loopback
-port on the lease registry. The pool is `gpu` for a server with offload layers and `cpu`
-for `-ngl 0`. A request takes a ticket in `<state>/gate/<pool>/`, named by the time it was
+port on the lease registry. The device is `gpu` for a server with offload layers and `cpu`
+for `-ngl 0` or `device: cpu` in the spec. A request takes a ticket in `<state>/gate/<device>/`, named by the time it was
 taken, and holds an exclusive file lock on it while it runs; the oldest live ticket runs.
 A process that dies releases its lock, and the next request removes the ticket. A request
 that has waited `ML_STACK_REQUEST_WAIT_S` (default 600) raises `ServerError` with status 429
 naming the request ahead of it: pid, label, how long and which server. Requests to
-different servers in one pool queue behind each other, requests to different pools do not,
-and a thread that already holds the pool is not queued again. A streamed answer holds its
+different servers on one device queue behind each other, requests to different devices do not,
+and a thread that already holds the device is not queued again. A streamed answer holds its
 turn until the stream is read to the end or closed. Servers that are not on the registry
 (including unmanaged ones that were not adopted) are not queued.
 
@@ -122,7 +122,7 @@ for the process, or `with gate.parallel("bench sweep"):` for a block of one thre
 use of each name logs a warning. The benchmarks that measure streams in flight together
 (`bench.speed.cell`, `bench.measure.concurrent`) name themselves and send in parallel.
 
-`ml-stack-serve queue` (and `Broker.snapshot()["requests"]`) lists each pool's line of requests.
+`ml-stack-serve queue` (and `Broker.snapshot()["requests"]`) lists each device's line of requests.
 
 ### Unmanaged servers
 
@@ -152,7 +152,7 @@ before anything is sent to it:
    `total_slots` (two GETs, no credentials, no prompt).
 
 An adopted server is written to the registry with `unmanaged: true` and `owner_pid` set to its
-own pid; its estimate is its resident size and its pool is `gpu`. Its requests queue like any
+own pid; its estimate is its resident size and its device is read from its `-ngl` (`gpu` when absent). Its requests queue like any
 other, `release`, `stop_all`, `stop_all_servers`, `ml-stack-serve down`, idle reclaim and the
 orphan sweep leave it alone, and it leaves the registry when its process ends. The adoption is
 logged with pid, port and model.
@@ -178,8 +178,8 @@ servers and the sum; a fourth asking for one of the three models gets that serve
 
 - Request queueing applies to servers on the registry. A server nobody registered is not
   queued, and neither is one on another machine.
-- Pools are `gpu` and `cpu`; a machine with several GPUs has one `gpu` pool.
-- A process that holds a turn and neither finishes nor dies holds the pool until its request
+- Devices are `gpu` and `cpu`; a machine with several GPUs has one `gpu` device.
+- A process that holds a turn and neither finishes nor dies holds the device until its request
   times out.
 - A server started by `ml-stack` in a process that has since exited without releasing is
   stopped when the memory is needed (local broker) or when the machine's broker has found

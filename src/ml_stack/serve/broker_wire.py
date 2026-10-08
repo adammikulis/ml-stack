@@ -183,7 +183,7 @@ class RemoteBroker:
                      wait_s=timeout, port=ask.port, claim=dict(ask.claim or provenance.asked()),
                      behalf=ask.behalf, options={**self.options, **dict(ask.options)})
         return Grant(**{k: reply[k] for k in ("lease", "purpose", "model", "port", "base_url",
-                                              "shared")})
+                                              "shared", "device")})
 
     def release(self, lease_id: str) -> bool:
         """Let go of a lease."""
@@ -383,7 +383,7 @@ def lease(purpose: str, models: list[str] | tuple[str, ...], *, reason: str,
     reply = call("lease", timeout=None, purpose=purpose, models=list(models), spec=spec or {},
                  weight=weight, label=who(), wait_s=timeout, claim=provenance.asked(reason))
     return Grant(**{k: reply[k] for k in ("lease", "purpose", "model", "port", "base_url",
-                                          "shared")})
+                                          "shared", "device")})
 
 
 def release(lease_id: str) -> bool:

@@ -29,7 +29,7 @@ from ml_stack import activity, gate
 from ml_stack.client import is_healthy, reported_models, serving_params
 from ml_stack.files import read_json, write_json
 from ml_stack.hub import free_memory
-from ml_stack.serve import canaries, grant, guarded, lease_history, provenance, unmanaged
+from ml_stack.serve import admission, canaries, grant, guarded, lease_history, provenance, unmanaged
 from ml_stack.serve.backend import LlamaServerBackend, ServerFailed, ServerInfo, ServerSpec
 from ml_stack.serve.events import Caller, Growth
 from ml_stack.serve.leases import recorded_servers
@@ -50,13 +50,13 @@ _MODEL_START = "gpu-model-start:"
 
 
 _QUANT = re.compile(r"(?i)(?<![a-z0-9])((?:IQ|Q)\d(?:_[A-Z0-9]+)*|BF16|F16|F32)(?![a-z0-9])")
-_FLAGS = ("context", "n_gpu_layers", "parallel", "mtp", "spec_type", "flash_attn", "embedding")
+_FLAGS = ("context", "n_gpu_layers", "device", "parallel", "mtp", "spec_type", "flash_attn", "embedding")
 
 
 def _shape_of(settings: Mapping[str, Any]) -> dict[str, Any]:
     """The settings of a server that decide whether it can be shared, from an ask's spec, a
     `ServerSpec` as a dict or a lease record."""
-    out: dict[str, Any] = {}
+    out: dict[str, Any] = {"device": admission.device_of(settings)}
     for key in ("context", "parallel", "cache_type_k", "cache_type_v", "spec_type", "mtp",
                 "embedding", "draft", "chat_template_file", "spec_draft_max", "spec_p_min"):
         if key in settings and settings[key] is not None:
@@ -122,6 +122,7 @@ class Ask:
         unknown = sorted(set(spec) - _SPEC_FIELDS)
         if unknown:
             raise ValueError(f"not server settings: {', '.join(unknown)}")
+        admission.device_of(spec)
         return cls(purpose=purpose, models=models, pid=int(body.get("pid") or 0),
                    label=str(body.get("label") or ""), weight=int(body.get("weight") or 0),
                    spec=spec, port=int(body.get("port") or 0),
@@ -165,9 +166,11 @@ class Held:
     def short_of(self, asked: Mapping[str, Any]) -> str:
         """Why this server cannot serve ``asked`` (an ask's spec), or "" when it can: it must
         hold at least the context and slots asked for and run the cache type, MTP head and
-        speculation kind asked for. Sharing by model alone served a 256K request from a
+        speculation kind asked for, on the device asked for. Sharing by model alone served a 256K request from a
         32K server."""
         have = self.shape
+        if (device := admission.device_of(asked)) != have.get("device", device):
+            return f"port {self.port} computes on {have['device']}, {device} asked"
         for key, what in (("context", "tokens of context"), ("parallel", "slot(s)")):
             want, got = asked.get(key), have.get(key)
             if isinstance(want, int) and want > 0 and isinstance(got, int) and got < want:
@@ -201,7 +204,7 @@ class Held:
     def said(self) -> dict[str, Any]:
         return {"port": self.port, "model": self.model, "purpose": self.purpose,
                 "pid": self.pid, "ours": self.ours, "unmanaged": self.unmanaged,
-                "loading": self.loading,
+                "loading": self.loading, "device": self.shape.get("device", ""),
                 "base_url": self.base_url,
                 "holders": [{**provenance.record_from(self.records.get(lease, {})),
                              "lease": lease, "pid": pid, "label": label}
@@ -228,6 +231,7 @@ class Grant:
     port: int
     base_url: str
     shared: bool
+    device: str
 
     def as_dict(self) -> dict[str, Any]:
         return dataclasses.asdict(self)
@@ -564,7 +568,8 @@ class Broker:
         self._write_held()
         self._cond.notify_all()
         return Grant(lease=lease, purpose=ask.purpose, model=held.model, port=held.port,
-                     base_url=held.base_url, shared=True)
+                     base_url=held.base_url, shared=True,
+                     device=held.shape["device"])
 
     def _place(self, waiting: Waiting, evict: list[Held]) -> tuple[Held, list[Held]]:
         ask = waiting.ask
@@ -613,7 +618,8 @@ class Broker:
             self._cond.notify_all()
         ask = waiting.ask
         return Grant(lease=waiting.lease, purpose=ask.purpose, model=placeholder.model,
-                     port=placeholder.port, base_url=info.base_url, shared=False)
+                     port=placeholder.port, base_url=info.base_url, shared=False,
+                     device=placeholder.shape["device"])
 
     def _stop(self, held: Held) -> None:
         if held.info is not None and not held.info.adopted:
@@ -766,6 +772,7 @@ class Broker:
                     guarded.unmanaged_seen([proc])
                 found.append(Held(port=proc["port"], model=proc["model"], pid=proc["pid"],
                                   ours=False, unmanaged=not taken, weight=proc["rss"],
+                                  shape={"device": admission.device_of(proc)},
                                   idle_since=now))
         with self._cond:
             for held in found:

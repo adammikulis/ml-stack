@@ -7,8 +7,7 @@ for is charged the same way, and the sum is rated against the memory this machin
 and then refuses. Servers are not counted or limited otherwise; any number may be up while
 they fit.
 
-Servers started with every layer on the accelerator share one pool, ``gpu``; servers with
-none share ``cpu``. `ml_stack.gate` queues the requests of a pool.
+A server runs on the device ``gpu``, or on ``cpu`` when it offloads no layer or says so. `ml_stack.gate` queues the requests of a device.
 """
 
 from __future__ import annotations
@@ -41,9 +40,9 @@ __all__ = [
     "charge",
     "check",
     "compatible",
+    "device_of",
     "estimate_bytes",
     "live",
-    "pool_of",
     "rate",
 ]
 
@@ -91,9 +90,18 @@ def wait_s() -> float:
         return DEFAULT_WAIT_S
 
 
-def pool_of(spec: ServerSpec) -> str:
-    """The accelerator pool ``spec`` computes in."""
-    return "cpu" if str(spec.n_gpu_layers).strip() == "0" else "gpu"
+def device_of(settings: ServerSpec | Mapping[str, Any]) -> str:
+    """The device, ``cpu`` or ``gpu``, a spec or its settings as a dict compute on: the
+    ``device`` given, else ``cpu`` when no layer is offloaded. Raises ``ValueError`` on a
+    device that is neither or that disagrees with ``n_gpu_layers``."""
+    get = settings.get if isinstance(settings, Mapping) else lambda k, d=None: getattr(settings, k, d)
+    given = str(get("device") or "").strip().lower()
+    none_offloaded = str(get("n_gpu_layers") if get("n_gpu_layers") is not None else "auto").strip() == "0"
+    if given not in ("", "cpu", "gpu"):
+        raise ValueError(f"device is cpu or gpu, not {given!r}")
+    if given == "gpu" and none_offloaded:
+        raise ValueError("device gpu with n_gpu_layers 0")
+    return given or ("cpu" if none_offloaded else "gpu")
 
 
 def _size(ref: str | Path | None) -> int:

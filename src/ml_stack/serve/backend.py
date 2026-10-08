@@ -233,6 +233,7 @@ class ServerSpec:
     port: int = 8080
     context: int = 4096
     n_gpu_layers: int | str = "auto"
+    device: str = ""
     parallel: int = 1
     embedding: bool = False
     mmproj: str | Path | None = None
@@ -581,7 +582,9 @@ class LlamaServerBackend(ServerBackend):
 
         argv += ["-c", str(spec.context)]
 
-        if spec.n_gpu_layers == "auto":
+        if spec.device == "cpu":
+            argv += ["-ngl", "0"]
+        elif spec.n_gpu_layers == "auto":
             argv += ["-ngl", "99"]
         elif spec.n_gpu_layers is not None:
             argv += ["-ngl", str(spec.n_gpu_layers)]

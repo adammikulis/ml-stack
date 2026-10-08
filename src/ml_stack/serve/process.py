@@ -212,6 +212,17 @@ def kill_process_tree(pid: int, *, grace_s: float = 5.0) -> list[int]:
     return [proc.pid for proc in victims]
 
 
+def offloaded_layers(argv: list[str]) -> str:
+    """The layer count a llama-server command line offloads (``-ngl``), ``auto`` when absent."""
+    for i, a in enumerate(argv):
+        if a in ("-ngl", "--n-gpu-layers", "--gpu-layers") and i + 1 < len(argv):
+            return argv[i + 1]
+        for flag in ("--n-gpu-layers=", "--gpu-layers="):
+            if a.startswith(flag):
+                return a[len(flag):]
+    return "auto"
+
+
 def every_server() -> list[dict]:
     """Every llama-server process on this machine, leased or not: pid, port, model, the draft
     head it was started with, memory.
@@ -254,6 +265,7 @@ def every_server() -> list[dict]:
                     "draft": after("--spec-draft-model", "-md") or after("--model-draft")
                              or after("-hfd"),
                     "spec_type": after("--spec-type"),
+                    "n_gpu_layers": offloaded_layers(argv),
                     "draft_max": int(ahead) if ahead.isdigit() else None,
                     "rss": rss})
     return sorted(out, key=lambda r: r["port"])
@@ -326,6 +338,7 @@ def listener(port: int) -> dict[str, Any] | None:
                     return {"pid": proc.pid, "ip": conn.laddr.ip,
                             "uid": uids.real if uids else None,
                             "user": proc.username(), "exe": proc.exe(),
+                            "n_gpu_layers": offloaded_layers(proc.cmdline()),
                             "rss": int(proc.memory_info().rss)}
         except (psutil.Error, OSError):
             continue

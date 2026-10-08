@@ -51,15 +51,15 @@ def cmd_queue(args: argparse.Namespace) -> int:
                             for h in held["holders"]) or "nobody"
         state = ("loading" if held["loading"] else "unmanaged" if held["unmanaged"]
                  else "ours" if held["ours"] else "adopted, not ours")
-        say(f":{held['port']}  {held['purpose'] or '-':<10} {held['model']}  [{state}]  "
+        say(f":{held['port']}  {held['purpose'] or '-':<10} {held['model']}  [{held['device'] or '-'}, {state}]  "
             f"held by {holders}")
     for at, waiting in enumerate(snapshot["queue"], start=1):
         say(f"waiting #{at}: {waiting['purpose']} {waiting['model']} for pid {waiting['pid']} "
             f"({waiting['requester']}: {waiting['reason']}), "
             f"{waiting['waited_s']}s -- {waiting['blocked_by'] or 'queued'}")
-    for pool, line in snapshot.get("requests", {}).items():
+    for device, line in snapshot.get("requests", {}).items():
         for at, request in enumerate(line):
-            say(f"requests {pool} #{at}: pid {request.get('pid')} "
+            say(f"requests {device} #{at}: pid {request.get('pid')} "
                 f"({request.get('label') or '-'}) {request.get('url')}"
                 + (" -- running" if request.get("running") else " -- waiting"))
     for name, held in snapshot["claims"].items():

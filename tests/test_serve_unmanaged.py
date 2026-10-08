@@ -209,7 +209,7 @@ def test_auto_adopts_a_verified_server_and_it_is_queued_counted_and_never_stoppe
         assert entry["unmanaged"] is True and entry["owner_pid"] == process.pid
         assert any("adopted" in line and str(process.pid) in line for line in told)
         assert admission.charge(entry) == LLAMA["rss"]
-        assert gate.pool_of(f"http://127.0.0.1:{fake.port}/v1/chat/completions") == "gpu"
+        assert gate.device_of(f"http://127.0.0.1:{fake.port}/v1/chat/completions") == "gpu"
 
         manager.release(info)
         manager.stop_all()

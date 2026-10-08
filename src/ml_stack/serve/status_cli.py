@@ -144,6 +144,8 @@ def _say_leases(held: list[holding.Hold]) -> None:
     for one in held:
         since = time.strftime("%F %T", time.localtime(one.since)) if one.since else "-"
         where = f"port {one.port}" if one.port else one.status
+        device = next((s.get("device") for s in servers if s["port"] == one.port), "")
+        where += f" on {device}" if device else ""
         say(f"lease {one.id}  {Path(one.model).name}  context {one.context:,}  {where}  "
             f"held by pid {one.pid}  {human_bytes(one.memory) if one.memory else 'memory unmeasured'}"
             f"  since {since}" + (f"  idle {one.idle_s:.0f}s" if one.idle_s else ""))
@@ -188,6 +190,7 @@ def cmd_status(args: argparse.Namespace) -> int:
         say(f"  context  {snapshot.context if snapshot.context is not None else 'not reported'}"
             " per slot")
         say(f"  slots    {snapshot.slots if snapshot.slots is not None else 'not reported'}")
+        say(f"  device   {snapshot.device or 'not recorded'}")
         say(f"  lease    {_lease_line(snapshot)}")
         if snapshot.iq_warning:
             say(f"  WARNING  {status_note(snapshot.iq_warning)}")

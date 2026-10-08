@@ -695,7 +695,7 @@ class ServerManager(Admitting):
         self._mine[str(spec.port)] = {
             "port": spec.port, "pid": None, "backend": self.backend_for(spec).name,
             "model": str(spec.model), "owner_pid": os.getpid(), "pending": True,
-            "pool": admission.pool_of(spec), "est_bytes": est_bytes,
+            "device": admission.device_of(spec), "est_bytes": est_bytes,
             "embedding": bool(spec.embedding), "mmproj": bool(spec.mmproj),
             "context": int(spec.context), "parallel": int(spec.parallel or 1),
         }
@@ -711,7 +711,7 @@ class ServerManager(Admitting):
             "backend": info.backend,
             "model": str(spec.model),
             "owner_pid": os.getpid(),
-            "pool": admission.pool_of(spec),
+            "device": admission.device_of(spec),
             "est_bytes": (self._mine.get(str(spec.port)) or {}).get("est_bytes", 0),
             "embedding": bool(spec.embedding),
             "mmproj": bool(spec.mmproj),
