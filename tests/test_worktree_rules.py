@@ -305,6 +305,14 @@ def test_hook_repository_environment_does_not_change_checkout_identity(repo, mon
     assert worktreerules.commit_refusal(primary, {"ML_STACK_AGENT": "test"}) == ""
 
 
+def test_read_only_stash_commands_are_allowed_in_the_primary_checkout(repo):
+    primary, _, _ = repo
+    assert worktreerules.bash_refusal("git stash list", str(primary)) == ""
+    assert worktreerules.bash_refusal("git stash show -p", str(primary)) == ""
+    assert worktreerules.bash_refusal("git stash", str(primary))
+    assert worktreerules.bash_refusal("git stash pop", str(primary))
+
+
 def test_main_branch_edits_and_commits_are_refused(repo):
     primary, work, _ = repo
     git(primary, "checkout", "-q", "-b", "main")

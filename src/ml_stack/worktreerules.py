@@ -167,6 +167,11 @@ def _landing(segment: str) -> bool:
             and ":" not in names[0] and ".." not in names[0])
 
 
+def _reads_only(segment: str) -> bool:
+    """Whether a git command in CHANGES_THE_TREE only looks: `git stash list` and `git stash show`."""
+    return re.match(GIT + r"\s+(list|show)\b", segment) is not None and "stash" in segment.split()
+
+
 def _installs(segment: str, here: Path) -> list[Path]:
     if not re.match(INSTALL, segment):
         return []
@@ -223,7 +228,7 @@ def bash_refusal(command: str, cwd: str) -> str:
             found = checkouts(where)
             if found and _enforced(found[1]) and (why := worktree_refusal(where / target, where)):
                 return why
-        if git and git["verb"] in CHANGES_THE_TREE:
+        if git and git["verb"] in CHANGES_THE_TREE and not _reads_only(segment):
             given = re.search(r"\s-C\s+(\S+)", segment)
             where = here / _unquote(given.group(1)) if given else here
             primary = in_primary(where)
