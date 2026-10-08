@@ -136,6 +136,7 @@ def test_history_filters_actor_exact_runtime_and_family_over_the_same_review(boa
             page = browser.new_page(viewport={'width': 390, 'height': 844})
             page.goto(f'http://127.0.0.1:{server.port}/ui/#history')
             view = page.locator('history-view')
+            view.locator('details.activity-reputation > summary').click()
             credits = view.locator('#history-credits')
             expect(credits.locator('summary').filter(has_text='Qwen · 10 credits')).to_be_visible()
             view.locator('#history-dimension').select_option('agent')

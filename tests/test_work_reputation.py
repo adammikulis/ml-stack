@@ -146,6 +146,7 @@ def test_history_shows_verified_score_and_expandable_parent_evidence(work, tmp_p
             page = browser.new_page(viewport={'width': 390, 'height': 844})
             page.goto(f'http://127.0.0.1:{server.port}/ui/#history')
             viewer = page.locator('history-view')
+            viewer.locator('details.activity-reputation > summary').click()
             viewer.locator('#history-credits > details > summary').filter(has_text=work.agent_id).click()
             viewer.get_by_text(f"Task {work.task['seq']} · verified by lead", exact=True).click()
             expect(viewer.get_by_text('native regression suite', exact=False)).to_be_visible()
