@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -9,6 +10,7 @@ from pathlib import Path
 __all__ = ["Checkout", "git_ok", "inspect", "run_git"]
 
 GIT_TIMEOUT_S = 2.0
+HOOK_VARIABLES = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE")
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,8 +23,9 @@ class Checkout:
 
 def _run(cwd: str | Path, *args: str) -> subprocess.CompletedProcess[str] | None:
     try:
+        env = {k: v for k, v in os.environ.items() if k not in HOOK_VARIABLES}
         return subprocess.run(["git", "-C", str(cwd), *args], capture_output=True, text=True, check=False,
-                              timeout=GIT_TIMEOUT_S)
+                              timeout=GIT_TIMEOUT_S, env=env)
     except (OSError, subprocess.TimeoutExpired):
         return None
 

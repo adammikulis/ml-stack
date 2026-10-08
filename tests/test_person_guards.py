@@ -19,6 +19,7 @@ from person_support import (
     commit,
     environment,
     git,
+    person_consume,
     repository,
     rows,
     say,
@@ -66,6 +67,13 @@ def test_the_approved_release_goes_through_once_and_is_recorded(world):
     second = push(repo, state, release(repo), **AGENT)
     assert second.returncode != 0 and "no live release-main authorization" in second.stderr
     assert [r["state"] for r in rows(state) if r["type"] == "transition"] == ["used"]
+
+
+def test_the_facts_come_from_the_repository_even_when_git_exports_its_own_directory(world):
+    tmp, state, repo = world
+    other = repository(tmp / "elsewhere")
+    done = person_consume(repo, state, "propose", GIT_DIR=str(other / ".git"), GIT_WORK_TREE=str(other))
+    assert done.returncode == 0 and tip(repo) in done.stdout and tip(other) not in done.stdout
 
 
 def test_a_push_of_main_without_an_approval_is_refused_and_says_how_to_ask(world):
