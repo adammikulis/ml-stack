@@ -1,0 +1,465 @@
+#!/usr/bin/env python3
+"""Compare the GitHub repository with the target in docs/github-protection.md.
+
+    scripts/github-protection --check            local checks, then read-only `gh api` GET calls
+    scripts/github-protection --check --local    CODEOWNERS coverage and workflow rules only
+    scripts/github-protection --check --agent    also fail when these credentials can administer the repository
+
+One line per finding with the section of the document that fixes it; exit 1 when anything drifts,
+2 when there is no repository to read. The script issues GET requests only.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+DOC = "docs/github-protection.md"
+WORKFLOWS = ROOT / ".github" / "workflows"
+ENVIRONMENT = "release"
+SECRET = "RELEASE_SIGNING_KEY"
+
+PROTECTED = (
+    ".github/", ".claude/", "packaging/", "SECURITY.md", "pyproject.toml", "budgets.json",
+    "scripts/hooks/", "scripts/gates/", "scripts/budgets", "scripts/land*", "scripts/test*",
+    "scripts/release-key", "scripts/github-protection", "scripts/audit_gate.py",
+    "tests/known-fixtures.txt", "src/ml_stack/fleet/signing.py", "src/ml_stack/guard/",
+    "src/ml_stack/person.py", "src/ml_stack/worktreerules.py",
+    "src/ml_stack/workspace/person_*.py",
+)
+"""Paths whose change decides what the gates, the guards or the release signing accept."""
+
+MAIN_RULES = {"deletion", "non_fast_forward", "pull_request", "required_status_checks"}
+DEV_RULES = {"deletion", "non_fast_forward"}
+DEV_FORBIDDEN = {"update", "creation", "pull_request", "required_status_checks"}
+TAG_RULES = {"deletion", "non_fast_forward", "update", "creation"}
+MAIN_CHECKS = ("gates", "privacy", "licenses")
+SCANNING = ("secret_scanning", "secret_scanning_push_protection", "dependabot_security_updates")
+WRITE_ALLOWED = {"security-events"}
+ID_TOKEN_WITHOUT_ENVIRONMENT = {"scorecard.yml"}
+
+
+class Unreadable(Exception):
+    """A GET that gh could not complete."""
+
+
+def finding(code: str, text: str, section: str) -> str:
+    return f"{code:<34} {text}  -> {DOC}#{section}"
+
+
+def gh_get(path: str):
+    """The JSON body of one GET request to the GitHub API."""
+    try:
+        done = subprocess.run(["gh", "api", path], capture_output=True, text=True, check=False)
+    except FileNotFoundError:
+        raise Unreadable("gh is not installed") from None
+    if done.returncode:
+        raise Unreadable((done.stderr.strip() or done.stdout.strip() or "gh failed").splitlines()[0])
+    try:
+        return json.loads(done.stdout)
+    except ValueError:
+        raise Unreadable(f"{path} did not return JSON") from None
+
+
+def read(path: str, code: str, section: str, out: list[str]):
+    """The body at ``path``, or None after recording that it could not be read."""
+    try:
+        return gh_get(path)
+    except Unreadable as exc:
+        out.append(finding(code, f"cannot read {path}: {exc}", section))
+        return None
+
+
+# -- CODEOWNERS ---------------------------------------------------------------------------
+
+def owners_rules(text: str) -> list[tuple[str, list[str]]]:
+    """The (pattern, owners) rules of a CODEOWNERS file, in order."""
+    rules = []
+    for line in text.splitlines():
+        parts = line.split("#", 1)[0].split()
+        if parts:
+            rules.append((parts[0], parts[1:]))
+    return rules
+
+
+def pattern_regex(pattern: str) -> re.Pattern[str]:
+    """The regular expression a CODEOWNERS pattern means."""
+    anchored = pattern.startswith("/") or "/" in pattern.strip("/")
+    body = pattern.strip("/")
+    out, i = [], 0
+    while i < len(body):
+        if body.startswith("**", i):
+            out.append(".*")
+            i += 2
+            continue
+        char = body[i]
+        out.append("[^/]*" if char == "*" else "[^/]" if char == "?" else re.escape(char))
+        i += 1
+    return re.compile(("^" if anchored else "^(?:.*/)?") + "".join(out) + "(?:/.*)?$")
+
+
+def owners_of(path: str, rules: list[tuple[str, list[str]]]) -> tuple[str, list[str]]:
+    """The last rule matching ``path``; later rules win."""
+    found = ("", [])
+    for pattern, owners in rules:
+        if pattern_regex(pattern).match(path):
+            found = (pattern, owners)
+    return found
+
+
+def tracked_files() -> list[str]:
+    done = subprocess.run(["git", "ls-files"], capture_output=True, text=True, cwd=ROOT, check=False)
+    return done.stdout.splitlines() if done.returncode == 0 else []
+
+
+def check_codeowners(files: list[str] | None = None) -> list[str]:
+    """Findings for protected paths without a rule of their own."""
+    path = ROOT / ".github" / "CODEOWNERS"
+    if not path.is_file():
+        return [finding("codeowners.file", ".github/CODEOWNERS is missing", "codeowners")]
+    rules = owners_rules(path.read_text(encoding="utf-8"))
+    tree = tracked_files() if files is None else files
+    out = []
+    for spec in PROTECTED:
+        regex = pattern_regex(spec)
+        hit = [f for f in tree if regex.match(f)]
+        if not hit:
+            out.append(finding("codeowners.stale", f"{spec} names no tracked file", "codeowners"))
+        for name in hit:
+            rule, owners = owners_of(name, rules)
+            if rule in ("", "*") or not owners:
+                out.append(finding("codeowners.uncovered", f"{name} falls under {rule or 'no rule'}",
+                                   "codeowners"))
+    return out
+
+
+# -- workflows ----------------------------------------------------------------------------
+
+def triggers(workflow: dict) -> set[str]:
+    on = workflow.get("on", workflow.get(True))
+    if isinstance(on, str):
+        return {on}
+    return set(on) if isinstance(on, (list, dict)) else set()
+
+
+def writes(permissions) -> set[str]:
+    if permissions == "write-all":
+        return {"write-all"}
+    return {k for k, v in (permissions or {}).items() if v == "write"} if isinstance(
+        permissions, dict) else set()
+
+
+def job_findings(name: str, workflow: dict, job_id: str, job: dict) -> list[str]:
+    where = f"{name}:{job_id}"
+    out = []
+    if job.get("secrets") == "inherit":
+        out.append(finding("workflow.secrets-inherit", f"{where} passes every secret", "workflow-rules"))
+    if "runs-on" not in job:
+        return out
+    granted = writes(job.get("permissions"))
+    if "id-token" in granted and "environment" not in job and name not in ID_TOKEN_WITHOUT_ENVIRONMENT:
+        out.append(finding("workflow.id-token", f"{where} mints an OIDC token outside an environment",
+                           "workflow-rules"))
+    if triggers(workflow) & {"pull_request", "pull_request_target"} and granted - WRITE_ALLOWED:
+        out.append(finding("workflow.pr-write", f"{where} runs on pull requests with "
+                           f"{', '.join(sorted(granted - WRITE_ALLOWED))}: write", "workflow-rules"))
+    text = json.dumps(job)
+    secrets = set(re.findall(r"secrets\.([A-Za-z_][A-Za-z0-9_]*)", text)) - {"GITHUB_TOKEN"}
+    if secrets and "environment" not in job:
+        out.append(finding("workflow.secret-scope", f"{where} reads {', '.join(sorted(secrets))} "
+                           "outside an environment", "workflow-rules"))
+    return out
+
+
+def workflow_findings(name: str, workflow: dict, text: str) -> list[str]:
+    out = []
+    for ref in re.findall(r"uses:\s*(\S+)", text):
+        if not ref.startswith("./") and not re.fullmatch(r".+@[0-9a-f]{40}", ref):
+            out.append(finding("workflow.unpinned", f"{name}: {ref} is not pinned to a commit",
+                               "workflow-rules"))
+    if "pull_request_target" in triggers(workflow):
+        out.append(finding("workflow.pr-target", f"{name} runs pull_request_target", "workflow-rules"))
+    if writes(workflow.get("permissions")):
+        out.append(finding("workflow.top-write", f"{name} grants write to every job", "workflow-rules"))
+    for job_id, job in (workflow.get("jobs") or {}).items():
+        out += job_findings(name, workflow, job_id, job)
+    return out
+
+
+def release_findings(texts: dict[str, str]) -> list[str]:
+    out = []
+    if "merge-base --is-ancestor" not in texts.get("release.yml", ""):
+        out.append(finding("workflow.tag-guard", "release.yml does not require the tagged commit to be "
+                           "on main", "workflow-rules"))
+    ci = texts.get("ci.yml", "")
+    if "path: trusted" not in ci or "github.event.pull_request.base.sha" not in ci:
+        out.append(finding("workflow.base-gate", "ci.yml runs the gates from the pull request's own "
+                           "tree", "workflow-rules"))
+    return out
+
+
+def check_workflows() -> list[str]:
+    """Findings for the workflow files under .github/workflows."""
+    try:
+        import yaml
+    except ImportError:
+        return [finding("workflow.yaml", "PyYAML is not installed, so no workflow was read",
+                        "workflow-rules")]
+    out, texts = [], {}
+    for path in sorted(WORKFLOWS.glob("*.yml")):
+        texts[path.name] = path.read_text(encoding="utf-8")
+        try:
+            workflow = yaml.safe_load(texts[path.name])
+        except yaml.YAMLError as exc:
+            out.append(finding("workflow.parse", f"{path.name} does not parse: {exc}", "workflow-rules"))
+            continue
+        out += workflow_findings(path.name, workflow, texts[path.name])
+    return out + release_findings(texts)
+
+
+# -- rulesets -----------------------------------------------------------------------------
+
+def rule_types(rulesets: list[dict]) -> set[str]:
+    return {r["type"] for rs in rulesets for r in rs.get("rules", [])}
+
+
+def parameters(rulesets: list[dict], kind: str) -> dict:
+    for rs in rulesets:
+        for rule in rs.get("rules", []):
+            if rule["type"] == kind:
+                return rule.get("parameters") or {}
+    return {}
+
+
+def ruleset_group(rulesets: list[dict], target: str, ref: str) -> list[dict]:
+    return [rs for rs in rulesets if rs.get("target") == target
+            and ref in ((rs.get("conditions") or {}).get("ref_name") or {}).get("include", [])]
+
+
+def group_findings(label: str, group: list[dict], needed: set[str], section: str,
+                   forbidden: set[str] = frozenset()) -> list[str]:
+    if not group:
+        return [finding(f"ruleset.{label}.missing", f"no ruleset covers {label}", section)]
+    out = []
+    for rs in group:
+        if rs.get("enforcement") != "active":
+            out.append(finding(f"ruleset.{label}.enforcement",
+                               f"{rs.get('name')} is {rs.get('enforcement')}, not active", section))
+        for actor in rs.get("bypass_actors") or []:
+            out.append(finding(f"ruleset.{label}.bypass", f"{rs.get('name')} lets {actor.get('actor_type')} "
+                               f"{actor.get('actor_id')} bypass ({actor.get('bypass_mode')})", section))
+    have = rule_types(group)
+    for rule in sorted(needed - have):
+        out.append(finding(f"ruleset.{label}.rule", f"{label} lacks the {rule} rule", section))
+    for rule in sorted(forbidden & have):
+        out.append(finding(f"ruleset.{label}.extra", f"{label} carries the {rule} rule", section))
+    return out
+
+
+def main_findings(group: list[dict], signatures: bool) -> list[str]:
+    needed = MAIN_RULES | ({"required_signatures"} if signatures else set())
+    out = group_findings("main", group, needed, "main-branch-ruleset")
+    pr = parameters(group, "pull_request")
+    for key, want in (("require_code_owner_review", True), ("dismiss_stale_reviews_on_push", True),
+                      ("require_last_push_approval", True)):
+        if pr and pr.get(key) is not want:
+            out.append(finding("ruleset.main.pull-request", f"pull_request.{key} is {pr.get(key)}",
+                               "main-branch-ruleset"))
+    if pr and pr.get("required_approving_review_count", 0) < 1:
+        out.append(finding("ruleset.main.pull-request", "no approving review is required",
+                           "main-branch-ruleset"))
+    contexts = [c.get("context", "") for c in parameters(group, "required_status_checks").get(
+        "required_status_checks", [])]
+    for name in MAIN_CHECKS:
+        if group and name not in contexts and "required_status_checks" in rule_types(group):
+            out.append(finding("ruleset.main.checks", f"status check {name} is not required",
+                               "main-branch-ruleset"))
+    if group and "required_status_checks" in rule_types(group) and not any(
+            c.startswith("test (") for c in contexts):
+        out.append(finding("ruleset.main.checks", "no test job is a required status check",
+                           "main-branch-ruleset"))
+    return out
+
+
+def check_rulesets(repo: str, signatures: bool) -> list[str]:
+    out: list[str] = []
+    listing = read(f"repos/{repo}/rulesets", "ruleset.read", "rulesets", out)
+    if listing is None:
+        return out
+    full = []
+    for entry in listing:
+        body = read(f"repos/{repo}/rulesets/{entry['id']}", "ruleset.read", "rulesets", out)
+        if body is not None:
+            full.append(body)
+    out += main_findings(ruleset_group(full, "branch", "~DEFAULT_BRANCH"), signatures)
+    out += group_findings("dev", ruleset_group(full, "branch", "refs/heads/*dev"), DEV_RULES,
+                          "development-branch-ruleset", DEV_FORBIDDEN)
+    out += group_findings("tags", ruleset_group(full, "tag", "refs/tags/v*"), TAG_RULES,
+                          "release-tag-ruleset")
+    return out
+
+
+# -- environment, secrets, Actions, security ----------------------------------------------
+
+def check_environment(repo: str, owner: str) -> list[str]:
+    out: list[str] = []
+    env = read(f"repos/{repo}/environments/{ENVIRONMENT}", "env.read", "the-release-environment", out)
+    if env is not None:
+        rules = env.get("protection_rules") or []
+        people = [r["reviewer"].get("login") for rule in rules if rule.get("type") == "required_reviewers"
+                  for r in rule.get("reviewers", []) if r.get("type") == "User"]
+        if owner not in people:
+            out.append(finding("env.reviewer", f"{ENVIRONMENT} does not require review by {owner}",
+                               "the-release-environment"))
+        if len(people) > 1 or any(rule.get("type") == "required_reviewers" and any(
+                r.get("type") != "User" for r in rule.get("reviewers", [])) for rule in rules):
+            out.append(finding("env.reviewer", f"{ENVIRONMENT} names reviewers besides {owner}",
+                               "the-release-environment"))
+        if env.get("can_admins_bypass") is not False:
+            out.append(finding("env.admin-bypass", f"administrators can bypass {ENVIRONMENT} protection",
+                               "the-release-environment"))
+        policy = env.get("deployment_branch_policy") or {}
+        if not policy.get("custom_branch_policies"):
+            out.append(finding("env.deployment", f"{ENVIRONMENT} deploys from any branch",
+                               "the-release-environment"))
+        else:
+            out += environment_refs(repo)
+    out += check_secret_scope(repo)
+    return out
+
+
+def environment_refs(repo: str) -> list[str]:
+    out: list[str] = []
+    found = read(f"repos/{repo}/environments/{ENVIRONMENT}/deployment-branch-policies", "env.read",
+                 "the-release-environment", out)
+    if found is None:
+        return out
+    names = {(p.get("type", "branch"), p.get("name")) for p in found.get("branch_policies", [])}
+    for want in (("branch", "main"), ("tag", "v*")):
+        if want not in names:
+            out.append(finding("env.deployment", f"{ENVIRONMENT} does not allow deployment from "
+                               f"{want[0]} {want[1]}", "the-release-environment"))
+    extra = names - {("branch", "main"), ("tag", "v*")}
+    if extra:
+        out.append(finding("env.deployment", f"{ENVIRONMENT} also allows {sorted(extra)}",
+                           "the-release-environment"))
+    return out
+
+
+def secret_names(body) -> set[str]:
+    return {s.get("name") for s in (body or {}).get("secrets", [])}
+
+
+def check_secret_scope(repo: str) -> list[str]:
+    out: list[str] = []
+    held = read(f"repos/{repo}/actions/secrets", "secret.read", "the-release-environment", out)
+    if held is not None and SECRET in secret_names(held):
+        out.append(finding("secret.repository", f"{SECRET} is a repository secret, readable by "
+                           "any workflow on any branch", "the-release-environment"))
+    scoped = read(f"repos/{repo}/environments/{ENVIRONMENT}/secrets", "secret.read",
+                  "the-release-environment", out)
+    if scoped is not None and SECRET not in secret_names(scoped):
+        out.append(finding("secret.environment", f"{SECRET} is not a secret of {ENVIRONMENT}",
+                           "the-release-environment"))
+    return out
+
+
+def check_actions(repo: str) -> list[str]:
+    out: list[str] = []
+    flow = read(f"repos/{repo}/actions/permissions/workflow", "actions.read", "actions-settings", out)
+    if flow is not None:
+        if flow.get("default_workflow_permissions") != "read":
+            out.append(finding("actions.default-token", "the default workflow token is not read-only",
+                               "actions-settings"))
+        if flow.get("can_approve_pull_request_reviews"):
+            out.append(finding("actions.approve-reviews", "workflows may approve pull requests",
+                               "actions-settings"))
+    general = read(f"repos/{repo}/actions/permissions", "actions.read", "actions-settings", out)
+    if general is not None:
+        if general.get("allowed_actions") != "selected":
+            out.append(finding("actions.allowed", "any action may run; the allow list is not set",
+                               "actions-settings"))
+        if general.get("sha_pinning_required") is False:
+            out.append(finding("actions.sha-pinning", "actions are not required to be pinned to a commit",
+                               "actions-settings"))
+    fork = read(f"repos/{repo}/actions/permissions/fork-pr-contributor-approval", "actions.read",
+                "actions-settings", out)
+    if fork is not None and fork.get("approval_policy") != "all_external_contributors":
+        out.append(finding("actions.fork-approval", f"approval policy is {fork.get('approval_policy')}",
+                           "actions-settings"))
+    return out
+
+
+def check_repository(repo: str, agent: bool) -> list[str]:
+    out: list[str] = []
+    body = read(f"repos/{repo}", "repo.read", "code-security-settings", out)
+    if body is None:
+        return out
+    scanning = body.get("security_and_analysis") or {}
+    for key in SCANNING:
+        if (scanning.get(key) or {}).get("status") != "enabled":
+            out.append(finding(f"security.{key}", f"{key} is not enabled", "code-security-settings"))
+    if body.get("allow_auto_merge"):
+        out.append(finding("repo.auto-merge", "auto-merge is allowed", "who-merges"))
+    if agent and (body.get("permissions") or {}).get("admin"):
+        out.append(finding("identity.admin", "these credentials can administer the repository",
+                           "agent-identity"))
+    if agent:
+        out += agent_identity(repo)
+    return out
+
+
+def agent_identity(repo: str) -> list[str]:
+    out: list[str] = []
+    who = read("user", "identity.read", "agent-identity", out)
+    if who is not None and who.get("login") == repo.split("/")[0]:
+        out.append(finding("identity.owner", f"these credentials are the account {who.get('login')}, "
+                           "the repository owner", "agent-identity"))
+    return out
+
+
+def check_remote(repo: str, args: argparse.Namespace) -> list[str]:
+    owner = repo.split("/")[0]
+    return (check_rulesets(repo, args.require_signatures) + check_environment(repo, owner)
+            + check_actions(repo) + check_repository(repo, args.agent))
+
+
+def default_repo() -> str:
+    """OWNER/NAME of the repository gh is pointed at."""
+    done = subprocess.run(["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
+                          capture_output=True, text=True, cwd=ROOT, check=False)
+    return done.stdout.strip() if done.returncode == 0 else ""
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="github-protection", description=__doc__.splitlines()[0])
+    parser.add_argument("--check", action="store_true", required=True, help="report drift")
+    parser.add_argument("--local", action="store_true", help="skip every GitHub request")
+    parser.add_argument("--repo", help="OWNER/NAME; defaults to the repository gh is pointed at")
+    parser.add_argument("--agent", action="store_true",
+                        help="the credentials in use are an agent's: fail when they are the owner's")
+    parser.add_argument("--require-signatures", action="store_true",
+                        help="also require signed commits on the default branch")
+    args = parser.parse_args(argv)
+
+    findings = check_codeowners() + check_workflows()
+    if not args.local:
+        repo = args.repo or default_repo()
+        if not repo:
+            print("github-protection: no repository: pass --repo OWNER/NAME or sign in with gh",
+                  file=sys.stderr)
+            return 2
+        findings += check_remote(repo, args)
+    for line in findings:
+        print(line)
+    print(f"{len(findings)} finding{'s' if len(findings) != 1 else ''}"
+          f"{' (local only)' if args.local else ''}")
+    return 1 if findings else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

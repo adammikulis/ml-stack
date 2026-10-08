@@ -3,8 +3,9 @@ on:
   push:
     branches: [main, "*dev"]
     paths-ignore: ["**.md", "docs/**"]
+  # No path filter: a required check that never starts leaves a documentation-only
+  # pull request unmergeable.
   pull_request:
-    paths-ignore: ["**.md", "docs/**"]
   workflow_dispatch:
     inputs:
       macos-pytest:
