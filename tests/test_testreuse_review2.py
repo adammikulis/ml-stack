@@ -294,3 +294,19 @@ def test_the_services_environment_does_not_choose_the_store(board, tmp_path, mon
     head = git(checkout(board), "rev-parse", "HEAD")
     with pytest.raises(ValueError, match="verifies"):
         board.board.checkpoint(board.child, board.task["id"], {"summary": "ok", "test_entry": entry, "commit": head})
+
+
+def test_removing_a_temporary_directory_is_not_a_write_into_the_checkout(project, tmp_path):
+    store = storage.Store(tmp_path / "store")
+    (project / FILE).write_text(
+        "import tempfile\n\n\ndef test_a():\n    with tempfile.TemporaryDirectory() as folder:\n"
+        "        open(folder + '/x', 'w').write('1')\n")
+    report, _ = attempt(project, store)
+    assert report.outcomes[0].passed and "pass" in kinds(store)
+
+
+def test_library_code_that_uses_sqlite_does_not_bar_a_file_that_does_not(project, tmp_path):
+    store = storage.Store(tmp_path / "store")
+    (project / HELPER).write_text("import sqlite3\n\nVALUE = 1\n\n\ndef db():\n    return sqlite3.connect(':memory:')\n")
+    attempt(project, store)
+    assert hows(attempt(project, store)[0]) == ["reused"]
