@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from ml_stack.http import ServerError, ServerUnreachable, open_stream
-from ml_stack.hub.capabilities import allows_chat
+from ml_stack.hub.capabilities import allows_chat, capabilities as model_capabilities
 
 __all__ = ["ChatError", "Target", "find", "reply_text", "stream", "targets"]
 
@@ -30,6 +30,7 @@ class Target:
     token: str = ""
     peer: str = ""
     alias: str = ""
+    capabilities: dict[str, Any] = field(default_factory=model_capabilities)
 
     @property
     def local(self) -> bool:
@@ -37,7 +38,12 @@ class Target:
 
     def public(self) -> dict[str, Any]:
         return {"model": self.model, "peer": self.peer, "local": self.local,
+                'capabilities': self.capabilities,
                 "path": self.alias if self.local and Path(self.alias).is_absolute() else ""}
+
+
+def _capabilities(value):
+    return value if isinstance(value, dict) and 'chat' in value else model_capabilities()
 
 
 def targets(peers: list[dict[str, Any]], serving: Any = None,
@@ -50,6 +56,7 @@ def targets(peers: list[dict[str, Any]], serving: Any = None,
         for model in served.models:
             out.append(Target(model=model,
                               url=f"http://127.0.0.1:{served.port}{CHAT_PATH}",
+                              capabilities=_capabilities(getattr(served, 'capabilities', None)),
                               alias=next((name for name in served.aliases if Path(name).name == model), model)))
     here = {t.model for t in out}
     for beacon in peers:
@@ -67,6 +74,7 @@ def targets(peers: list[dict[str, Any]], serving: Any = None,
                 out.append(Target(model=str(model),
                                   url=f"{base}/infer{CHAT_PATH}",
                                   token=token,
+                                  capabilities=_capabilities(served.get('capabilities')),
                                   peer=str(beacon.get("name") or "")))
     out.sort(key=lambda t: (not t.local, t.peer, t.model))
     return out

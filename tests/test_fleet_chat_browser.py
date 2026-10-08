@@ -180,6 +180,10 @@ def test_picker_excludes_known_non_chat_and_keeps_unknown_models(chat_browser):
     from playwright.sync_api import expect
 
     served, page = chat_browser
+    page.unroute('**/ui/chat')
+    page.route('**/ui/chat', lambda route: route.fulfill(json={'models': [
+        {'model': 'Known loaded decoder', 'local': True, 'capabilities': {'chat': True}},
+        {'model': 'Unknown loaded decoder', 'local': True, 'capabilities': {'chat': None}}]}))
     page.route('**/ui/models', lambda route: route.fulfill(json={'ok': True, 'library': [
         {'path': '/models/embedding.gguf', 'name': 'Embedding model', 'family': 'Encoder',
          'servable': True, 'capabilities': {'chat': False, 'embedding': True}},
@@ -197,6 +201,8 @@ def test_picker_excludes_known_non_chat_and_keeps_unknown_models(chat_browser):
     expect(choices).to_contain_text('Chat decoder')
     expect(choices).not_to_contain_text('Embedding model')
     expect(choices).not_to_contain_text('Speech model')
+    expect(choices.get_by_role('button', name='Unknown loaded decoder Loaded · Chat capability unverified', exact=True)).to_be_visible()
+    expect(choices.get_by_role('button', name='Known loaded decoder Loaded', exact=True)).to_be_visible()
     assert len(page.locator('chat-view').evaluate('node => node.modelPicker.library')) == 4
     choices.get_by_role('button', name='Future decoder Installed · Chat capability unverified Configure in Models →', exact=True).click()
     expect(page.locator('models-view #models')).to_be_visible()

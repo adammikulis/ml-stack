@@ -110,6 +110,9 @@ class TestPickingWhereToSend:
             {'models': ['speech'], 'capabilities': {'chat': False}},
             {'models': ['remote-decoder'], 'capabilities': {'chat': True}}]}}
         assert [row.model for row in targets([peer], Local())] == ['future-decoder.gguf', 'remote-decoder']
+        found = targets([peer], Local())
+        assert found[0].public()['capabilities']['chat'] is None
+        assert found[1].public()['capabilities']['chat'] is True
 
     def test_a_machine_serving_nothing_still_sees_a_peers_model(self, host):
         found = targets([host], serving=None, token="t")
