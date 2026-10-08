@@ -84,6 +84,13 @@ may nominate an eligible main session. Readable labels never add permissions or 
 workspace authority. Register main-session presentation through the authenticated
 `ml-stack-workspace main-session --agent ID` flow; subagent briefs use the actual parent identity.
 
+**The lowest tier never coordinates.** The lowest model tier a vendor offers (Haiku, Luna and the
+like) is never a coordinator or eligible for promotion to one. A model that is not listed in the
+tier table is not eligible either. When only lowest-tier agents are present, one of them spawns a
+subagent at a suitable level (Sonnet 5.5 is acceptable) to coordinate, and that subagent hands
+coordination back when a higher-tier main session joins. Tier is read from the exact model
+identifier in the registry through a maintained table, never from a display name or a label.
+
 **Say which model you are.** Agents are identified by the specific model they run. A lead joining
 passes its own model id (`--model <id>`), and each subagent runs
 `ml-stack-workspace hello-model LABEL MODEL` once with the model it was started as (it inherits
@@ -274,15 +281,28 @@ that starts a task, finishes a task or returns from a wait fetches and fast-forw
 development branch first, so no one works on history another device has already moved. A
 local-only commit on the development branch is not left past the end of the task that made it.
 
+**Keep the landing queue short.** Throughput is limited by unlanded work, not typing speed.
+- Branches are cut from current development, stay under ten commits, and land the day they are
+  ready. Land a stack bottom-up, one layer at a time. Past 50 commits or 20 behind development,
+  split a branch into separately landing batches instead of carrying it.
+- Run `git cherry <dev> <branch>` before porting and drop equivalent patches. Record the tree hash
+  a gate ran on; a tree already gated is not gated again.
+- Finish before starting: no new branch while your own ready branches await landing; about ten
+  open worktrees at most per lead.
+- When the parent's brief grants it, a subagent whose leaf passed its affected selectors lands it
+  itself under the short branch claim (fetch, merge development, rerun only the selectors the
+  merge touched, fast-forward, push, release). Batches needing the shared gates go through the lead.
+- If a combined gate fails, bisect to the branch, eject it to its owner, and land the rest.
+- Claims cover a step: heartbeat while working, release when idle, never hold one across a wait.
+  Ask a stale claim's owner once, then use documented recovery.
+- A `HANDOFF.md` or log conflict keeps both sides and never holds a landing.
+
 The primary development checkout may receive reviewed changes through a fast-forward merge or
 authorized direct edits and named-file commits. Resolve conflicts in an isolated worktree. The
 retained primary checkout is never removed as temporary-worktree cleanup.
 
-The main session lands each branch it asked for, or the agent does, but one of them does, the
-same day. A branch nobody lands is work nobody has. Whoever merges, prunes: a subagent that
-lands its own branch removes its own worktree and branch, and when the main session merges it
-does so in the same step. A merge is not finished until `git worktree list` shows only trees
-with live work in them.
+Whoever merges, prunes: the lander removes its own worktree and branch in the same step. A merge
+is not finished until `git worktree list` shows only trees with live work in them.
 
 Canonical coding tasks own their worktree lifecycle: assignment reserves the path and branch,
 claiming creates the checkout, independent review accepts the proposal, and gated integration
@@ -387,6 +407,11 @@ checks when remote reconciliation or a subsequent change affects their surface. 
 also handles full end-to-end verification and schedules full and full red-team suites in the
 background. Run only one background full suite at a time. Do not repeat shared checks for every
 leaf branch or intermediate commit. Do not raise budgets or weaken guards to clear a check.
+
+Gate cost is per batch: combine all ready leaves into one run and start it whenever a leaf is
+ready and no gate is in flight. Scale it to the diff: documentation-only or handoff-only batches
+need a clean diff and `scripts/budgets`. A background full-suite failure blocks only landings
+touching the failing surface and gets one named owner at once.
 
 Known failures remain named tasks with evidence and ownership. A scoped pass is not a full-suite
 pass. Fix a known relevant regression before the affected change lands. A missing cold selector
