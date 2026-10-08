@@ -408,6 +408,26 @@ is not a reason to refuse an authorized development change.
   normal host-triggered hook too; report any remaining reload or verification step explicitly.
   A source commit, review, passing test or prepared runtime is only a checkpoint.
 
+### Branch hygiene and landing
+
+- A branch holds at most 10 commits and merges `0.2dev` at least daily. At more than 30 commits
+  ahead or 20 behind, split it or land part of it before adding more. `scripts/worktrees`
+  reports every worktree against these limits and exits 1 when any is over.
+- One lineage per branch: never build on another branch's unlanded commits. Shared work lands
+  first and dependents rebase onto it.
+- Work that changes an architectural premise (host broker, transport, authority) gets a board
+  note and the coordinator's acknowledgement before it is built.
+- A "superseded" verdict names the `0.2dev` commit that replaces each behaviour it drops.
+- A conflict resolution never weakens an authority, locality or verification check. Touching one
+  needs a second reviewer and a test that fails against the weakened form. A diff that removes
+  or weakens an assertion in a red-team, guard or authority test is refused by
+  `scripts/hooks/weakened-assertions` (commit-msg hook and CI) unless the commit message carries
+  a `Reviewed-by-second:` line.
+- Code on the default path of `scripts/test` or a hook has a measured fixed cost and a test that
+  bounds it.
+- A feature is not landed until a person can reach it in the interface.
+- One worker owns an area from review through gate, push and cleanup.
+
 ## 3. Testing and gates
 
 ### Scoped merge gates and background verification

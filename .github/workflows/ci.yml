@@ -242,6 +242,12 @@ jobs:
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
 
+      - name: no guard test weakened without a second reviewer
+        if: github.event_name == 'pull_request'
+        run: python scripts/hooks/weakened-assertions --against "$BASE"
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+
       - name: gate tests
         run: |
           files=()

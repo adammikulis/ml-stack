@@ -1,0 +1,86 @@
+#!/usr/bin/env python3
+"""Report each worktree against 0.2dev: commits ahead and behind, age, and what is over a limit.
+
+    worktrees [--target REV]
+
+Read-only. Exits 1 when any worktree is flagged, so it can gate a landing batch.
+Limits (AGENTS.md, "Branch hygiene and landing"): at most 10 commits, at most 30 ahead
+(split or land part before adding more), at most 20 behind, and a branch that is behind
+0.2dev has merged it within the last day.
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+import time
+from dataclasses import dataclass
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import land_git as lg  # noqa: E402
+
+MAX_COMMITS = 10
+MAX_AHEAD = 30
+MAX_BEHIND = 20
+MAX_AGE_BEHIND_DAYS = 1.0
+
+
+@dataclass(frozen=True)
+class Row:
+    """One worktree's standing against the target."""
+
+    path: str
+    branch: str
+    ahead: int
+    behind: int
+    age_days: float
+    flags: tuple[str, ...]
+
+
+def flags_for(ahead: int, behind: int, age_days: float) -> tuple[str, ...]:
+    """The limits this standing is over."""
+    out = []
+    if ahead > MAX_AHEAD:
+        out.append(f"ahead>{MAX_AHEAD}: split or land part")
+    elif ahead > MAX_COMMITS:
+        out.append(f"commits>{MAX_COMMITS}")
+    if behind > MAX_BEHIND:
+        out.append(f"behind>{MAX_BEHIND}: merge or rebase")
+    elif behind and age_days > MAX_AGE_BEHIND_DAYS:
+        out.append("behind and not merged within a day")
+    return tuple(out)
+
+
+def rows(root: Path, target: str, now: float) -> list[Row]:
+    """A row for every worktree on a branch, other than the primary checkout."""
+    found = []
+    for tree in lg.trees(root)[1:]:
+        if not tree.branch:
+            continue
+        ahead = int(lg.out(root, "rev-list", "--count", f"{target}..{tree.head}"))
+        behind = int(lg.out(root, "rev-list", "--count", f"{tree.head}..{target}"))
+        stamp = int(lg.out(root, "log", "-1", "--format=%ct", tree.head))
+        age = max(0.0, (now - stamp) / 86400)
+        found.append(Row(str(tree.path), tree.branch, ahead, behind, age,
+                         flags_for(ahead, behind, age)))
+    return found
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--target", default=lg.TARGET)
+    args = parser.parse_args(argv)
+    root = lg.toplevel(Path.cwd())
+    found = rows(root, args.target, time.time())
+    for row in found:
+        mark = "FLAG" if row.flags else "ok  "
+        print(f"{mark} {row.branch}  +{row.ahead} -{row.behind}  {row.age_days:.1f}d  {row.path}")
+        for flag in row.flags:
+            print(f"       {flag}")
+    return 1 if any(r.flags for r in found) else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
