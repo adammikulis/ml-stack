@@ -152,20 +152,25 @@ def test_a_failure_is_recorded_for_attribution_and_never_reused(project, tmp_pat
     assert green.status == 0 and [r["kind"] for r in reuse.rows(store.folder)] == ["fail", "fail", "pass"]
 
 
-def test_marked_skipped_and_state_touching_files_are_not_stored(project, tmp_path):
+def test_marked_and_skipped_files_are_not_stored(project, tmp_path):
     store = storage.Store(tmp_path / "store")
     (project / "tests/test_heavy.py").write_text("import pytest\n\n\n@pytest.mark.heavy\ndef test_h():\n    pass\n")
     (project / "tests/test_skip.py").write_text("import pytest\n\n\ndef test_s():\n    pytest.skip('no')\n")
-    (project / "tests/test_write.py").write_text(
-        f"def test_w():\n    open({str(project / 'outside.txt')!r}, 'w').write('x')\n")
-    report, _ = attempt(project, store, "tests/test_heavy.py", "tests/test_skip.py", "tests/test_write.py")
+    report, _ = attempt(project, store, "tests/test_heavy.py", "tests/test_skip.py")
     details = {o.file: o.detail for o in report.outcomes}
     assert "not reusable" in details["tests/test_heavy.py"]
     assert "a test was skipped" in details["tests/test_skip.py"]
-    assert "wrote" in details["tests/test_write.py"]
     assert reuse.rows(store.folder) == []
-    again, launches = attempt(project, store, "tests/test_heavy.py", "tests/test_skip.py", "tests/test_write.py")
-    assert hows(again) == ["ran", "ran", "ran"] and len(launches) == 1
+    again, launches = attempt(project, store, "tests/test_heavy.py", "tests/test_skip.py")
+    assert hows(again) == ["ran", "ran"] and len(launches) == 1
+
+
+def test_a_test_that_writes_into_the_checkout_is_not_stored(project, tmp_path):
+    store = storage.Store(tmp_path / "store")
+    (project / FILE).write_text(f"def test_w():\n    open({str(project / 'outside.txt')!r}, 'w').write('x')\n")
+    report, _ = attempt(project, store)
+    assert "wrote" in report.outcomes[0].detail or "changed during the run" in report.outcomes[0].detail
+    assert reuse.rows(store.folder) == [] and hows(attempt(project, store)[0]) == ["ran"]
 
 
 def test_a_data_file_the_test_read_is_part_of_the_hit(project, tmp_path):

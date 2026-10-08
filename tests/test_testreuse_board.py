@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -146,22 +147,30 @@ def put_entry(base: Path, scope: str, **over) -> str:
     store = storage.Store(base / scope)
     fields = {"lookup": KEY, "file": FILE, "outcome": "pass", "manifest": {"files": {}, "dirs": {}, "dists": [],
               "env": {}, "tree": ""}, "manifest_digest": "d" * 64, "command": ["pytest", FILE],
-              "junit_sha256": "e" * 64, "counts": {"tests": 3, "failed": 0, "skipped": 0}, "tree": "t" * 40, "commit": "c" * 40,
+              "junit_sha256": "e" * 64, "counts": {"tests": 3, "failed": 0, "skipped": 0}, "tree": "t" * 40, "commit": "c" * 40, "clean": True,
               "runner": {"pid": 1, "started": 1.0}, "agent": {"id": "alice"}, **over}
     return store.put(fields)
 
 
 def test_a_runner_entry_is_verified_for_its_own_project_only(team, tmp_path):
     base = tmp_path / "reuse"
-    entry = put_entry(base, "scope-a")
-    facts = testruns.verified(entry, "scope-a", base)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    for step in (["init", "-q"], ["-c", "user.name=T", "-c", "user.email=t@example.invalid", "commit", "-q",
+                                  "--allow-empty", "-m", "x"]):
+        subprocess.run(["git", "-C", str(repo), *step], check=True, capture_output=True)
+    head = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    tree = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD^{tree}"], capture_output=True,
+                          text=True).stdout.strip()
+    entry = put_entry(base, "scope-a", commit=head, tree=tree)
+    facts = testruns.verified(entry, "scope-a", base, head, repo)
     assert (facts["file"], facts["outcome"], facts["agent"], facts["junit_sha256"]) == (FILE, "pass", "alice", "e" * 64)
     with pytest.raises(ValueError, match="verifies"):
-        testruns.verified(entry, "scope-b", base)
+        testruns.verified(entry, "scope-b", base, head, repo)
     path = base / "scope-a" / "entries" / f"{entry}.json"
     forged = json.loads(path.read_text())
     forged["counts"]["tests"] = 300
     path.write_text(json.dumps(forged))
     with pytest.raises(ValueError, match="verifies"):
-        testruns.verified(entry, "scope-a", base)
+        testruns.verified(entry, "scope-a", base, head, repo)
     assert reuse.find("../x", "scope-a", base) is None
