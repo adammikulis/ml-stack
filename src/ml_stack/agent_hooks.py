@@ -15,6 +15,7 @@ from ml_stack.checks import Finding
 __all__ = ["AGENTS", "findings", "install", "install_report", "paths"]
 
 AGENTS = ("claude-code", "codex")
+IDS = {"claude-code": "claude", "codex": "codex"}
 BINARY = "ml-stack-workspace"
 OWN = (f"{BINARY} nudge", "claude-nudge.sh")
 CLAUDE_EVENTS = (("PostToolUse", "post", "*"), ("Stop", "stop", ""), ("UserPromptSubmit", "prompt", ""))
@@ -63,7 +64,7 @@ def install_claude(settings: Path) -> list[str]:
             if kept:
                 groups.append({**group, "hooks": kept})
         groups.append({**({"matcher": matcher} if matcher else {}),
-                       "hooks": [{"type": "command", "command": command("claude-code", hook)}]})
+                       "hooks": [{"type": "command", "command": command(IDS["claude-code"], hook)}]})
         hooks[event] = groups
     text = json.dumps(data, indent=2) + "\n"
     if not settings.exists() or settings.read_text() != text:
@@ -93,7 +94,7 @@ def _codex_block(agent: str, with_post: bool, with_features: bool) -> str:
         if hook == "post" and not with_post:
             continue
         out += [f"[[hooks.{event}]]", *([f'matcher = "{matcher}"'] if matcher else []), "",
-                f"[[hooks.{event}.hooks]]", 'type = "command"', f'command = "{command(agent, hook)}"',
+                f"[[hooks.{event}.hooks]]", 'type = "command"', f'command = "{command(IDS[agent], hook)}"',
                 "timeout = 30", *(["additionalContextLimit = 4000"] if hook == "post" else []), ""]
     return "\n".join([*out[:-1], END]) + "\n"
 
@@ -148,7 +149,7 @@ def _problems(agent: str, data: dict, events: tuple[tuple[str, str, str], ...]) 
             continue
         if not have:
             out.append(f"{event} missing")
-        elif have != [command(agent, hook)]:
+        elif have != [command(IDS[agent], hook)]:
             out.append(f"{event} stale")
     if agent == "codex" and (data.get("features") or {}).get("hooks") is not True:
         out.append("the hooks feature is off")

@@ -66,9 +66,9 @@ def test_claude_hooks_are_idempotent_keep_other_hooks_and_replace_earlier_nudges
     assert path.read_text() == first
     data = json.loads(first)
     assert data["model"] == "x"
-    assert commands(data, "PostToolUse") == ["other-tool", "ml-stack-workspace nudge --agent claude-code --hook post"]
-    assert commands(data, "Stop") == ["keep-me", "ml-stack-workspace nudge --agent claude-code --hook stop"]
-    assert commands(data, "UserPromptSubmit") == ["ml-stack-workspace nudge --agent claude-code --hook prompt"]
+    assert commands(data, "PostToolUse") == ["other-tool", "ml-stack-workspace nudge --agent claude --hook post"]
+    assert commands(data, "Stop") == ["keep-me", "ml-stack-workspace nudge --agent claude --hook stop"]
+    assert commands(data, "UserPromptSubmit") == ["ml-stack-workspace nudge --agent claude --hook prompt"]
     assert data["hooks"]["PostToolUse"][-1]["matcher"] == "*"
 
 
@@ -151,7 +151,7 @@ def test_findings_say_missing_stale_and_current_per_agent(machine):
     assert all(f.fix == "ml-stack-workspace install-hooks" for f in missing)
     agent_hooks.install(where=where)
     assert all(f.good for f in agent_hooks.findings(where))
-    where["claude-code"].write_text(where["claude-code"].read_text().replace("--agent claude-code", "--agent old"))
+    where["claude-code"].write_text(where["claude-code"].read_text().replace("--agent claude", "--agent old"))
     stale = agent_hooks.findings(where)
     assert not stale[0].good and "PostToolUse stale" in stale[0].said and stale[1].good
     where["codex"].write_text(where["codex"].read_text().replace("hooks = true", "hooks = false"))
