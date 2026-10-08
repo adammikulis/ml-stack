@@ -409,6 +409,17 @@ tests = [
 note = "request-bound sessions recheck project authority and live person permissions; explicit POST binds a hashless principal"
 
 [[group]]
+match = ["human:workspace/coordinator_routes.py:_change"]
+status = "covered"
+count = 1
+tests = [
+  "tests/test_standing_device_policy.py::test_an_agent_token_cannot_choose_host_mode_for_itself_a_subagent_or_a_forged_parent",
+  "tests/test_standing_device_policy.py::test_only_protected_own_local_identity_selects_authority",
+  "tests/test_standing_device_policy.py::test_a_person_cannot_host_over_a_followed_coordinator",
+]
+note = "an agent, subagent or forged token cannot choose host mode; only a person selects what the device hosts"
+
+[[group]]
 match = ["human:*"]
 status = "covered"
 tests = [
