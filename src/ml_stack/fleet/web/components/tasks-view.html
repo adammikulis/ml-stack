@@ -84,16 +84,16 @@ class TasksView extends HTMLElement{
   this.projectsLoaded=true;
  }
  async load(){
-  if(this.loading||this.submitting)return;this.loading=true;
+  if(this.loading||this.submitting)return;this.loading=true;let selected=this.project.value;
   try{
    if(!this.projectsLoaded)await this.loadProjects();
    if(!this.project.value){this.rows=[];this.overview=null;this.paint();this.note.replaceChildren(E('span',{},'Choose a project workspace. '),W.button('Open Projects',()=>M.go('projects')));return;}
-   const selected=this.project.value;this.note.textContent='Updating task overview…';
+   selected=this.project.value;this.note.textContent='Updating task overview…';
    const data=await W.api(this.endpoint());if(selected!==this.project.value)return;
    this.rows=data.tasks||[];this.metrics=data.metrics||{};this.overview=data.overview;this.loadError='';this.paint();
    this.note.textContent=`Updated ${new Date(this.overview.as_of*1000).toLocaleTimeString()}`;
    const project=this.projects.find(row=>row.id===selected);this.querySelector('.task-authority').textContent=project?`Canonical workspace · ${project.authority_machine||'authority not configured'}`:'';
-  }catch(error){this.rows=[];this.overview=null;this.loadError=error.message||String(error);this.paint();this.note.replaceChildren(E('span',{},`Task data unavailable: ${this.loadError} Use Refresh to try again, or check the project workspace. `),W.button('Open Projects',()=>M.go('projects')));}
+  }catch(error){if(selected!==this.project.value)return;this.rows=[];this.overview=null;this.loadError=error.message||String(error);this.paint();this.note.replaceChildren(E('span',{},`Task data unavailable: ${this.loadError} Use Refresh to try again, or check the project workspace. `),W.button('Open Projects',()=>M.go('projects')));}
   finally{this.loading=false;if(this.reloadAfterLoad){this.reloadAfterLoad=false;this.load();}}
  }
  summary(){
