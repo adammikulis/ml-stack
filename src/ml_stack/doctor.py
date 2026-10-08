@@ -15,7 +15,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-from ml_stack import agent_hooks, bench, checks, hook_diagnostics
+from ml_stack import agent_hooks, bench, checks, hook_diagnostics, hookcheck
 from ml_stack.bench.underway import measuring, measuring_file
 from ml_stack.checks import Finding, ask
 from ml_stack.command import Group, flag, option
@@ -31,8 +31,8 @@ __all__ = ["HOOKS", "STALE_BUILD_DAYS", "ahead_of", "bench_of", "builds_of",
 STALE_BUILD_DAYS = 14
 """A managed llama.cpp older than this is noted."""
 
-HOOKS = ("pre-commit", "commit-msg", "pre-push", "post-merge")
-"""The git hooks every repository here installs, from the directory it ships them in."""
+HOOKS = hookcheck.HOOKS
+"""The git hooks a repository here installs, each when it ships one, from the directory it ships them in."""
 
 _SHIPPED = ("scripts/hooks", "services/hooks")
 _STAMP = re.compile(r"(\d{8}T\d{6})\.log$")
@@ -94,23 +94,38 @@ def hooks_of(repo: Path) -> Finding | None:
     shipped = _shipped_hooks(repo)
     if not shipped:
         return None
+    if shipped == hookcheck.SCRIPTS:
+        return _running_hooks(repo)
     common = _git(repo, "rev-parse", "--git-common-dir")
     hooks = Path(common) if Path(common).is_absolute() else repo / common
-    missing = [h for h in HOOKS if not _installed(hooks / "hooks" / h, shipped)]
+    missing = [h for h in HOOKS if (repo / shipped / h).exists() and not _installed(hooks / "hooks" / h, shipped)]
     installer = repo / "scripts" / "install-hooks.sh"
     if installer.is_file():
-        fix = f"cd {repo} && sh scripts/install-hooks.sh"
+        fix = ["sh", "scripts/install-hooks.sh"]
     else:
-        fix = f"cd {repo} && " + " && ".join(
-            f"ln -sf ../../{shipped}/{h} .git/hooks/{h}" for h in missing)
+        fix = ["ln", "-sf", *[f"../../{shipped}/{h}" for h in missing], ".git/hooks/"]
     return Finding(
         name=f"{repo.name}: hooks", good=not missing,
         said=("installed, from " + shipped) if not missing else
              "not installed: " + ", ".join(missing),
-        fix="" if not missing else fix,
+        fix=[] if not missing else fix, cwd=str(repo),
         note="" if not missing else
              f"git runs nothing from {shipped}/ until they are; a real name or a scrape "
              "goes into a commit unrefused")
+
+
+def _running_hooks(repo: Path) -> Finding:
+    """Whether git will run the hooks: hooks directory, hook files, repository config and guard scripts.
+
+    A repair that edits the repository config is only written in the note, for a person to run.
+    """
+    problems = hookcheck.inspect(repo)
+    installable = bool(problems) and all(p.kind == "install" and p.repair.startswith("sh ") for p in problems)
+    return Finding(
+        name=f"{repo.name}: hooks", good=not problems,
+        said=f"installed, from {hookcheck.SCRIPTS}" if not problems else "; ".join(p.what for p in problems),
+        fix=["sh", "scripts/install-hooks.sh"] if installable else [], cwd=str(repo),
+        note="; ".join(f"a person runs: {p.repair}" for p in problems if p.repair))
 
 
 def status_of(repo: Path) -> Finding:
@@ -181,7 +196,7 @@ def install_of(repo: Path, *, checkout: Path | None = None,
         error = str(exc)
     else:
         error = (got.stderr.strip().splitlines() or [""])[-1]
-    fix = f"{python} -m pip install -e {checkout}"
+    fix = [str(python), "-m", "pip", "install", "-e", str(checkout)]
     if got is None or got.returncode != 0:
         return Finding(name=f"{repo.name}: editable install", good=False,
                        said=f"{python}: import ml_stack fails -- {error or 'no output'}",
@@ -194,7 +209,7 @@ def install_of(repo: Path, *, checkout: Path | None = None,
     return Finding(
         name=f"{repo.name}: editable install", good=under,
         said=str(found),
-        fix="" if under else fix,
+        fix=[] if under else fix,
         note="" if under else
              f"{python} imports a copy, not {checkout}: what is edited there is not "
              "what runs here")
@@ -265,7 +280,7 @@ def bench_of(home: Path) -> list[Finding]:
             name="bench: runs", good=False,
             said=f"{len(hollow)} run(s) read back as nothing: "
                  + ", ".join(hollow[:3]) + (" ..." if len(hollow) > 3 else ""),
-            fix=f"ml-stack-bench forget --empty --kept {store}",
+            fix=["ml-stack-bench", "forget", "--empty", "--kept", str(store)],
             note="each was a measurement that saved a row of dashes; the table skips them "
                  "and says nothing about why"))
 
@@ -317,13 +332,13 @@ def builds_of(current: Path, named: Path, *, stale_days: int = STALE_BUILD_DAYS)
     server = current / server_name()
     if not (current.is_symlink() or current.exists()):
         out.append(Finding(name="llama.cpp: current", good=False,
-                           said="not built yet", fix="ml-stack-serve build",
+                           said="not built yet", fix=["ml-stack-serve", "build"],
                            note="serving falls back to whatever llama-server is on PATH, "
                                 "which lags master by an architecture or two"))
     elif not _answers_help(server):
         out.append(Finding(name="llama.cpp: current", good=False,
                            said=f"{server} does not answer --help",
-                           fix="ml-stack-serve build",
+                           fix=["ml-stack-serve", "build"],
                            note="the link is there and the binary behind it is not, or "
                                 "cannot load: it will fail the same way at serve time"))
     else:
@@ -334,7 +349,7 @@ def builds_of(current: Path, named: Path, *, stale_days: int = STALE_BUILD_DAYS)
             name="llama.cpp: current", good=not stale,
             said=f"{commit}, " + (f"{age}d old" if age is not None else "age unknown")
                  + ", answers --help",
-            fix="ml-stack-serve build" if stale else "",
+            fix=["ml-stack-serve", "build"] if stale else [],
             note="" if not stale else
                  f"older than {stale_days} days; master has gained an architecture or two "
                  "since, and a model in one of them exits saying only 'unknown model "

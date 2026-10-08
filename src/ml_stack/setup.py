@@ -111,7 +111,7 @@ def look() -> list[Finding]:
                   if raised and not kept else
                   "this is the default share; raising it lets a larger model fit"
                   if not raised else "raised, and set at boot"),
-            fix="ml-stack-serve memory --persist",
+            fix=["ml-stack-serve", "memory", "--persist"],
             root=False))
 
     from ml_stack.serve.binary import BinaryNotFound, find_binary
@@ -133,7 +133,7 @@ def look() -> list[Finding]:
             out.append(Finding(
                 name=f"architecture {wanted}", good=wanted in arches,
                 said="supported" if wanted in arches else "not in this build",
-                fix="" if wanted in arches else "ml-stack-serve build",
+                fix=[] if wanted in arches else ["ml-stack-serve", "build"],
                 note="" if wanted in arches else
                      "a release lags master by an architecture or two; ml-stack-serve "
                      "build gets one from llama.cpp's own master, or serve with --binary "
@@ -146,7 +146,7 @@ def look() -> list[Finding]:
             out.append(Finding(
                 name="flags this build lacks", good=False,
                 said=", ".join(flag for flag, _ in lacking),
-                fix="ml-stack-serve build",
+                fix=["ml-stack-serve", "build"],
                 note="; ".join(f"no {flag}" + (f", it has {near}" if near else "")
                                for flag, near in lacking)
                      + ". llama.cpp renames flags between releases, and a flag the build "
@@ -172,7 +172,7 @@ def look() -> list[Finding]:
         out.append(Finding(
             name="a GGUF on disk", good=bool(gguf),
             said=f"{len(gguf)} file(s)" if gguf else "none",
-            fix="" if gguf else "ml-stack-models fetch hf:owner/repo/file.gguf",
+            fix=[] if gguf else ["ml-stack-models", "fetch", "hf:owner/repo/file.gguf"],
             note="" if gguf else "llama-server serves GGUF only; a safetensors checkpoint "
                                  "on disk is not enough to load"))
     except OSError as exc:
@@ -181,7 +181,7 @@ def look() -> list[Finding]:
 
     out.extend(Finding(name=one.name, good=here,
                        said=f"{one.module} is here" if here else "not installed",
-                       fix="" if here else one.fix, note="" if here else one.does)
+                       fix=[] if here else one.fix, note="" if here else one.does)
                for one, here in standard())
     out.extend(_speech_findings())
     out.append(_commands_finding())
@@ -195,9 +195,9 @@ def look() -> list[Finding]:
 
 
 SPEECH_PROTOCOLS = (
-    ("speech recognition", "asr", "pip install 'ml-stack[speech]'"),
-    ("speech synthesis", "tts", "pip install 'ml-stack[speech]'"),
-    ("voice activity", "vad", ""),
+    ("speech recognition", "asr", ["pip", "install", "ml-stack[speech]"]),
+    ("speech synthesis", "tts", ["pip", "install", "ml-stack[speech]"]),
+    ("voice activity", "vad", []),
 )
 
 
@@ -218,7 +218,7 @@ def _speech_findings() -> list[Finding]:
             said=(", ".join(f"{one['name']}" + (f" ({one['model']})" if one["model"] else "")
                             for one in working) if working
                   else "nothing on this machine"),
-            fix="" if working else fix,
+            fix=[] if working else fix,
             note=(f"ml-stack-speech uses {table['auto']} unless told otherwise"
                   + ("; " + "; ".join(f"{one['name']}: {one['detail']}" for one in missing)
                      if missing else "")
@@ -246,12 +246,12 @@ def _fleet_findings(*, port: int | None = None, discovery_port: int | None = Non
     me = already_running(port)
     if not mine:
         out.append(Finding(name="fleet: joined", good=False, said="in no cluster",
-                           fix="ml-stack-cluster join --passphrase WORDS"))
+                           fix=["ml-stack-cluster", "join", "--passphrase", "WORDS"]))
     else:
         out.append(Finding(name="fleet: joined", good=True, said=f"cluster '{mine[0].group}'"))
         if me is None:
             out.append(Finding(name="fleet: daemon", good=False,
-                               said=f"does not answer on {port}", fix="ml-stack-cluster join"))
+                               said=f"does not answer on {port}", fix=["ml-stack-cluster", "join"]))
         else:
             out.append(Finding(name="fleet: daemon", good=True,
                                said=f"'{me.get('name', '?')}' answers on {port}"))
@@ -260,14 +260,14 @@ def _fleet_findings(*, port: int | None = None, discovery_port: int | None = Non
                             self_machine=str(me.get("machine") or ""))
             except OSError as exc:
                 out.append(Finding(name="fleet: seen", good=False,
-                                   said=f"discovery failed: {exc}", fix="ml-stack-peers ls"))
+                                   said=f"discovery failed: {exc}", fix=["ml-stack-peers", "ls"]))
             else:
                 seen = any(row.get("is_self") for row in rows)
                 out.append(Finding(
                     name="fleet: seen", good=seen,
                     said=(f"sees itself among {len(rows)} peer(s)" if seen else
                           f"discovery hears {len(rows)} peer(s), none itself"),
-                    fix="" if seen else "ml-stack-peers ls",
+                    fix=[] if seen else ["ml-stack-peers", "ls"],
                     note="" if seen else
                          "the beacon is unreachable even on loopback -- a firewall or a "
                          "security tool dropping local multicast hides this machine from "
@@ -288,10 +288,10 @@ def _store_finding(path: Path | None = None) -> Finding:
             pass
     except GraphStoreUnavailable as exc:
         return Finding(name="store", good=False, said=str(exc),
-                       fix="pip install 'ml-stack[store]'")
+                       fix=["pip", "install", "ml-stack[store]"])
     except (RuntimeError, OSError) as exc:
         return Finding(name="store", good=False, said=f"{tilde(path)} did not open: {exc}",
-                       fix=f"ml-stack-store check {path}")
+                       fix=["ml-stack-store", "check", str(path)])
     return Finding(name="store", good=True, said=f"{tilde(path)} opens")
 
 
@@ -320,7 +320,7 @@ def _ports_finding(http_port: int, discovery_port: int, daemon: dict[str, object
     return Finding(
         name="ports", good=not stuck,
         said="free" if not stuck else f"held by something else: {', '.join(map(str, stuck))}",
-        fix="" if not stuck else f"lsof -nP -iTCP:{http_port} -iUDP:{discovery_port}",
+        fix=[] if not stuck else ["lsof", "-nP", f"-iTCP:{http_port}", f"-iUDP:{discovery_port}"],
         note="" if not stuck else
              "ml-stack-cluster join needs both free to start the daemon and hear the LAN")
 
@@ -350,7 +350,7 @@ def _commands_finding() -> Finding:
         good=not missing,
         said=(f"{len(wanted)} command(s) found" if not missing
               else "not found: " + ", ".join(missing)),
-        fix="" if not missing or where is None else f"pip install -e {where} && pyenv rehash",
+        fix=[] if not missing or where is None else ["pip", "install", "-e", str(where)],
         note=(", ".join(wanted) if not missing else
               "an entry point added to pyproject.toml is not a command until the package "
               "is reinstalled and the shims rehashed; a queue step that names one dies "
@@ -384,7 +384,7 @@ def _firewall_finding() -> Finding:
         good=not missing,
         said=("inbound rules present: " + ", ".join(present)) if not missing
              else "no inbound rule for " + ", ".join(missing),
-        fix="" if not missing else windows_firewall_line(),
+        fix=[] if not missing else ["cmd", "/c", windows_firewall_line()],
         root=True,
         note="" if not missing else
              "Windows blocks inbound TCP 8770 (the daemon) and UDP 8771 (its beacons) "

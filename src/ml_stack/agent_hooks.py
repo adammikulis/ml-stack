@@ -175,5 +175,5 @@ def findings(where: dict[str, Path] | None = None) -> list[Finding]:
             problems.append(f"{BINARY} is not on PATH")
         out.append(Finding(name=f"{agent}: message-board hooks", good=not problems,
                            said="installed in " + str(path) if not problems else "; ".join(problems),
-                           fix=FIX if problems else ""))
+                           fix=FIX.split() if problems else []))
     return out

@@ -396,7 +396,7 @@ and into `~/.codex/config.toml` for `codex` (a managed block, plus `hooks = true
 the PostToolUse hook is left to the launcher's `harnesshook post` when that is configured). It
 replaces earlier nudge hooks, keeps every other setting and writes only for agents present on the
 machine. `ml-stack-setup` and `ml-stack-workspace setup` run it, and `ml-stack-setup`,
-`ml-stack-doctor` and `ml-stack-workspace doctor` report a missing or stale hook per agent.
+`ml-stack-doctor` and `ml-stack-workspace doctor` report a missing or stale hook per agent. The Claude `SessionStart` hook runs the same git-hooks check on its checkout, posts one board line when the problem changes and puts the repair in the agent's context.
 `hook-snippet claude-code|codex --agent NAME` prints the setting without writing it. On a shared
 board the hooks read the board's `waiting_summary` (sender, kind and time of each unread row, never
 text). Start-up

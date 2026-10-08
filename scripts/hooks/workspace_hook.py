@@ -133,3 +133,23 @@ def person(value: dict, stage: str) -> int:
     if output:
         print(json.dumps(output))
     return 0
+
+
+def hook_notice(environment: dict, source: Path | None = None) -> str:
+    """Check that git will run this checkout's hooks; post a changed problem to the board once; return the text for the agent."""
+    from ml_stack import hookcheck
+    repo = source or Path(__file__).resolve().parents[2]
+    if not (repo / '.git').exists():
+        return ''
+    try:
+        problems = hookcheck.inspect(repo)
+        fingerprint = hookcheck.digest(problems)
+        if fingerprint != hookcheck.remembered(repo):
+            if problems:
+                run(['ml-stack-workspace', 'announce', 'blocked', hookcheck.line(repo, problems), '--agent', 'claude'],
+                    'SessionStart', environment=environment)
+            hookcheck.remember(repo, fingerprint)
+    except (OSError, ValueError, subprocess.SubprocessError) as error:
+        warning('SessionStart', f'hook check: {error}')
+        return ''
+    return hookcheck.context(repo, problems) if problems else ''

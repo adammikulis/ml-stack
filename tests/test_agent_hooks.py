@@ -148,7 +148,7 @@ def test_findings_say_missing_stale_and_current_per_agent(machine):
     missing = agent_hooks.findings(where)
     assert [f.name for f in missing] == ["claude-code: message-board hooks", "codex: message-board hooks"]
     assert not any(f.good for f in missing) and "PostToolUse missing" in missing[0].said
-    assert all(f.fix == "ml-stack-workspace install-hooks" for f in missing)
+    assert all(f.fix == ["ml-stack-workspace", "install-hooks"] for f in missing)
     agent_hooks.install(where=where)
     assert all(f.good for f in agent_hooks.findings(where))
     where["claude-code"].write_text(where["claude-code"].read_text().replace("--agent claude", "--agent old"))
