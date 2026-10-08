@@ -20,6 +20,7 @@ import pytest
 from packaging.requirements import Requirement
 from packaging.tags import parse_tag, sys_tags
 
+from ml_stack import runtime
 from ml_stack.fleet import runtime_wheel
 from ml_stack.net import packages
 
@@ -48,7 +49,12 @@ def test_stamp_records_the_source_and_hashes_every_installed_file(tmp_path):
             assert digest == f"sha256={expected}" and size == str(len(data))
 
 
-def test_install_uses_committed_snapshot_and_replaces_same_version(tmp_path, monkeypatch):
+@pytest.mark.parametrize("frozen", [False, True])
+def test_install_uses_committed_snapshot_and_replaces_same_version(tmp_path, monkeypatch, frozen):
+    from ml_stack.fleet.environment import Environment
+    host = tmp_path / "host" / "python"
+    monkeypatch.setattr(sys, "frozen", frozen, raising=False)
+    monkeypatch.setattr(Environment, "host_python", lambda self: host)
     calls = []
     monkeypatch.setattr(sys, "prefix", str(tmp_path / "runtime-prefix"))
 
@@ -65,11 +71,18 @@ def test_install_uses_committed_snapshot_and_replaces_same_version(tmp_path, mon
         return "ok"
 
     monkeypatch.setattr(runtime_wheel, "_run", run)
-    assert runtime_wheel.install_checkout(tmp_path, timeout=7) == (0, "ok")
+    chosen = runtime.Runtime(tmp_path / "new-prefix", COMMIT, "0.1.0", runtime.identity())
+    monkeypatch.setattr(runtime_wheel, "prepare", lambda wheel, commit, timeout: chosen)
+    from ml_stack import runtime_launchers
+    monkeypatch.setattr(runtime_launchers, "install", lambda directory, runtime: [])
+    published = []
+    monkeypatch.setattr(runtime, "publish", published.append)
+    code, message = runtime_wheel.install_checkout(tmp_path, timeout=7)
+    assert code == 0 and COMMIT in message and published == [chosen]
     assert calls[1][-1] == COMMIT
+    assert calls[2][0] == str(host)
     assert str(tmp_path) not in calls[2]
-    assert calls[-2][4] == "--upgrade"
-    assert calls[-1][4:6] == ["--force-reinstall", "--no-deps"]
+    assert not any("install" in argv for argv in calls)
     assert not any("-e" in argv for argv in calls)
 
 
@@ -91,6 +104,10 @@ def test_dependency_failure_does_not_replace_the_installed_distribution(tmp_path
         return ""
 
     monkeypatch.setattr(runtime_wheel, "_run", run)
+    def failing(wheel, commit, timeout):
+        raise ValueError("missing dependency")
+    monkeypatch.setattr(runtime_wheel, "prepare", failing)
+    monkeypatch.setattr(runtime, "publish", lambda value: pytest.fail("selected a failed runtime"))
     code, error = runtime_wheel.install_checkout(tmp_path, timeout=7)
     assert code == 1 and "missing dependency" in error
     assert not any("--force-reinstall" in argv for argv in calls)
@@ -226,3 +243,19 @@ def test_third_party_installs_keep_matching_bundled_wheels(tmp_path, monkeypatch
     monkeypatch.setattr(packages, "run", lambda python, args, **kwargs: run([str(python), "-m", "pip", *args], **kwargs))
     assert environment.pip(["install", "--no-index", "torch"]).returncode == 0
     assert calls == [[str(environment.python), "-m", "pip", "install", "--find-links", str(bundled), "--no-index", "torch"]]
+
+
+def test_frozen_build_uses_verified_external_host_python(tmp_path, monkeypatch):
+    from ml_stack.fleet.environment import Environment
+    host = tmp_path / "host" / "python"
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(Environment, "host_python", lambda self: host)
+    assert runtime_wheel._host_python() == host
+
+
+def test_missing_host_python_refuses_before_selection(tmp_path, monkeypatch):
+    from ml_stack.fleet.environment import Environment
+    monkeypatch.setattr(Environment, "host_python", lambda self: None)
+    monkeypatch.setattr(runtime, "publish", lambda value: pytest.fail("selected failed build"))
+    with pytest.raises(OSError, match=r"Python 3\.13"):
+        runtime_wheel._host_python()

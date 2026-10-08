@@ -718,6 +718,15 @@ def restart(*, run: Callable[[list[str]], int] | None = None,
 
     ``run`` and ``reexec`` are the seams; a test replaces both and nothing is killed.
     """
+    from ml_stack import runtime
+
+    chosen = runtime.selected() if run is None and reexec is None else None
+    if chosen is not None and (getattr(sys, "frozen", False) or Path(sys.prefix) != chosen.prefix):
+        from ml_stack import jobs
+        args = [arg for arg in sys.argv[1:] if arg not in {"--restart", "--force-restart", "--no-browser"}]
+        jobs.detach("ml_stack.fleet.launch", ["--restart", "--no-browser", *args],
+                    log=runtime.directory() / "restart.log")
+        return "launcher"
     call = run or _run
     mode = str(status()["mode"])
     if mode in ("login", "boot") and sys.platform != "win32":
