@@ -69,7 +69,7 @@ def test_a_junit_with_fewer_tests_than_were_collected_stores_no_pass(project, tm
         def launch(command):
             status = real(command)
             junit = Path(next(w.split("=", 1)[1] for w in command if w.startswith("--junitxml=")))
-            tree = ET.parse(junit)
+            tree = ET.parse(junit)  # noqa: S314 - the file pytest just wrote
             suite = next(tree.getroot().iter("testsuite"))
             suite.remove(next(suite.iter("testcase")))
             tree.write(junit)

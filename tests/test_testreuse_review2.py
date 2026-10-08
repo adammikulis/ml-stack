@@ -202,7 +202,7 @@ def test_a_session_level_error_in_the_junit_stores_nothing(project, tmp_path):
         def launch(command):
             real(command)
             junit = Path(next(w.split("=", 1)[1] for w in command if w.startswith("--junitxml=")))
-            tree = ET.parse(junit)
+            tree = ET.parse(junit)  # noqa: S314 - the file pytest just wrote
             suite = next(tree.getroot().iter("testsuite"))
             ET.SubElement(ET.SubElement(suite, "testcase", classname="", name="session"), "error", message="x")
             tree.write(junit)
@@ -282,7 +282,7 @@ def test_a_failing_entry_is_not_evidence_of_passing(board, tmp_path, monkeypatch
     base = start(board, monkeypatch, tmp_path)
     entry = put(board, base, outcome="fail")
     head = git(checkout(board), "rev-parse", "HEAD")
-    with pytest.raises(ValueError, match="verifies|pass"):
+    with pytest.raises(ValueError, match=r"verifies|pass"):
         board.board.checkpoint(board.child, board.task["id"], {"summary": "ok", "test_entry": entry, "commit": head})
 
 
