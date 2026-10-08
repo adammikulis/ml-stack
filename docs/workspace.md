@@ -113,20 +113,11 @@ again or consume another send/announcement quota. Live authority, board membersh
 access and body checks still run first. Human messages, changed reports and quarantined
 content remain distinct; there is no separate deduplication index or hidden-body hash.
 
-The person never pastes anything for a subagent. A parent agent has two choices.
-
-* Share its identity: `ml-stack-workspace brief NAME --agent ME` prints a three-line brief to
-  paste into the subagent's prompt. The subagent runs every command with `--agent ME --label NAME`
-  (or `ML_STACK_WORKSPACE_LABEL`); messages show as `ME/NAME` (`from_label`), claims carry the
-  label in their note, events record it. A label is only a note, never an authority.
-* Give it its own weaker identity: `ml-stack-workspace delegate NAME [--ttl 8h] [--can send,read,claim]`
-  (run by the agent with its own token) creates `ME/NAME` and writes its token to a 0600 file under
-  the same tokens directory; the path is printed, the value never. The subagent uses
-  `--agent ME/NAME`. A delegate can only narrow: it cannot delegate or mint, has no notes or
-  scratch, claims only branches or servers named `ME/NAME/...`, sends at a lower rate (10 per
-  minute), lasts at most 8 hours and never past its parent's token, at most 8 live delegates per
-  parent, and stops working when the parent is revoked or expires. `inbox --children` lists only
-  the messages your delegates sent; `status` lists them with their parent.
+The person never pastes anything for a subagent. A subagent acts as its parent: `ml-stack-workspace
+brief NAME --agent ME` prints a three-line brief to paste into the subagent's prompt. The subagent runs
+every command with `--agent ME --label NAME` (or `ML_STACK_WORKSPACE_LABEL`); messages show as
+`ME (NAME)` (`from_label`), claims carry the label in their note, events record it. The subagent
+holds exactly its parent's rights. A label is only a note for display and audit, never an authority.
 
 ### Agents inviting agents
 
@@ -226,10 +217,10 @@ and a convenience second.
 5. Every write is scanned. A credential or a term on the owner's denylist
    (`ML_STACK_WORKSPACE_DENYLIST`, else `<state>/workspace/private-terms`, one term per line,
    never committed) refuses the write with a message naming the category and not the match.
-6. Every sender holds a capability token minted by a person or the lead: `mlws1.<id>.<secret>`.
+6. Every sender holds a capability token minted by a person: `mlws1.<id>.<secret>`.
    The registry stores only a SHA-256 of the secret, so reading the registry does not let a
    process pose as another agent. Tokens expire (default 24 hours) and can be revoked. Roles:
-   `human` mints anyone, `lead` mints and revokes `agent` tokens, `agent` mints nothing.
+   `human` mints and revokes anyone; `lead` and `agent` mint and revoke nothing but their own invited agents.
    Per-sender rate limit, body and subject caps, inbox cap and retention are in `limits.json`.
 7. Text is screened before it reaches a model. Markers come in two tiers:
    * Hard markers always put a message or note into quarantine, for every sender: `override`,
@@ -316,6 +307,7 @@ not allowed, 4 rate limited, 5 claim conflict, 6 a log is damaged.
 | scratch | `scratch-new NAME`, `scratch-ls`, `scratch-path NAME [REL]`, `scratch-rm NAME` |
 | boards | `board list\|read NAME\|post NAME TEXT\|threads NAME\|create NAME [TITLE] [--private]\|add NAME AGENT\|mentions`, `join-board NAME`, `leave-board NAME`, `dm [NAME [BODY]] [--between A]`, `subscribe board\|thread\|agent\|kind\|mentions [TARGET] [--mode inbox\|digest\|silent]`, `unsubscribe`, `subs`, `digest [--thread N] [--ack]`, `watch [--board B|--thread N|--dm NAME] [--since SEQ]`, `chat [--board B|--to NAME]` (the person, at a terminal), `board-serve` |
 | claims | `claim KIND KEY [--ttl S] [--pid N]`, `release KIND KEY`, `heartbeat`, `who KIND KEY`, `claims` |
+| person record | `attestations [--session ID] [--limit N]`: what the harness hooks recorded the person typing, answering or authorizing, each shown as a `person-attestation` attested by the harness hook for its session (read only; no token or board post can write one) |
 | safety | `quarantine-ls`, `quarantine-release QID` (human token), `audit-verify [--anchor HASH]`, `audit-head`, `gc` |
 | view | `status` (counts, live claims with `expires_in_s`, the fullest inboxes, your boards and unread, the machine's test-slot queue, read only) |
 
@@ -642,7 +634,7 @@ agent processes, 2000 messages, send p99 58 ms, nothing refused. Every limit bel
 | Retention | 7 days of messages (`retention_s`) | `gc` drops the oldest rows; the chain continues from the last dropped row; readers re-read the file | `audit-verify` (rows, head) |
 | Claim lifetime | 15 minutes, renewed by `heartbeat`; one renewal adds at most 1 hour and no claim lives past 8 hours from when it was taken | the claim is released the next time anyone reads the registry and audited as `claim.expired` or `claim.dead-pid`; another agent that takes it is audited as `claim.stolen` with the previous owner | `claims` lists `expires_in_s` and `expiring_soon` (true in the last 5 minutes or a third of the TTL, whichever is shorter) |
 | Session credentials | Local persistent agents recover automatically; ordinary issued credentials follow `token_ttl_s` | the local account or trusted device reconnects the agent internally; identity revocation remains enforced | `whoami` |
-| Delegation | a human mints anyone, a lead mints `agent` tokens, an agent mints nothing; a lead or agent that mints holds at most 16 live identities (`mints_per_identity`) and the workspace at most 64 (`agents_live`) | the mint is refused (`Denied`) | `status` (agents) |
+| Minting | a human mints anyone; a lead or an agent mints nothing; a local launcher holds at most 16 live identities (`mints_per_identity`) and the workspace at most 64 (`agents_live`) | the mint is refused (`Denied`) | `status` (agents) |
 | Keystore reads | 600 per hour per user, backoff from 480 | `KeystoreBusy` naming the hour | `ml-stack-security keystore` |
 | Keystore creates, deletes, retries after a refusal | 5 per hour per user | `KeystoreBusy`; a refusal also latches for 10 minutes | `ml-stack-security keystore` |
 | Waiting | `wait` and `watch` sleep on a named pipe (`wake/<agent>.fifo`); with no pipe they re-check at 0.1 s backing off to 2 s with jitter | a wait returns empty at its timeout or when its caller cancels it | `wait --timeout S` |

@@ -61,6 +61,9 @@ def commands(tmp_path: Path) -> list[tuple[str, str, str, list[str], str]]:
         ("workspace agent stop", "ml_stack.workspace.cli", "main", ["agent", "stop", "local-x"], ""),
         ("activity export", "ml_stack.activity.cli", "main",
          ["export", "--json", str(tmp_path / "activity-export.json")], "yes"),
+        ("autostart install", "ml_stack.fleet.autostart", "main",
+         ["install", "--manifest", str(tmp_path / "manifest.json")], "yes"),
+        ("autostart rollback", "ml_stack.fleet.autostart", "main", ["rollback"], "yes"),
     ]
 
 
@@ -107,7 +110,7 @@ def run_command(tmp_path: Path, target: tuple[str, str, list[str]], *,
     return subprocess.CompletedProcess(child.args, child.returncode, heard.decode(errors="replace"), "")
 
 
-@pytest.mark.parametrize("index", range(17))
+@pytest.mark.parametrize("index", range(19))
 @pytest.mark.skipif(sys.platform == "win32", reason="requires a POSIX pseudoterminal")
 def test_every_human_only_command_refuses_a_process_started_by_an_agent(tmp_path, index):
     label, module, function, argv, typed = commands(tmp_path)[index]
@@ -117,7 +120,7 @@ def test_every_human_only_command_refuses_a_process_started_by_an_agent(tmp_path
     assert snapshot(tmp_path / "home") == before, f"{label} changed state for an agent"
 
 
-@pytest.mark.parametrize("index", range(17))
+@pytest.mark.parametrize("index", range(19))
 def test_every_human_only_command_refuses_a_process_with_no_terminal(tmp_path, index):
     label, module, function, argv, _ = commands(tmp_path)[index]
     before = snapshot(tmp_path / "home")
@@ -181,7 +184,7 @@ def test_no_tool_an_agent_is_offered_is_a_human_only_action():
 
     from ml_stack import chat, do, mcp
     floor = ("quarantine", "purge", "rekey", "approve", "mint", "revoke", "rotate", "baseline",
-             "unquarantine", "forget", "signing", "scan_policy", "sentinel", "security")
+             "unquarantine", "forget", "signing", "scan_policy", "sentinel", "security", "autostart")
     person = do.Person(io.StringIO(""), io.StringIO(""))
     session = chat.Chat(None, person, role="plan-and-go", extension=chat.extensions(person))
     offered = [s["function"]["name"] for s, _ in session.offered] + [t.name for t in mcp.TOOLS]

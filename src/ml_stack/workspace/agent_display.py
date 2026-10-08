@@ -40,10 +40,7 @@ def metadata(registry, name, label=''):
     eligible = bool(not parent and kind == 'main' and registry.role_of(name) == AGENT
                     and set(CAPS) <= set(info['can']))
     if label:
-        if label in info.get('label_models', {}):
-            display = f"Subagent · {label} (parent {display})"
-            kind = 'helper'
-        else:
-            display += f" · activity {label}"
+        display = f"{display} ({label})"
+        kind = 'helper' if label in info.get('label_models', {}) else kind
         eligible = False
     return {'display_name': display, 'session_kind': kind, 'coordinator_eligible': eligible}

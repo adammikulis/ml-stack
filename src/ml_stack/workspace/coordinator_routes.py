@@ -15,7 +15,6 @@ from ml_stack.workspace import (
 from ml_stack.workspace.boardroute import Request
 from ml_stack.workspace.chain import held
 from ml_stack.workspace.coordination import workspace_id
-from ml_stack.workspace.coordinator_bootstrap import ensure_host as ensure_host
 from ml_stack.workspace.identity import HUMAN, Denied
 from ml_stack.workspace.service import Workspace
 
@@ -48,6 +47,8 @@ def _change(ws, token, document):
     if local_agent:
         device_agent.owned_local(ws, token)
     if document == {'action': 'host'}:
+        if local_agent:
+            raise Denied('only a person chooses what this device hosts')
         if coordinator_config.load(ws.base).get('mode') == 'remote':
             raise Denied('this device already follows a coordinator; it cannot create a second authority')
         return coordinator_config.save(ws.base, {'mode': 'host', 'workspace': workspace_id(ws)})

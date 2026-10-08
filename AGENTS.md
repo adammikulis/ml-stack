@@ -243,7 +243,10 @@ setup; do not interrupt another process's active work.
 `main` is the release branch: a commit that arrives there is a commit queued to publish. Work
 lands on the development branch, and promoting that to `main` is the owner's, as are tags and
 releases. The owner controls version numbers. Never commit or push `main` without the owner's
-explicit instruction. Never push with force, delete a remote ref or push tags.
+explicit instruction: an agent's push of `main` happens only after the person selects the approval
+in the AskUserQuestion that `scripts/hooks/person-consume propose` renders from git, and it covers one
+fast-forward to that one commit. Development pushes need no approval. Never push with force, delete a
+remote ref or push tags.
 
 Whoever made a branch finishes it. Fetch before preparing each integration batch and again
 immediately before pushing. Reconcile upstream advancement in an isolated integration worktree,
@@ -590,12 +593,13 @@ tool is a dependency, so a checker that cannot find its tool prints why and its 
 out rather than counted as zero.
 
 `scripts/hooks/pre-push` lets an agent push the development branch and nothing else, and lets the
-owner's own push through: an agent's shell carries a marker variable (Claude Code sets
-`CLAUDECODE` for every command it runs) and a terminal sets nothing. The development branch is
+owner's own push through: an agent is a process under the marker variable (Claude Code sets
+`CLAUDECODE` for every command it runs) or under a harness process, and a terminal is neither. The development branch is
 the one the primary checkout is on, and `main` is never it. A push to `main` publishes every
-commit on it at once, so it is the owner's, and an agent makes it only when asked, on a command
-that says so: `ML_STACK_PUSH_MAIN=yes git push origin main`. That opener opens `main` and
-nothing else -- never a force, a deletion, `--all` or `--tags`, and never another branch.
+commit on it at once, so it is the owner's, and an agent makes it only when the person has
+approved that one commit: the person's selected answer to the approval question (`scripts/hooks/person-consume
+propose` prints it) authorizes one fast-forward of `main` to one commit, once. Nothing an agent types
+or sets opens `main`, and a force, a deletion, `--all` or `--tags` are never authorized.
 
 Writes are refused when they add a function whose body already exists elsewhere, a raw HTTP
 call, a docstring over twelve lines, a signature over eight parameters, or a write that takes a
@@ -843,6 +847,21 @@ step. The wired memory limit is the one machine setting an agent may request (ga
 `serve.wired-limit`): it goes through macOS's own administrator dialog, ml-stack never sees or
 stores the password, and `sudo` still needs a terminal. The identity bootstrap (`init`) and the
 review screen also stay a person's.
+
+Boot and login units (launchd, systemd, Windows tasks) are prepared by tooling and installed by a
+person. `python -m ml_stack.fleet.autostart prepare --role pool-daemon|runtime-ensure` is safe for
+an agent: it writes unit files and a `manifest.json` (version, device id, preparer, sha256 of each
+unit, exec argv, a 24-hour expiry) under the state root and prints the one `install --manifest`
+command for the person; it never writes to `LaunchAgents`, `~/.config/systemd` or any system
+directory. `install` and `rollback` refuse every agent marker and any process without a terminal,
+check the manifest against the staged files, this device and a fixed destination set, back up what
+they replace, load the unit, probe it, and record the action in the authority audit log as a
+person's. `status` and `verify` are read-only and show `autostart: current | stale | missing |
+drifted | not-prepared` in `ml-stack-workspace status` and the device report; an agent reports a
+drift and never repairs it. A unit runs as the user, from the stable launcher the runtime tooling
+wrote (never a checkout), with a path-only environment and no credentials. `runtime-ensure` runs
+the lock-only unattended `ensure`; there is no landing unit, because landing needs an agent
+identity (claims, board posts, push rules) and stays session-driven.
 
 ### Never a real person
 

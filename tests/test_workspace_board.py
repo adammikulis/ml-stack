@@ -341,19 +341,6 @@ def test_a_senders_unread_share_of_one_inbox_is_capped(kit):
     assert ws.status()["fullest_inboxes"][0]["id"] == "bob"
 
 
-def test_a_leads_mints_and_live_agents_are_capped(kit):
-    kit.limits(mints_per_identity=2, agents_live=100)
-    ws = kit.ws
-    ws.mint(kit.lead, "w1")
-    ws.mint(kit.lead, "w2")
-    with pytest.raises(Denied):
-        ws.mint(kit.lead, "w3")
-    ws.mint(kit.owner, "w3")
-    kit.limits(agents_live=5)
-    with pytest.raises(Denied):
-        kit.ws.mint(kit.lead, "w9")
-
-
 def test_delegates_share_their_parents_send_window(kit):
     kit.limits(sends_per_window=6, child_sends_per_window=5)
     ws, a = kit.ws, kit.tokens["alice"]

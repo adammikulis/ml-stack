@@ -18,6 +18,12 @@
 
 - **The agent sandbox is staged, not installed or measured** (`docs/agent-sandbox.md`, `scripts/agent-sandbox`). The owner runs the fifteen acceptance steps; every sandboxed result in the compatibility matrix is predicted. Open design gaps: the workspace CLI writes `~/.ml-stack/workspace` from the agent's own process, so a sandboxed agent that may announce may also edit board files (needs the CLI to go through the daemon with `workspace/` read-only to agents); `testslots_rpc` binds an ephemeral loopback port that Linux and WSL cannot allow-list (needs a configurable fixed port); Codex's workspace-write cannot deny `.git/config` and `.git/hooks` in the shared git directory.
 
+## Autostart units (prepare and install)
+
+- **`runtime-ensure` has not run unattended against a real checkout.** The unit runs `ml-stack runtime ensure` as no agent (no `ML_STACK_WORKSPACE_AGENT` in its environment) from the `ml-stack` launcher in the `--launchers` directory; it needs a first `ensure --checkout --launchers` run by a person or agent, and hourly runs on a checkout with local edits or a held commit have not been observed.
+- **No unit has run under a real service manager here.** The `launchctl bootstrap`/`bootout`, `systemctl --user`, `schtasks /XML` commands and copy-truncate log rotation under launchd are covered by a recorder and real files, not by a loaded unit. Run the reboot checklist in `docs/install.md` on a Mac and on the WSL device; the Windows task XML has not been loaded on Windows. systemd units have no watchdog because the daemon sends no `sd_notify`.
+- **`autostart.install` (UI toggle, join, `--persist`) still writes units from a running process.** The Settings and join flows call it without a manifest; moving them to prepare plus a person's `install` is the rest of the owner's decision that agents never install units.
+
 ## Active work (2026-10-06)
 
 - **Speed up checks without reducing coverage.** `scripts/gates/_floors.py` now reuses the gate's

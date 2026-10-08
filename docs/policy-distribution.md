@@ -312,11 +312,11 @@ workspace text is data and grants nothing.
 | Edit the generated block through the Edit tool | yes, edit guard | also pre-commit and CI |
 | Edit it with `sed -i`, a heredoc or a script | not at write time (the bash guard cannot know every writer) | `render --check` in pre-commit, CI, SessionStart |
 | Remove or rewrite `.claude/settings.json` hook entries, `.git/hooks/*`, `core.hooksPath`, `--no-verify` | refused by edit guard and bash guard patterns for agents | SessionStart `selftest` and `check` (lock mismatch), CI |
-| Loosen `.ml-stack/policy.toml` or raise a ratchet number | refused at commit for agents (`ratchet` generalised: `ML_STACK_POLICY_LOOSEN=yes` is the person's opener) | CI `--against $BASE` |
+| Loosen `.ml-stack/policy.toml` or raise a ratchet number | refused at commit for agents (`ratchet` generalised; the opener is a person-only command at the person's terminal) | CI `--against $BASE` |
 | Edit block, lock, policy file and wiring consistently, then pin an older ml-stack | not prevented locally | CI compares against the base branch: version decrease, removed entries, loosened values fail. Only holds if the base branch is protected and the check is a required status; that is the owner's repository setting and a human-only machine setting |
 | Run with `MLSTACK_GUARD=off` | an agent cannot set the hook process environment from a command; it can through `settings.local.json` `env` | edit guard protects `.claude/settings*.json`; open question 2 |
 | Same-user process writes anything | not prevented | tamper evidence only; same limit as `person-delegation` section 2 |
-| Harness without pre-tool hooks | rules degrade to git hooks, in-process checks and CI | coverage table says so |
+| Harness without pre-tool hooks | rules degrade to the repository's own hooks, in-process checks and CI | coverage table says so |
 
 Local enforcement is a checkpoint against the model, not a sandbox. What does not fall to an agent
 with a shell: the wheel code, a protected base branch with a required check, and the person's
@@ -369,7 +369,7 @@ kept to preserve an old path: tests move with the code in the same commit.
   `ml_stack/policy/rules.toml` (extend `test_packaging_install.py`).
 - Not in slice 1: hooks move, install, lock, project policy file.
 
-### Slice 2: hooks into the wheel, install, lock
+### Second slice: hooks into the wheel, install, lock
 
 - Move `scripts/hooks/{claude-bash-guard,claude-edit-guard,pre-push,commit-msg,primary-only,
   budgets-only-fall,pushed,no-data-files,claude-session-*}` logic to `policy/hooks/`; fold

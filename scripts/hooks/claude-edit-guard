@@ -159,10 +159,10 @@ def docstring_lines(node) -> int:
     return len(text.splitlines()) if text else 0
 
 
-def refuse(message: str) -> int:
-    print(f"blocked: {message}\n\n(ml-stack scripts/hooks/claude-edit-guard. If this is "
-          f"genuinely the right code, say so and a person can write it, or set "
-          f"MLSTACK_GUARD=off.)", file=sys.stderr)
+def refuse(message: str, hard: bool = False) -> int:
+    tail = ("no switch opens this rule" if hard else
+            "If this is genuinely the right code, say so and a person can write it, or set MLSTACK_GUARD=off")
+    print(f"blocked: {message}\n\n(ml-stack scripts/hooks/claude-edit-guard. {tail}.)", file=sys.stderr)
     return BLOCKED
 
 
@@ -294,9 +294,28 @@ def check(tool: str, given: dict) -> int:
     return ALLOWED
 
 
+PERSON_STORE = re.compile(r"(^|/)\.ml-stack/person(/|$)")
+"""The person record: statements, authorizations and the key that seals them."""
+
+
+def in_person_store(path: str) -> bool:
+    """Whether ``path`` (links resolved) lies in the person record, in the default place or under the active
+    state root."""
+    if not path:
+        return False
+    real = Path(path).resolve()
+    root = (Path(os.environ.get("ML_STACK_HOME") or "~/.ml-stack") / "person").expanduser().resolve()
+    return real == root or root in real.parents or any(PERSON_STORE.search(p) for p in (path, str(real)))
+
+
+PROTECTED = re.compile(
+    r"(^|/)(src/ml_stack/workspace/person_\w+\.py|scripts/hooks/(claude-user-prompt|person-consume|claude-bash-guard"
+    r"|claude-edit-guard|pre-push|rules_loader\.py)|\.claude/settings(\.local)?\.json)$")
+"""The code and settings that make the person record: only a person at a terminal changes them."""
+
+
 def main() -> int:
-    if os.environ.get("MLSTACK_GUARD") == "off":
-        return ALLOWED
+    switched = rules_loader.guard_off()
     try:
         event = json.load(sys.stdin)
     except Exception:
@@ -305,6 +324,14 @@ def main() -> int:
     if tool not in TOOLS:
         return ALLOWED
     given = event.get("tool_input") or {}
+    if in_person_store(str(given.get("file_path") or given.get("notebook_path") or "")):
+        return refuse("the person record is written only by the harness hooks when the person types", hard=True)
+    target = str(given.get("file_path") or given.get("notebook_path") or "")
+    if target and any(PROTECTED.search(p) for p in (target, str(Path(target).resolve()))):
+        return refuse("the person-record code, the guards and the hook settings are changed by a person at a "
+                      "terminal", hard=True)
+    if switched:
+        return ALLOWED
     rules = rules_loader.load()
     if rules is not None:
         why = rules.edit_refusal([given.get("file_path") or given.get("notebook_path") or ""],

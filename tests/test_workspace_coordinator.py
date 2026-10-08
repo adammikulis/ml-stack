@@ -195,7 +195,7 @@ def test_declared_cli_arguments_roundtrip_without_credentials(shared):
     argv = argv_for(args, [*cli.COMMON, *options])
     assert '--agent' not in argv and '--token-file' not in argv and '--request-id' not in argv
     got = shared.remote.command(argv, shared.alice, request_id=args.request_id)
-    assert got['from'] == 'alice' and got['from_label'] == 'alice/helper'
+    assert got['from'] == 'alice' and got['from_label'].endswith(' (helper)')
 
 
 def test_installed_cli_on_second_device_reads_shared_state_without_local_fallback(shared, installed_metadata):

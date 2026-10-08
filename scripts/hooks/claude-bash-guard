@@ -3,7 +3,8 @@
 
 Claude Code runs this before every Bash call. Exit 2 blocks the command and hands the
 message back.
-Set MLSTACK_GUARD=off to disable it for a session.
+Set MLSTACK_GUARD=off to disable the soft rules for a session; the hard rules (pushes of main, tags,
+force and deletions, minting identities, the person record) stay in force.
 
 Wire it in as a PreToolUse hook on Bash in a project's `.claude/settings.json`:
 
@@ -16,8 +17,8 @@ must not block every Bash call.
 """
 
 import json
-import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -27,12 +28,20 @@ import rules_loader
 # The start of a command, past any NAME=value the caller put in front of it.
 RUN = r"(^|[;&|(]\s*|\bthen\s+|\bdo\s+|\bexec\s+)(\w+=\S*\s+)*"
 
-PUSH_MAIN = RUN + r"git\s+push\b[^;&|\n]*\bmain\b"
+# The start of a git push: a command start, a quote (sh -c "..."), or an env / sudo / command prefix.
+PUSHER = (r"(^|[;&|(]\s*|\bthen\s+|\bdo\s+|\bexec\s+|[\"'`]\s*|\bsudo\s+|\bcommand\s+"
+          r"|\benv\s+(-\S+\s+(\w+\s+)?|\w+=\S*\s+)*)(\w+=\S*\s+)*")
+GIT_PUSH = r"git\s+(-[Cc]\s+\S+\s+|--\S+\s+)*push\b"
 
-# Read off the command rather than the environment: the guard is told what to allow by the
-# command it is asked about.
-PUSH_MAIN_OPENED = r"\bML_STACK_PUSH_MAIN=yes\b"
-
+PUSH_MAIN = PUSHER + GIT_PUSH + r"[^;&|\n]*\bmain\b"
+PUSH_FLAGS = (PUSHER + GIT_PUSH + r"[^;&|\n]*(--all\b|--mirror\b|--tags\b|--delete\b"
+              r"|--force|\s-f\b|\s-d\b)")
+MINT = RUN + r"(\S*/)?ml-stack-workspace\s+(-\S+\s+)*(mint|delegate)\b"
+PERSON_STORE = (r"\.ml-stack/person\b|person/statements\.log|\bCLAUDE_CONFIG_DIR=|"
+                r"(import|from)\s+ml_stack\.workspace(\.|\s+import\s+[^;\n]*\b)person_\w+|"
+                r"-m\s+ml_stack\.workspace\.person_|"
+                + RUN + r"(\S*python\S*\s+|(ba)?sh\s+)?(\S*/)?(claude-user-prompt|person-consume(?!\s+propose\b))")
+HERE = Path(__file__).resolve().parent
 
 # (what it matches, what to do instead). Ordered: the first match wins.
 REFUSE = [
@@ -80,18 +89,24 @@ REFUSE = [
     (r"\bpkill\b[^|;]*llama|\bkillall\b[^|;]*llama",
      "Do not pkill llama-server. `ml-stack-serve down --port N` releases the lease too; "
      "killing the process leaves the lease behind and the next `up` refuses."),
-    (RUN + r"git\s+push\b[^;&|\n]*(--all\b|--mirror\b|--tags\b|--delete\b"
-     r"|--force|\s-f\b|\s-d\b)",
+    (PUSH_FLAGS,
      "An agent pushes one branch by name: `git push origin <branch>`. Every branch at "
      "once, a tag, a deletion and a forced push stay the owner's, and no opener opens "
      "them."),
     (PUSH_MAIN,
-     "An agent pushes the development branch by name and nothing else: `git push origin "
-     "<development branch>` after a merge lands on it. A push to `main` publishes: "
-     "release-please reads the subjects there, so it moves the release pull request and "
-     "releases every commit on the branch at once.\n\n"
-     "When the owner has asked for that push, the ask is written on the command itself:  "
-     "ML_STACK_PUSH_MAIN=yes git push origin main"),
+     "An agent pushes the development branch by name: `git push origin <development branch>` "
+     "after a merge lands on it. A push to `main` publishes: release-please reads the subjects "
+     "there, so it moves the release pull request and releases every commit on the branch at "
+     "once. It needs the person's approval of that one commit: run "
+     "`scripts/hooks/person-consume propose`, ask its question with AskUserQuestion word for "
+     "word, and push main only after the person selects the approval."),
+    (MINT,
+     "An agent does not create identities. A person at a terminal mints a token; a joined agent "
+     "starts a new agent with `ml-stack-workspace invite`."),
+    (PERSON_STORE,
+     "The person record is written only by the harness hooks when the person types. An agent "
+     "does not read its key, open its log or import its writers; `ml-stack-workspace "
+     "attestations` shows what the hooks recorded."),
     (r"(^|[;&|]\s*|\benv\s+)SKIP_NAME_CHECK=1",
      "SKIP_NAME_CHECK is a person's to set, not an agent's. The hook is the last thing "
      "between a real community and a public repository. If it flagged an invented name, add "
@@ -131,9 +146,24 @@ def without_search_patterns(command: str) -> str:
     return re.sub(rf"\b({SEARCHERS})\b[^|;&\n]*", strip, command)
 
 
+HARD = (PUSH_FLAGS, PUSH_MAIN, MINT, PERSON_STORE)
+"""Patterns that stay in force when MLSTACK_GUARD=off is set: this guard only ever runs on an agent's call."""
+
+MESSAGE = re.compile(r"(-m|--message)(\s+|=)('[^']*'|\"[^\"]*\")")
+
+
+def release_approved(cwd: str) -> bool:
+    """Whether this session holds a live release-main approval for the repository at ``cwd``."""
+    try:
+        done = subprocess.run([sys.executable, str(HERE / "person-consume"), "peek"], cwd=cwd or None,
+                              capture_output=True, timeout=10, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return done.returncode == 0
+
+
 def main() -> int:
-    if os.environ.get("MLSTACK_GUARD") == "off":
-        return 0
+    switched = rules_loader.guard_off()
     try:
         event = json.load(sys.stdin)
     except Exception:
@@ -141,20 +171,23 @@ def main() -> int:
     if event.get("tool_name") != "Bash":
         return 0
     command = without_heredocs((event.get("tool_input") or {}).get("command") or "")
-    rules = rules_loader.load()
+    rules = None if switched else rules_loader.load()
     why = rules.bash_refusal(command, event.get("cwd") or "") if rules else ""
     if why:
         print(f"blocked: {why}\n\n(ml-stack scripts/hooks/claude-bash-guard. Set "
               f"MLSTACK_GUARD=off for a person's own session.)", file=sys.stderr)
         return 2
-    command = without_search_patterns(command)
+    command = MESSAGE.sub(r"\1 ''", without_search_patterns(command))
     for pattern, instead in REFUSE:
+        if switched and pattern not in HARD:
+            continue
         if re.search(pattern, command, re.M):
-            if pattern is PUSH_MAIN and re.search(PUSH_MAIN_OPENED, command):
+            if pattern is PUSH_MAIN and not re.search(PUSH_FLAGS, command) and release_approved(event.get("cwd") or ""):
                 continue
-            print(f"blocked: {instead}\n\n"
-                  f"(ml-stack scripts/hooks/claude-bash-guard. If this is genuinely the right "
-                  f"command, say so and a person can run it, or set MLSTACK_GUARD=off.)",
+            tail = ("No switch opens this rule." if pattern in HARD else
+                    "If this is genuinely the right command, say so and a person can run it, "
+                    "or set MLSTACK_GUARD=off.")
+            print(f"blocked: {instead}\n\n(ml-stack scripts/hooks/claude-bash-guard. {tail})",
                   file=sys.stderr)
             return 2
     return 0

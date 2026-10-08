@@ -1,6 +1,10 @@
 # Person-spoken authorization
 
-Design note. Nothing here is implemented. Owner decisions of this revision are folded in.
+Design note. Slice 1a (section 12) is implemented; the rest is not. Owner decision of 2026-10-08: development
+pushes need no authorization, and the only authorizable kind is `release-main`, created only by the structured
+approval question (sections 7 and 12). Sections 5.1 to 5.3 describe the earlier prose design: typed words now
+only revoke, refuse, or ask for the approval question.
+Slice 1b-i (`delegate` removed from the CLI, `mint` person-only) is implemented; section 8 lists what remains.
 
 ## Invariants
 
@@ -226,7 +230,7 @@ b. No agent, subagent, board message or hook run during an agent turn can write 
    live in `person_record.py`, imported only by the hook entry points (a wiring test, same
    shape as `tests/test_serve_no_bypass.py`). The board append API refuses the kind from
    every token.
-c. Agent author fields cannot look human. Registration refuses ids and display names that
+c. The author fields of an agent cannot look human. Registration refuses ids and display names that
    equal, contain or visually resemble a reserved set after Unicode normalisation, case
    folding and homoglyph mapping: `human`, `owner`, `person`, `user`, `you`, `system`,
    `attested`, and the owner's display name. **The owner's name is derived at runtime from
@@ -265,7 +269,7 @@ Can (closed registry; targets derived by the guard):
 
 | kind | derived target | consumer |
 |---|---|---|
-| `push-dev` | upstream and development branch of the primary checkout | `pre-push`, Bash guard |
+| `release-main` | repository, remote, full commit and tree of one fast-forward of `refs/heads/main`, shown in the approval question | `pre-push`, Bash guard |
 | `daemon-restart` | owned process id and birth time from the claim table | runtime claims |
 | `restore-launcher` | installed launcher paths | repair tooling |
 | `runtime-deploy` | immutable wheel hash and target runtime | runtime tooling |
@@ -273,11 +277,11 @@ Can (closed registry; targets derived by the guard):
 
 Cannot, ever: the human-only floor (keystore and secrets, signing keys, `sudoers`, the OS
 administrator prompt, `iogpu.wired_limit_mb`, sentinel policy, quarantine release, roles,
-saved rules, the review screen, `init`); raising a budget; pushing `main`, tags, releases,
-forced pushes or remote ref deletion; creating, widening or reading authorizations. The
-interpreter has no kind for these, so no wording reaches them; a sentence naming one is
-answered with a refusal that says the owner runs it. `ML_STACK_PUSH_MAIN=yes` remains an
-owner-typed opener.
+saved rules, the review screen, `init`); raising a budget; tags, forced pushes, remote ref deletion,
+`--all` and `--mirror` pushes; creating, widening or reading authorizations. `main` is coverable only as
+`release-main`, through the structured approval question and never through typed words, `/allow` or a
+reply. A sentence naming one of the others is answered with a refusal that says the owner runs it.
+`ML_STACK_PUSH_MAIN=yes` opens nothing for an agent; the owner's own terminal push meets no hook.
 
 ## 8. Removing `delegate`, and checking `mint` and `invite`
 
@@ -285,33 +289,26 @@ owner-typed opener.
 identity with a label taken from the SubagentStart event (`agent_id`, `agent_type`), the
 shape CLAUDE.md already describes ("a subagent acts as that parent with a label").
 
-Callers audit (grep of `src`, `scripts`, `docs`, `tests`):
+Done in slice 1b-i: the `delegate` command line verb is gone, `mint` belongs to a person
+alone (a lead mints nothing), a labelled helper is displayed as `parent (label)`, and
+`tests/test_redteam_no_synthetic_identity.py` pins the reviewed identity-creating call sites,
+the verbs, the invite role and the people-looking names.
 
-- CLI verb: `workspace/cli.py:666` (`delegate`).
-- Service: `service.py:142` `Workspace.delegate`; registry `identity.py:540`
-  `Registry.delegate`; `person_session.py:96` (refusal stub, delete).
-- Remote: `remote.py:137`, `remote_host.py:309` (operation `delegate`) and `:349`
-  (`remote.delegate` audit).
-- Subagent identity: `harnessid.py:95`, `localstart.py:158`,
-  `automatic_connection.py:311-319` ("native sessions delegate from their authenticated
-  project agent"). These are the real consumers: they obtain `parent/name` tokens for
-  SubagentStart and local launches.
-- Renewal: `child_renewal.py` and `task_scheduler.py:31` (`renew` of worker seats); worker
-  seats that are delegated children.
-- Docs: `docs/workspace.md:122-139`, `docs/local-agent.md:45`; `localagent.py:188-206`
-  ("a delegate of ...").
-- Tests: 81 references across about 30 files, including `test_child_renewal.py`,
-  `test_redteam_human_floor.py` (several `delegate` cases), `test_workspace_agent_invites.py`,
-  `test_automatic_project_connection.py`, `test_device_agent*.py`, `test_harness_rails.py`,
-  `test_taskboard.py`, `test_workspace_board.py`, `test_agent_display.py`.
+Remaining (slice 1b-ii), consumers that still obtain `parent/name` tokens:
 
-This is the largest part of slice 1: `Identity` gains a `label` (display and audit only,
-not a capability), the SubagentStart hook supplies it, `parent/name` as a registry entry
-with its own secret disappears, `child_renewal.py` is deleted (nothing to renew), worker
-seats for tasks become labelled uses of the worker's own agent identity, and the board shows
-"Subagent · label (parent P)" from the event. If the diff proves too large to review at once,
-split slice 1 into 1a (hook, log, `push-dev`, reserved names) and 1b (`delegate` removal);
-both are scheduled now, 1b is not deferred.
+| Consumer | Needs |
+|---|---|
+| `service.py` `Workspace.delegate`, `identity.py` `Registry.delegate`, `person_session.py` stub | delete with the last caller |
+| `remote.py` `delegate`, `remote_host.py` operation `delegate` and its audit | delete; native sessions become a parent seat with a label |
+| `automatic_connection.py` native session start, `harnessid.py` local harness start | `Seat(label, parent=...)`; `harnesshook`, `harness_claims`, `harness_remote` and `notification_reader` key their identity and physical claim owner by the seat name today |
+| `localstart.py` `_worker_identity`, `child_renewal.py`, `task_scheduler.py`, `device_agent.bind_worker` | worker seats for tasks |
+| `task_worktrees`, `resource_allocations`, `backlog`, `issuepump`, `claim_handoff`, `task_integration`, `task_source_recovery`, `task_worktree_recovery`, `task_scope`, `taskboard`, `task_actions` | authorize by `child.parent == caller` where the worker holds its own token |
+| tests | about 25 files build a delegated worker through `ws.delegate` (`taskboard_kit`, `test_child_renewal`, `test_workspace_quickstart`, `test_device_agent*`, `test_automatic_project_connection`, `test_enrollment`) |
+
+Open design question: a local-model worker is a separate process. Under the parent-plus-label
+model it would hold its parent's token and so its parent's rights, and the task checks that
+separate a worker from its coordinator (`child.parent`, the independent reviewer) would reduce
+to label comparisons.
 
 `mint`: a human mints any role; a lead mints `agent`. A lead minting a new `agent` identity
 is the same synthetic-identity shape. It is removed from agent-reachable flows: only a person
@@ -416,3 +413,48 @@ Library decisions:
    removal).
 2. `mint` is removed from agent flows. A person at a terminal can still mint. `invite` and `join`
    stay, with the invited role pinned to `agent`.
+
+## 12. Slice 1a as built
+
+- Modules in `src/ml_stack/workspace/`: `person_store` (paths, verified reads, authorization state, the lock),
+  `person_record` (the writers), `person_auth` (`consume`), `person_release` (facts, question, push check, the
+  `person-consume` commands), `person_intent` (revoke, refuse, ask), `person_transcript`, `person_targets`,
+  `person_ancestry`, `person_hook`, `person_view`. Only `person_hook` and `person_auth` import `person_record`;
+  `tests/test_person_guards.py` pins that.
+- One chain: the log is a `sentinel/events.py` `EventLog` (keyed HMAC, sealed head) at
+  `~/.ml-stack/person/statements.log`.
+- Hooks: `scripts/hooks/claude-user-prompt` serves `UserPromptSubmit`, `PostToolUse` on `AskUserQuestion` and
+  `SessionEnd`; `claude-session-start` closes a session's authorizations when it starts again and records the
+  harness process as that session's binding.
+- Transcript versions pinned: `person_transcript.PINNED_VERSIONS` (2.1.293 as probed, 2.1.294 as read from a
+  live transcript). Another version fails closed until the tuple is updated. The transcript path must be an
+  owned plain file under the Claude projects folder named `<session id>.jsonl`; only its last 8 MiB is read.
+- `release-main`: the hook (or `person-consume propose`) renders the question from git: the full commit, subject,
+  commits ahead of the remote's main, diffstat and remote, ending in a line tagged under the store key. The
+  authorization is created only when the answer is exactly "Approve release of <short sha>" to exactly that
+  question as git renders it at answer time. It is bound to repository, remote, commit and tree, expires after
+  15 minutes, is used once under the consume lock, and ends on session end, `stop`, `cancel that` or `/revoke`.
+- `pre-push`: an agent (CLAUDECODE set, or an ancestor process that is a harness or a recorded session binding)
+  may push the development branch with no authorization. A push that updates `refs/heads/main` must be the only
+  ref, a fast-forward from the remote's tip, to the approved commit; the approval is consumed after the other
+  push checks pass. Tags, forced pushes and deletions are refused. The Bash guard refuses the same pushes by
+  command text (through `env`, `sudo`, `sh -c` and `unset` prefixes) and lets a push of main through only while
+  the session holds an approval.
+- The session of a guard is the one whose recorded harness process is its ancestor; `ML_STACK_SESSION_ID` is not
+  trusted.
+- The hard rules of both guards ignore `MLSTACK_GUARD=off`: the guards run only for an agent's tool calls. The
+  edit guard refuses edits to the person-record modules, the hook scripts, the guards, `pre-push`, `rules_loader.py`
+  and `.claude/settings*.json`; edits through the shell are not covered and stay a same-user matter.
+- Forgeable by the same user: the hook entry points can be run by an agent, and a same-user process can write
+  the store, its key or a transcript. Detection, not prevention: the chain and seal are verified before every
+  use, the transcript path is validated, each statement records its transcript folder and the Claude Code
+  version, and the guards refuse commands that name the store, the hooks or the writers. `CLAUDE_CONFIG_DIR`
+  and `ML_STACK_HOME` still move the transcript folder and the store; a store an agent creates elsewhere holds
+  no binding for the real harness process unless the agent forges one.
+- Privacy: a statement keeps the SHA-256 of the prompt, an excerpt of at most 80 characters with secrets
+  redacted, the working directory and the session id. To purge, the person deletes `~/.ml-stack/person/` at a
+  terminal; a new chain starts and every authorization ends.
+- Manual acceptance (the person): a typed "yes" or "/allow" after a release proposal does not authorize; the
+  approval answer to the AskUserQuestion does, and `git push origin main` then goes through once; a message posted
+  to `CLAUDE_CODE_MESSAGING_SOCKET` in a live session is not recorded as a statement; `env -u CLAUDECODE git push
+  origin main` from the agent's shell is refused; the hooks fire and exit 0 under the installed Claude Code.

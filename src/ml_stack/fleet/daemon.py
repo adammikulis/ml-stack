@@ -31,6 +31,8 @@ from ml_stack.speech import service as speech
 from . import (
     automatic_clusters,
     autostart,
+    autostart_check,
+    autostart_guard,
     cluster_modes,
     invite_client,
     invite_routes,
@@ -510,6 +512,7 @@ class DaemonRuntime:
             "labels": self.labels,
             **self.bench_host.report(),
             **updating.state(),
+            "autostart": autostart_check.state_word(),
             "launcher_control": self.control.instance if hasattr(self, "control") else "",
             "speech": list(self.heard),
         }
@@ -651,13 +654,17 @@ class DaemonRuntime:
 def serve(options: DaemonOptions) -> None:
     runtime = DaemonRuntime(options)
     runtime.configure()
-    runtime.services()
-    runtime.initialize_listener()
-    runtime.updates()
-    runtime.announcements()
-    runtime.configure_interface()
-    runtime.report_startup()
-    runtime.run()
+    with autostart_guard.running(runtime.root) as sole:
+        if not sole:
+            say("another ml-stack-traind already runs from this root; exiting")
+            return
+        runtime.services()
+        runtime.initialize_listener()
+        runtime.updates()
+        runtime.announcements()
+        runtime.configure_interface()
+        runtime.report_startup()
+        runtime.run()
 
 
 def _stop_advertisers(advertisers: dict[str, Any]) -> None:

@@ -1,9 +1,10 @@
 #!/bin/sh
 # Refuse an agent's push of anything but the development branch, then check what it pushes
-# with scripts/hooks/pushed. Claude Code sets CLAUDECODE for every command it runs, and a
-# person's shell does not. The development branch is the one the primary checkout is on, and
-# `main` is never it. ML_STACK_PUSH_MAIN=yes on the command lets `main` through, for the
-# push the owner has asked for.
+# with scripts/hooks/pushed. An agent is a process under CLAUDECODE or under a harness process;
+# a person's terminal is neither. The development branch is the one the primary checkout is on,
+# and `main` is never it. An agent's push of `main` is allowed only as one fast-forward to a
+# commit the person approved through the approval question (person-consume); tags, forced
+# pushes and deletions are never allowed.
 if [ -n "$(git status --porcelain --untracked-files=all)" ]; then
     echo "pre-push: refused: working tree has uncommitted changes" >&2
     exit 1
@@ -14,7 +15,6 @@ for state in MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD rebase-merge rebase-apply s
         exit 1
     fi
 done
-[ -z "$CLAUDECODE" ] && exit 0
 
 self=$0
 while [ -L "$self" ]; do
@@ -25,6 +25,10 @@ while [ -L "$self" ]; do
     esac
 done
 here=$(cd "$(dirname "$self")" && pwd)
+python="${PYTHON:-python3}"
+if [ -z "$CLAUDECODE" ] && ! "$python" "$here/person-consume" harness </dev/null 2>/dev/null; then
+    exit 0
+fi
 input=$(cat)
 
 primary=$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")
@@ -33,12 +37,13 @@ dev=$(env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE git -C "$primary" branch
 zero=0000000000000000000000000000000000000000
 
 refused=""
+pushes_main=""
 while read -r local_ref local_sha remote_ref remote_sha; do
     [ -z "$remote_ref" ] && continue
     if [ "$local_sha" = "$zero" ]; then
         refused="$refused $remote_ref"
-    elif [ "$remote_ref" = refs/heads/main ] && [ "$ML_STACK_PUSH_MAIN" = yes ]; then
-        continue
+    elif [ "$remote_ref" = refs/heads/main ]; then
+        pushes_main=yes
     elif [ -z "$dev" ] || [ "$dev" = main ] || [ "$remote_ref" != "refs/heads/$dev" ]; then
         refused="$refused $remote_ref"
     fi
@@ -47,20 +52,26 @@ $input
 EOF
 
 if [ -z "$refused" ]; then
-    printf '%s\n' "$input" | "${PYTHON:-python3}" "$here/pushed" "$dev"
-    exit $?
+    printf '%s\n' "$input" | "$python" "$here/pushed" "$dev" || exit 1
+    [ -z "$pushes_main" ] && exit 0
+    if used=$(printf '%s\n' "$input" | "$python" "$here/person-consume" consume "$1" 2>&1); then
+        echo "pre-push: main released with the person's approval (authorization $used)" >&2
+        exit 0
+    fi
+    refused=" refs/heads/main ($used)"
 fi
 cat >&2 <<WHY
 pre-push: refused:$refused
 
-An agent pushes the development branch and nothing else. release-please reads the commit
-subjects on \`main\`, so a push there moves the release pull request and publishes every
-commit on it at once.
+An agent pushes the development branch and, with the person's approval, one fast-forward of
+\`main\`. release-please reads the commit subjects on \`main\`, so a push there moves the release
+pull request and publishes every commit on it at once.
 
 Land your branch into the development branch the primary checkout is on, then push it by
 name: git push origin ${dev:-<development branch>}
 
-When the owner has asked for the push to \`main\`, the ask is written on the command:
-ML_STACK_PUSH_MAIN=yes git push origin main
+To release \`main\`, print the approval question with scripts/hooks/person-consume propose
+and ask it with AskUserQuestion, word for word. The person's answer approves that one commit.
+Tags, forced pushes and deletions are the owner's.
 WHY
 exit 1
