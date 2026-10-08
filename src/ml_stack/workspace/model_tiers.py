@@ -12,7 +12,7 @@ from typing import Any
 
 from ml_stack.workspace.modelid import VERIFIED
 
-__all__ = ["NOT_LISTED", "NOT_VERIFIED", "LOWEST", "Tier", "TierTableError", "load_table", "tier_of"]
+__all__ = ["LOWEST", "NOT_LISTED", "NOT_VERIFIED", "Tier", "TierTableError", "load_table", "tier_of"]
 
 TABLE = Path(__file__).with_name("model_tiers.json")
 NOT_LISTED = "model not in the tier table"

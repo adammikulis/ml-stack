@@ -1,10 +1,10 @@
 {
- "surfaces": 795,
+ "surfaces": 797,
  "by_status": {
-  "covered": 470,
+  "covered": 471,
   "partial": 199,
   "uncovered": 53,
-  "n/a": 73,
+  "n/a": 74,
   "unmapped": 0
  },
  "by_kind": {
@@ -26,7 +26,7 @@
    "covered": 8,
    "partial": 0,
    "uncovered": 4,
-   "n/a": 16,
+   "n/a": 17,
    "unmapped": 0
   },
   "desktop": {
@@ -79,7 +79,7 @@
    "unmapped": 0
   },
   "parser": {
-   "covered": 74,
+   "covered": 75,
    "partial": 0,
    "uncovered": 49,
    "n/a": 0,
@@ -1244,6 +1244,16 @@
     "tests/test_decide_questions.py"
    ],
    "note": ""
+  },
+  {
+   "id": "context:workspace/localinbox.py",
+   "kind": "context",
+   "source": "workspace/localinbox.py",
+   "trust": "tool results, pages, files, peers, stored facts",
+   "attacker": "text from outside is read by a model as an instruction",
+   "status": "n/a",
+   "tests": [],
+   "note": "prompts built from the person's own benchmark questions, canaries and fixed smoke checks"
   },
   {
    "id": "context:workspace/localprofile.py",
@@ -7462,6 +7472,19 @@
     "tests/test_redteam_local_agent.py::test_start_and_stop_refuse_an_agent_process_and_leave_the_state_alone"
    ],
    "note": "start and stop need the person's session, a loopback origin and JSON; hostile names, projects, roles and efforts are refused; injections in task text and a model that obeys them gain nothing beyond the role"
+  },
+  {
+   "id": "parser:workspace/model_tiers.py",
+   "kind": "parser",
+   "source": "workspace/model_tiers.py",
+   "trust": "files, pages and archives from outside",
+   "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
+   "status": "covered",
+   "tests": [
+    "tests/test_workspace_bus.py",
+    "tests/test_workspace_rules.py"
+   ],
+   "note": ""
   },
   {
    "id": "parser:workspace/notes.py",
