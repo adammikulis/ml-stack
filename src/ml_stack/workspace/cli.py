@@ -201,7 +201,7 @@ def _text(value: Any) -> str:
     if isinstance(value, list):
         return "\n".join(_text(v) for v in value) or "(none)"
     if isinstance(value, dict):
-        value = {**value, "owner": project_session.owner(value["owner"])} if "owner" in value else value
+        value = {**value, "owner": project_session.owner(value["owner"])} if isinstance(value.get("owner"), str) else value
         return "\n".join(f"{k}: {v if not isinstance(v, (dict, list)) else json.dumps(v)}"
                          for k, v in value.items())
     return str(value)
