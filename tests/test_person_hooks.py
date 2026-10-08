@@ -96,6 +96,24 @@ def test_a_prompt_the_person_did_not_type_leaves_no_record(world, entry):
     assert rows(state) == []
 
 
+def test_each_origin_field_alone_can_rule_a_prompt_out(world):
+    tmp, state, repo = world
+    say(tmp, state, repo, "yes", before=(PROPOSAL,), entry=functools.partial(human, turnOrigin="peer"))
+    say(tmp, state, repo, "yes", before=(PROPOSAL,), entry=functools.partial(human, origin={"kind": "peer"}),
+        prompt_id="p-2")
+    say(tmp, state, repo, "yes", before=(PROPOSAL,), entry=functools.partial(human, sessionId="other"),
+        prompt_id="p-3")
+    assert rows(state) == []
+
+
+def test_an_authorization_past_its_expiry_reads_as_expired(world):
+    tmp, state, repo = world
+    say(tmp, state, repo, "yes", before=(PROPOSAL,))
+    held = person_store.records(person_store.open_log(state / "person"))
+    assert [a.state for a in person_store.authorizations(held)] == ["live"]
+    assert [a.state for a in person_store.authorizations(held, time.time() + 3600)] == ["expired"]
+
+
 def test_a_missing_transcript_entry_fails_closed_after_a_bounded_wait(world):
     tmp, state, repo = world
     path = transcript(tmp / "t.jsonl", PROPOSAL, human("something else", "other-id"))
