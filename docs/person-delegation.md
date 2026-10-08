@@ -365,10 +365,54 @@ Later, in order: 2) `AskUserQuestion` echo path and `PostToolUse` recorder; 3) `
 environment test to `consume`; 5) Codex and `ml-stack-chat` statement writers; 6) board view
 with person-session revocation.
 
-## 11. Open questions
+## 10a. Verified on Claude Code 2.1.293 (2026-10-08)
 
-1. Confirm slice 1 may be split 1a/1b if the `delegate` removal diff is too large to review
-   at once. Both are scheduled now.
-2. A lead's `mint` of `agent` identities: remove it from agent flows as proposed, leaving only
-   a person at a terminal and `invite`/`join` (assumes nothing outside the audited callers
-   uses it).
+A temporary hook probe logged the real hook inputs; it and its log are deleted.
+
+- `UserPromptSubmit` fires for typed prompts and also for harness-generated turns such as a
+  `<task-notification>`. The hook input has the same fields in both cases (`session_id`, `cwd`,
+  `scratchpad_dir`, `prompt_id`, `permission_mode`, `transcript_path`, `prompt`). No hook field
+  says who wrote the prompt.
+- The session transcript does. Each user entry carries `origin`, `promptSource` and `turnOrigin`,
+  and `promptId` equals the hook's `prompt_id`. Typed: `origin.kind = human`, `promptSource =
+  typed`, `turnOrigin = human`. A prompt typed while a turn runs: same, with `promptSource =
+  queued`. An agent message: `promptSource = system`, `turnOrigin = peer`. A task notification:
+  `origin.kind = task-notification`, `turnOrigin = task_notification`. Local commands such as
+  `/model` have `origin = null`.
+- The statement hook therefore records a `PersonStatement` only when the transcript entry for its
+  `prompt_id` has `origin.kind = human`, `turnOrigin = human` and `promptSource` in `typed`,
+  `queued`. A missing entry, an unknown shape or a different Claude Code version is not human
+  and fails closed. The transcript is written asynchronously, so the hook retries for a bounded
+  time. The transcript format is internal; the version is pinned in the test and any change makes
+  statements fail closed until the reader is updated.
+- `AskUserQuestion`: the `PostToolUse` input has `tool_response.answers` (question text to the
+  chosen label) and `annotations`. A `PreToolUse` hook can pre-fill `answers` through
+  `updatedInput`, so a test asserts that no configured hook does.
+- Every command run in a session sees `CLAUDE_CODE_MESSAGING_SOCKET` and
+  `CLAUDE_CODE_MESSAGING_TOKEN`. A message posted to that socket must be shown to carry a
+  non-human origin before slice 1a ships; until it is, the origin check above is the only gate and
+  the acceptance test posts one and requires `not human`.
+- A same-user process can edit the transcript file. That falls under the detect-after-the-fact
+  threat model in section 2.
+
+Library decisions:
+
+- Authorization records are JSON signed with Ed25519 from `cryptography`, verified with the public
+  key. `biscuit-python` (not `biscuit-auth`) is only worth adding for offline attenuation to
+  subagents. `pymacaroons` is not used (last release 2018, HMAC only, needs PyNaCl). `pymerkle`
+  is not used (GPLv3, last release 2023). `cedarpy` waits until there are many policies.
+- One chain implementation: `sentinel/events.py` `EventLog` (keyed HMAC, sealed head, anchor,
+  verify), with the workspace `ChainLog` features it lacks ported in (torn-tail cut, fsync, lock,
+  incremental verify, prefix prune). The workspace audit, notes, quarantine, bus and the test-reuse
+  store move onto it.
+- Defects found in the existing chains, each its own task: `activity/reuse.py` `chain_ok` returns
+  true on an unparseable line and the next append restarts the chain; `EventLog._catch_up` does not
+  cut a torn tail; `activity/gate.py` `evidence()` never calls `verify()`; the workspace
+  `ChainLog` is unkeyed.
+
+## 11. Decisions
+
+1. Slice 1 is split: 1a (statement hook, record store, `push-dev` check) and 1b (`delegate`
+   removal).
+2. `mint` is removed from agent flows. A person at a terminal can still mint. `invite` and `join`
+   stay, with the invited role pinned to `agent`.
