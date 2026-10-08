@@ -17,7 +17,7 @@ import pytest
 from ml_stack.fleet.api import Daemon, make_handler
 from ml_stack.fleet.daemon import load_or_create_token
 from ml_stack.fleet.jobs import JobRunner
-from ml_stack.fleet.serving import Endpoint, Serving, answers
+from ml_stack.fleet.serving import Endpoint, ServeSettings, Serving, answers
 from ml_stack.http import Server, build_request
 from ml_stack.testing.fakes import FakeLlamaServer, Served, fake_llama_binary
 
@@ -411,6 +411,29 @@ def gguf(tmp_path):
 
 
 class TestStartingAModelWithoutTheInterface:
+    @pytest.mark.parametrize('scenario', [(False, None, False), (True, None, True), (True, False, False)])
+    def test_escalation_defaults_and_explicit_opt_out(self, tmp_path, manager, gguf, monkeypatch, scenario):
+        from ml_stack.fleet.serving import Hosting, start_model, stop_model
+
+        observed = []
+        hosted, escalate, expected = scenario
+        lease = manager.lease
+
+        def tracked(spec, **kwargs):
+            observed.append(kwargs['escalate'])
+            return lease(spec, **kwargs)
+
+        monkeypatch.setattr(manager, 'lease', tracked)
+        settings = ServeSettings(escalate=escalate)
+        if hosted:
+            hosting = Hosting(tmp_path, Serving(tmp_path / 'serving.json'), manager=manager)
+            started = hosting.start(gguf, settings)
+            hosting.stop(started.port)
+        else:
+            started = start_model(tmp_path, gguf, settings=settings, manager=manager)
+            stop_model(started)
+        assert observed == [expected]
+
     def test_it_leases_a_server_that_answers(self, tmp_path, manager, gguf):
         from ml_stack.fleet.serving import start_model, stop_model
 
@@ -445,7 +468,7 @@ class TestStartingAModelWithoutTheInterface:
         from ml_stack.fleet.serving import start_model, stop_model
 
         registry = Serving(tmp_path / "serving.json")
-        started = start_model(tmp_path, gguf, name="something else.gguf",
+        started = start_model(tmp_path, gguf, settings=ServeSettings(name="something else.gguf"),
                               manager=manager, serving=registry)
         try:
             assert registry.all()[0].models == ["something else.gguf"]
@@ -455,7 +478,7 @@ class TestStartingAModelWithoutTheInterface:
     def test_the_context_length_reaches_the_server(self, tmp_path, manager, gguf):
         from ml_stack.fleet.serving import start_model, stop_model
 
-        started = start_model(tmp_path, gguf, context=2048, manager=manager)
+        started = start_model(tmp_path, gguf, settings=ServeSettings(context=2048), manager=manager)
         stop_model(started)
         argv = json.loads((tmp_path / "argv.json").read_text())
         assert argv[argv.index("-c") + 1] == "2048"
@@ -478,7 +501,7 @@ class TestStartingAModelWithoutTheInterface:
         from ml_stack.fleet.serving import start_model, stop_model
 
         port = free_port()
-        started = start_model(tmp_path, gguf, manager=manager, port=port)
+        started = start_model(tmp_path, gguf, manager=manager, settings=ServeSettings(port=port))
         try:
             assert started.port == port
         finally:

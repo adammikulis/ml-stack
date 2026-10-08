@@ -23,7 +23,7 @@ from ml_stack.fleet.join import main
 from ml_stack.fleet.models import Models
 from ml_stack.fleet.plan import Room, fit_for, place, ranked, room_of, table
 from ml_stack.fleet.remote import Peer, PeerError
-from ml_stack.fleet.serving import Hosting, NoRoom, Serving
+from ml_stack.fleet.serving import Hosting, NoRoom, ServeSettings, Serving
 from ml_stack.http import Server
 from ml_stack.serve.fit import Fit
 from ml_stack.serve.profile import Profile
@@ -398,7 +398,7 @@ class TestServeRoute:
         hosting = Hosting(tmp_path, Serving(tmp_path / "serving.json"),
                           fits=lambda: list(FITS))
         with pytest.raises(NoRoom, match="24.0G"):
-            hosting.start(tmp_path / MID, name=MID, context=16384, parallel=8, room=24 * G)
+            hosting.start(tmp_path / MID, ServeSettings(name=MID, context=16384, parallel=8, room=24 * G))
 
 
 class TestApply:

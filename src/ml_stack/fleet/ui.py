@@ -39,6 +39,7 @@ from .onboard.joining import (
 from .page import FIT_ONLY
 from .routes import ASSETS, UI_HEADER, asset_bytes, routes, write, write_json
 from .runtime_paths import default_root
+from .serving import Hosting, ServeSettings
 from .session import Sessions, Throttle, parse_cookie
 from .settings import apply_preferences
 
@@ -350,16 +351,14 @@ class UI:
 
     def _hosting(self) -> Any:
         if self.hosting is None:
-            from .serving import Hosting
-
             self.hosting = Hosting(self.root or default_root(), self.serving)
         return self.hosting
 
     def start_serving(self, model: Any) -> Any:
         """Run ``model`` on this machine and tell the network it is here."""
         return self._hosting().start(
-            model.path, name=model.name,
-            context=int(getattr(self.settings, "context", 0) or 8192))
+            model.path, ServeSettings(name=model.name,
+            context=int(getattr(self.settings, "context", 0) or 8192)))
 
     def stop_serving(self, port: int) -> None:
         """Stop a model server this machine started."""

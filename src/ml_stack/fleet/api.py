@@ -68,7 +68,7 @@ from .jobs import DaemonError, JobRunner
 from .measuring import BenchHost, Job as BenchJob, Refused
 from .models import Models
 from .onboard.joining import API as JOIN_API, Joining
-from .serving import Hosting, NoRoom, Serving
+from .serving import Hosting, NoRoom, ServeSettings, Serving
 from .ui import routes as ui_routes
 from .weights import ModelError
 
@@ -807,9 +807,8 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
                     self._send(200, running.public())
                     return
                 try:
-                    served = hosting.start(found.path, name=found.name, context=context,
-                                           parallel=parallel,
-                                           room=int(report().get("room_bytes") or 0))
+                    served = hosting.start(found.path, ServeSettings(name=found.name, context=context,
+                                           parallel=parallel, room=int(report().get("room_bytes") or 0)))
                 except NoRoom as e:
                     self._send(409, {"error": str(e), "refused": "room"})
                     return

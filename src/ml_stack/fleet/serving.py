@@ -6,7 +6,7 @@ import json
 import socket
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from http.client import HTTPException
 from pathlib import Path
 from typing import Any
@@ -28,8 +28,18 @@ from ml_stack.units import human_bytes
 from . import model_components
 from .models import draft_beside
 
-__all__ = ["Endpoint", "Hosting", "NoRoom", "Served", "Serving", "Started",
-           "discover_serving", "start_model", "stop_model"]
+__all__ = [
+    "Endpoint",
+    "Hosting",
+    "NoRoom",
+    "ServeSettings",
+    "Served",
+    "Serving",
+    "Started",
+    "discover_serving",
+    "start_model",
+    "stop_model",
+]
 
 # Each health path waits this long, and the beacon rebuilds the list every 10s.
 PROBE_TIMEOUT = 1.0
@@ -151,25 +161,30 @@ class Started:
     served: Served | None = None
 
 
-def start_model(root: Path | str, model_path: Path | str, *, name: str | None = None,
-                context: int = 8192, parallel: int = 1, manager: Any = None,
-                serving: Serving | None = None, port: int | None = None,
-                escalate: bool = False) -> Started:
-    """Run ``model_path`` on this machine with ``parallel`` slots of ``context`` tokens.
-    Registers the port when given a ``Serving``.
+@dataclass(frozen=True, slots=True)
+class ServeSettings:
+    """Model identity, context, slots, memory room and escalation preferences."""
 
-    ``escalate=True`` grows a server already up on ``port`` with fewer slots than
-    ``parallel`` asks for, rather than refusing -- see
-    :meth:`~ml_stack.serve.ServerManager.escalate`.
-    """
+    name: str = ''
+    context: int = 8192
+    parallel: int = 1
+    room: int = 0
+    port: int | None = None
+    escalate: bool | None = None
+
+
+def start_model(root: Path | str, model_path: Path | str, *, settings: ServeSettings | None = None,
+                manager: Any = None, serving: Serving | None = None) -> Started:
+    """Lease the configured model and optionally register its serving endpoint."""
+    settings = settings or ServeSettings()
     if manager is None:
         from .llama import ensure_server
         manager = ServerManager(
             backend=LlamaServerBackend(binary=ensure_server(root)))
 
-    if port is None:
-        port = free_port()
-    parallel = max(1, int(parallel))
+    port = free_port() if settings.port is None else settings.port
+    parallel = max(1, int(settings.parallel))
+    context = int(settings.context)
     original_path = Path(model_path)
     model_path = str(model_components.effective(original_path))
     projector = (model_components.linked(original_path, "vision")
@@ -192,11 +207,11 @@ def start_model(root: Path | str, model_path: Path | str, *, name: str | None = 
                                      spec_draft_type_k=DEFAULT_KV if draft else "",
                                      spec_draft_type_v=DEFAULT_KV if draft else "",
                                      spec_type=kind, spec_draft_ngl=99 if draft else None),
-                          escalate=escalate,
+                          escalate=bool(settings.escalate),
                           reason=f"fleet serving of {Path(model_path).name}")
     served = None
     if serving is not None:
-        served = serving.register(port, [name or Path(model_path).name], slots=parallel)
+        served = serving.register(port, [settings.name or Path(model_path).name], slots=parallel)
     return Started(port=port, lease=lease, manager=manager, served=served)
 
 
@@ -242,25 +257,20 @@ class Hosting:
         return (f"{human_bytes(need)} for {parallel} slot(s) at {context} tokens; "
                 f"this machine has {human_bytes(room)}")
 
-    def start(self, model_path: Path | str, *, name: str = "", context: int = 8192,
-              parallel: int = 1, room: int = 0, escalate: bool = True) -> Served:
-        """Serve ``model_path`` here, or raise `NoRoom`.
-
-        ``escalate`` (on by default: a pool is exactly the place more than one
-        conversation is expected) grows a server already up with fewer slots than
-        ``parallel`` asks for rather than refusing.
-        """
-        name = name or Path(model_path).name
-        why = self.fits_in(name, context=int(context), parallel=int(parallel), room=int(room))
+    def start(self, model_path: Path | str, settings: ServeSettings | None = None) -> Served:
+        """Serve the configured model, admitting its memory and slot requirements."""
+        settings = settings or ServeSettings()
+        name = settings.name or Path(model_path).name
+        why = self.fits_in(name, context=int(settings.context), parallel=int(settings.parallel), room=int(settings.room))
         if why:
             raise NoRoom(f"{name} does not fit: {why}")
-        started = start_model(self.root, model_path, name=name, context=int(context),
-                              parallel=int(parallel), manager=self.manager,
-                              serving=self.serving, escalate=escalate)
+        configured = replace(settings, name=name, escalate=True if settings.escalate is None else settings.escalate)
+        started = start_model(self.root, model_path, settings=configured,
+                              manager=self.manager, serving=self.serving)
         self.manager = started.manager
         self.leases[started.port] = started.lease
         return started.served or Served(port=started.port, models=[name],
-                                        slots=max(1, int(parallel)))
+                                        slots=max(1, int(settings.parallel)))
 
     def stop(self, port: int) -> None:
         """Release the server on ``port``; a port this process did not start is only
