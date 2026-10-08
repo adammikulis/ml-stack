@@ -12,6 +12,11 @@
                            in the background by itself the first time)
     scripts/test ratchet   compare the last full run's wall and CPU time with tests/full-tier-time.json
     scripts/test heavy --junit J   rewrite tests/heavy-modules.txt from a pytest --junitxml file J
+    scripts/test submit TIER [PATH...]   start the same run in the background and print its job id
+    scripts/test status [JOB] | wait JOB [--timeout S] | result JOB | cancel JOB
+
+A tier run is a background job that the command follows; Ctrl-C cancels it. A run that names test
+files reuses an earlier pass of an unchanged file unless --no-reuse is given (docs/test-reuse.md).
 
 Every pytest run is admitted by the shared host broker (scripts/testslots_runner.py, see
 docs/test-execution.md): worker startup, collection and each test take CPU permits.
@@ -24,8 +29,11 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
 import os
 import re
+import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -36,11 +44,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 import affected
+import testjobs
+import testreuse_run
+import testreuse_store
 import testselectors
 import testslots_runner
 import testtime
 
+from ml_stack.activity import reuse
 from ml_stack.activity.gate import Run, record_run, tree_hash
+from ml_stack.workspace import testboard, testruns
+from ml_stack.workspace.taskboard import TaskBoard
 
 ROOT = Path(__file__).resolve().parent.parent
 BASE = "0.2dev"
@@ -51,6 +65,10 @@ CASE = re.compile(r'<testcase classname="([^"]+)" name="[^"]*" time="([^"]+)"')
 HEAVY_FILE = ROOT / "tests" / "heavy-modules.txt"
 FULL: list[str] = []
 RECORD_WORKERS = 3
+FOREGROUND = ("quick", "fast", "full", "slow", "all", "gate")
+BUSY_EXIT = 6
+JOB_COMMANDS = ("submit", "status", "wait", "result", "cancel", "subscribe", "_job")
+REUSE: dict = {"on": True, "seat": None, "agent": {"id": "", "source": "none"}, "events": testreuse_run.Events()}
 
 
 def pytest_command(workers: int, *rest: str) -> list[str]:
@@ -59,19 +77,49 @@ def pytest_command(workers: int, *rest: str) -> list[str]:
 
 
 def run(command: list[str], env: dict[str, str] | None = None, tier: str = "") -> int:
+    """Run pytest; named test files reuse earlier passes, and a tier or gate run refreshes the store."""
+    if env is not None or tier not in testreuse_run.TIERS:
+        return launch(command, env, tier)
+    files = testreuse_run.selectors(command, ROOT)
+    reuse = REUSE["on"] and files is not None and tier != "gate"
+    session = testreuse_run.Session(ROOT, command, files, reuse_store(), REUSE["events"])
+    report = session.run(lambda shown: launch(shown, env, tier), lambda: tree_hash(ROOT), reuse)
+    REUSE["report"] = report
+    print("\n".join(report.lines()), flush=True)
+    return report.status
+
+
+def reuse_store() -> testreuse_store.Store:
+    """This project's reuse store."""
+    return testreuse_store.Store(reuse.reuse_base() / testruns.scope(ROOT))
+
+
+def jobs_store() -> testjobs.Jobs:
+    """This project's background jobs."""
+    return testjobs.Jobs(reuse_store().folder)
+
+
+def launch(command: list[str], env: dict[str, str] | None = None, tier: str = "") -> int:
     """Run pytest in the repository and write its local evidence artifact."""
-    descriptor, name = tempfile.mkstemp(suffix=".xml")
-    os.close(descriptor)
-    junit = Path(name)
-    shown = [*command, f"--junitxml={junit}"]
+    given = next((a.split("=", 1)[1] for a in command if a.startswith("--junitxml=")), "")
+    if given:
+        junit, shown = Path(given), list(command)
+    else:
+        descriptor, name = tempfile.mkstemp(suffix=".xml")
+        os.close(descriptor)
+        junit = Path(name)
+        shown = [*command, f"--junitxml={junit}"]
     print("+", " ".join(command), flush=True)
     environment = dict(os.environ if env is None else env)
+    environment.pop("DEV_TEST_JOB", None)
     environment["PYTHONPATH"] = os.pathsep.join(
         (str(ROOT / "src"), str(ROOT / "scripts"), environment.get("PYTHONPATH", "")))
     index = shown.index("-n")
     want = int(shown[index + 1])
     shown[index + 1] = "{workers}"
     shown.extend(["-p", "testslots_pytest"])
+    if environment.get("DEV_TEST_REUSE_RECORD"):
+        shown.extend(["-p", "testreuse_plugin"])
     executed_tree = tree_hash(ROOT)
     began = time.monotonic()
     load = os.getloadavg()[0] if hasattr(os, "getloadavg") else 0.0
@@ -83,14 +131,16 @@ def run(command: list[str], env: dict[str, str] | None = None, tier: str = "") -
         print("test: source tree changed during the run", file=sys.stderr)
         status = 4
     wall = time.monotonic() - began
-    if junit is not None and tier in ("full", "all") and not [a for a in command if a.startswith("tests/") or a == "-k"]:
+    if tier in ("full", "all") and not [a for a in command if a.startswith("tests/") or a == "-k"]:
         measured(command, junit, wall, load)
-    if junit is not None:
-        artifact_fd, artifact_name = tempfile.mkstemp(suffix=".result.json")
-        os.close(artifact_fd)
-        artifact = Path(artifact_name)
-        record_run(Run(ROOT, tier, command, junit, status, wall, executed_tree), artifact)
-        print(f"test: evidence {artifact}", flush=True)
+    artifact_fd, artifact_name = tempfile.mkstemp(suffix=".result.json")
+    os.close(artifact_fd)
+    record_run(Run(ROOT, tier, command, junit, status, wall, executed_tree), Path(artifact_name))
+    print(f"test: evidence {artifact_name}", flush=True)
+    kept = os.environ.get("DEV_TEST_JOB")
+    if kept and junit.is_file():
+        shutil.copy(junit, jobs_store().path(kept) / f"junit-{time.time_ns()}.xml")
+    if not given:
         junit.unlink(missing_ok=True)
     return status
 
@@ -276,11 +326,123 @@ def heavy(junit: Path, over: float) -> int:
     return 0
 
 
-def main() -> int:
+def show(job: str, status: dict, spec: dict) -> str:
+    """One line describing a job."""
+    ran = status.get("summary", {})
+    counts = f" ran {ran['ran']} reused {ran['reused']}" if ran else ""
+    return (f"{job}  {status.get('state', '?'):9}  {' '.join(spec.get('argv', []))[:60]}  "
+            f"owner {spec.get('owner', {}).get('id') or '-'}{counts}"
+            + (f"  exit {status['exit']}" if "exit" in status else ""))
+
+
+def job_command(args: argparse.Namespace, rest: list[str], argv: list[str]) -> int:
+    """submit, status, wait, result, cancel and the detached runner."""
+    jobs, me = jobs_store(), REUSE["agent"].get("id", "")
+    try:
+        if args.tier == "submit":
+            inner = argv[argv.index("submit") + 1:]
+            if not inner or inner[0] not in FOREGROUND:
+                raise testjobs.Refused(f"submit takes a tier: {', '.join(FOREGROUND)}")
+            if inner[0] != "gate":
+                testselectors.validate(rest[1:], ROOT)
+            print(jobs.submit(inner, REUSE["agent"], ROOT, Path(__file__).resolve(),
+                              {"task": args.task}))
+            return 0
+        if args.tier == "_job":
+            return run_job(jobs, rest[0], args)
+        if args.tier == "subscribe":
+            return subscribe(jobs, rest, args)
+        if args.tier == "status" and not rest:
+            for job in jobs.ids():
+                print(show(job, jobs.state(job), jobs.read(job, "spec.json")))
+            return 0
+        job = rest[0] if rest else ""
+        if args.tier == "cancel":
+            print(jobs.cancel(job, me))
+            return 0
+        status = jobs.wait(job, args.timeout) if args.tier == "wait" else jobs.state(job)
+        if not status:
+            raise testjobs.Refused(f"no job {job}")
+        if args.tier == "result":
+            print(json.dumps(jobs.result(job, ROOT), indent=2))
+        else:
+            print(show(job, status, jobs.read(job, "spec.json")))
+        return int(status.get("exit", 3)) if args.tier == "wait" and status.get("state") in testjobs.TERMINAL else (
+            3 if args.tier == "wait" else 0)
+    except testjobs.Busy as error:
+        print(f"test: {error}", file=sys.stderr)
+        return BUSY_EXIT
+    except (testjobs.Refused, ValueError, OSError) as error:
+        print(f"test: {error}", file=sys.stderr)
+        return 4
+
+
+def subscribe(jobs: testjobs.Jobs, rest: list[str], args: argparse.Namespace) -> int:
+    """Follow a job, a reuse key or a task through the board's own subscriptions."""
+    seat = REUSE["seat"]
+    if seat is None:
+        raise testjobs.Refused("subscribe needs a workspace agent: run it as the identity the harness assigned")
+    if args.task:
+        print(TaskBoard(seat.ws).subscribe(seat.token, args.task))
+        return 0
+    thread = int(jobs.read(rest[0]).get("thread", 0)) if rest else 0
+    if args.key:
+        thread = testboard.thread_for_key(reuse_store().folder, args.key)
+    if not thread:
+        raise testjobs.Refused("that run has not opened a board thread yet")
+    print(testboard.follow_thread(seat, thread))
+    return 0
+
+
+def run_job(jobs: testjobs.Jobs, job: str, args: argparse.Namespace) -> int:
+    """Run a recorded job in this detached process and record how it ended."""
+    spec = jobs.read(job, "spec.json")
+    me = {"pid": os.getpid(), "started": testreuse_store.process_start(os.getpid())}
+    thread = REUSE["events"].job_started(job, spec)
+    jobs.write(job, "status.json", {"state": "running", "at": time.time(), "thread": thread, **me})
+    signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
+    state, code = "failed", 1
+    flags = ["--task", args.task] if args.task else []
+    try:
+        code = main([*spec["argv"], *flags])
+        state = "done"
+    except KeyboardInterrupt:
+        state, code = "cancelled", 130
+    except SystemExit as stop:
+        state, code = "done", stop.code if isinstance(stop.code, int) else 1
+    finally:
+        report = REUSE.get("report")
+        ran, reused = report.counts() if report else (0, 0)
+        status = {"state": state, "exit": code, "finished": time.time(), "thread": thread, **me,
+                  "summary": {"ran": ran, "reused": reused} if report else {}}
+        jobs.write(job, "status.json", status)
+        REUSE["events"].job_done(job, spec, status, thread)
+    return code
+
+
+def follow(argv: list[str], args: argparse.Namespace) -> int:
+    """Run a tier as a job and show its output until it ends; Ctrl-C cancels it."""
+    jobs, me = jobs_store(), REUSE["agent"].get("id", "")
+    try:
+        job = jobs.submit(argv, REUSE["agent"], ROOT, Path(__file__).resolve(),
+                          {"task": args.task, "exclusive": False})
+    except testjobs.Refused as error:
+        print(f"test: {error}", file=sys.stderr)
+        return 4
+    try:
+        status = jobs.wait(job, float("inf"), tail=True)
+    except KeyboardInterrupt:
+        print(f"\n{jobs.cancel(job, me, jobs.read(job, 'spec.json').get('secret', ''))}")
+        return 130
+    return int(status.get("exit", 1))
+
+
+def main(argv: list[str] | None = None) -> int:
     """Parse the tier and run it."""
+    argv = sys.argv[1:] if argv is None else argv
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("tier", choices=["quick", "fast", "full", "slow", "all", "heavy", "gate", "record", "ratchet"])
+    parser.add_argument("tier", choices=[*FOREGROUND, "heavy", "record", "ratchet", *JOB_COMMANDS])
     parser.add_argument("--update", action="store_true", help="ratchet: record a lower time")
     parser.add_argument("--allow-increase", action="store_true",
                         help="ratchet --update: record a higher time (refused for an agent)")
@@ -288,10 +450,25 @@ def main() -> int:
     parser.add_argument("--over", type=float, default=12.0, help="heavy: seconds per module")
     parser.add_argument("-n", "--workers", type=int, default=1,
                         help="xdist worker ceiling (default: 1); explicit 0 = automatic pool up to broker capacity")
+    parser.add_argument("--no-reuse", action="store_true", help="execute every named test file")
+    parser.add_argument("--timeout", type=float, default=3600.0, help="wait: seconds to wait")
+    parser.add_argument("--task", default="", help="submit/tier runs: the task whose watchers hear how the job ends")
+    parser.add_argument("--key", default="", help="subscribe: follow the run of this reuse key prefix")
     parser.add_argument("--base", default=BASE, help="branch quick diffs against")
     parser.add_argument("--slow", action="store_true", help="quick: include slow tests")
     parser.add_argument("--explain", action="store_true", help="quick: say what selected what")
-    args, rest = parser.parse_known_args()
+    args, rest = parser.parse_known_args(argv)
+    REUSE["on"] = not args.no_reuse
+    seat = testboard.acting()
+    REUSE["seat"] = seat
+    if seat is not None:
+        REUSE["agent"] = seat.identity
+        REUSE["events"] = testboard.BoardEvents(seat, (lambda: TaskBoard(seat.ws).watchers(args.task)) if args.task else None)
+        os.environ["DEV_TEST_AGENT"] = json.dumps({**seat.identity, "job": os.environ.get("DEV_TEST_JOB", "")})
+    else:
+        os.environ.pop("DEV_TEST_AGENT", None)
+    if args.tier in JOB_COMMANDS:
+        return job_command(args, rest, argv)
     if args.tier == "heavy":
         return heavy(args.junit, args.over)
     if args.tier == "ratchet":
@@ -307,6 +484,8 @@ def main() -> int:
         except (ValueError, OSError) as error:
             print(f"test: {error}", file=sys.stderr)
             return 4
+    if not os.environ.get("DEV_TEST_JOB"):
+        return follow(argv, args)
     tiers = {"fast": FAST, "full": FULL, "slow": ["--slow", "-m", "slow"], "all": ["--slow"]}
     if args.tier == "quick":
         return quick(args, rest)

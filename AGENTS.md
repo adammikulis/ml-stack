@@ -467,6 +467,16 @@ fixture. Anything whose cost scales with the machine's state (files under the ho
 runtimes, queue depth) and not with the change is a bug. Measure with `--durations` before blaming
 the tests, and never leave a state walk unbounded.
 
+A run that names test files reuses a passing result of the same file from an earlier run when the
+file, its recorded inputs, the pytest flags and the environment are byte-identical
+([docs/test-reuse.md](docs/test-reuse.md)); the report says `ran` or `reused from <run id>` per
+file, and `--no-reuse` forces execution. Say "reused" in a report only for files the runner printed
+as reused. Tier runs, `gate`, `quick` and the coordinator's combined-tree checks always execute.
+`scripts/test submit <tier|paths>` returns a job id; `status`, `wait`, `result`, `cancel` and
+`subscribe` follow it, and only one whole-tier job runs at a time. `task-checkpoint` and
+`task-submit` accept runner entry ids (`test_entry`, `test_entries`) that the board verifies. Running tests creates no identity, token or credential: board notices go out under the submitting
+agent's own session, and nothing is posted when no agent is configured.
+
 The maintained tiers are `fast` (neither slow nor heavy), `full` (not slow), `slow` (only slow)
 and `all` (including slow). `tests/README.md` describes their mechanics; the policy above
 controls when each is authorized. Run the relevant slow tests for packaging, page and Fleet

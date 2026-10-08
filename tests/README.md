@@ -31,6 +31,12 @@ scripts/test all tests/<affected-file>.py -n 1   # brokered sequential reproduct
 scripts/test full --durations=0 --durations-min=1.8    # scheduled background timing
 ```
 
+A run that names test files prints `ran` or `reused from <run id>` for each file and counts both;
+`--no-reuse` executes every file, and tier, `gate` and `quick` runs always execute. A tier is a
+background job: `scripts/test submit all tests/<file>.py` prints a job id for `status`, `wait`,
+`result`, `cancel` and `subscribe`. Keys, what is never reused and the limits are in
+[docs/test-reuse.md](../docs/test-reuse.md).
+
 Use the workers granted by the maintained broker. Coordinate test concurrency with active
 benchmarks; do not reserve a fixed worker pool or bypass shared admission.
 

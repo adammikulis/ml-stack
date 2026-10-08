@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from uuid import uuid4
 
 from ml_stack.graph.store import GraphStore
-from ml_stack.workspace import task_worktrees
+from ml_stack.workspace import task_worktrees, testruns
 from ml_stack.workspace.chain import held
 from ml_stack.workspace.family_accounts import bind_resource
 from ml_stack.workspace.identity import HUMAN, Denied
@@ -83,22 +83,30 @@ def heartbeat(board, token, ident):
 
 
 def checkpoint(board, token, ident, value):
-    if type(value) is not dict or set(value) - {'summary', 'progress', 'commit', 'environment'}:
+    if type(value) is not dict or set(value) - {'summary', 'progress', 'commit', 'environment', 'test_entry'}:
         raise ValueError('unsupported checkpoint fields')
-    fields = {key: text(item, key, 2000) for key, item in value.items()}
+    fields = {key: text(item, key, 2000) for key, item in value.items() if key != 'test_entry'}
     if not fields.get('summary'):
         raise ValueError('a checkpoint summary is required')
     with working(board, token, ident) as (graph, task, lease):
+        evidence = testruns.evidence([value['test_entry']] if 'test_entry' in value else [], graph, ident,
+                                     fields.get('commit', ''))
         checkpoint = {'id': f'checkpoint:{uuid4().hex}', 'task': ident, 'worker': task['worker'],
-                      'at': board.ws.clock(), 'lease_id': lease['id'], **fields}
+                      'at': board.ws.clock(), 'lease_id': lease['id'], **fields,
+                      **({'test_evidence': evidence} if evidence else {})}
         save(graph, 'checkpoint', checkpoint)
         link(graph, ident, checkpoint['id'], 'checkpoint')
         return checkpoint
 
 
 def submit(board, token, ident, value):
-    value = submission(value)
+    entries = value.get('test_entries', []) if type(value) is dict else []
+    value = submission({key: item for key, item in value.items() if key != 'test_entries'}
+                       if type(value) is dict else value)
     with working(board, token, ident) as (graph, task, lease):
+        if entries:
+            value['test_evidence'] = testruns.evidence(
+                entries, graph, ident, value['provenance'].get('commit', ''))
         previous_state = task['state']
         proposal = {'id': f'proposal:{uuid4().hex}', 'task': ident, 'worker': task['worker'],
                     'at': board.ws.clock(), 'lease_id': lease['id'], **value}

@@ -256,20 +256,34 @@ def _own_records(directory: Path, path: Path, record: dict) -> list[Slot] | None
     return slots
 
 
-@contextlib.contextmanager
-def lease(want: int, minimum: int | None = None, label: str = "tests", say=lambda m: print(m, file=sys.stderr, flush=True)
-          ) -> Iterator[Lease]:
-    """Acquire a bounded FIFO CPU lease, released on context exit or process death."""
-    _reject_nested()
+def _agent_from_env() -> dict[str, str]:
+    """The workspace agent the runner exported for this process, as plain strings."""
+    try:
+        data = json.loads(os.environ.get("DEV_TEST_AGENT", ""))
+    except ValueError:
+        return {}
+    return {k: str(data[k]) for k in ("id", "label", "parent", "job") if isinstance(data, dict) and data.get(k)}
+
+
+def _request(want: int, minimum: int | None, label: str) -> tuple[int, int, dict]:
+    """The clamped worker range of a lease request and the record that publishes it."""
     auto = int(want) <= 0
     want = 0 if auto else max(1, int(want))
     minimum = max(1, int(minimum if minimum is not None else 1)) if auto \
         else max(1, min(int(minimum if minimum is not None else 1), want))
     if minimum > (int(os.environ["DEV_TEST_BUDGET"]) if os.environ.get("DEV_TEST_BUDGET", "").isdigit() else base_budget()):
         raise ValueError("testslots: minimum exceeds the configured CPU budget")
+    return want, minimum, {"label": label, "pid": os.getpid(), "want": want, "minimum": minimum, "granted": 0, "since": time.time(), "version": 1, "token": secrets.token_hex(24), "agent": _agent_from_env()}
+
+
+@contextlib.contextmanager
+def lease(want: int, minimum: int | None = None, label: str = "tests", say=lambda m: print(m, file=sys.stderr, flush=True)
+          ) -> Iterator[Lease]:
+    """Acquire a bounded FIFO CPU lease, released on context exit or process death."""
+    _reject_nested()
+    want, minimum, me = _request(want, minimum, label)
     d = slots_dir()
     path = d / f"{time.time_ns()}-{os.getpid()}-{secrets.token_hex(8)}.slot"
-    me = {"label": label, "pid": os.getpid(), "want": want, "minimum": minimum, "granted": 0, "since": time.time(), "version": 1, "token": secrets.token_hex(24)}
     t0 = time.monotonic()
     deadline = t0 + float(os.environ.get("DEV_TEST_WAIT_S", "3600"))
     with _mutex(d):
@@ -399,10 +413,18 @@ def main(argv: list[str] | None = None) -> int:
     print(f"budget {st['budget']} workers (base {st['base']}; load {load} on {_cores()} cores), {st['in_use']} in use, "
           f"{_lane_count()} heavy lane(s)")
     for s in st["running"]:
-        print(f"  running  {s['granted']:>2}  pid {s['pid']:<7} {s['label']}")
+        print(f"  running  {s['granted']:>2}  pid {s['pid']:<7} {_who(s)}")
     for s in st["waiting"]:
-        print(f"  waiting  {s['minimum']}-{s['want'] or 'auto'}  pid {s['pid']:<7} {s['label']}")
+        print(f"  waiting  {s['minimum']}-{s['want'] or 'auto'}  pid {s['pid']:<7} {_who(s)}")
     return 0
+
+
+def _who(slot: dict) -> str:
+    """A status line's owner: the workspace agent when the lease names one, then its label."""
+    agent = slot.get("agent")
+    if not agent:
+        return slot["label"]
+    return f"{agent['id']}{'/' + agent['label'] if agent.get('label') else ''} ({slot['label']})"
 
 
 if __name__ == "__main__":
