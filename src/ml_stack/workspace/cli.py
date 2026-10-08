@@ -14,7 +14,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from ml_stack import authority
+from ml_stack import agent_hooks, authority
 from ml_stack.command import Group, flag, option
 from ml_stack.http import ServerError
 from ml_stack.log import say, warn
@@ -31,6 +31,7 @@ from ml_stack.workspace import (
     filecli,
     guide,
     harness_remote,
+    hooks_cli,
     limits,
     localcli,
     localroute,
@@ -332,6 +333,8 @@ def _init(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
 
 
 def _setup(args: argparse.Namespace, ws: Workspace) -> int:
+    for line in agent_hooks.install_report():
+        say(line)
     if args.yes or args.rotate:
         done = onboard.setup(ws, args.agents or list(onboard.DEFAULT_AGENTS), args.rotate,
                              args.ttl_hours * 3600)
@@ -479,11 +482,6 @@ def _ttl(text: str) -> float:
     return float(text[:-1]) * units[text[-1]] if text and text[-1] in units else float(text or 0)
 
 
-def _hook_snippet(args: argparse.Namespace, ws: Workspace) -> int:
-    say(onboard.hook_snippet(args.tool, args.agent or "NAME"), end="")
-    return 0
-
-
 def _nudging(args: argparse.Namespace) -> int:
     if coordinator_config.load(limits.root()).get("mode") == "remote":
         raise Denied("this watcher is local-only; use coordinator inbox polling")
@@ -507,13 +505,6 @@ def _hook(args: argparse.Namespace) -> int:
         return 0
     if out:
         say(out)
-    return 0
-
-
-def _install_hooks(args: argparse.Namespace, ws: Workspace) -> int:
-    path = Path(args.settings).expanduser()
-    events = onboard.install_hooks(path, args.agent or "claude-code")
-    say(f"wrote {', '.join(events)} to {path}")
     return 0
 
 
@@ -573,10 +564,9 @@ BARE: tuple[tuple[str, str, list[Any], Callable[[argparse.Namespace, Workspace],
     ("snippet", "print the paste block for AGENT (no secret in it)", [flag("name")],
      lambda a, w: say(onboard.snippet(a.name), end="") or 0),
     ("hook-snippet", "print the setting that makes a tool run `nudge` after each step; writes nothing",
-     [flag("tool", choices=("claude-code", "codex"))], _hook_snippet),
-    ("install-hooks", "write the nudge hooks (PostToolUse, Stop, UserPromptSubmit) into Claude Code's "
-     "settings; at a terminal", [flag("--settings", default="~/.claude/settings.json",
-                                      help="the Claude Code settings file")], _install_hooks),
+     hooks_cli.SNIPPET, hooks_cli.snippet),
+    ("install-hooks", "write the nudge hooks (post tool, prompt, stop) into Claude Code's and Codex's settings",
+     hooks_cli.INSTALL, hooks_cli.install),
     ("brief", "print the short brief a parent pastes into a subagent's prompt",
      [flag("name"), flag("--registered", action="store_true", help="the parent's hooks register and announce the subagent")],
      _brief),
@@ -831,7 +821,7 @@ def _bare(handler: Callable[[argparse.Namespace, Workspace], int]) -> Callable[[
                 return handler(args, None)
             return handler(args, Workspace())
         if connection is not None:
-            if handler in {_brief, _hook_snippet}:
+            if handler in {_brief, hooks_cli.snippet, hooks_cli.install}:
                 return handler(args, None)
             raise Denied("this command is unavailable in a canonical project; use its shared board")
         if coordinator_client.client(limits.root()) and handler is not _join:

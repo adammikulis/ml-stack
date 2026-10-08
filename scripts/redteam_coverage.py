@@ -237,7 +237,7 @@ def find_calls(found: dict[str, Surface], where: str, tree: ast.Module) -> None:
             add(found, "listener", f"{sub}:{sym}", f"{sub}:{sym}")
         elif name in EGRESS or name.startswith(EGRESS_PREFIX):
             add(found, "egress", f"{sub}:{sym}", f"{sub}:{sym}")
-        elif last in HUMAN and (name == last or "human" in name or name.startswith("ml_stack")):
+        elif name in ("authority.require", "ml_stack.authority.require") or (last in HUMAN and (name == last or "human" in name or name.startswith("ml_stack"))):
             add(found, "human", f"{sub}:{sym}", f"{sub}:{sym}")
 
 

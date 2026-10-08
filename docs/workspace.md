@@ -387,11 +387,27 @@ With `--hook post|stop|prompt` it prints the JSON a Claude Code hook expects:
   `$TMPDIR`); it always allows the stop when `stop_hook_active` is true.
 
 A hook prints nothing and exits 0 when nothing is unread or the workspace cannot be reached.
-`ml-stack-workspace install-hooks [--agent NAME] [--settings PATH]` (a person at a terminal) writes
-the three hooks into `~/.claude/settings.json`, replacing earlier nudge hooks and keeping every other
-hook; `hook-snippet claude-code|codex --agent NAME` prints the setting without writing it. Start-up
+`ml-stack-workspace install-hooks [--settings PATH] [--codex-config PATH] [--only claude-code|codex]`
+(the `workspace.setup` gate) writes the three hooks into `~/.claude/settings.json` for `claude-code`
+and into `~/.codex/config.toml` for `codex` (a managed block, plus `hooks = true` under `[features]`;
+the PostToolUse hook is left to the launcher's `harnesshook post` when that is configured). It
+replaces earlier nudge hooks, keeps every other setting and writes only for agents present on the
+machine. `ml-stack-setup` and `ml-stack-workspace setup` run it, and `ml-stack-setup`,
+`ml-stack-doctor` and `ml-stack-workspace doctor` report a missing or stale hook per agent.
+`hook-snippet claude-code|codex --agent NAME` prints the setting without writing it. On a canonical
+board the hooks read the board's `waiting_summary` (sender, kind and time of each unread row, never
+text). Start-up
 costs about 90 ms here (Python and the package imports), more than the 50 ms aimed for; trimming the
 imports is a follow-up.
+
+## Authority
+
+`ml-stack-workspace authority show` lists the delegable gates, `authority set person|delegated
+ALL|GROUP|GATE [GATE ...] [--project KEY]` changes some, and `authority preset dev|prod` changes all
+of them and the project's task enforcement mode together (see CLAUDE.md, "System settings and the
+authority registry"). A lead agent or a person flips; a helper identity is refused. Each flip is
+audited in the workspace log and in `authority-audit.jsonl` under the state root, which also records
+each use of a delegated gate by an agent.
 
 ## The Board
 

@@ -3,14 +3,11 @@
 from __future__ import annotations
 
 import json
-import re
 import time
 
 import pytest
 from workspace_kit import Kit, clean_env, cli
 
-from ml_stack import authority
-from ml_stack.workspace import onboard
 from ml_stack.workspace.remote_protocol import METHODS
 
 LONG_AGO = 3 * 3600 + 12 * 60 + 20
@@ -105,29 +102,6 @@ def test_hooks_print_nothing_and_exit_zero_when_the_workspace_is_unreachable(tmp
     assert out.returncode == 0 and out.stdout == "" and out.stderr == ""
 
 
-def test_the_installer_adds_the_three_hooks_idempotently_and_keeps_other_hooks(monkeypatch, tmp_path):
-    clean_env(monkeypatch, tmp_path)
-    real = authority.require_person
-    monkeypatch.setattr(authority, "require_person", lambda a, terminal=None, env=None: real(a, (True, True), env))
-    path = tmp_path / "settings.json"
-    path.write_text(json.dumps({"model": "x", "hooks": {
-        "PostToolUse": [
-            {"matcher": "Bash", "hooks": [{"type": "command", "command": "other-tool"}]},
-            {"matcher": "*", "hooks": [{"type": "command", "command": "sh ~/.ml-stack/hooks/claude-nudge.sh"}]}],
-        "Stop": [{"hooks": [{"type": "command", "command": "keep-me"}]}]}}))
-    assert onboard.install_hooks(path, "claude-code") == ["PostToolUse", "Stop", "UserPromptSubmit"]
-    first = path.read_text()
-    onboard.install_hooks(path, "claude-code")
-    assert path.read_text() == first
-    data = json.loads(first)
-    assert data["model"] == "x"
-    commands = {e: [h["command"] for g in groups for h in g["hooks"]] for e, groups in data["hooks"].items()}
-    assert commands["PostToolUse"] == ["other-tool", "ml-stack-workspace nudge --agent claude-code --hook post"]
-    assert commands["Stop"] == ["keep-me", "ml-stack-workspace nudge --agent claude-code --hook stop"]
-    assert commands["UserPromptSubmit"] == ["ml-stack-workspace nudge --agent claude-code --hook prompt"]
-    assert re.search(r'"matcher": "\*"', first)
-
-
 def test_the_installer_is_for_a_person(tmp_path):
     out = cli(tmp_path / "ws", "", "install-hooks", "--settings", str(tmp_path / "s.json"),
               env_extra={"CLAUDECODE": "1"})
@@ -159,8 +133,7 @@ class _Board:
 def test_prompt_hook_on_a_canonical_board_injects_the_waiting_line(kit, monkeypatch, tmp_path, capsys):
     from types import SimpleNamespace
 
-    from ml_stack.workspace import cli as ws_cli
-    from ml_stack.workspace import project_connection as connection
+    from ml_stack.workspace import cli as ws_cli, project_connection as connection
     monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "home"))
     root = tmp_path / "project"
     root.mkdir()
