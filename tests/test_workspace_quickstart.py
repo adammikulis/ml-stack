@@ -871,11 +871,8 @@ def test_host_discovery_failure_does_not_mint_or_remember_an_invite(base, ws, mo
 
 
 def test_canonical_dev_local_bootstrap_does_not_host_legacy_coordinator(base, ws, monkeypatch, tmp_path):
-    from ml_stack.workspace import coordinator_bootstrap
-
-    monkeypatch.setattr(coordinator_bootstrap, 'ensure_host', lambda *a: pytest.fail('legacy host'))
     found = project.describe(str(tmp_path))
-    guide.agent_connect(ws, 'claude', found, host_coordinator=False)
+    guide.agent_connect(ws, 'claude', found)
     token = tokens.load(base, 'claude')
     assert ws.auth(token).id == 'claude'
     assert ws.registry.info('claude')['project'] == found

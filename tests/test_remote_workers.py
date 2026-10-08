@@ -20,7 +20,7 @@ from ml_stack.fleet.discovery import (
 from ml_stack.fleet.framing import LimitedServer
 from ml_stack.fleet.jobs import JobRunner
 from ml_stack.fleet.remote import Peer
-from ml_stack.workspace import guide, localagent, localloop, localmodel, remote_workers, tokens
+from ml_stack.workspace import localagent, localloop, localmodel, remote_workers, tokens
 from ml_stack.workspace.remote import RemoteWorkspace
 from ml_stack.workspace.remote_host import WorkspaceHost
 from ml_stack.workspace.service import Workspace
@@ -60,7 +60,6 @@ def devices(tmp_path, monkeypatch):
     monkeypatch.setattr('ml_stack.home.state', lambda *parts: tmp_path / 'device-a' / 'state' / '/'.join(parts))
     monkeypatch.setattr('ml_stack.home.device_id', lambda: 'device-b')
     monkeypatch.setattr('ml_stack.home.machine_id', lambda: remote_workers.home.device_id())
-    monkeypatch.setattr(guide.coordinator_bootstrap, 'ensure_host', lambda *args: None)
     roots, servers, runners, peers, spawned = {}, [], [], [], []
     project = SimpleNamespace(name='sample', board_host='', root='')
     class Projects:

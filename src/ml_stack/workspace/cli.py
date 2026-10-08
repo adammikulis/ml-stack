@@ -119,8 +119,7 @@ def _local_token(args: argparse.Namespace) -> str:
         try:
             ws.auth(tokens.load(base, agent))
         except Denied:
-            guide.agent_connect(ws, agent, project.describe(),
-                                host_coordinator=not getattr(args, "_canonical_dev", False))
+            guide.agent_connect(ws, agent, project.describe())
     return tokens.resolve(base, token_file=token_file, agent=args.agent)
 
 

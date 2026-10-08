@@ -15,7 +15,6 @@ from ml_stack.fleet.onboard.requests import Device, Devices
 from ml_stack.fleet.remote import Peer
 from ml_stack.hub.peerbook import PeerBook
 from ml_stack.workspace import (
-    coordinator_bootstrap,
     coordinator_client,
     coordinator_config,
     coordinator_routes,
@@ -36,18 +35,11 @@ def own(kit):
     return token
 
 
-def test_own_local_session_hosts_without_reading_person_token(tmp_path, monkeypatch):
+def test_a_person_chooses_what_the_device_hosts(tmp_path):
     kit = Kit(tmp_path / 'workspace')
-    token = own(kit)
-    monkeypatch.setattr(coordinator_client, '_client', lambda base: None)
-    read = tokens.read_file
-    def agent_only(path):
-        assert path.name != tokens.OWNER_FILE
-        return read(path)
-    monkeypatch.setattr(tokens, 'read_file', agent_only)
-    result = coordinator_bootstrap.ensure_host(kit.ws, token)
+    result = coordinator_routes.change(kit.ws, kit.owner, {'action': 'host'})
     assert result['mode'] == 'host'
-    assert coordinator_bootstrap.ensure_host(kit.ws, token) == result
+    assert coordinator_config.load(kit.base) == result
 
 
 @pytest.mark.redteam
@@ -73,21 +65,28 @@ def test_only_protected_own_local_identity_selects_authority(tmp_path, monkeypat
 
 
 @pytest.mark.redteam
-def test_remote_and_unavailable_shared_authority_never_becomes_local_host(tmp_path, monkeypatch):
+def test_an_agent_token_cannot_choose_host_mode_for_itself_a_subagent_or_a_forged_parent(tmp_path):
     kit = Kit(tmp_path / 'workspace')
     token = own(kit)
+    child = kit.ws.delegate(token, 'worker')
+    child_token = tokens.load(kit.base, child['id'])
+    forged = child_token[:-1] + ('0' if child_token[-1] != '0' else '1')
+    for presented in (token, child_token, forged, 'mlws1.forged.credential'):
+        with pytest.raises(Denied):
+            coordinator_routes.change(kit.ws, presented, {'action': 'host'})
+        assert coordinator_config.load(kit.base) == {}
+    with pytest.raises(Denied, match='only a person chooses'):
+        coordinator_routes.change(kit.ws, token, {'action': 'host'})
+
+
+@pytest.mark.redteam
+def test_a_person_cannot_host_over_a_followed_coordinator(tmp_path):
+    kit = Kit(tmp_path / 'workspace')
     config = coordinator_config.save(kit.base, {'mode': 'remote', 'workspace': 'workspace:foreign',
                                                'endpoint': 'https://example.invalid:8784'})
     with pytest.raises(Denied):
-        coordinator_bootstrap.ensure_host(kit.ws, token)
+        coordinator_routes.change(kit.ws, kit.owner, {'action': 'host'})
     assert coordinator_config.load(kit.base) == config
-    (kit.base / 'coordinator.json').unlink()
-    def unavailable(base):
-        raise Denied('the enrolled workspace coordinator is unavailable')
-    monkeypatch.setattr(coordinator_client, '_client', unavailable)
-    with pytest.raises(Denied, match='unavailable'):
-        coordinator_bootstrap.ensure_host(kit.ws, token)
-    assert coordinator_config.load(kit.base) == {}
 
 
 def test_own_agent_connect_preserves_existing_authority(tmp_path, monkeypatch):
@@ -122,7 +121,7 @@ def test_concurrent_host_and_connect_cannot_replace_authority(tmp_path, monkeypa
             if direct and document['action'] == 'connect':
                 coordinator_client.connect(kit.base, document['name'])
             else:
-                coordinator_routes.change(kit.ws, token, document)
+                coordinator_routes.change(kit.ws, kit.owner if document['action'] == 'host' else token, document)
         except Denied as error:
             errors.append(error)
     monkeypatch.setattr(coordinator_routes, 'held', observed_lock)
