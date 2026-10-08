@@ -479,36 +479,6 @@ def _wheel(where: Path, name: str, version: str, extras: tuple[str, ...],
     return made
 
 
-def _slow_index(wheel: Path, *, delay_s: float):
-    """A package index on loopback that serves ``wheel`` after ``delay_s``: (url, server)."""
-    from http.server import BaseHTTPRequestHandler
-
-    class Index(BaseHTTPRequestHandler):
-        def do_GET(self):
-            if self.path.rstrip("/").endswith("/simple/ml-stack"):
-                body = f'<a href="/files/{wheel.name}">{wheel.name}</a>'.encode()
-                kind = "text/html"
-            elif self.path == f"/files/{wheel.name}":
-                time.sleep(delay_s)
-                body, kind = wheel.read_bytes(), "application/octet-stream"
-            else:
-                self.send_response(404)
-                self.end_headers()
-                return
-            self.send_response(200)
-            self.send_header("Content-Type", kind)
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-
-        def log_message(self, *a):
-            pass
-
-    server = Server(("127.0.0.1", 0), Index)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    return f"http://127.0.0.1:{server.server_address[1]}/simple", server
-
-
 @pytest.mark.slow
 def test_a_frozen_peer_installs_the_bench_after_accepting_the_job(boxes, tmp_path, monkeypatch):
     """The install runs after ``POST /bench`` has answered, so an install slower than the
@@ -519,10 +489,21 @@ def test_a_frozen_peer_installs_the_bench_after_accepting_the_job(boxes, tmp_pat
     environment = Environment(tmp_path / "managed")
     environment.create()
     # what `_measures` imports: the bench's store reader, and the store itself
-    stand_in = _wheel(tmp_path, "ml-stack", "0.0.1", ("graph", "store", "serve", "hub"),
-                      ("ml_stack/bench/__init__.py", "ml_stack/bench/peer_runs.py", "ladybug.py"))
-    index, server = _slow_index(stand_in, delay_s=4.0)
-    monkeypatch.setenv("PIP_INDEX_URL", index)
+    wheels = tmp_path / "bundle" / "wheels"
+    wheels.mkdir(parents=True)
+    _wheel(wheels, "ml-stack", "0.0.1", ("graph", "store", "serve", "hub"),
+           ("ml_stack/bench/__init__.py", "ml_stack/bench/peer_runs.py", "ladybug.py"))
+    # a frozen app installs ml-stack from the wheel it bundles, with no index to reach
+    monkeypatch.setenv("PIP_NO_INDEX", "1")
+    # a frozen app has no source tree on the path to shadow what the managed environment installed
+    monkeypatch.delenv("PYTHONPATH", raising=False)
+    real_pip = environment.pip
+
+    def slow_pip(args, **kwargs):
+        time.sleep(4.0)
+        return real_pip(args, **kwargs)
+
+    monkeypatch.setattr(environment, "pip", slow_pip)
     monkeypatch.setenv("PIP_NO_CACHE_DIR", "1")
     monkeypatch.setenv("PIP_DISABLE_PIP_VERSION_CHECK", "1")
     monkeypatch.setattr(sys, "frozen", True, raising=False)
@@ -530,13 +511,10 @@ def test_a_frozen_peer_installs_the_bench_after_accepting_the_job(boxes, tmp_pat
     roomy.runner.environment = environment
     impatient = Peer(roomy.peer.base_url, roomy.peer.token, timeout=2.0)
     said: list[str] = []
-    try:
-        began = time.monotonic()
-        (handle,) = dispatch({impatient: _job("big.gguf")}, log=said.append)
-        assert handle.state == "preparing" and time.monotonic() - began < 2.0
-        (done,) = wait([handle], poll_s=0.2, timeout_s=120, log=said.append)
-    finally:
-        server.shutdown()
+    began = time.monotonic()
+    (handle,) = dispatch({impatient: _job("big.gguf")}, log=said.append)
+    assert handle.state == "preparing" and time.monotonic() - began < 2.0
+    (done,) = wait([handle], poll_s=0.2, timeout_s=120, log=said.append)
     assert done.state == "done", "\n".join(said)
     assert time.monotonic() - began > 4.0, "the install was slower than the peer timeout"
     assert roomy.host.launch.pythons == [environment.python]
