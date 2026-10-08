@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import subprocess
 import sys
@@ -58,7 +59,7 @@ class Run:
     tree: str = ""
 
 
-def record_run(run: Run, artifact: Path | None = None) -> bool:
+def record_run(run: Run, artifact: Path | None = None, *, destination=None, boundary: dict | None = None) -> bool:
     """Record one pytest run: tree, tier, a hash of the command, counts and duration."""
     root, tier, exit_code = run.root, run.tier, run.exit_code
     try:
@@ -79,7 +80,12 @@ def record_run(run: Run, artifact: Path | None = None) -> bool:
                           "root": str(root.resolve()), "tree_after": tree_hash(root)}
         payload["process"] = {"pid": os.getpid(),
                               "started": psutil.Process().create_time()}
-        write_json(artifact, payload)
+        if boundary is not None:
+            payload["boundary"] = boundary
+        if destination is None:
+            write_json(artifact, payload)
+        else:
+            destination.write(json.dumps(payload, sort_keys=True).encode() + b"\n")
         return True
     return writer.record("test.result", actor="system", **said)
 

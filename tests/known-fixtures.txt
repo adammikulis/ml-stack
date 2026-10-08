@@ -271,3 +271,6 @@ Import Quota
 Currency Clause
 Downstream Trade Policy
 Moonbase Zeta
+
+# not a person: code phrases the recogniser reads as people
+worktree pointer

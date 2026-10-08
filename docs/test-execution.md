@@ -64,6 +64,42 @@ under one setup permit, releases it, then starts supervised pytest. Serial
 execution through `scripts/test` uses `-n 1`. A directly supervised pytest command can use `-n 0`
 to run without xdist workers.
 
+On macOS, `scripts/test --confine` (or `DEV_TEST_CONFINE=1`) runs pytest under the Seatbelt
+confinement kernel; without it the run follows the ordinary path and the isolation guards in
+`tests/conftest.py`. The kernel constructs private startup home, state, cache and temporary
+roots before collection and launches pytest through the maintained Seatbelt backend, which
+denies every write outside the private scratch root. Source reads name tracked files
+individually; dependency prefixes are read-only. The child receives only its authenticated
+private Unix admission and descriptor-transfer endpoints. Fixtures that need more require
+explicit pre-launch endpoint reservations, and the kernel accepts only reviewed gate files and
+the nodes listed in `scripts/test_kernel_selectors.py`; other selectors fail before collection
+rather than receiving loopback access. The human-floor terminal fixture uses a supervisor-owned
+PTY bank through bounded authenticated operations on that endpoint. The kernel does not walk the
+real state root: a canary file outside the scratch root and the profile's write denial carry
+the isolation proof.
+
+The supervisor pins stdout and stderr descriptors before the confined launch. Regular output
+files and JUnit destinations must be owned, have one hard link, and stay outside protected
+state by physical path and directory identity. Child output forwarding and JUnit promotion each
+permit at most 16 MiB. Sockets, named FIFOs and unidentified device destinations are refused;
+output writes have a five-second deadline per forwarded block. A failed preparation removes the
+control and holder directories it created.
+
+`scripts/test all --confine --artifact-output` creates fresh private console, JUnit and
+evidence files. Confined output and supervisor diagnostics stay in that namespace; the caller
+receives its location before collection. Private shadow Git metadata disables executable
+configuration and filters. Tree hashing there uses raw source bytes, tracked deletions,
+executable modes, symlinks and recorded gitlinks; repository `.git/info/exclude` and global
+ignore configuration are not imported, and unsupported split or sparse indexes fail closed.
+
+# Holder channel resources on macOS
+
+Reviewed holder protocol nodes use three offline-prepared immutable fixture prefixes. The
+supervisor verifies the reviewed manifest digest, complete file/link inventory and source
+stamp, then copies the manifest into its private control directory before collection. One
+fresh, private, short invocation namespace supplies TMPDIR and permits Unix bind, inbound and
+outbound operations only inside that namespace. TCP stays denied.
+
 ## Landing a batch
 
 `scripts/land` (modules `scripts/land_*.py`) lands several ready branches with one verification.

@@ -13,12 +13,13 @@ usage() {
   cat <<'HELP'
 scripts/test-on-linux [--single] [--rebuild] [--platform P] [pytest args...]
 
-Runs this worktree's tests inside a Linux container, with the extras ci.yml installs,
+Runs explicit reviewed selectors inside an isolated Linux container, with test extras,
 and prints what pytest prints. Arguments after the script's own flags go to pytest:
 
-    scripts/test-on-linux tests/test_serve.py -q
-    scripts/test-on-linux --single tests/test_graph_thread.py
-    scripts/test-on-linux -q --slow
+    scripts/test-on-linux tests/test_layers.py -q
+    scripts/test-on-linux --single tests/test_cli_reference.py
+
+Selectors and fixture resources must be admitted by the maintained test supervisor.
 
   --single        run in one process (-n 0), so an order-dependent test is not hidden
                   by xdist scattering the file across workers
@@ -28,11 +29,11 @@ and prints what pytest prints. Arguments after the script's own flags go to pyte
                   Linuxes catch a pass that is only macOS's, and an emulated run is
                   several times slower.
 
-The container gets a clone of this worktree with the working tree copied over it, so
+The supervisor stages tracked source files into an immutable container image, so
 the tests that read a real repository have one and nothing the run writes lands in
 yours. The dependencies live in a docker volume, keyed by a hash of pyproject.toml and
 the installed set, and are rebuilt only when that hash changes. Each run then makes its
-own throwaway venv inside the container for the editable install of this checkout, so
+own throwaway venv inside the container for an immutable wheel of this checkout, so
 two runs sharing the volume never see each other's install in progress.
 
 Docker credentials: on macOS the desktop credential helper can hang an image pull
@@ -54,20 +55,12 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-DCFG="$(mktemp -d)"
-STAGE="$(mktemp -d)"
-trap 'rm -rf "$DCFG" "$STAGE"' EXIT
-printf '{"auths":{}}' > "$DCFG/config.json"
-docker() { command docker --config "$DCFG" "$@"; }
-
-if ! docker info >/dev/null 2>&1; then
-  echo "scripts/test-on-linux: \`docker info\` failed, so there is no Linux to run in." >&2
-  echo "Start Docker Desktop, or install docker, and run it again." >&2
+PYTEST_ARGS=("$@")
+if [ ${#PYTEST_ARGS[@]} -eq 0 ]; then
+  echo "scripts/test-on-linux: explicit reviewed selectors are required" >&2
   exit 2
 fi
-
-PYTEST_ARGS=("$@")
-[ ${#PYTEST_ARGS[@]} -eq 0 ] && PYTEST_ARGS=(tests/ -q)
+export PYTHONPATH="$REPO/src:$REPO/scripts"
 WANT=0
 [ -n "$SINGLE" ] && WANT=1
 # The scheduler owns the process count; explicit pytest values are ceilings.
@@ -91,23 +84,7 @@ BROKER="${DEV_TEST_SLOTS_DIR:-$HOME/.cache/dev-test-slots}"
 mkdir -p "$BROKER"
 BROKER="$(cd "$BROKER" && pwd)"
 export DEV_TEST_SLOTS_DIR="$BROKER"
-git clone -q --no-hardlinks "$REPO" "$STAGE/repo"
-(cd "$REPO" && tar -cf - --exclude .git --exclude __pycache__ .) | (cd "$STAGE/repo" && tar -xf -)
-CONTAINER=""
-cleanup() {
-  [ -z "$CONTAINER" ] || docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
-  rm -rf "$DCFG" "$STAGE"
-}
-trap cleanup EXIT
-CONTAINER="$(docker run -d --init ${PLATFORM:+--platform "$PLATFORM"} \
-  -v "$STAGE/repo":/src:ro -v "$VOLUME":/venv \
-  -e PIP_DISABLE_PIP_VERSION_CHECK=1 -e PIP_CACHE_DIR=/venv/pipcache \
-  -e IMAGE="$IMAGE" -e REBUILD="$REBUILD" \
-  -e HOST_UID=1000 -e HOST_GID=1000 \
-  -w /work "$IMAGE" sleep infinity)"
-python3 "$REPO/scripts/testslots.py" run --want 1 --min 1 --label "ml-stack: Linux setup" -- \
-  docker --config "$DCFG" exec "$CONTAINER" bash /src/scripts/test-on-linux-setup "${CLEAN_ARGS[@]}"
-export ML_STACK_LINUX_CONTAINER="$CONTAINER" ML_STACK_LINUX_DCFG="$DCFG"
-export ML_STACK_LINUX_UID=1000 ML_STACK_LINUX_GID=1000 ML_STACK_LINUX_SINGLE="$SINGLE"
+export ML_STACK_LINUX_IMAGE="$IMAGE" ML_STACK_LINUX_VOLUME="$VOLUME" ML_STACK_LINUX_PLATFORM="$PLATFORM"
+export ML_STACK_LINUX_SINGLE="$SINGLE" ML_STACK_LINUX_REBUILD="$REBUILD"
 python3 "$REPO/scripts/testslots.py" pytest --container --want "$WANT" --min 1 --label "ml-stack: Linux tests" -- \
-  bash "$REPO/scripts/test-on-linux-exec" "${CLEAN_ARGS[@]}"
+  "$(python3 -c 'import sys; print(sys.executable)')" -m pytest "${CLEAN_ARGS[@]}"

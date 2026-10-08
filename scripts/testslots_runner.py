@@ -2,34 +2,86 @@
 from __future__ import annotations
 
 import contextlib
+import contextvars
+import json
 import os
 import subprocess
+import sys
+import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
+import test_browser_admission
 import testslots
 import testslots_rpc
+
+ARTIFACT_CONTEXT = contextvars.ContextVar("test_artifact_context", default=None)
+
+
+@dataclass
+class Preparation:
+    want: int = 0
+    terminals: object | None = None
+    confined: object | None = None
+    browser: object | None = None
+
+
+def confining(environment: dict[str, str]) -> bool:
+    """Whether the run asked for the macOS Seatbelt confinement kernel."""
+    return sys.platform == "darwin" and environment.get("DEV_TEST_CONFINE") == "1"
+
+
+def environment_for(env: dict[str, str] | None) -> dict[str, str]:
+    environment = dict(os.environ if env is None else env)
+    for name in ("PYTEST_XDIST_WORKER", "PYTEST_XDIST_WORKER_COUNT", "PYTEST_XDIST_TESTRUNUID"):
+        environment.pop(name, None)
+    if confining(environment):
+        from test_kernel_isolation import validate_control_roots
+        validate_control_roots(environment)
+    return environment
+
+
+def run_artifact_pytest(command: list[str], want: int, environment: dict[str, str], artifacts) -> int:
+    from test_kernel_outputs import ArtifactOutputs
+    if not confining(environment) or type(artifacts) is not ArtifactOutputs:
+        raise RuntimeError("test confinement: strict artifact mode requires its macOS supervisor context")
+    artifacts.validate()
+    token = ARTIFACT_CONTEXT.set(artifacts)
+    try:
+        return run_pytest(command, want, env=environment)
+    finally:
+        ARTIFACT_CONTEXT.reset(token)
 
 
 def run_pytest(command: list[str], want: int = 0, label: str = "pytest", env: dict[str, str] | None = None,
                *, container: bool = False) -> int:
-    environment = dict(os.environ if env is None else env)
-    for name in ("PYTEST_XDIST_WORKER", "PYTEST_XDIST_WORKER_COUNT", "PYTEST_XDIST_TESTRUNUID"):
-        environment.pop(name, None)
+    environment = environment_for(env)
     testslots._reject_nested()
-    admission = testslots_rpc.Admission(container)
+    launch = None
+    if container:
+        from test_container_launch import ContainerRun
+        launch = ContainerRun(command, environment)
+    admission = testslots_rpc.UnixAdmission(False) if (confining(environment) or launch is not None) else testslots_rpc.Admission(False)
     process = None
+    confined = None
+    output = None
+    prepared = Preparation(want=want)
     try:
         with testslots.lease(1, 1, label=f"{label}: coordinator"):
-            maximum = int(environment.get("DEV_TEST_BUDGET", "0")) or testslots.base_budget()
-            workers = min(want or maximum, maximum)
-            environment.update(DEV_TEST_SLOTS_DIR=str(testslots.slots_dir().resolve()), DEV_TEST_WORKERS=str(workers),
-                               DEV_TEST_PYTEST_ENDPOINT=admission.endpoint, DEV_TEST_PYTEST_TOKEN=admission.token,
-                               DEV_TEST_REMOTE_BROKER=str(testslots.slots_dir().resolve()))
-            for name in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "VECLIB_MAXIMUM_THREADS", "NUMEXPR_NUM_THREADS"):
-                environment.setdefault(name, "1")
-            command = [part.replace("{workers}", str(workers)) for part in command]
-            process = subprocess.Popen(command, env=environment, cwd=Path(__file__).resolve().parent.parent)
+            if launch is not None:
+                launch.prepare()
+            command, environment = prepare_pytest(command, environment, admission, launch, prepared)
+            confined = prepared.confined
+            process = subprocess.Popen(command, env=environment, cwd=Path(__file__).resolve().parent.parent,
+                                       close_fds=True, pass_fds=confined.bootstrap.pass_fds if confined is not None else (),
+                                       stdin=subprocess.DEVNULL, start_new_session=True,
+                                       stdout=subprocess.PIPE if confined is not None else None,
+                                       stderr=subprocess.STDOUT if confined is not None else None)
+            if confined is not None:
+                output = threading.Thread(target=relay, args=(process, confined), daemon=True)
+                output.start()
+                confined.bootstrap.launched(process)
             deadline = time.monotonic() + float(environment.get("DEV_TEST_WAIT_S", "3600"))
             while not admission.ready.wait(.01):
                 if process.poll() is not None:
@@ -46,4 +98,78 @@ def run_pytest(command: list[str], want: int = 0, label: str = "pytest", env: di
             if process.poll() is None:
                 process.kill()
                 process.wait()
-        admission.finish()
+        try:
+            if launch is not None:
+                launch.close()
+        finally:
+            try:
+                finish(output, admission, prepared.terminals, prepared.confined)
+            finally:
+                if prepared.browser is not None:
+                    prepared.browser.close()
+
+
+def relay(process, confined):
+    try:
+        while block := process.stdout.read1(65536):
+            confined.relays[0].write(block)
+    except (OSError, RuntimeError) as exc:
+        confined.relay_error = exc
+        while process.stdout.read1(65536):
+            pass
+
+
+def finish(output, admission, terminals, confined):
+    try:
+        if output is not None:
+            output.join(timeout=10)
+            if output.is_alive():
+                raise RuntimeError("test confinement: descendants retained the output pipe")
+    finally:
+        try:
+            admission.finish()
+        finally:
+            try:
+                if terminals is not None:
+                    terminals.close()
+            finally:
+                if confined is not None:
+                    try:
+                        from test_kernel_lifecycle import held_shutdown, retired_probe
+                        held_shutdown()
+                        retired_probe(confined)
+                    finally:
+                        confined.finish()
+
+
+def prepare_pytest(command, environment, admission, launch, prepared):
+    confined = terminals = None
+    maximum = int(environment.get("DEV_TEST_BUDGET", "0")) or testslots.base_budget()
+    workers = min(prepared.want or maximum, maximum)
+    environment.update(DEV_TEST_SLOTS_DIR=str(testslots.slots_dir().resolve()), DEV_TEST_WORKERS=str(workers),
+                       DEV_TEST_PYTEST_ENDPOINT=admission.endpoint, DEV_TEST_PYTEST_TOKEN=admission.token,
+                       DEV_TEST_REMOTE_BROKER=str(testslots.slots_dir().resolve()))
+    for name in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "VECLIB_MAXIMUM_THREADS", "NUMEXPR_NUM_THREADS"):
+        environment.setdefault(name, "1")
+    command = [part.replace("{workers}", str(workers)) for part in command]
+    if launch is not None:
+        environment["DEV_TEST_PYTEST_IDENTITY"] = json.dumps(admission.identity)
+        command, environment = launch.command(environment)
+    elif confining(environment):
+        from test_kernel_isolation import ConfinedRun, check_selectors
+        from test_terminal_bank import TerminalBank
+        plan = check_selectors(command)
+        if plan is not None:
+            prepared.browser = test_browser_admission.BrowserRun(command, environment, admission, workers, plan=plan)
+        terminals = TerminalBank(64, admission.terminal_admission)
+        prepared.terminals = terminals
+        admission.terminals = terminals
+        environment.update(DEV_TEST_PTY_TOKEN=terminals.token, DEV_TEST_PTY_ENDPOINT=terminals.endpoint,
+                           DEV_TEST_PTY_IDENTITY=json.dumps(terminals.identity), DEV_TEST_PYTEST_IDENTITY=json.dumps(admission.identity))
+        with test_browser_admission.bind(prepared.browser):
+            confined = ConfinedRun(command, environment, admission.endpoint,
+                                   terminal_endpoint=terminals.endpoint, artifacts=ARTIFACT_CONTEXT.get())
+        prepared.confined = confined
+        command, environment = confined.wrapped.argv, confined.environment
+        confined.recheck_images()
+    return command, environment

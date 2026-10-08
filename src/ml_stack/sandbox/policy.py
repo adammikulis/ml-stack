@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 import re
+import stat
+import sys
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
@@ -126,7 +128,9 @@ class Policy:
     and write (``write`` implies read), ``exec`` the only programs it can start, ``env`` the
     whole environment it sees, ``net`` its network. ``gpu`` adds what Metal needs and nothing
     else; ``cache`` is one directory the process may read and write besides ``write`` (shader
-    and compile caches)."""
+    and compile caches). ``unix_sockets`` grants outbound connections to exact endpoints;
+    ``unix_namespaces`` separately grants bind/inbound/outbound in one private Darwin tree,
+    without a process or listener count guarantee."""
 
     name: str = "policy"
     read: tuple[str, ...] = ()
@@ -137,6 +141,12 @@ class Policy:
     limits: Limits = field(default_factory=Limits)
     gpu: bool = False
     cache: str = ""
+    read_files: tuple[str, ...] = ()
+    read_dirs: tuple[str, ...] = ()
+    unix_sockets: tuple[str, ...] = ()
+    unix_namespaces: tuple[str, ...] = ()
+    strict: bool = False
+    read_metadata: tuple[str, ...] = ()
 
     def validated(self) -> Policy:
         """This policy with every path checked, or `PolicyError`."""
@@ -146,8 +156,28 @@ class Policy:
                 raise PolicyError(f"env: {key!r} is not a variable name")
             if not isinstance(value, str) or "\x00" in value:
                 raise PolicyError(f"env: the value of {key} is not text")
+        namespaces = checked_paths(self.unix_namespaces, what="Unix namespace")
+        if len(namespaces) > 1 or (namespaces and sys.platform != "darwin"):
+            raise PolicyError("Unix namespace: requires one maintained Darwin namespace")
+        for namespace in namespaces:
+            info = Path(namespace).lstat()
+            if (len(os.fsencode(namespace)) > 40 or not stat.S_ISDIR(info.st_mode)
+                    or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o700):
+                raise PolicyError("Unix namespace: requires a short private owned directory")
+            for parent in Path(namespace).parents:
+                ancestor = parent.stat()
+                sticky = ancestor.st_uid == 0 and ancestor.st_mode & stat.S_ISVTX
+                if (ancestor.st_uid not in (0, os.getuid())
+                        or (ancestor.st_mode & 0o022 and not sticky)):
+                    raise PolicyError("Unix namespace: replaceable ancestry is refused")
         return replace(
             self, read=checked_paths(self.read, what="read"),
+            read_files=checked_paths(self.read_files, what="read file"),
+            read_dirs=checked_paths(self.read_dirs, what="read directory"),
+            unix_sockets=checked_paths(self.unix_sockets, what="Unix endpoint"),
+            unix_namespaces=namespaces,
+            read_metadata=tuple(dict.fromkeys(checked_path(path, what="metadata", link=True)
+                                             for path in self.read_metadata)),
             write=checked_paths(self.write, what="write"),
             exec=checked_paths(self.exec, what="exec"), env=env,
             cache=checked_path(self.cache, what="cache") if self.cache else "")
