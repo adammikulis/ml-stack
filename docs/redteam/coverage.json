@@ -1,7 +1,7 @@
 {
- "surfaces": 826,
+ "surfaces": 827,
  "by_status": {
-  "covered": 502,
+  "covered": 503,
   "partial": 197,
   "uncovered": 53,
   "n/a": 74,
@@ -79,7 +79,7 @@
    "unmapped": 0
   },
   "parser": {
-   "covered": 79,
+   "covered": 80,
    "partial": 0,
    "uncovered": 49,
    "n/a": 0,
@@ -7854,6 +7854,19 @@
    "note": "a transcript entry that is not a typed human prompt on a pinned Claude Code version, is missing, unreadable or differs from the hook prompt records nothing; a forged line by a same-user process is the documented threat-model limit"
   },
   {
+   "id": "parser:workspace/profilehook.py",
+   "kind": "parser",
+   "source": "workspace/profilehook.py",
+   "trust": "files, pages and archives from outside",
+   "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
+   "status": "covered",
+   "tests": [
+    "tests/test_workspace_bus.py",
+    "tests/test_workspace_rules.py"
+   ],
+   "note": ""
+  },
+  {
    "id": "parser:workspace/project_connection.py",
    "kind": "parser",
    "source": "workspace/project_connection.py",
@@ -10805,9 +10818,9 @@
    "note": "Real interpreter paths containing shell punctuation remain literal argv; unstamped and mismatched revisions cannot start work, and probing has an explicit timeout and no shell"
   },
   {
-   "id": "spawn:fleet/jobs.py:JobRunner._run_one",
+   "id": "spawn:fleet/jobs.py:JobRunner._launch",
    "kind": "spawn",
-   "source": "fleet/jobs.py:JobRunner._run_one",
+   "source": "fleet/jobs.py:JobRunner._launch",
    "trust": "arguments built from model output, peer messages or file names",
    "attacker": "attacker text becomes a command line, environment or working directory",
    "status": "partial",
@@ -11131,23 +11144,6 @@
    "note": "actual subprocess receives hostile arguments only inside JSON and closes malformed native control streams"
   },
   {
-   "id": "spawn:harnesshook.py:nudge",
-   "kind": "spawn",
-   "source": "harnesshook.py:nudge",
-   "trust": "arguments built from model output, peer messages or file names",
-   "attacker": "attacker text becomes a command line, environment or working directory",
-   "status": "covered",
-   "tests": [
-    "tests/test_harness_rails.py::TestWorkspaceCommands::test_a_hostile_label_is_one_argument_and_never_a_shell_line",
-    "tests/test_harness_rails.py::TestHook::test_no_environment_variable_or_argument_lifts_the_policy",
-    "tests/test_harness_rails.py::TestHook::test_a_call_that_asks_with_no_keystore_is_denied_at_once",
-    "tests/test_harness_rails.py::TestHook::test_a_hook_that_fails_blocks_the_call",
-    "tests/test_harness_rails.py::TestSessionFiles::test_the_settings_are_outside_the_tree_read_only_and_hold_no_secret",
-    "tests/test_harness_rails.py::TestPolicy::test_text_naming_the_launchers_files_or_a_person_only_action_is_denied_in_every_role"
-   ],
-   "note": "the harness is spawned with argv only; its hook sits in a settings file the model cannot write, decides from the classifier and a role fixed on the command line, denies when the request store or the hook fails, and a hostile label is one argument"
-  },
-  {
    "id": "spawn:harnessid.py:announce",
    "kind": "spawn",
    "source": "harnessid.py:announce",
@@ -11349,6 +11345,20 @@
    "id": "spawn:net/scanners.py:WindowsDefender.scan",
    "kind": "spawn",
    "source": "net/scanners.py:WindowsDefender.scan",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_sandbox_redteam.py",
+    "tests/test_pdf_engine.py",
+    "tests/test_net_scan.py"
+   ],
+   "note": ""
+  },
+  {
+   "id": "spawn:net/uvinstall.py:install",
+   "kind": "spawn",
+   "source": "net/uvinstall.py:install",
    "trust": "arguments built from model output, peer messages or file names",
    "attacker": "attacker text becomes a command line, environment or working directory",
    "status": "covered",
