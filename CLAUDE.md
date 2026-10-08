@@ -80,11 +80,11 @@ Known failures remain named tasks with evidence and ownership. A scoped pass is 
 pass. Fix a known relevant regression before the affected change lands. A missing cold selector
 cache does not require a full suite for a leaf change; use reviewed explicit affected tests.
 
-**Linux testing is paused by the owner.** Do not launch local or container Linux tests until
-the owner explicitly resumes them. Linux is not a per-merge prerequisite during this pause;
-record the platform coverage gap honestly. Automated checks and background platform coverage do
-not change this local authorization. When resumed, Linux checks follow the same scoped and
-background policy, rather than a second full suite before every merge.
+**Linux testing is resumed by the owner.** Use the available WSL device for Linux verification.
+Linux checks follow the same reviewed affected-selector and background-suite policy as other
+platforms. Report the exact device, operating system, runtime and tested commit; a Mac result
+or historical Linux receipt is not verification of the current WSL setup. Do not run a second
+full suite before every merge.
 
 Use the maintained test broker for every run; shared CPU/GPU admission and ownership apply
 before work starts. Do not bypass a queue, start a competing full run, or extend a temporary
@@ -491,7 +491,7 @@ Follow **Scoped merge gates and background verification** above. Workers use rev
 slow browser/process checks. The main agent owns `scripts/test quick`: its cold-map recording
 and fallback can start full runs. Invalid selectors fail before admission; never
 replace a missing selector with an unreviewed omission. Do not run a full suite after every
-intermediate commit or require full Linux testing for a local merge while Linux is paused.
+intermediate commit. Use the available WSL device for scoped Linux verification.
 
 The maintained tiers are `fast` (neither slow nor heavy), `full` (not slow), `slow` (only slow)
 and `all` (including slow). `tests/README.md` describes their mechanics; the policy above

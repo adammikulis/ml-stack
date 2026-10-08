@@ -13,8 +13,8 @@ subagent. Read it first. Apply the operational requirements below alongside it.
 - Independently review each branch and gate its affected changes. Subagents run affected checks;
   main coordination gates the combined integration tree with structural/security checks per batch
   before primary fast-forward integration. Run full suites in the background per batch/schedule,
-  not at every intermediate commit. **Linux testing is paused by
-  the owner until explicitly resumed.** Report platform gaps and known failures honestly.
+  not at every intermediate commit. **Linux testing is resumed by the owner; use the available
+  WSL device with reviewed affected checks.** Report platform gaps and known failures honestly.
 - Delegate by demonstrated capability, difficulty, benchmarks and available resources; no
   hardcoded vendor/model hierarchy. Keep independent review and name exact runtime provenance.
 - Reasoning, output tokens, context, turns, wall time and resource admission are separate
