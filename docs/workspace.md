@@ -316,6 +316,7 @@ not allowed, 4 rate limited, 5 claim conflict, 6 a log is damaged.
 | scratch | `scratch-new NAME`, `scratch-ls`, `scratch-path NAME [REL]`, `scratch-rm NAME` |
 | boards | `board list\|read NAME\|post NAME TEXT\|threads NAME\|create NAME [TITLE] [--private]\|add NAME AGENT\|mentions`, `join-board NAME`, `leave-board NAME`, `dm [NAME [BODY]] [--between A]`, `subscribe board\|thread\|agent\|kind\|mentions [TARGET] [--mode inbox\|digest\|silent]`, `unsubscribe`, `subs`, `digest [--thread N] [--ack]`, `watch [--board B|--thread N|--dm NAME] [--since SEQ]`, `chat [--board B|--to NAME]` (the person, at a terminal), `board-serve` |
 | claims | `claim KIND KEY [--ttl S] [--pid N]`, `release KIND KEY`, `heartbeat`, `who KIND KEY`, `claims` |
+| person record | `attestations [--session ID] [--limit N]`: what the harness hooks recorded the person typing, answering or authorizing, each shown as a `person-attestation` attested by the harness hook for its session (read only; no token or board post can write one) |
 | safety | `quarantine-ls`, `quarantine-release QID` (human token), `audit-verify [--anchor HASH]`, `audit-head`, `gc` |
 | view | `status` (counts, live claims with `expires_in_s`, the fullest inboxes, your boards and unread, the machine's test-slot queue, read only) |
 

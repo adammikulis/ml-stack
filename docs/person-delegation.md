@@ -1,6 +1,6 @@
 # Person-spoken authorization
 
-Design note. Nothing here is implemented. Owner decisions of this revision are folded in.
+Design note. Slice 1a (section 12) is implemented; the rest is not. Owner decisions of this revision are folded in.
 
 ## Invariants
 
@@ -416,3 +416,26 @@ Library decisions:
    removal).
 2. `mint` is removed from agent flows. A person at a terminal can still mint. `invite` and `join`
    stay, with the invited role pinned to `agent`.
+
+## 12. Slice 1a as built
+
+- Modules in `src/ml_stack/workspace/`: `person_store` (paths, verified reads, authorization state),
+  `person_record` (the writers), `person_auth` (`consume`), `person_intent` (the closed lexicon),
+  `person_transcript` (the transcript reader), `person_targets` (guard-derived targets),
+  `person_hook` (the handlers), `person_view` (the board view). Only `person_hook` and `person_auth`
+  import `person_record`; `tests/test_person_guards.py` pins that.
+- One chain: the log is a `sentinel/events.py` `EventLog` (keyed HMAC, sealed head) at
+  `~/.ml-stack/person/statements.log`.
+- `scripts/hooks/claude-user-prompt` serves `UserPromptSubmit`, `PostToolUse` on `AskUserQuestion` and
+  `SessionEnd`; `claude-session-start` closes a session's authorizations when it starts again.
+- Transcript versions pinned: `person_transcript.PINNED_VERSIONS` (2.1.293 as probed, 2.1.294 as read from a
+  live transcript). Another version fails closed until the tuple is updated.
+- `pre-push` consumes a live `push-dev` authorization for the development branch and records the use.
+  The existing rule (an agent may push the development branch) stays, so a push without an authorization
+  is allowed; the authorization adds the audit row. `main`, tags, forced pushes and deletions are not
+  authorizable. The Bash guard does not consume: only the push itself does.
+- With an agent marker set (`CLAUDECODE`, `ML_STACK_AGENT`, `ML_STACK_NONINTERACTIVE`, `CODEX_THREAD_ID`,
+  `CODEX_SESSION_ID`), `MLSTACK_GUARD=off` leaves the force, tag, deletion, `main`, mint and person-store
+  rules of the Bash guard and the person-store rule of the edit guard in force.
+- Manual acceptance: post a message to `CLAUDE_CODE_MESSAGING_SOCKET` in a live session and require that the
+  transcript entry for it is not `origin.kind = human` (so no statement is recorded).
