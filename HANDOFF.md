@@ -20,6 +20,29 @@
 
 - **The agent sandbox is staged, not installed or measured** (`docs/agent-sandbox.md`, `scripts/agent-sandbox`). The owner runs the fifteen acceptance steps; every sandboxed result in the compatibility matrix is predicted. Open design gaps: the workspace CLI writes `~/.ml-stack/workspace` from the agent's own process, so a sandboxed agent that may announce may also edit board files (needs the CLI to go through the daemon with `workspace/` read-only to agents); `testslots_rpc` binds an ephemeral loopback port that Linux and WSL cannot allow-list (needs a configurable fixed port); Codex's workspace-write cannot deny `.git/config` and `.git/hooks` in the shared git directory.
 
+## Deferred by the second landing batch (2026-10-08)
+
+- **Mesh journals (signed, `docs/mesh-board.md`).**
+  - A person-only command to clear a damaged origin through `Journals.forgive` is not built. It needs an authority entry and human-floor registry entries, so no agent can run it.
+  - Acknowledgements are not signed, and `keys.json` and `damaged.json` are not sealed; a local writer can rewrite them.
+  - There is no per-peer request-rate limit, and the 4 MB request limit is applied after the body is read (`mesh_sync.route`), not before.
+  - Board order is not stable across devices (rows fold in merged order per device); a stable cross-device order is not built.
+  - A reply to a `name@dN` sender is not routed back to the device that wrote it.
+- **Person-session launch tickets (`docs/person-delegation.md`).**
+  - `POST /ui/setup/join` on a machine with no cluster still opens an uncredentialed session.
+  - The Windows and WSL window is not handled.
+  - Packaged-app acceptance for the owner: (1) fresh install, first run; (2) quit and reopen; (3) a stale window and Reopen; (4) a typed URL, then `ml-stack peers open` once; (5) an agent's `peers open` is refused and a curl with a forged `X-ML-Stack-Launch` header gets 403; (6) Production asks for the passphrase.
+- **Restart and durable jobs.**
+  - Capacity held on an uncertain launch is released only by a person-gated step that is not built.
+  - A verification receipt is trusted from a file the verified run itself wrote.
+  - The chat repair path cannot register a candidate runtime.
+  - `job_exit` is untested on Windows.
+  - `integrate/dev-cpu` is still unlanded.
+- **Unblock.**
+  - Three `project_connection` / remote failures still need tracing (see the baseline list in the batch 2 report).
+  - Hook diagnostics `post.reader-timeout` and `host not authenticated by cluster discovery` entries are untouched.
+- **Runtime cost.** `ml-stack runtime ensure --settle` has not run end to end on a real checkout.
+
 ## Autostart units (prepare and install)
 
 - **`runtime-ensure` has not run unattended against a real checkout.** The unit runs `ml-stack runtime ensure` as no agent (no `ML_STACK_WORKSPACE_AGENT` in its environment) from the `ml-stack` launcher in the `--launchers` directory; it needs a first `ensure --checkout --launchers` run by a person or agent, and hourly runs on a checkout with local edits or a held commit have not been observed.
