@@ -25,7 +25,8 @@ from ml_stack.command import Option, flag
 
 __all__ = ["animate_options", "asking_options", "checking", "concurrent_options",
            "drafts_options", "forget_options", "measuring_options", "prepare_options",
-           "queue_options", "reaching_options", "report_options", "run_options",
+           "queue_options", "reaching_options", "report_options", "retrieval_options",
+           "run_options",
            "show_options", "sweep_options", "tail_options", "wait_options"]
 
 
@@ -322,6 +323,22 @@ def prepare_options() -> tuple[Option, ...]:
                   "draws from"),
         flag("--questions", default="",
              help="the set --mix reports on (default: the invented community's)"),
+    )
+
+
+def retrieval_options() -> tuple[Option, ...]:
+    """``retrieval``: the fused order, the vector order and a model reranker, compared."""
+    return (
+        flag("--store", default=bench.prepared(),
+             help="the indexed and embedded graph (default: what `prepare` built, when it "
+                  "has been; without one, characters alone)"),
+        flag("--embed-url", default="", help="a server that embeds, for the vector vote"),
+        flag("--embed-model", default="", help="the model that embedded the graph"),
+        flag("--rerank-url", default="",
+             help="a server started with --reranking; without one that row is left out"),
+        flag("--rerank-model", default="", help="the name to ask the reranking server for"),
+        flag("-k", type=int, default=6, metavar="K",
+             help="the cut-off for recall and nDCG (default: %(default)s, the rerank window)"),
     )
 
 

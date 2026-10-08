@@ -125,6 +125,7 @@ def _asked_spec(args: argparse.Namespace, model: str, extra: tuple[str, ...]) ->
         spec_draft_type_k=draft_k, spec_draft_type_v=draft_v,
         kv_unified=getattr(args, "kv_unified", None),
         embedding=bool(getattr(args, "embedding", False)),
+        reranking=bool(getattr(args, "reranking", False)),
         spec_draft_max=getattr(args, "spec_n_max", None),
         spec_p_min=getattr(args, "spec_p_min", None),
         spec_tree=getattr(args, "spec_tree", None),
@@ -226,6 +227,9 @@ OPTIONS_UP = [
     flag("--embedding", action="store_true",
          help="serve an embedding model (llama-server --embedding), the way the graph's "
               "vectors and the thread's recall want one"),
+    flag("--reranking", action="store_true",
+         help="serve a reranker (llama-server --reranking, answering /v1/rerank); it is "
+              "never shared with a chat or embedding lease"),
     flag("--kv", default="q8_0", metavar="TYPE",
          help="what the KV cache is stored as (default q8_0: measured 2026-09-02 on "
               "Flash-Next, F1 unchanged, faster, half the cache; the recurrent state is "

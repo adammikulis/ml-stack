@@ -29,6 +29,7 @@ from ml_stack.bench import (
     extract as bench_extract,
     ops,
     options,
+    retrieval,
     selfcheck as bench_selfcheck,
     speed as bench_speed,
 )
@@ -240,6 +241,14 @@ def cmd_concurrent(args: Any) -> int:
     say(f"kept as {key}")
     if args.smoke:
         table(read_back(args.kept, [key]))
+    return 0
+
+
+@COMMANDS.command("retrieval", help="compare fused, vector and model-reranked search "
+                  "on the scored questions, without an answering model",
+                  options=options.retrieval_options, allow_abbrev=False)
+def cmd_retrieval(args: Any) -> int:
+    say(retrieval.report(args))
     return 0
 
 

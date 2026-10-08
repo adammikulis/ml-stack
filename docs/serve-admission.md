@@ -102,6 +102,12 @@ returns that server (`adopted=True`) instead of loading the weights again. A lea
 arrives while a compatible server is still loading waits for it. A caller that needs a
 specific port (`roam=False`) does not get another.
 
+A reranker is served with `ml-stack-serve up MODEL --reranking` (`llama-server --reranking`, which
+answers `/v1/rerank`; `ml_stack.client.rerank.rerank` is the client). Like an embedding server it
+is a different kind of server: a `reranking` lease is never given a chat or embedding server, and
+a chat or embedding lease is never given a reranker. `ml-stack-bench retrieval --rerank-url URL`
+compares it with the fused and vector orders on the scored questions.
+
 ### Requests
 
 `ml_stack.gate` queues generation and embedding requests (`/v1/chat/completions`,

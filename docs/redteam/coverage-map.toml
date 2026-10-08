@@ -1051,6 +1051,17 @@ status = "covered"
 tests = ["tests/test_onboard_tailnet.py", "tests/test_onboard_transfer.py"]
 
 [[group]]
+match = ["egress:client/rerank.py:*"]
+status = "covered"
+count = 2
+tests = ["tests/test_rerank.py::test_a_hostile_reranker_answer_raises_rerank_error",
+         "tests/test_rerank.py::test_an_oversized_answer_is_refused_without_reading_it_all",
+         "tests/test_rerank.py::test_a_server_that_never_answers_hits_the_timeout",
+         "tests/test_rerank.py::test_a_server_that_drips_its_answer_cannot_outlast_the_deadline",
+         "tests/test_rerank.py::test_a_server_error_status_is_a_rerank_error_that_keeps_the_status"]
+note = "a real hostile socket server: oversized, slow or dripping replies, non-JSON, wrong shapes, bool, negative, out-of-range or non-int indexes, null, string, NaN or infinite scores all raise RerankError"
+
+[[group]]
 match = ["egress:*"]
 status = "partial"
 tests = ["tests/test_net_no_bypass.py"]

@@ -178,6 +178,7 @@ def pending_serves(spec: ServerSpec, entry: Mapping[str, Any]) -> bool:
     return (int(entry.get("context") or 0) // held >= int(spec.context) // max(1, int(spec.parallel or 1))
             and held >= max(1, int(spec.parallel or 1))
             and bool(entry.get("embedding")) == bool(spec.embedding)
+            and bool(entry.get("reranking")) == bool(spec.reranking)
             and not (spec.mmproj and not entry.get("mmproj")))
 
 
@@ -187,6 +188,8 @@ def compatible(spec: ServerSpec, entry: Mapping[str, Any], mismatches: list[str]
     if mismatches:
         return False
     if bool(entry.get("embedding")) != bool(spec.embedding):
+        return False
+    if bool(entry.get("reranking")) != bool(spec.reranking):
         return False
     if spec.mtp is not None and entry.get("mtp") is not spec.mtp:
         return False

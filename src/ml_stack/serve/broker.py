@@ -50,7 +50,8 @@ _MODEL_START = "gpu-model-start:"
 
 
 _QUANT = re.compile(r"(?i)(?<![a-z0-9])((?:IQ|Q)\d(?:_[A-Z0-9]+)*|BF16|F16|F32)(?![a-z0-9])")
-_FLAGS = ("context", "n_gpu_layers", "device", "parallel", "mtp", "spec_type", "flash_attn", "embedding")
+_FLAGS = ("context", "n_gpu_layers", "device", "parallel", "mtp", "spec_type", "flash_attn",
+          "embedding", "reranking")
 
 
 def _shape_of(settings: Mapping[str, Any]) -> dict[str, Any]:
@@ -58,7 +59,7 @@ def _shape_of(settings: Mapping[str, Any]) -> dict[str, Any]:
     `ServerSpec` as a dict or a lease record."""
     out: dict[str, Any] = {"device": admission.device_of(settings)}
     for key in ("context", "parallel", "cache_type_k", "cache_type_v", "spec_type", "mtp",
-                "embedding", "draft", "chat_template_file", "spec_draft_max", "spec_p_min"):
+                "embedding", "reranking", "draft", "chat_template_file", "spec_draft_max", "spec_p_min"):
         if key in settings and settings[key] is not None:
             out[key] = settings[key]
         elif key in settings and key in ("draft", "chat_template_file"):
@@ -182,7 +183,7 @@ class Held:
             want, got = asked.get(key), have.get(key)
             if want and got is not None and want != got:
                 return f"port {self.port} serves {key} {got!r}, {want!r} asked"
-        for key in ("mtp", "embedding"):
+        for key in ("mtp", "embedding", "reranking"):
             want, got = asked.get(key), have.get(key)
             if want is not None and got is not None and bool(want) != bool(got):
                 return f"port {self.port} serves {key}={bool(got)}, {bool(want)} asked"
