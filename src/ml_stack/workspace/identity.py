@@ -250,9 +250,11 @@ class Registry:
             if entry is None or entry.get("revoked"):
                 raise ValueError(f"no agent called {name}")
             if label:
-                if len(entry.setdefault("label_models", {})) >= 20 and label not in entry["label_models"]:
-                    raise ValueError("an agent keeps at most 20 helper models")
-                entry["label_models"][label] = model
+                models = entry.setdefault("label_models", {})
+                models.pop(label, None)
+                while len(models) >= 20:
+                    models.pop(next(iter(models)))  # evict the oldest helper, never refuse a new one
+                models[label] = model
                 self._save(agents)
                 return "", ""
             before = (str(entry.get("model", "")), str(entry.get("model_state", "")))

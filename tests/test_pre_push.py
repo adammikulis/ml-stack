@@ -175,15 +175,27 @@ def test_a_fresh_worktree_with_no_commits_yet_does_not_block(checkout):
 
 
 @pytest.mark.parametrize("agent", ["", "1"])
-def test_dirty_checkout_refuses_publication(checkout, agent):
+def test_dirty_checkout_warns_and_never_blocks_publication(checkout, agent):
     (checkout / "pending.txt").write_text("pending")
     done = push(checkout, "0.9dev", CLAUDECODE=agent)
-    assert done.returncode != 0
+    assert done.returncode == 0, done.stderr
     assert "uncommitted changes" in done.stderr
 
 
-def test_clean_checkout_with_pending_operation_refuses_publication(checkout):
+def test_clean_checkout_with_pending_operation_warns_and_never_blocks_publication(checkout):
     (checkout / ".git" / "CHERRY_PICK_HEAD").write_text(git(checkout, "rev-parse", "HEAD"))
-    done = push(checkout, "main", CLAUDECODE="")
-    assert done.returncode != 0
+    done = push(checkout, "0.9dev", CLAUDECODE="1")
+    assert done.returncode == 0, done.stderr
     assert "unresolved git operation" in done.stderr
+
+
+def test_a_dirty_primary_and_other_worktrees_do_not_block_a_sibling_push(checkout):
+    (checkout / "other-agents-file.txt").write_text("pending")
+    other = checkout.parent / "other"
+    git(checkout, "worktree", "add", "-q", "-b", "other-work", str(other))
+    commit(other, "x.py", "x = 1\n")
+    tree = checkout.parent / "mine"
+    git(checkout, "worktree", "add", "-q", "-b", "mine-work", str(tree))
+    tip = git(checkout, "rev-parse", "0.9dev")
+    env = {"CLAUDECODE": "1", "GIT_DIR": git(tree, "rev-parse", "--absolute-git-dir")}
+    assert push(tree, "0.9dev", sha=tip, **env).returncode == 0

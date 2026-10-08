@@ -5,14 +5,14 @@
 # and `main` is never it. An agent's push of `main` is allowed only as one fast-forward to a
 # commit the person approved through the approval question (person-consume); tags, forced
 # pushes and deletions are never allowed.
+# A dirty tree or a half-finished operation does not change the commits being pushed, so they
+# are reported and never block: other agents leave files in the primary checkout.
 if [ -n "$(git status --porcelain --untracked-files=all)" ]; then
-    echo "pre-push: refused: working tree has uncommitted changes" >&2
-    exit 1
+    echo "pre-push: warning: working tree has uncommitted changes (not part of this push)" >&2
 fi
 for state in MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD rebase-merge rebase-apply sequencer; do
     if [ -e "$(git rev-parse --git-path "$state")" ]; then
-        echo "pre-push: refused: unresolved git operation: $state" >&2
-        exit 1
+        echo "pre-push: warning: unresolved git operation: $state (not part of this push)" >&2
     fi
 done
 

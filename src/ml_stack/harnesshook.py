@@ -190,7 +190,7 @@ def stop(rail: Rail) -> dict[str, Any]:
         who = ws.auth(tokens.load(ws.base, rail.label))
         if who.id != rail.label:
             raise Denied('completion requires the launcher-bound identity')
-        worktree_lifecycle.require_clean(ws.base, who.id)
+        worktree_lifecycle.require_clean(ws.base, who.id, within=tuple(rail.roots))
     except (Denied, OSError, RuntimeError) as error:
         return {"decision": "block", "reason": hook_diagnostics.record(error, "stop", "completion", metadata=hook_bootstrap.timings())}
     return {}

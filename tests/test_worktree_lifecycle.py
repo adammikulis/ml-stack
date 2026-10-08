@@ -37,8 +37,13 @@ def test_scoped_done_blocks_retained_checkout_after_claim_release(setup):
     assert kit.checkout.exists()
     assert kit.ws.announce(kit.sender, 'milestone', 'Review ready', label='helper')
     assert kit.ws.announce(kit.sender, 'done', 'Read-only audit', label='other')
+    # another label's retained checkout never blocks this one's completion
+    assert kit.ws.announce(kit.sender, 'done', 'Everything complete')
     with pytest.raises(Denied, match='verified cleanup'):
-        kit.ws.announce(kit.sender, 'done', 'Everything complete')
+        lifecycle.require_clean(kit.base, 'worker')
+    lifecycle.require_clean(kit.base, 'worker', within=(str(kit.base),))
+    with pytest.raises(Denied, match='verified cleanup'):
+        lifecycle.require_clean(kit.base, 'worker', within=(str(kit.checkout),))
 
 
 def test_missing_checkout_does_not_hide_surviving_branch(setup):
@@ -336,7 +341,7 @@ def test_pretool_invalidates_old_cleanup_proof_when_tool_removes_its_final_commi
     repo.git(kit.checkout, 'commit', '-m', 'feat: vanished tool commit')
     repo.git(kit.primary, 'worktree', 'remove', str(kit.checkout))
     repo.git(kit.primary, 'branch', '-D', 'worker/change')
-    monkeypatch.setattr(harnesshook, 'nudge', lambda _: '')
+    monkeypatch.setattr(harnesshook, 'nudge', lambda *_, **__: '')
     assert harnesshook.post('worker', harnesshook.Rail('plan-and-go', 'worker', [str(kit.checkout)])) == {}
     with pytest.raises(Denied, match='cleanup proof is missing'):
         kit.ws.announce(kit.sender, 'done', 'Complete')
@@ -353,7 +358,7 @@ def test_posttool_captures_final_commit_and_cleanup_proves_it_landed(setup, monk
     repo.git(kit.checkout, 'add', 'source.py')
     repo.git(kit.checkout, 'commit', '-m', 'feat: captured final commit')
     commit = repo.git(kit.checkout, 'rev-parse', 'HEAD')
-    monkeypatch.setattr(harnesshook, 'nudge', lambda _: '')
+    monkeypatch.setattr(harnesshook, 'nudge', lambda *_, **__: '')
     harnesshook.post('worker', harnesshook.Rail('plan-and-go', 'worker', [str(kit.checkout)]))
     assert commit in lifecycle.scopes(kit.base, 'worker')[0]['commits']
     with pytest.raises(Denied, match='commits outside'):
