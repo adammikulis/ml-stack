@@ -36,6 +36,7 @@ from ml_stack.workspace import (
     limits,
     localcli,
     localroute,
+    mesh_sync,
     nudge,
     onboard,
     person_view,
@@ -478,6 +479,11 @@ def _digest(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
     return ws.board.digest(token, args.ack, args.thread)
 
 
+def _sync(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
+    ws.auth(token)
+    return mesh_sync.sync(ws)
+
+
 def _ttl(text: str) -> float:
     units = {"s": 1, "m": 60, "h": 3600, "d": 86400}
     return float(text[:-1]) * units[text[-1]] if text and text[-1] in units else float(text or 0)
@@ -669,7 +675,9 @@ TABLE: tuple[tuple[str, str, list[Any], Handler], ...] = (
         flag("--thread", type=int, default=0), flag("--ack", action="store_true")], _digest),
     ("wait", "block until a message arrives", [
         *READ, flag("--timeout", type=float, default=60.0)], _wait),
-    ("outbox", "messages you sent", [], lambda a, w, t: w.outbox(t)),
+    ("outbox", "messages you sent, each provisional until every paired device holds it, then synced", [],
+     lambda a, w, t: w.outbox(t)),
+    ("sync", "exchange message and note journals with the paired devices", [], _sync),
     ("ack", "mark messages up to SEQ read", [flag("seq", type=int)],
      lambda a, w, t: {"cursor": w.ack(t, a.seq)}),
     ("thread", "a message and its replies (first and newest by default)", [

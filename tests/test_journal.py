@@ -139,9 +139,9 @@ def test_replaying_an_older_journal_changes_nothing_and_a_fork_is_refused(tmp_pa
     assert b.rows(a.origin) == before
 
 
-def row(origin, seq, wall, counter, actor='x', idem='', kind='message'):
-    return {'origin': origin, 'seq': seq, 'hlc': [wall, counter, origin], 'kind': kind,
-            'actor': actor, 'idem': idem, 'body': {}}
+def row(origin, seq, wall, counter, **fields):
+    return {'origin': origin, 'seq': seq, 'hlc': [wall, counter, origin], 'kind': 'message',
+            'actor': 'x', 'idem': '', 'body': {}, **fields}
 
 
 def test_merge_orders_by_clock_then_origin_then_sequence_whatever_order_it_is_given():
