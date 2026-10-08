@@ -14,6 +14,7 @@ Paused on purpose. Nothing here is merged; the work is on branch `feat/decider-g
   optimiser step at batch 1 x accum 4.
 * A fix so pointer prompts are tokenised with the tokenizer's special tokens (a Gemma prompt
   starts with `<bos>`), and a guard test that no test can pin into the real sentinel manifest.
+* 2026-10-08: FunctionGemma 270M is dropped (Gemma Terms of Use) in favour of embeddinggemma-2 (Apache-2.0).
 * WIP: a pin and a test for `google/functiongemma-270m-it` (gemma3_text, 18 layers, hidden 640,
   536 MB, cached) as a fast test bed.
 

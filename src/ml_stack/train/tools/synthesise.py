@@ -181,7 +181,7 @@ def _row(system: str, question: str, tool: str, arguments: dict[str, Any] | None
         assistant: dict[str, Any] = {"role": "assistant", "content": reply}
     else:
         # arguments as a mapping, which is what a chat template renders; the OpenAI wire
-        # shape carries them as a JSON string, and functiongemma's template prints that raw
+        # shape carries them as a JSON string, and the Gemma template prints that raw
         assistant = {"role": "assistant", "content": None, "tool_calls": [
             {"id": "call_0", "type": "function",
              "function": {"name": tool, "arguments": dict(arguments or {})}}]}

@@ -374,7 +374,7 @@ def _parser() -> Any:
     ap.add_argument("--set", action="append", default=[], metavar="KEY=VALUE")
     ap.add_argument("--size", default="",
                     help="which size of the recipe: its base model, and the defaults that "
-                         "suit it (tool-calls: 270m, e4b)")
+                         "suit it (tool-calls: e4b)")
     ap.add_argument("--dry-run", action="store_true",
                     help="20 steps, no checkpoint: does this config work at all, and what "
                          "does a step really cost")

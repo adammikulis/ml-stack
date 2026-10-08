@@ -407,7 +407,7 @@ class TestCommandLine:
         assert main(["--tools", str(tools), "--prompts", str(prompts), "--out", str(out),
                      "--only", "synth"]) == 0
         manifest = json.loads((out / "data" / "manifest.json").read_text())
-        assert manifest["base"] == "google/functiongemma-270m-it"
+        assert manifest["base"] == "unsloth/gemma-4-E4B-it"
         assert manifest["train"] + manifest["holdout"] == manifest["rows"]
         assert (out / "data" / "train.jsonl").read_text().count("\n") == manifest["train"]
 

@@ -44,9 +44,9 @@ cannot rank a model on two questions.
 ## Measuring a change to the asking
 
 ```
-ml-stack-bench prepare --embed-url http://127.0.0.1:8081 --embed-model embeddinggemma-300M-Q8_0.gguf
+ml-stack-bench prepare --embed-url http://127.0.0.1:8081 --embed-model embeddinggemma-2-Q8_0.gguf
 ml-stack-bench sweep --on gptoss=http://127.0.0.1:8080 --on e4b=http://127.0.0.1:8083 \
-    --embed-url http://127.0.0.1:8081 --embed-model embeddinggemma-300M-Q8_0.gguf
+    --embed-url http://127.0.0.1:8081 --embed-model embeddinggemma-2-Q8_0.gguf
 ml-stack-bench show
 ```
 

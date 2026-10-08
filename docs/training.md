@@ -54,7 +54,7 @@ each skipped when `--out` already holds its output:
   paraphrase of it goes with it. `--ask URL` has a served model write more questions per
   tool with the examples as few-shots, which is also where better arguments come from;
   `--per-tool` is how many conversations each tool gets.
-- **train** runs the `tool-calls` recipe: `--base` (`google/functiongemma-270m-it` unless
+- **train** runs the `tool-calls` recipe: `--base` (`unsloth/gemma-4-E4B-it` unless
   told otherwise) with every conversation rendered through its own chat template and the
   loss on the assistant tokens only, into `run/` — checkpoints, `metrics.jsonl`, resumable.
   `--set steps=600` and the other recipe fields work as in `ml-stack-train-run`. It is
@@ -138,6 +138,14 @@ share one GPU and neither measurement would be worth having.
 
 `docs/research/tool-caller-finetune.md` is the plan this is the first half of — what to
 train, on whose traces, what it would cost, and what is unmeasured.
+
+The small `270m` size of the `tool-calls` recipe (FunctionGemma 270M) was removed on
+2026-10-08 for licence reasons: it is under the Gemma Terms of Use, whose use restrictions
+must flow downstream, and a model that cannot be used broadly is not used. Tool *selection*
+now goes through the embed backend (`src/ml_stack/decide/embed.py`) with `embeddinggemma-2`
+(Apache-2.0) and well-written examples; the generative recipe remains for producing
+free-form arguments, and its only size is E4B (a LoRA). Note: the embed rows in
+`docs/decision-models.md` were measured with the 300M model and are historical.
 
 The next recipe is embeddinggemma for `graph.route`: a contrastive fine-tune on the same
 question → tool pairs, so the router that chooses which tools to offer learns the project's

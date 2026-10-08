@@ -37,10 +37,10 @@ inference — the fine-tune has no shortlist to run and no extra context to read
 2. **Harvest.** `ml-stack-train-tools from-bench --kept STORE --model e4b --min-f1 0.8
    --base unsloth/gemma-4-E4B-it --out DIR` turns every traced question that scored well
    enough into one example per model turn. **Pass `--base`**: the manifest's base is what
-   the recipe renders the chat template with and fine-tunes, and its default is the 270m —
-   E4B traces written under that default would silently train the wrong model.
+   the recipe renders the chat template with and fine-tunes, and its default is E4B,
+   so traces from another model would silently train the wrong one.
 3. **Train.** The `tool-calls` recipe over that file — the base model's own chat template,
-   loss on the assistant tokens only. `--lora` for anything above the 270m: rank 16 on the
+   loss on the assistant tokens only. `--lora` is the default size's path: rank 16 on the
    attention and MLP projections, the base frozen in bf16, ~40M trainable parameters for
    E4B. What it will cost is printed before a weight is loaded, and refused over the same
    30-minute ceiling the bench uses unless `--yes` (see "Which model, and how").
@@ -192,8 +192,7 @@ That splits the 25.4 s/question question in two and puts the expensive model on 
 is actually better at.
 
 **The LoRA path, which now exists.** The `tool-calls` recipe was a full fine-tune through
-`transformers` — right for `functiongemma-270m-it` (the default base and the `270m` size)
-and impossible for E4B, where bf16 weights, gradients and two Adam moments for 8B
+`transformers` — right for a small base and impossible for E4B, where bf16 weights, gradients and two Adam moments for 8B
 parameters is ~128G of state before a single activation. `--lora` is the second size of the
 same recipe: peft adapters on the attention and MLP projections, the base frozen in bf16,
 ~40M trainable parameters, everything else — the renderer, the assistant-only loss, the
@@ -219,7 +218,7 @@ ml-stack-train-run --recipe tool-calls --size e4b --lora --export-gguf \
 ```
 
 `--size e4b` carries its own defaults — `lora` on, batch 4, context 2048, 1000 steps, lr
-1e-4, rank 16, alpha 32 — because one set of numbers cannot suit a 270m and an 8B at once.
+1e-4, rank 16, alpha 32 — because a full fine-tune's numbers cannot suit an 8B.
 `--yes` is there because the run is refused without it; that refusal is the point of the
 next table.
 
@@ -281,9 +280,12 @@ does not stop two runs from colliding.
   has measured a step of an 8B LoRA on it. The 65 s/step above is arithmetic from FLOPs and
   a throughput guess; `--dry-run` turns it into a number in 22 minutes, and that is the
   first thing to spend the GPU on.
-- **Whether a 270m caller is enough.** `functiongemma-270m-it` fine-tuned on the same data
-  is hours cheaper and might route acceptably. Untested, and worth testing first because it
-  is the cheap experiment that would make the expensive one unnecessary.
+- **Whether a small caller is enough.** The 270m size (FunctionGemma 270M) was removed on
+  2026-10-08: it is under the Gemma Terms of Use, and a model that cannot be used broadly is
+  not used. Tool selection now goes through the embed backend with `embeddinggemma-2`
+  (Apache-2.0) and well-written examples (`docs/decision-models.md`); the generative recipe
+  remains only for free-form arguments (E4B). The contrastive router for `graph.route` is
+  the recipe already planned at `docs/training.md`, not a new one.
 
 ## Three telemetries, and the record type they want to be
 

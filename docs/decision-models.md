@@ -82,6 +82,8 @@ Raw rows: `ml-stack-decide bench guards --split test --tag QUESTION --backend NA
 temperature fit is `ml-stack-decide calibrate --split dev`. The embed heads are trained on
 a 70% slice of dev and calibrated on the other 30%.
 
+Note (2026-10-08): the embed backend now targets `embeddinggemma-2` (Apache-2.0); the embeddinggemma-300M rows below were measured with the 300M model and are historical.
+
 | backend and model | question | accuracy | Brier raw / cal | ECE raw / cal | p50 ms |
 |---|---|---|---|---|---|
 | logprob, Qwen3-VL-8B-Instruct Q4_K_M | destructive | 0.969 | 0.041 / 0.063 | 0.028 / 0.032 | 141 |

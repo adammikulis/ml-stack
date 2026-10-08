@@ -28,7 +28,7 @@ def live() -> None:
 @pytest.mark.slow
 def test_a_public_repository_lists_with_sizes_and_checksums():
     live()
-    files = remote.listing("ggml-org/functiongemma-270m-it-GGUF")
+    files = remote.listing("ggml-org/embeddinggemma-2-GGUF")
     ggufs = [f for f in files if f.path.endswith(".gguf")]
     assert ggufs and all(f.size > 0 and len(f.sha256) == 64 for f in ggufs)
 
@@ -36,7 +36,7 @@ def test_a_public_repository_lists_with_sizes_and_checksums():
 @pytest.mark.slow
 def test_a_search_finds_gguf_repositories():
     live()
-    assert remote.search("functiongemma", remote.Filters(limit=3, files=False))
+    assert remote.search("embeddinggemma", remote.Filters(limit=3, files=False))
 
 
 @pytest.mark.slow

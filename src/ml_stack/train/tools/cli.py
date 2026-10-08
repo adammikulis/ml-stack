@@ -95,7 +95,7 @@ def _from_bench_arguments(ap: Any) -> Any:
                     help="a system prompt to put in front of any conversation that has "
                          "none; by default the trace's own is used, which is the one the "
                          "model was actually served")
-    ap.add_argument("--base", default="google/functiongemma-270m-it",
+    ap.add_argument("--base", default="unsloth/gemma-4-E4B-it",
                     help="what the manifest names as the model this data is rendered for")
     ap.add_argument("--out", required=True, metavar="FILE.jsonl",
                     help="one JSONL file of rows, or a directory -- which gets train.jsonl, "
@@ -211,7 +211,7 @@ def _parser() -> argparse.ArgumentParser:
                     help="JSON {tool: [question, ...]} or python:module:attr "
                          "(e.g. python:ml_stack.graph.prompts:TOOL_PROMPTS); a 'chat' key is "
                          "the messages that want no tool")
-    ap.add_argument("--base", default="google/functiongemma-270m-it",
+    ap.add_argument("--base", default="unsloth/gemma-4-E4B-it",
                     help="Hugging Face id or a local directory to fine-tune")
     ap.add_argument("--out", required=True, help="where data/, run/ and the GGUF go")
     ap.add_argument("--ask", default="", metavar="URL",

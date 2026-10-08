@@ -10,7 +10,6 @@
   },
   "requires": {"backend": "torch", "min_ram_gb": 8},
   "sizes": {
-    "270m": {"base": "google/functiongemma-270m-it", "params_m": 270, "needs_gb": 6},
     "e4b": {
       "base": "unsloth/gemma-4-E4B-it",
       "params_m": 7996, "active_m": 4000, "needs_gb": 32,
@@ -28,7 +27,7 @@
      "help": "A few hundred steps over a few hundred conversations is a pass or two. Watch the held-out score. One pass over 4,000 harvested turns at batch 4 is 1,000 steps."},
     {"name": "context", "type": "int", "default": 2048, "min": 64, "max": 32768,
      "label": "Longest conversation it reads",
-     "help": "Tokens. The tool declarations are rendered into every row: the five graph tools with their worked examples measured 1,080 tokens through functiongemma's template, and a row the context cuts off is dropped, not taught."},
+     "help": "Tokens. The tool declarations are rendered into every row: the five graph tools with their worked examples measured 1,080 tokens through the Gemma 4 template, and a row the context cuts off is dropped, not taught."},
     {"name": "batch_size", "type": "int", "default": 8, "min": 1, "max": 128,
      "label": "Conversations per step"},
     {"name": "learning_rate", "type": "float", "default": 0.00002, "min": 0.0000001, "max": 0.01,

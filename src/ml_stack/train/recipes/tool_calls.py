@@ -2,7 +2,7 @@
 
 The data is what ``ml-stack-train-tools`` synthesises — or anything in the same shape: rows
 of ``{"messages": [...], "tools": [...]}`` — and the base is a Hugging Face causal LM with
-a chat template, ``google/functiongemma-270m-it`` unless the data's manifest names another.
+a chat template, ``unsloth/gemma-4-E4B-it`` unless the data's manifest names another.
 Each conversation is rendered through the model's own template, so what it learns is the
 exact format it will be served with, and the loss is on the assistant turn only: the
 question and the tool declarations are read, never predicted.
