@@ -192,7 +192,7 @@ def test_tasks_join_selected_person_workspace_with_real_backend(tmp_path, playwr
             join.click()
             assert posts == [f'http://127.0.0.1:{server.port}/ui/projects/{project}/board/connect']
             if foreign_authority:
-                expect(viewer.locator('.status')).to_contain_text('authority')
+                expect(viewer.locator('.status')).to_contain_text('authoritative device')
                 expect(viewer.locator('.task-layout')).to_be_hidden()
                 assert all('person_project' not in row for row in ws.registry._load().values())
             else:
