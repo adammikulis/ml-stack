@@ -12,6 +12,9 @@ passes its own model id (`--model <id>`; `claude-sonnet-5-5` unless it knows oth
 
 Use Haiku 5.5 (`claude-haiku-5-5`) for read-only search, summarising, narrow mechanical edits,
 and lowering a budget ratchet when the brief names the metric and the test selector that checks it.
+Haiku never deletes or weakens a test or an assertion, edits authorization, grant, claim, guard,
+hook or red-team code, resolves a semantic merge conflict, changes anything outside its worktree
+(an install, an interpreter, a shared service), or decides that a branch is ready to land.
 Use Sonnet 5.5 (`claude-sonnet-5-5`) for any other work that writes or reviews code. Use Opus 5.5
 (`claude-opus-5-5`) only after Sonnet has failed on the task. Fable is used only when the owner
 asks. The evidence is in docs/model-benchmarks.md. Select within that order using the capability
