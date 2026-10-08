@@ -83,7 +83,7 @@ def _generate() -> bytes:
 
 def _set_secret(private: bytes) -> None:
     try:
-        _run(["gh", "secret", "set", REPO_NAME], data=private, cwd=ROOT)
+        _run(["gh", "secret", "set", REPO_NAME, "--env", "release"], data=private, cwd=ROOT)
     except Failed as exc:
         raise Failed(f"{exc}\nthe repo secret, the keystore and signing.py are unchanged; run "
                      "`gh auth status` in this repository and run the command again") from None

@@ -109,8 +109,10 @@ def test_every_audit_job_ends_in_the_gate_and_nothing_in_the_audit_workflow_is_s
 
 
 def test_the_audit_and_release_workflows_use_pinned_actions_only():
-    for name in ("audit.yml", "release.yml"):
+    for name in ("audit.yml", "release.yml", "release-build.yml"):
         for ref in re.findall(r"uses:\s*(\S+)", (WORKFLOWS / name).read_text(encoding="utf-8")):
+            if ref.startswith("./.github/workflows/"):
+                continue
             assert re.fullmatch(r".+@[0-9a-f]{40}", ref), f"{name}: {ref} is not pinned to a commit"
 
 
@@ -157,7 +159,7 @@ def test_a_broken_sbom_is_caught(bom):
 
 
 def test_the_release_workflow_builds_checks_and_uploads_the_sbom():
-    steps = jobs("release.yml")["wheels"]["steps"]
+    steps = jobs("release-build.yml")["wheels"]["steps"]
     (make,) = [s for s in steps if s.get("name") == "SBOM"]
     assert "scripts/sbom.py --out sbom.cdx.json" in make["run"] and "scripts/sbom.py --check" in make["run"]
     assert "curl" not in make["run"]

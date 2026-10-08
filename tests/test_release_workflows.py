@@ -28,13 +28,49 @@ CI = read("ci.yml")
 PLEASE = read("release-please.yml")
 RELEASE_FILE = "release.yml"
 RELEASE = read(RELEASE_FILE)
+BUILD_FILE = "release-build.yml"
+BUILD = read(BUILD_FILE)
 DRY_RUN_FILE = "release-dry-run.yml"
 DRY_RUN = read(DRY_RUN_FILE)
 
 
 def checkouts() -> list[dict[str, Any]]:
+    """The checkouts of the tree under test; the base commit's checker copy is separate."""
     return [step for job in CI["jobs"].values() for step in job["steps"]
-            if str(step.get("uses", "")).startswith("actions/checkout@")]
+            if str(step.get("uses", "")).startswith("actions/checkout@")
+            and (step.get("with") or {}).get("path") != "trusted"]
+
+
+def trusted_checkouts() -> list[dict[str, Any]]:
+    return [step for job in CI["jobs"].values() for step in job["steps"]
+            if (step.get("with") or {}).get("path") == "trusted"]
+
+
+def test_the_checkers_of_a_pull_request_come_from_its_base():
+    found = trusted_checkouts()
+    assert len(found) == 2, "the gates and privacy jobs each check out the base"
+    for step in found:
+        assert step["with"]["ref"] == "${{ github.event.pull_request.base.sha }}"
+        assert step["if"] == "github.event_name == 'pull_request'"
+
+
+def test_the_gate_scripts_run_from_the_base_not_the_pull_request():
+    runs = [str(s.get("run", "")) for s in CI["jobs"]["gates"]["steps"]]
+    overlay = next(i for i, run in enumerate(runs) if "cp -R trusted/scripts/gates" in run)
+    for needle in ("python scripts/budgets", "budgets-only-fall"):
+        at = next(i for i, run in enumerate(runs) if needle in run)
+        assert at > overlay, f"{needle} ran before the base commit's copy was in place"
+    pins = next(s for s in CI["jobs"]["gates"]["steps"]
+                if "pinned.txt" in str(s.get("env", {})))
+    assert "trusted/" in pins["env"]["PINS"]
+
+
+def test_the_name_hooks_run_from_the_base_not_the_pull_request():
+    runs = [str(s.get("run", "")) for s in CI["jobs"]["privacy"]["steps"]]
+    overlay = next(i for i, run in enumerate(runs) if "cp -R trusted/scripts/hooks" in run)
+    for needle in ("no-real-names", "commit-msg"):
+        at = next(i for i, run in enumerate(runs) if needle in run)
+        assert at > overlay
 
 
 def test_ci_can_be_called_by_another_workflow():
@@ -123,11 +159,47 @@ def test_the_caller_grants_the_oidc_token_only_to_jobs_that_call_release():
     release-please.yml fails at startup."""
     calls = [name for name, job in PLEASE["jobs"].items()
              if job.get("uses") == f"./.github/workflows/{RELEASE_FILE}"]
-    assert set(calls) == {"build", "release-pr-bundles"}
-    assert set(id_token_jobs(PLEASE)) == set(calls)
-    for name in calls:
-        assert PLEASE["jobs"][name]["permissions"]["id-token"] == "write"
+    assert calls == ["build"]
+    assert id_token_jobs(PLEASE) == calls
+    assert PLEASE["jobs"]["build"]["permissions"]["id-token"] == "write"
     assert "id-token" not in (PLEASE.get("permissions") or {})
+
+
+def test_no_workflow_passes_every_secret_to_a_called_one():
+    for name in ("release-please.yml", "release.yml", "release-dry-run.yml", "ci.yml"):
+        assert "secrets: inherit" not in (WORKFLOWS / name).read_text(encoding="utf-8")
+    assert "secrets" not in RELEASE["on"]["workflow_call"]
+
+
+def test_the_signing_key_is_read_only_by_a_job_in_the_release_environment():
+    jobs = {n: j for n, j in RELEASE["jobs"].items()
+            if "secrets." in yaml.safe_dump(j)}
+    assert list(jobs) == ["publish"]
+    assert jobs["publish"]["environment"] == "release"
+    assert "secrets." not in yaml.safe_dump(BUILD)
+
+
+def test_the_build_and_the_dry_run_hold_no_write_grant():
+    called = {
+        "release-dry-run.yml": list(DRY_RUN["jobs"].values()),
+        "release-please.yml": [PLEASE["jobs"]["release-pr-bundles"],
+                               PLEASE["jobs"]["release-pr"]],
+    }
+    for name, jobs in called.items():
+        for job in jobs:
+            assert job["permissions"] == {"contents": "read"}, name
+    assert BUILD["permissions"] == {"contents": "read"}
+    assert all("permissions" not in job for job in BUILD["jobs"].values())
+
+
+def test_a_tag_publishes_only_a_commit_that_is_on_main():
+    guard = RELEASE["jobs"]["guard"]
+    run = next(s["run"] for s in guard["steps"] if "run" in s)
+    assert "merge-base --is-ancestor" in run and "origin main" in run
+    assert guard["steps"][0]["with"]["fetch-depth"] == 0
+    for name in ("pypi", "publish"):
+        assert "guard" in RELEASE["jobs"][name]["needs"]
+        assert "needs.guard.result == 'success'" in RELEASE["jobs"][name]["if"]
 
 
 def test_the_upload_passes_no_password():
@@ -142,9 +214,10 @@ def test_no_secret_reaches_the_upload_job():
     assert "secrets." not in yaml.safe_dump(RELEASE["jobs"]["pypi"])
 
 
-def test_the_upload_declares_no_environment():
-    """The registered publisher names no environment; one here would stop it matching."""
-    assert "environment" not in RELEASE["jobs"]["pypi"]
+def test_the_upload_runs_in_the_release_environment():
+    """The registered publisher names the `release` environment, whose deployment rules
+    keep a branch's copy of this file from minting the token."""
+    assert RELEASE["jobs"]["pypi"]["environment"] == "release"
 
 
 def test_a_rerun_does_not_fail_on_a_version_already_there():
@@ -153,8 +226,8 @@ def test_a_rerun_does_not_fail_on_a_version_already_there():
 
 def test_the_upload_waits_for_wheels_that_built():
     job = RELEASE["jobs"]["pypi"]
-    assert job["needs"] == "wheels" or "wheels" in job["needs"]
-    assert "needs.wheels.result == 'success'" in job["if"], "always() uploads nothing"
+    assert "build" in job["needs"]
+    assert "needs.build.outputs.wheels == 'success'" in job["if"], "always() uploads nothing"
     assert "always()" not in job["if"]
 
 
@@ -187,7 +260,7 @@ def test_every_job_caches_the_packages_it_installs(step):
 
 def bundle_runs() -> list[str]:
     """Each shell block of the bundle job, with its continuation lines joined."""
-    return [str(s["run"]).replace("\\\n", " ") for s in RELEASE["jobs"]["bundle"]["steps"]
+    return [str(s["run"]).replace("\\\n", " ") for s in BUILD["jobs"]["bundle"]["steps"]
             if "run" in s]
 
 
@@ -213,7 +286,8 @@ def test_the_window_reopens_only_on_the_platform_that_has_the_event():
 
 
 def release_checkouts() -> list[dict[str, Any]]:
-    return [step for job in RELEASE["jobs"].values() for step in job["steps"]
+    return [step for workflow in (RELEASE, BUILD) for job in workflow["jobs"].values()
+            for step in job.get("steps", [])
             if str(step.get("uses", "")).startswith("actions/checkout@")]
 
 
@@ -253,12 +327,10 @@ def test_release_please_builds_the_pr_branch_without_publishing():
     """The release pull request is green only once every bundle builds and passes the
     smoke check, which release.yml alone runs."""
     job = PLEASE["jobs"]["release-pr-bundles"]
-    assert job["uses"] == "./.github/workflows/release.yml"
+    assert job["uses"] == f"./.github/workflows/{BUILD_FILE}"
     assert job["if"] == "needs.propose.outputs.pr_branch != ''"
     assert job["with"]["ref"] == "${{ needs.propose.outputs.pr_branch }}"
     assert "tag" not in job["with"], "a tag here would try to publish the PR branch"
-    assert job["permissions"]["contents"] == "write"
-    assert job["permissions"]["id-token"] == "write"
 
 
 def test_the_dry_run_watches_the_development_branches():
@@ -281,10 +353,8 @@ def test_the_dry_run_calls_release_without_publishing():
     jobs = list(DRY_RUN["jobs"].values())
     assert len(jobs) == 1
     job = jobs[0]
-    assert job["uses"] == "./.github/workflows/release.yml"
+    assert job["uses"] == f"./.github/workflows/{BUILD_FILE}"
     assert "with" not in job or "tag" not in job["with"]
-    assert job["permissions"]["contents"] == "write"
-    assert job["permissions"]["id-token"] == "write"
 
 
 def test_the_smoke_screenshots_are_not_published():
