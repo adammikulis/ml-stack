@@ -23,6 +23,8 @@ SPAWNS = re.compile(r"\b(?:subprocess|Popen|os\.system|os\.exec\w*|os\.spawn\w*|
                     r"pty|create_subprocess_\w+|ProcessPoolExecutor|runpytest_subprocess|playwright|"
                     r"concurrent\.futures\.process)\b")
 DYNAMIC = re.compile(r"\b(?:importlib\.util|runpy|pkgutil|entry_points|importorskip|__import__|import_module)\b")
+UNSEEN = re.compile(r"\b(?:DirEntry|scandir|fstat|utime|chown|setxattr|mmap|sqlite3|ladybug)\b")
+SNAPSHOT_SKIP = frozenset({".git", ".venv", "venv", "node_modules"})
 RUNNER_PLUGINS = frozenset({"testslots_pytest", "testreuse_plugin"})
 VALUE_OPTIONS = frozenset({"-m", "-k", "-c", "-o", "-W", "-p", "-n", "--rootdir", "--confcutdir", "--ignore",
                            "--ignore-glob", "--deselect", "--override-ini", "--maxfail", "--tb", "--basetemp",
@@ -234,9 +236,14 @@ def runtime_pin(root: Path) -> str:
     return f"{dist.version} {dist.read_text('direct_url.json') or ''}".replace(str(root), "<root>")
 
 
-def argument_digest(arguments: list[str]) -> str:
+def selector(word: str, root: Path) -> bool:
+    """Whether a bare word names tests (a node, a ``.py`` file or an existing path) rather than being an option value."""
+    return "::" in word or word.endswith(".py") or (root / word).exists()
+
+
+def argument_digest(arguments: list[str], root: Path) -> str:
     """The pytest arguments that can change a result: no selectors, worker count, output paths or the
-    runner's own plugins; the values of options such as ``-c``, ``--rootdir`` and ``--ignore`` stay."""
+    runner's own plugins; the values of options (``-c``, ``--rootdir``, ``--ignore``, ``--log-cli-level``) stay."""
     words = list(arguments)
     if "pytest" in words:
         words = words[words.index("pytest") + 1:]
@@ -252,7 +259,7 @@ def argument_digest(arguments: list[str]) -> str:
         elif word == "-q" or word.startswith(("--junitxml=", "--numprocesses=")) or (
                 word.startswith("-n") and word[2:].isdigit()):
             continue
-        elif word.startswith("-"):
+        elif word.startswith("-") or not selector(word, root):
             kept.append(word)
     return sha(json.dumps(kept))
 
@@ -289,7 +296,7 @@ def lookup(root: Path, rel: str, arguments: list[str]) -> Lookup:
         "interpreter": sha(f"{sys.version} {platform.platform()} {platform.machine()} "
                            f"{platform.python_implementation()}"),
         "plugins": sha("\n".join(plugin_pins())),
-        "arguments": argument_digest(arguments),
+        "arguments": argument_digest(arguments, root),
         "pytest": sha(executed_identity(arguments)),
         "environment": sha("\n".join(f"{n}={env_digest(root, n)}" for n in sorted(names))),
         "runtime": sha(runtime_pin(root)),
@@ -330,13 +337,33 @@ def build_manifest(root: Path, rel: str, seen: dict, closures: Closures, argumen
             envs |= set(ENV_NAME.findall(text_of(root / path)))
     first_party = {k.split(".")[0] for k in closures.known}
     spawning = any(SPAWNS.search(text_of(root / p)) for p in members if p.endswith(".py"))
+    unseen = next((m.group(0) for p in members if p.endswith(".py")
+                   for m in [UNSEEN.search(text_of(root / p))] if m), "")
     return {"files": {p: file_sha(root / p) for p in files},
             "dirs": {d: dir_sha(root / d) for d in sorted({*seen.get("dirs", ()), *(p for p in probed if (root / p).is_dir())})},
             "absent": sorted(p for p in probed if not (root / p).exists()),
             "links": dict(seen.get("links", {})),
+            "unobserved": unseen,
             "dists": pins_for({n for n in externals if n not in STDLIB and n not in first_party}),
             "env": {n: env_digest(root, n) for n in sorted(envs - ENV_SKIP)},
             "tree": closures.tree() if spawning or dynamic else ""}
+
+
+def snapshot(root: Path) -> dict[str, tuple[int, int]]:
+    """Modification time and size of every file under ``root`` except caches and environments, ignored files included."""
+    found: dict[str, tuple[int, int]] = {}
+    for folder, names, files in os.walk(root):
+        names[:] = [n for n in names if n not in IGNORED_NAMES and n not in SNAPSHOT_SKIP]
+        for name in files:
+            if name.endswith(".pyc") or name.startswith(".testmondata") or name == ".DS_Store":
+                continue
+            path = Path(folder) / name
+            try:
+                stat = path.lstat()
+            except OSError:
+                continue
+            found[path.relative_to(root).as_posix()] = (stat.st_mtime_ns, stat.st_size)
+    return found
 
 
 def manifest_holds(root: Path, manifest: dict, closures: Closures) -> str:

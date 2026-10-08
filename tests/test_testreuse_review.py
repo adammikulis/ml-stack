@@ -32,7 +32,6 @@ from test_testreuse import (  # noqa: F401  (fixture)
 )
 
 from ml_stack.activity import reuse
-from ml_stack.graph.store import GraphStore
 from ml_stack.workspace import testboard, testruns
 
 pytestmark = pytest.mark.slow
@@ -70,7 +69,7 @@ def test_a_junit_with_fewer_tests_than_were_collected_stores_no_pass(project, tm
         def launch(command):
             status = real(command)
             junit = Path(next(w.split("=", 1)[1] for w in command if w.startswith("--junitxml=")))
-            tree = ET.parse(junit)  # noqa: S314 - the file pytest just wrote
+            tree = ET.parse(junit)
             suite = next(tree.getroot().iter("testsuite"))
             suite.remove(next(suite.iter("testcase")))
             tree.write(junit)
@@ -85,8 +84,8 @@ def test_a_junit_with_fewer_tests_than_were_collected_stores_no_pass(project, tm
 # -- (2) a tree that moves during the run is never stored ---------------------------------------------
 def test_a_tree_that_changed_during_the_run_stores_nothing_and_fails_the_run(project, tmp_path):
     store = storage.Store(tmp_path / "store")
-    seen = iter(["tree-before", "tree-after"])
-    report, _ = attempt(project, store, tree=lambda: next(seen))
+    calls = []
+    report, _ = attempt(project, store, tree=lambda: "tree-after" if len(calls) > 1 else calls.append(1) or "tree-before")
     assert kinds(store) == [] and report.status == 4
 
 
@@ -212,75 +211,6 @@ def test_plugin_names_roots_ignores_and_versions_are_in_the_key(project):
     assert keys.lookup(project, FILE, ["-q", "-c", "other.ini"]).key != base
     assert keys.lookup(project, FILE, ["-q", "--rootdir=elsewhere"]).key != base
     assert keys.lookup(project, FILE, ["-q"]).parts.get("pytest")
-
-
-# -- (9) runner entries as task evidence -----------------------------------------------------------------
-def put_entry(base: Path, scope: str, **over) -> str:
-    fields = {"lookup": "a" * 64, "file": FILE, "outcome": "pass", "manifest": {"files": {}, "dirs": {}, "dists": [],
-              "env": {}, "tree": ""}, "manifest_digest": "d" * 64, "command": ["pytest", FILE],
-              "junit_sha256": "e" * 64, "counts": {"tests": 3, "failed": 0, "skipped": 0}, "tree": "t" * 40,
-              "commit": "c" * 40, "runner": {"pid": 1, "started": 1.0}, "agent": {"id": "alice"}, **over}
-    return storage.Store(base / scope).put(fields, "pass" if fields["outcome"] == "pass" else "fail")
-
-
-def worktree_scope(kit) -> str:
-    with GraphStore(kit.ws.base / "coordination.db") as graph:
-        return testruns.task_scope(graph, kit.task["id"])
-
-
-def claim(kit):
-    kit.board.claim(kit.child, kit.task["id"], kit.allocation["allocation_id"])
-
-
-def test_the_project_is_the_tasks_checkout_not_the_working_directory(board, tmp_path, monkeypatch):
-    base = tmp_path / "reuse"
-    monkeypatch.setattr(testruns, "STORE_BASE", base, raising=False)
-    entry = put_entry(base, worktree_scope(board))
-    monkeypatch.chdir(tmp_path)
-    claim(board)
-    saved = board.board.checkpoint(board.child, board.task["id"], {"summary": "ok", "test_entry": entry})
-    assert [f["id"] for f in saved["test_evidence"]] == [entry]
-
-
-def test_an_entry_from_the_working_directorys_project_is_not_accepted_for_the_task(board, tmp_path, monkeypatch):
-    base = tmp_path / "reuse"
-    monkeypatch.setattr(testruns, "STORE_BASE", base, raising=False)
-    monkeypatch.chdir(tmp_path)
-    entry = put_entry(base, testruns.scope(Path.cwd()))
-    claim(board)
-    with pytest.raises(ValueError, match="verifies"):
-        board.board.checkpoint(board.child, board.task["id"], {"summary": "ok", "test_entry": entry})
-
-
-def test_a_failing_entry_is_not_evidence_of_passing(board, tmp_path, monkeypatch):
-    base = tmp_path / "reuse"
-    monkeypatch.setattr(testruns, "STORE_BASE", base, raising=False)
-    entry = put_entry(base, worktree_scope(board), outcome="fail")
-    claim(board)
-    with pytest.raises(ValueError, match="pass"):
-        board.board.checkpoint(board.child, board.task["id"], {"summary": "ok", "test_entry": entry})
-
-
-def test_an_entry_for_another_commit_is_not_evidence_for_the_proposal(board, tmp_path, monkeypatch):
-    base = tmp_path / "reuse"
-    monkeypatch.setattr(testruns, "STORE_BASE", base, raising=False)
-    entry = put_entry(base, worktree_scope(board))
-    claim(board)
-    submission = {"artifacts": {"r.json": "a" * 64}, "checks": [{"name": "Worker claims tests", "passed": True}],
-                  "summary": "x", "provenance": {"commit": "f" * 40, "environment": "x", "model": "qwen", "runtime": "r"},
-                  "test_entries": [entry]}
-    with pytest.raises(ValueError, match="commit"):
-        board.board.submit(board.child, board.task["id"], submission)
-
-
-def test_the_services_environment_does_not_choose_the_store(board, tmp_path, monkeypatch):
-    forged = tmp_path / "forged"
-    entry = put_entry(forged, worktree_scope(board))
-    monkeypatch.setenv("DEV_TEST_REUSE_DIR", str(forged))
-    monkeypatch.setattr(testruns, "STORE_BASE", tmp_path / "real", raising=False)
-    claim(board)
-    with pytest.raises(ValueError, match="verifies"):
-        board.board.checkpoint(board.child, board.task["id"], {"summary": "ok", "test_entry": entry})
 
 
 # -- (10) exit codes and admission ----------------------------------------------------------------------

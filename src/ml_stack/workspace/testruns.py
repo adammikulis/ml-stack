@@ -8,9 +8,10 @@ from typing import Any
 
 from ml_stack import home
 from ml_stack.activity import reuse
+from ml_stack.net import git
 from ml_stack.workspace import project
 
-__all__ = ["STORE_BASE", "evidence", "scope", "task_scope", "verified"]
+__all__ = ["STORE_BASE", "evidence", "scope", "task_checkout", "task_scope", "verified"]
 
 STORE_BASE = home.user_home() / ".cache" / "test-reuse"
 
@@ -24,28 +25,45 @@ def scope(root: Path) -> str:
     return "local-" + hashlib.sha256(str(root.resolve()).encode()).hexdigest()[:12]
 
 
-def task_scope(graph: Any, ident: str) -> str:
-    """The project scope of the checkout the task board assigned to ``ident``."""
+def task_checkout(graph: Any, ident: str) -> Path:
+    """The checkout the task board assigned to ``ident``."""
     attrs = next((n["attrs"] for n in graph.nodes("task-worktree") if n["attrs"].get("task") == ident), None)
     if attrs is None:
         raise ValueError("the task has no assigned checkout, so its project is unknown")
-    return scope(Path(attrs.get("project") or attrs["source_project"]))
+    return Path(attrs.get("project") or attrs["source_project"])
 
 
-def verified(entry_id: str, where: str, base: Path | None = None, commit: str = "") -> dict[str, Any]:
+def task_scope(graph: Any, ident: str) -> str:
+    """The project scope of the checkout the task board assigned to ``ident``."""
+    return scope(task_checkout(graph, ident))
+
+
+def verified(entry_id: str, where: str, base: Path | None = None, commit: str = "",
+             repo: Path | None = None) -> dict[str, Any]:
     """The facts of runner entry ``entry_id`` in project scope ``where``; ValueError unless it verifies,
-    passed, and ran on ``commit`` when one is given."""
+    passed, ran on ``commit`` in a clean checkout, and holds the tree ``commit`` has in ``repo``."""
     found = reuse.find(entry_id, where, base or STORE_BASE)
+    label = f"runner entry {entry_id[:24]!r}"
     if found is None:
-        raise ValueError(f"no runner entry {entry_id[:24]!r} verifies in this project's store")
+        raise ValueError(f"no {label} verifies in this project's store")
     if found["outcome"] != "pass":
-        raise ValueError(f"runner entry {entry_id[:24]!r} did not pass")
-    if commit and found["commit"] != commit:
-        raise ValueError(f"runner entry {entry_id[:24]!r} ran on commit {found['commit'][:12] or 'unknown'}, "
-                         f"not {commit[:12]}")
+        raise ValueError(f"{label} did not pass")
+    if not commit:
+        raise ValueError(f"{label} is evidence for a named commit; give the commit it ran on")
+    if found["commit"] != commit:
+        raise ValueError(f"{label} ran on commit {found['commit'][:12] or 'unknown'}, not {commit[:12]}")
+    if not found["clean"]:
+        raise ValueError(f"{label} ran with uncommitted changes, so it is not evidence for a commit")
+    try:
+        tree = git.run(["rev-parse", f"{commit}^{{tree}}"], cwd=repo).stdout.strip() if repo else ""
+    except git.GitFailed as error:
+        raise ValueError(f"{label}: the commit's tree cannot be read ({error})") from error
+    if tree != found["tree"]:
+        raise ValueError(f"{label} ran on tree {found['tree'][:12]}, not the tree of commit {commit[:12]}")
     return {"id": entry_id, "file": found["file"], "key": found["lookup"], "tree": found["tree"],
             "commit": found["commit"], "outcome": found["outcome"], "junit_sha256": found["junit_sha256"],
-            "counts": found["counts"], "agent": found["agent"].get("id", ""), "created": found["created"]}
+            "counts": found["counts"], "agent": found["agent"].get("id", ""), "created": found["created"],
+            "covers": f"{found['file']} only"}
 
 
 def evidence(entry_ids: object, graph: Any, ident: str, commit: str = "") -> list[dict[str, Any]]:
@@ -54,5 +72,5 @@ def evidence(entry_ids: object, graph: Any, ident: str, commit: str = "") -> lis
         raise ValueError("test entries are a list of at most 16 runner entry ids")
     if not entry_ids:
         return []
-    where = task_scope(graph, ident)
-    return [verified(entry_id, where, None, commit) for entry_id in entry_ids]
+    checkout = task_checkout(graph, ident)
+    return [verified(entry_id, scope(checkout), None, commit, checkout) for entry_id in entry_ids]

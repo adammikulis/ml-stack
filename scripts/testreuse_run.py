@@ -131,12 +131,10 @@ def file_of(classname: str, root: Path) -> str:
 
 
 def results(junit: Path, root: Path) -> dict[str, dict[str, int]]:
-    """Per test file: tests, failures and skips counted from a junit file."""
+    """Per test file: tests, failures and skips counted from a junit file; ``""`` holds cases that name no file."""
     rows: dict[str, dict[str, int]] = {}
     for case in ET.parse(junit).getroot().iter("testcase"):  # noqa: S314 - the file pytest just wrote
         path = file_of(case.get("classname", ""), root)
-        if not path:
-            continue
         row = rows.setdefault(path, {"tests": 0, "failed": 0, "skipped": 0})
         row["tests"] += 1
         row["failed"] += any(child.tag in ("failure", "error") for child in case)
@@ -185,6 +183,13 @@ def canary_rate() -> float:
     return rate if 0.0 <= rate <= 1.0 else CANARY_RATE
 
 
+def is_clean(root: Path) -> bool:
+    """Whether the checkout has no uncommitted or untracked changes; false when git cannot say."""
+    done = subprocess.run(["git", "-C", str(root), "status", "--porcelain", "--untracked-files=all"],
+                          capture_output=True, text=True, check=False)
+    return done.returncode == 0 and not done.stdout.strip()
+
+
 def head(root: Path) -> str:
     """The commit the checkout is on, or empty."""
     done = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"], capture_output=True, text=True, check=False)
@@ -214,6 +219,10 @@ class Session:
         self.junit_sha = ""
         self.outcomes: dict[str, Outcome] = {}
         self.looked: dict[str, keys.Lookup] = {}
+        self.checked: dict[str, str] = {}
+        self.claims: dict[str, str] = {}
+        self.checked_tree = ""
+        self.clean = False
 
     def lookup(self, file: str) -> keys.Lookup:
         """The lookup key of ``file`` under this run's command."""
@@ -232,6 +241,7 @@ class Session:
         """
         self.tree_of = tree if callable(tree) else (lambda: tree)
         self.refresh = not reuse
+        self.checked_tree = self.tree_of()
         plan = Plan(run=list(self.files or []))
         if reuse and self.files:
             plan.run = []
@@ -241,7 +251,7 @@ class Session:
             self.execute(plan, launch)
         finally:
             for file in plan.claimed:
-                self.store.release(self.lookup(file).key)
+                self.store.release(self.claims.get(file) or self.lookup(file).key)
         again = self.wait_for(plan.deferred)
         if again:
             self.execute(Plan(run=again, claimed=again), launch)
@@ -253,6 +263,7 @@ class Session:
     def consider(self, file: str, plan: Plan) -> None:
         """Decide whether ``file`` is reused, executed, executed as a canary or waited for."""
         look, outcome = self.lookup(file), self.outcome(file)
+        self.checked[file] = look.key
         if look.barred:
             outcome.detail = f"(not reusable: {look.barred})"
             plan.run.append(file)
@@ -269,6 +280,7 @@ class Session:
             outcome.detail = f"({why})"
         owner = self.store.claim(look.key, {"agent": self.events.agent, "files": [file]})
         if owner is None:
+            self.claims[file] = look.key
             seq = self.events.claimed(file, look.key)
             if seq:
                 self.store.note_thread(look.key, seq)
@@ -299,19 +311,30 @@ class Session:
         os.environ["DEV_TEST_REUSE_ROOT"] = str(self.root)
         command = [*[w for w in self.command if w not in (self.files or [])], *run, f"--junitxml={junit}"]
         try:
+            self.looked.clear()
+            before = {f: self.lookup(f).key for f in run}
             self.tree = self.tree_of()
+            self.clean = is_clean(self.root)
+            stamps = keys.snapshot(self.root)
             status = launch(command)
-            moved = self.tree_of() != self.tree
+            moved = keys.snapshot(self.root) != stamps or (bool(self.tree) and self.tree_of() != self.tree)
+            self.looked.clear()
+            stale = {f for f in run if self.checked.get(f, before[f]) != before[f] or self.lookup(f).key != before[f]}
+            stale |= set(run) if self.checked_tree and self.checked_tree != self.tree else set()
             self.report.status = max(self.report.status, 4 if moved else 0 if status == 5 else status)
             counts = results(junit, self.root) if junit.is_file() else {}
+            unattributed = counts.pop("", None)
             seen, trouble = recorded(scratch / "record") if (scratch / "record").is_dir() else ({}, "")
             self.junit_sha = keys.sha(junit.read_bytes()) if junit.is_file() else ""
             problem = "the tree changed during the run" if moved else (
-                f"pytest exited {status}" if status not in (0, 1, 5) else trouble)
+                f"pytest exited {status}" if status not in (0, 1, 5) else (
+                    "an error belongs to no test file" if status == 1 and unattributed and unattributed["failed"]
+                    else "the tree hash is unknown" if not self.tree else trouble))
             for file in run or sorted(counts):
                 keep = self.refresh or not run or file in plan.claimed or file in plan.canary
+                why = problem or ("its inputs changed between the hit check and the run" if file in stale else "")
                 self.settle(file, Ran(counts.get(file), seen.get(file), command, keep, plan.canary.get(file),
-                                      problem, status))
+                                      why, status))
         finally:
             os.environ.pop("DEV_TEST_REUSE_RECORD", None)
             os.environ.pop("DEV_TEST_REUSE_ROOT", None)
@@ -343,12 +366,15 @@ class Session:
         if not outcome.passed:
             self.events.finished(file, look.key, "fail", self.store_entry(file, ran, "fail"))
             return
-        why = self.refusal(ran.seen, count)
+        manifest = keys.build_manifest(self.root, file, ran.seen or {}, self.closures, tuple(self.command))
+        why = self.refusal(ran.seen, count) or (
+            f"its closure uses {manifest['unobserved']}, which the runner cannot observe" if manifest["unobserved"]
+            else "")
         if why:
             outcome.detail = f"{outcome.detail} (result not stored: {why})".strip()
             self.events.finished(file, look.key, "pass-unstored", "")
         else:
-            outcome.stored = self.store_entry(file, ran, "pass")
+            outcome.stored = self.store_entry(file, ran, "pass", manifest)
             self.events.finished(file, look.key, "pass", outcome.stored)
 
     @staticmethod
@@ -364,14 +390,14 @@ class Session:
             return f"{count['tests']} of {seen['collected']} collected tests ran"
         return f"marked {sorted(seen['marks'] & keys.NEVER_MARKS)[0]}" if seen["marks"] & keys.NEVER_MARKS else ""
 
-    def store_entry(self, file: str, ran: Ran, kind: str) -> str:
+    def store_entry(self, file: str, ran: Ran, kind: str, manifest: dict | None = None) -> str:
         """Write the entry for an executed file."""
-        seen, count, command = ran.seen or {}, ran.count, ran.command
-        manifest = keys.build_manifest(self.root, file, seen, self.closures, tuple(self.command))
+        count, command = ran.count, ran.command
+        manifest = manifest or keys.build_manifest(self.root, file, ran.seen or {}, self.closures, tuple(self.command))
         return self.store.put({
             "lookup": self.lookup(file).key, "file": file, "outcome": kind, "manifest": manifest,
             "manifest_digest": keys.manifest_digest(manifest), "command": command,
-            "junit_sha256": self.junit_sha, "counts": count, "tree": self.tree, "commit": self.commit,
+            "junit_sha256": self.junit_sha, "counts": count, "tree": self.tree, "commit": self.commit, "clean": self.clean,
             "runner": {"pid": os.getpid(), "started": storage.process_start(os.getpid())},
             "agent": self.events.agent}, kind)
 
@@ -382,12 +408,15 @@ class Session:
             key, outcome = self.lookup(file).key, self.outcome(file)
             while self.store.claimed(key) is not None and time.monotonic() < until:
                 time.sleep(POLL_S)
-            hit, _ = self.store.hit(key, self.root, self.closures)
+            self.looked.pop(file, None)
+            fresh = self.lookup(file).key
+            hit, _ = self.store.hit(fresh, self.root, self.closures) if fresh == key else (None, "")
             if hit:
                 self.reuse(outcome, hit, f"(tree {hit.entry['tree'][:10]}, run by "
                                          f"{hit.entry['agent'].get('id') or '?'} while this request waited)")
             else:
                 self.events.wait_failed(file, owner)
                 outcome.how, outcome.detail = "ran", "(the run it waited on did not pass)"
+                self.checked[file], self.checked_tree = fresh, self.tree_of()
                 again.append(file)
         return again

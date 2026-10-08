@@ -106,17 +106,21 @@ def git(path: Path, *args: str) -> str:
     return subprocess.run(["git", "-C", str(path), *args], capture_output=True, text=True, check=True).stdout.strip()
 
 
-def put(kit, base: Path, **over) -> str:
+def json_fields(kit) -> dict:
     where = checkout(kit)
-    with GraphStore(kit.ws.base / "coordination.db") as graph:
-        scope = testruns.task_scope(graph, kit.task["id"])
-    fields = {"lookup": "a" * 64, "file": "tests/test_a.py", "outcome": "pass",
+    return {"lookup": "a" * 64, "file": "tests/test_a.py", "outcome": "pass",
               "manifest": {"files": {}, "dirs": {}, "dists": [], "env": {}, "tree": ""},
               "manifest_digest": "d" * 64, "command": ["pytest"], "junit_sha256": "e" * 64,
               "counts": {"tests": 1, "failed": 0, "skipped": 0}, "tree": git(where, "rev-parse", "HEAD^{tree}"),
               "commit": git(where, "rev-parse", "HEAD"), "clean": True, "runner": {"pid": 1, "started": 1.0},
-              "agent": {"id": "alice"}, **over}
-    return storage.Store(base / scope).put(fields)
+              "agent": {"id": "alice"}}
+
+
+def put(kit, base: Path, **over) -> str:
+    with GraphStore(kit.ws.base / "coordination.db") as graph:
+        scope = testruns.task_scope(graph, kit.task["id"])
+    fields = {**json_fields(kit), **over}
+    return storage.Store(base / scope).put(fields, "pass" if fields["outcome"] == "pass" else "fail")
 
 
 def start(kit, monkeypatch, tmp_path):
@@ -160,12 +164,12 @@ def test_an_entry_whose_tree_is_not_the_commits_tree_is_refused(board, tmp_path,
 class Boom:
     base = Path("/nonexistent")
 
-    class bus:  # noqa: N801
+    class bus:
         @staticmethod
         def get(seq):
             raise ZeroDivisionError("bus")
 
-    class board:  # noqa: N801
+    class board:
         @staticmethod
         def list(token):
             return [{"name": "#p", "project": True, "member": True}]
@@ -198,7 +202,7 @@ def test_a_session_level_error_in_the_junit_stores_nothing(project, tmp_path):
         def launch(command):
             real(command)
             junit = Path(next(w.split("=", 1)[1] for w in command if w.startswith("--junitxml=")))
-            tree = ET.parse(junit)  # noqa: S314 - the file pytest just wrote
+            tree = ET.parse(junit)
             suite = next(tree.getroot().iter("testsuite"))
             ET.SubElement(ET.SubElement(suite, "testcase", classname="", name="session"), "error", message="x")
             tree.write(junit)
@@ -212,7 +216,8 @@ def test_a_session_level_error_in_the_junit_stores_nothing(project, tmp_path):
 # -- arguments and plugins ------------------------------------------------------------------------------------
 def test_option_values_the_digest_does_not_know_are_still_in_it(project):
     base = keys.lookup(project, FILE, ["-q"]).key
-    assert keys.lookup(project, FILE, ["-q", "--log-cli-level", "INFO"]).key != base
+    assert keys.lookup(project, FILE, ["-q", "--log-cli-level", "INFO"]).key != keys.lookup(
+        project, FILE, ["-q", "--log-cli-level", "DEBUG"]).key
     assert keys.lookup(project, FILE, ["-q", FILE, "tests"]).key == base
 
 
@@ -231,3 +236,61 @@ def test_a_dash_p_module_is_part_of_the_hit(project, tmp_path):
     assert hows(attempt(project, store, extra=("-p", "ml_stack.other"))[0]) == ["reused"]
     (project / "src/ml_stack/other.py").write_text("OTHER = 2\n")
     assert hows(attempt(project, store, extra=("-p", "ml_stack.other"))[0]) == ["ran"]
+
+
+def submission(commit: str) -> dict:
+    return {"artifacts": {"r.json": "a" * 64}, "checks": [{"name": "Worker claims tests", "passed": True}],
+            "summary": "done", "provenance": {"commit": commit, "environment": "x", "model": "qwen", "runtime": "r"}}
+
+
+def test_a_proposal_carries_the_verified_entries_it_cites(board, tmp_path, monkeypatch):
+    base = start(board, monkeypatch, tmp_path)
+    entry = put(board, base)
+    head = git(checkout(board), "rev-parse", "HEAD")
+    with pytest.raises(ValueError, match="at most 16"):
+        board.board.submit(board.child, board.task["id"], {**submission(head), "test_entries": "nope"})
+    proposal = board.board.submit(board.child, board.task["id"], {**submission(head), "test_entries": [entry]})
+    assert [f["id"] for f in proposal["test_evidence"]] == [entry]
+
+
+def test_a_proposal_for_another_commit_cannot_cite_the_entry(board, tmp_path, monkeypatch):
+    base = start(board, monkeypatch, tmp_path)
+    with pytest.raises(ValueError, match="commit"):
+        board.board.submit(board.child, board.task["id"], {**submission("f" * 40), "test_entries": [put(board, base)]})
+
+
+def test_the_project_is_the_tasks_checkout_not_the_working_directory(board, tmp_path, monkeypatch):
+    base = start(board, monkeypatch, tmp_path)
+    entry = put(board, base)
+    head = git(checkout(board), "rev-parse", "HEAD")
+    monkeypatch.chdir(tmp_path)
+    saved = board.board.checkpoint(board.child, board.task["id"], {"summary": "ok", "test_entry": entry, "commit": head})
+    assert [f["id"] for f in saved["test_evidence"]] == [entry]
+
+
+def test_an_entry_from_the_working_directorys_project_is_not_accepted(board, tmp_path, monkeypatch):
+    base = start(board, monkeypatch, tmp_path)
+    entry = storage.Store(base / testruns.scope(tmp_path)).put({
+        **json_fields(board), "lookup": "b" * 64})
+    monkeypatch.chdir(tmp_path)
+    head = git(checkout(board), "rev-parse", "HEAD")
+    with pytest.raises(ValueError, match="verifies"):
+        board.board.checkpoint(board.child, board.task["id"], {"summary": "ok", "test_entry": entry, "commit": head})
+
+
+def test_a_failing_entry_is_not_evidence_of_passing(board, tmp_path, monkeypatch):
+    base = start(board, monkeypatch, tmp_path)
+    entry = put(board, base, outcome="fail")
+    head = git(checkout(board), "rev-parse", "HEAD")
+    with pytest.raises(ValueError, match="verifies|pass"):
+        board.board.checkpoint(board.child, board.task["id"], {"summary": "ok", "test_entry": entry, "commit": head})
+
+
+def test_the_services_environment_does_not_choose_the_store(board, tmp_path, monkeypatch):
+    forged = tmp_path / "forged"
+    start(board, monkeypatch, tmp_path)
+    entry = put(board, forged)
+    monkeypatch.setenv("DEV_TEST_REUSE_DIR", str(forged))
+    head = git(checkout(board), "rev-parse", "HEAD")
+    with pytest.raises(ValueError, match="verifies"):
+        board.board.checkpoint(board.child, board.task["id"], {"summary": "ok", "test_entry": entry, "commit": head})

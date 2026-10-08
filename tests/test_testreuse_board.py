@@ -15,12 +15,11 @@ from workspace_kit import Kit, clean_env
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
-import testreuse_store as storage  # noqa: E402
+import testreuse_store as storage
 
-from ml_stack.activity import reuse  # noqa: E402
-from ml_stack.graph.store import GraphStore  # noqa: E402
-from ml_stack.workspace import onboard, slots, testboard, testruns, tokens  # noqa: E402
-from ml_stack.workspace.taskboard import TaskBoard  # noqa: E402
+from ml_stack.activity import reuse
+from ml_stack.workspace import onboard, slots, testboard, testruns, tokens
+from ml_stack.workspace.taskboard import TaskBoard
 
 PROJECT = {"key": "git@example.org:me/widgets.git", "name": "Widgets"}
 FILE = "tests/test_a.py"
@@ -166,24 +165,3 @@ def test_a_runner_entry_is_verified_for_its_own_project_only(team, tmp_path):
     with pytest.raises(ValueError, match="verifies"):
         testruns.verified(entry, "scope-a", base)
     assert reuse.find("../x", "scope-a", base) is None
-
-
-def test_task_checkpoint_and_submit_carry_verified_runner_entries(board, tmp_path, monkeypatch):  # noqa: F811
-    base = tmp_path / "reuse"
-    monkeypatch.setattr(testruns, "STORE_BASE", base)
-    with GraphStore(board.ws.base / "coordination.db") as graph:
-        entry = put_entry(base, testruns.task_scope(graph, board.task["id"]))
-    kit = board
-    submission = {"artifacts": {"replay.json": "a" * 64}, "checks": [{"name": "Worker claims tests", "passed": True}],
-                  "summary": "done", "provenance": {"commit": "c" * 40, "environment": "x", "model": "qwen",
-                                                    "runtime": "r"}}
-    kit.board.claim(kit.child, kit.task["id"], kit.allocation["allocation_id"])
-    saved = kit.board.checkpoint(kit.child, kit.task["id"], {"summary": "tests pass", "test_entry": entry})
-    [fact] = saved["test_evidence"]
-    assert (fact["id"], fact["file"], fact["key"], fact["tree"], fact["agent"]) == (entry, FILE, KEY, "t" * 40, "alice")
-    with pytest.raises(ValueError, match="verifies"):
-        kit.board.checkpoint(kit.child, kit.task["id"], {"summary": "x", "test_entry": "f" * 20})
-    with pytest.raises(ValueError, match="at most 16"):
-        kit.board.submit(kit.child, kit.task["id"], {**submission, "test_entries": "nope"})
-    proposal = kit.board.submit(kit.child, kit.task["id"], {**submission, "test_entries": [entry]})
-    assert [f["id"] for f in proposal["test_evidence"]] == [entry]

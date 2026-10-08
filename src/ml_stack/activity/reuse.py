@@ -14,7 +14,7 @@ __all__ = ["FIELDS", "SCHEMA", "chain_ok", "entry", "entry_hash", "find", "reuse
 
 SCHEMA = 1
 FIELDS = frozenset({"schema", "lookup", "file", "outcome", "manifest", "manifest_digest", "command",
-                    "junit_sha256", "counts", "tree", "commit", "runner", "agent", "created", "prev", "entry_sha256"})
+                    "junit_sha256", "counts", "tree", "commit", "clean", "runner", "agent", "created", "prev", "entry_sha256"})
 _verified: dict[str, tuple[int, int]] = {}
 
 

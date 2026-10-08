@@ -1,6 +1,7 @@
 """Pytest plugin: records, per test file, what a run read, listed, probed, imported, wrote and warned about."""
 from __future__ import annotations
 
+import functools
 import json
 import os
 import sys
@@ -129,6 +130,7 @@ def _audit(event: str, args: tuple) -> None:
 
 
 def _probe(original):
+    @functools.wraps(original)
     def wrapper(path, *args, **kwargs):
         if CURRENT and not BUSY and isinstance(path, (str, bytes, os.PathLike)):
             BUSY.append(True)
@@ -142,7 +144,14 @@ def _probe(original):
 
 if ENABLED:
     sys.addaudithook(_audit)
-    os.stat, os.lstat, os.access = _probe(os.stat), _probe(os.lstat), _probe(os.access)
+    for _name in ("stat", "lstat", "access"):
+        _original = getattr(os, _name)
+        _wrapper = _probe(_original)
+        for _support in (os.supports_follow_symlinks, os.supports_effective_ids, os.supports_dir_fd,
+                         os.supports_fd):
+            if _original in _support:
+                _support.add(_wrapper)
+        setattr(os, _name, _wrapper)
 
 
 def _loaded() -> set[str]:

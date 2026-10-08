@@ -17,11 +17,11 @@ import pytest
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
-import testreuse_key as keys  # noqa: E402
-import testreuse_run as run  # noqa: E402
-import testreuse_store as storage  # noqa: E402
+import testreuse_key as keys
+import testreuse_run as run
+import testreuse_store as storage
 
-from ml_stack.activity import reuse  # noqa: E402
+from ml_stack.activity import reuse
 
 pytestmark = pytest.mark.slow
 

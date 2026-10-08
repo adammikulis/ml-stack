@@ -18,8 +18,8 @@ from ml_stack.workspace.screen import Refused
 __all__ = ["Acting", "BoardEvents", "acting", "follow_thread", "thread_for_key"]
 
 LABEL_ENV = "ML_STACK_WORKSPACE_LABEL"
-BOARD_ERRORS = (Denied, Refused, RateLimited, LookupError, ValueError, TypeError, AttributeError, RuntimeError,
-                OSError)
+BOARD_ERRORS = (Denied, Refused, RateLimited, ArithmeticError, AssertionError, AttributeError, EOFError,
+                ImportError, LookupError, NotImplementedError, OSError, RuntimeError, TypeError, ValueError)
 
 
 @dataclass
@@ -31,6 +31,15 @@ class Acting:
     identity: dict[str, str]
 
 
+def guarded(what: str, call: Callable[[], Any]) -> Any:
+    """``call()``, or None after a warning: every board action goes through here, so none can fail a run."""
+    try:
+        return call()
+    except BOARD_ERRORS as error:
+        warn(f"test: board notice ({what}) not sent: {error}")
+        return None
+
+
 def acting(agent: str = "", label: str = "") -> Acting | None:
     """The session for ``--agent``/``--label`` or the environment, or None when none is configured."""
     named = agent or os.environ.get(tokens.AGENT_ENV, "")
@@ -38,12 +47,14 @@ def acting(agent: str = "", label: str = "") -> Acting | None:
         return None
     args = argparse.Namespace(agent=named, label=label or os.environ.get(LABEL_ENV, ""), token_file="")
     try:
-        ws, token = cli._context(args)
-        who = ws.auth(token)
-    except (Denied, OSError, ValueError, SystemExit):
+        opened = guarded("session", lambda: cli._context(args))
+    except SystemExit:
         return None
-    return Acting(ws, token, {"id": who.id, "label": args.label, "parent": who.parent or "",
-                              "source": "workspace-session"})
+    who = guarded("session", lambda: opened[0].auth(opened[1])) if opened else None
+    if who is None:
+        return None
+    return Acting(opened[0], opened[1], {"id": who.id, "label": args.label, "parent": who.parent or "",
+                                          "source": "workspace-session"})
 
 
 def thread_for_key(folder: Path, prefix: str) -> int:
@@ -75,11 +86,7 @@ class BoardEvents:
 
     @staticmethod
     def _try(what: str, call: Callable[[], Any]) -> Any:
-        try:
-            return call()
-        except BOARD_ERRORS as error:
-            warn(f"test: board notice ({what}) not sent: {error}")
-            return None
+        return guarded(what, call)
 
     def _project_board(self) -> str:
         if not self.board:
@@ -131,6 +138,9 @@ class BoardEvents:
 
     def job_done(self, job: str, spec: dict, status: dict, thread: int = 0) -> None:
         """Reply in the job's thread and send one message to each task watcher not already on the thread."""
+        self._try("job done", lambda: self._job_done(job, spec, status, thread))
+
+    def _job_done(self, job: str, spec: dict, status: dict, thread: int) -> None:
         state = status.get("state")
         outcome = "pass" if status.get("exit") == 0 else state if state in ("cancelled", "failed") else "fail"
         summary = status.get("summary", {})
@@ -139,11 +149,10 @@ class BoardEvents:
                 f"result=scripts/test result {job}")
         listeners: list[str] = []
         if thread:
-            sent = self._try("job done", lambda: self._post(f"test job {job} {outcome}", body, thread))
+            sent = self._post(f"test job {job} {outcome}", body, thread)
             row = self.seat.ws.bus.get(sent) if sent else None
             listeners = self.seat.ws.board.listeners(row) if row else []
-        followers = (self._try("task watchers", self.watchers) if self.watchers else None) or []
-        for name in dict.fromkeys(followers):
+        for name in dict.fromkeys((self.watchers() if self.watchers else None) or []):
             if name not in listeners and name != self.seat.identity["id"]:
                 self._try("direct", lambda name=name: self.seat.ws.send(
                     self.seat.token, name, "status", body, subject=f"test job {job} {outcome}"))
