@@ -481,6 +481,17 @@ tests = [
 note = "an agent, subagent or forged token cannot choose host mode; only a person selects what the device hosts"
 
 [[group]]
+match = ["parser:workspace/mesh_sync.py", "human:workspace/mesh_fold.py:*"]
+status = "covered"
+tests = [
+  "tests/test_journal.py::test_a_forged_head_signature_marks_the_origin_damaged_and_stores_nothing",
+  "tests/test_journal.py::test_a_head_signed_by_another_key_than_the_pinned_one_is_refused",
+  "tests/test_journal.py::test_replaying_an_older_journal_changes_nothing_and_a_fork_is_refused",
+  "tests/test_mesh.py::test_a_peer_serving_a_head_under_another_key_is_refused_and_nothing_of_it_is_folded",
+]
+note = "journal rows from a paired device are stored only when chain and head signature verify"
+
+[[group]]
 match = ["human:*"]
 status = "covered"
 tests = [

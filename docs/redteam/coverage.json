@@ -1,7 +1,7 @@
 {
- "surfaces": 814,
+ "surfaces": 817,
  "by_status": {
-  "covered": 490,
+  "covered": 493,
   "partial": 197,
   "uncovered": 53,
   "n/a": 74,
@@ -51,7 +51,7 @@
    "unmapped": 0
   },
   "human": {
-   "covered": 112,
+   "covered": 114,
    "partial": 0,
    "uncovered": 0,
    "n/a": 0,
@@ -79,7 +79,7 @@
    "unmapped": 0
   },
   "parser": {
-   "covered": 76,
+   "covered": 77,
    "partial": 0,
    "uncovered": 49,
    "n/a": 0,
@@ -4451,6 +4451,36 @@
    "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
   },
   {
+   "id": "human:workspace/mesh_fold.py:_message",
+   "kind": "human",
+   "source": "workspace/mesh_fold.py:_message",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_journal.py::test_a_forged_head_signature_marks_the_origin_damaged_and_stores_nothing",
+    "tests/test_journal.py::test_a_head_signed_by_another_key_than_the_pinned_one_is_refused",
+    "tests/test_journal.py::test_replaying_an_older_journal_changes_nothing_and_a_fork_is_refused",
+    "tests/test_mesh.py::test_a_peer_serving_a_head_under_another_key_is_refused_and_nothing_of_it_is_folded"
+   ],
+   "note": "journal rows from a paired device are stored only when chain and head signature verify"
+  },
+  {
+   "id": "human:workspace/mesh_fold.py:_note",
+   "kind": "human",
+   "source": "workspace/mesh_fold.py:_note",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_journal.py::test_a_forged_head_signature_marks_the_origin_damaged_and_stores_nothing",
+    "tests/test_journal.py::test_a_head_signed_by_another_key_than_the_pinned_one_is_refused",
+    "tests/test_journal.py::test_replaying_an_older_journal_changes_nothing_and_a_fork_is_refused",
+    "tests/test_mesh.py::test_a_peer_serving_a_head_under_another_key_is_refused_and_nothing_of_it_is_folded"
+   ],
+   "note": "journal rows from a paired device are stored only when chain and head signature verify"
+  },
+  {
    "id": "human:workspace/notes.py:Notes.trust_of",
    "kind": "human",
    "source": "workspace/notes.py:Notes.trust_of",
@@ -7667,6 +7697,21 @@
     "tests/test_redteam_local_agent.py::test_start_and_stop_refuse_an_agent_process_and_leave_the_state_alone"
    ],
    "note": "start and stop need the person's session, a loopback origin and JSON; hostile names, projects, roles and efforts are refused; injections in task text and a model that obeys them gain nothing beyond the role"
+  },
+  {
+   "id": "parser:workspace/mesh_sync.py",
+   "kind": "parser",
+   "source": "workspace/mesh_sync.py",
+   "trust": "files, pages and archives from outside",
+   "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
+   "status": "covered",
+   "tests": [
+    "tests/test_journal.py::test_a_forged_head_signature_marks_the_origin_damaged_and_stores_nothing",
+    "tests/test_journal.py::test_a_head_signed_by_another_key_than_the_pinned_one_is_refused",
+    "tests/test_journal.py::test_replaying_an_older_journal_changes_nothing_and_a_fork_is_refused",
+    "tests/test_mesh.py::test_a_peer_serving_a_head_under_another_key_is_refused_and_nothing_of_it_is_folded"
+   ],
+   "note": "journal rows from a paired device are stored only when chain and head signature verify"
   },
   {
    "id": "parser:workspace/notes.py",
