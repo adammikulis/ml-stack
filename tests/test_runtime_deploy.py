@@ -211,6 +211,7 @@ def test_collection_keeps_the_newest_verified_and_never_a_tree_a_process_runs_in
     for index in range(6):
         prefix = root / f"{index:040x}" / f"{index:032x}"
         prefix.mkdir(parents=True)
+        runtime_store.mark_created(prefix, "runtime-agent", "ensure")
         runtime_store.mark_verified(runtime.Runtime(prefix, f"{index:040x}", "0.1.0", runtime.identity()))
         os.utime(prefix / runtime_store.MARK, None)
         data = json.loads((prefix / runtime_store.MARK).read_text())
@@ -351,7 +352,7 @@ def test_a_current_runtime_answers_without_taking_the_build_lock(world):
         assert runtime_deploy.ensure(plan_for(repo, launchers), builder=builder()).action == "current"
 
 
-def fake_tree(root, commit_id, verified_at, name, *, importable=True):
+def fake_tree(root, commit_id, verified_at, name, *, importable=True, created=True):
     prefix = root / commit_id / f"{len(name):032x}"
     (prefix / "bin").mkdir(parents=True)
     python = prefix / "bin" / "python"
@@ -362,6 +363,8 @@ def fake_tree(root, commit_id, verified_at, name, *, importable=True):
         (prefix / "lib" / "python3.13" / "site-packages" / "ml_stack" / "__init__.py").write_text("")
     (prefix / "verified.json").write_text(json.dumps({"commit": commit_id, "version": "0", "identity": "x",
                                                       "verified_at": verified_at}))
+    if created:
+        (prefix / "created.json").write_text(json.dumps({"tool": "ml-stack-runtime", "agent": "a"}))
     return prefix
 
 
@@ -546,15 +549,18 @@ def test_the_session_start_refresh_is_bounded_and_the_smoke_environment_disables
     assert env["ML_STACK_RUNTIME_ENSURE"] == "off"
 
 
-def test_a_claim_whose_pid_was_reused_by_another_process_is_released(tmp_path):
+def test_a_claim_is_released_only_when_its_pid_started_after_the_claim_was_taken(tmp_path, monkeypatch):
+    from ml_stack.workspace import claims as claims_module
     from ml_stack.workspace.claims import Claims
     store = Claims(tmp_path, 600)
     target = tmp_path / "t"
     target.mkdir()
-    store.claim(Identity("old", AGENT), "install", str(target), {"pid": os.getpid(), "ttl_s": 600, "pid_started": 1.0})
+    store.claim(Identity("holder", AGENT), "install", str(target), {"pid": os.getpid(), "ttl_s": 600})
+    since = store.who("install", str(target))["since"]
+    monkeypatch.setattr(claims_module, "started_at", lambda pid: since - 3600)
+    assert store.who("install", str(target))["owner"] == "holder"
+    monkeypatch.setattr(claims_module, "started_at", lambda pid: since + 3600)
     assert store.who("install", str(target)) is None
-    store.claim(Identity("live", AGENT), "install", str(target), {"pid": os.getpid(), "ttl_s": 600})
-    assert store.who("install", str(target))["owner"] == "live"
 
 
 def test_status_and_a_tracker_ensure_need_no_recorded_launcher_directory(world, capsys):
@@ -579,24 +585,176 @@ def test_tests_cannot_write_launchers_outside_the_state_root_or_the_temporary_di
     assert not real.exists()
 
 
-def test_the_install_claim_is_held_by_the_acting_agent_and_no_agent_means_refusal(world, monkeypatch):
+def test_the_install_claim_is_held_by_the_acting_agent_and_rollback_needs_one(world, monkeypatch):
     repo, launchers, _ = world
-    head = commit(repo, "a")
+    commit(repo, "a")
     seen = []
     real = runtime_deploy.owning
 
     def spy(paths, **kwargs):
-        seen.append(kwargs["who"].id)
+        seen.append(kwargs["who"].id if kwargs["who"] else None)
         return real(paths, **kwargs)
 
     monkeypatch.setattr(runtime_deploy, "owning", spy)
     runtime_deploy.ensure(plan_for(repo, launchers), builder=builder())
     assert seen and all(owner.startswith("runtime-agent") for owner in seen)
     commit(repo, "b")
+    runtime_deploy.ensure(plan_for(repo, launchers), builder=builder())
     monkeypatch.delenv("ML_STACK_WORKSPACE_AGENT")
-    with pytest.raises(runtime_deploy.DeployError, match="no authenticated agent"):
-        runtime_deploy.ensure(plan_for(repo, launchers), builder=builder())
-    assert runtime_store.selection()["commit"] == head
+    with pytest.raises(runtime_deploy.DeployError, match="authenticated agent"):
+        runtime_deploy.rollback(plan_for(repo, launchers))
+
+
+def test_without_an_agent_ensure_and_recovery_run_unclaimed_and_post_nothing(world, monkeypatch):
+    repo, launchers, _ = world
+    commit(repo, "a")
+    runtime_deploy.ensure(plan_for(repo, launchers), builder=builder())
+    second = commit(repo, "b")
+    monkeypatch.delenv("ML_STACK_WORKSPACE_AGENT")
+    seen = []
+    real = runtime_deploy.owning
+
+    def spy(paths, **kwargs):
+        seen.append(kwargs["who"])
+        return real(paths, **kwargs)
+
+    monkeypatch.setattr(runtime_deploy, "owning", spy)
+    assert runtime_deploy.ensure(plan_for(repo, launchers), builder=builder()).action == "switched"
+    import shutil
+    shutil.rmtree(runtime_store.selection()["prefix"])
+    assert runtime_deploy.ensure(plan_for(repo, launchers), builder=builder(hook_code=3)).action == "recovered"
+    assert seen and all(who is None for who in seen)
+    assert not runtime_board.announce(runtime_deploy.Outcome("switched", second), "")
+
+
+def test_the_acting_identity_is_the_workspace_agent_and_collides_with_its_harness_claim(world):
+    from ml_stack.workspace import limits
+    repo, launchers, _ = world
+    commit(repo, "a")
+    who = runtime_deploy.acting(plan_for(repo, launchers))
+    base = limits.root()
+    store = Claims(base, 600)
+    target = world[2] / "area"
+    target.mkdir()
+    store.claim(Identity(who.id, AGENT), "install", str(target), {"ttl_s": 600})
+    with runtime_deploy.owning([target], wait_s=0.1, who=who, store=store):
+        pass
+    other = Identity("somebody-else", AGENT)
+    with pytest.raises(runtime_deploy.DeployError), runtime_deploy.owning([target], wait_s=0.1, who=other, store=store):
+        pass
+
+
+def test_the_canonical_acting_identity_is_the_physical_owner_and_needs_the_claim_capability(world, monkeypatch):
+    from types import SimpleNamespace
+    from ml_stack.workspace import harness_remote, project_connection
+    repo, launchers, _ = world
+    commit(repo, "a")
+    info = {"id": "runtime-agent", "role": "agent", "can": ["claim", "send"], "project": {"key": "pk"}}
+    remote = SimpleNamespace(host="h", project_id="pk", call=lambda name, token: info)
+    monkeypatch.setattr(runtime_deploy.cli, "_project_connection", lambda cwd=None: {"host": "h"})
+    monkeypatch.setattr(runtime_deploy.cli, "_context",
+                        lambda args, connection: (project_connection.CanonicalWorkspace(remote, "t"), "t"))
+    got = runtime_deploy.acting(plan_for(repo, launchers))
+    assert got.id == harness_remote.physical_owner(remote, Identity("runtime-agent", AGENT)).id
+    info["can"] = ["send"]
+    assert runtime_deploy.acting(plan_for(repo, launchers)) is None
+    info["can"], info["project"] = ["claim"], {"key": "other"}
+    assert runtime_deploy.acting(plan_for(repo, launchers)) is None
+
+
+def test_a_symlinked_family_directory_is_never_listed_collected_or_deleted(world, tmp_path):
+    runtime_deploy._prepare_root()
+    outside = tmp_path / "outside"
+    prefix = fake_tree(outside, "a" * 40, 5.0, "tree-x")
+    (runtime.directory() / ("a" * 40)).symlink_to(outside / ("a" * 40))
+    assert runtime_store.trees() == [] and runtime_store.candidates() == []
+    runtime_store.collect(set(), keep=0)
+    assert prefix.exists() and (prefix / "verified.json").exists()
+
+
+def test_the_launcher_fallback_needs_this_tools_creation_record(tmp_path):
+    root = tmp_path / "root"
+    fake_tree(root, "a" * 40, 100.0, "tree-a", created=False)
+    launcher = render_launcher(tmp_path, root)
+    done = run_launcher(launcher)
+    assert done.returncode != 0 and "no usable" in done.stderr
+    fake_tree(root, "b" * 40, 50.0, "tree-b")
+    assert run_launcher(launcher).stdout.strip() == "tree-b"
+
+
+def test_status_lists_trees_it_does_not_manage_and_never_collects_them(world, capsys):
+    runtime_deploy._prepare_root()
+    foreign = foreign_trees(runtime.directory())
+    live = subprocess.Popen(["sleep", "30"], cwd=foreign[2])
+    try:
+        time.sleep(0.2)
+        repo, launchers, _ = world
+        commit(repo, "a")
+        assert runtime_cli.main(["status", "--checkout", str(repo), "--launchers", str(launchers), "--json"]) == 0
+        record = json.loads(capsys.readouterr().out)
+        listed = {row["path"]: row for row in record["unmanaged"]}
+        assert set(listed) == {str(p) for p in foreign} and listed[str(foreign[2])]["in_use"] and not listed[str(foreign[0])]["in_use"]
+        assert listed[str(foreign[0])]["bytes"] > 0
+        assert runtime_cli.main(["status", "--checkout", str(repo), "--launchers", str(launchers)]) == 0
+        assert "unmanaged" in capsys.readouterr().out
+        runtime_store.collect(set(), keep=0)
+    finally:
+        live.kill()
+        live.wait()
+    assert all(p.exists() for p in foreign)
+
+
+def test_a_failed_first_switch_restores_the_original_launcher_bytes_and_removes_new_ones(world, monkeypatch):
+    repo, launchers, _ = world
+    (launchers / "ml-stack-workspace").write_text("original")
+    (launchers / "ml-stack-workspace").chmod(0o700)
+    commit(repo, "a")
+    monkeypatch.setattr(runtime, "publish", lambda chosen: (_ for _ in ()).throw(OSError("cannot publish")))
+    assert runtime_deploy.ensure(plan_for(repo, launchers), builder=builder()).action == "failed"
+    assert (launchers / "ml-stack-workspace").read_text() == "original"
+    assert [p.name for p in launchers.iterdir()] == ["ml-stack-workspace"]
+
+
+def test_a_commit_that_failed_is_not_rebuilt_for_ten_minutes_unless_forced_by_an_agent(world, monkeypatch):
+    repo, launchers, _ = world
+    commit(repo, "a")
+    built = []
+    assert runtime_deploy.ensure(plan_for(repo, launchers), builder=builder(hook_code=3, log=built)).action == "failed"
+    again = runtime_deploy.ensure(plan_for(repo, launchers), builder=builder(log=built))
+    assert again.action == "backoff" and len(built) == 1 and again.ok
+    assert runtime_deploy.ensure(plan_for(repo, launchers), force_build=True, builder=builder(log=built)).action == "switched"
+    runtime_store.write_state({"last_failure": {"commit": "f" * 40, "at": time.time(), "detail": "x"}})
+    commit(repo, "b")
+    monkeypatch.delenv("ML_STACK_WORKSPACE_AGENT")
+    with pytest.raises(runtime_deploy.DeployError, match="authenticated agent"):
+        runtime_deploy.ensure(plan_for(repo, launchers), force_build=True, builder=builder())
+
+
+def test_an_unset_state_root_is_refused_while_a_test_runs(world, monkeypatch, tmp_path):
+    monkeypatch.delenv("ML_STACK_HOME")
+    with pytest.raises(OSError, match="ML_STACK_HOME"):
+        runtime.confine_tests(tmp_path / "bin")
+
+
+def test_a_malformed_git_file_does_not_stop_the_session_hook(tmp_path, monkeypatch):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("workspace_hook_d8", Path(__file__).resolve().parents[1] / "scripts/hooks/workspace_hook.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    (tmp_path / ".git").write_bytes(b"\xff\xfe not text")
+    assert module.primary_checkout(tmp_path) == tmp_path
+    (tmp_path / ".git").unlink()
+    (tmp_path / ".git").mkdir()
+    assert module.primary_checkout(tmp_path) == tmp_path
+
+
+def test_the_background_log_is_private_and_the_runtimes_root_is_owner_only(world):
+    repo, launchers, _ = world
+    commit(repo, "a")
+    runtime_cli._start_background(["status", "--checkout", str(repo)])
+    time.sleep(0.5)
+    assert (runtime.directory() / "ensure.log").stat().st_mode & 0o777 == 0o600
+    assert runtime.directory().stat().st_mode & 0o777 == 0o700
 
 
 def foreign_trees(root):
