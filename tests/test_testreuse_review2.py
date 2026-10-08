@@ -12,7 +12,7 @@ import pytest
 import testreuse_key as keys
 import testreuse_store as storage
 from taskboard_kit import board  # noqa: F401  (fixture)
-from test_testreuse import FILE, hows, project  # noqa: F401  (fixture)
+from test_testreuse import FILE, Recorder, hows, project  # noqa: F401  (fixture)
 from test_testreuse_review import attempt, kinds
 
 from ml_stack.graph.store import GraphStore
@@ -320,3 +320,17 @@ def test_a_module_an_earlier_file_already_imported_is_still_in_a_later_files_man
     attempt(project, store, "tests/test_a.py", "tests/test_b.py")
     (project / HELPER).write_text("VALUE = 1  # edited\n")
     assert hows(attempt(project, store, "tests/test_a.py", "tests/test_b.py")[0]) == ["ran", "ran"]
+
+
+def test_a_file_edited_between_the_hit_check_and_the_start_of_the_launch_is_not_stored(project, tmp_path):
+    store = storage.Store(tmp_path / "store")
+    original = (project / FILE).read_text()
+
+    class Editor(Recorder):
+        def claimed(self, file, key):
+            (project / file).write_text(original + "# v2\n")
+            return 0
+
+    attempt(project, store, events=Editor())
+    (project / FILE).write_text(original)
+    assert hows(attempt(project, store)[0]) == ["ran"]
