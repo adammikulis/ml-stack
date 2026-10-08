@@ -1,8 +1,8 @@
 {
- "surfaces": 809,
+ "surfaces": 810,
  "by_status": {
   "covered": 484,
-  "partial": 198,
+  "partial": 199,
   "uncovered": 53,
   "n/a": 74,
   "unmapped": 0
@@ -38,7 +38,7 @@
   },
   "egress": {
    "covered": 44,
-   "partial": 48,
+   "partial": 49,
    "uncovered": 0,
    "n/a": 0,
    "unmapped": 0
@@ -1702,6 +1702,18 @@
    "id": "egress:client/ollama.py:fetch",
    "kind": "egress",
    "source": "client/ollama.py:fetch",
+   "trust": "addresses and redirects named by pages, repositories and peers",
+   "attacker": "a redirect or address sends the request somewhere the person did not choose",
+   "status": "partial",
+   "tests": [
+    "tests/test_net_no_bypass.py"
+   ],
+   "note": "loopback and LAN calls to servers the person configured; the net-no-bypass scan keeps public hosts out, answers from a hostile server (oversized, slow, malformed JSON) are not sent"
+  },
+  {
+   "id": "egress:client/rerank.py:rerank",
+   "kind": "egress",
+   "source": "client/rerank.py:rerank",
    "trust": "addresses and redirects named by pages, repositories and peers",
    "attacker": "a redirect or address sends the request somewhere the person did not choose",
    "status": "partial",
