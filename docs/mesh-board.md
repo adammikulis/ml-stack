@@ -387,6 +387,19 @@ Each slice leaves the current coordinator path working until slice 6. File lists
    `host` refused for an agent token (person session only) as the interim fix, with a red-team test. Works
    and is tested at N=1 (no peers) and N=2 (two real devices, pairing as today). Claims and tasks stay on
    the existing host until slice 2.
+   As built in slice 1: announcements, `#general` posts and notes are journaled; a direct message or a post
+   to any other board stays on the device that wrote it, because there is no directory of which device
+   hosts an addressee yet (slice 5). A row from another device is folded as an agent named `name@dN`, `dN`
+   being a label this device assigns to the origin when it first sees it. It goes through the size,
+   screen, quarantine and notes-per-agent checks of a local post; its role, flags, model claims and note
+   commands are discarded; a sender whose name is registered here is rejected; an unusable row is recorded
+   in `mesh/rejected.json` (the last 200) and skipped. An origin is a 32-character lower-case hex id.
+   A relay's copy of a journal never marks an origin damaged; only the device paired as its writer does,
+   and `Journals.forgive` clears it. An acknowledgement counts only when its hash for this device's row
+   matches. Not built: a person-only command to clear a refusal, per-peer request-rate limits, signed
+   acknowledgements, sealing of `keys.json` and `damaged.json` (same-user plain JSON), per-origin quotas
+   on rows folded per interval beyond 500, and a stable cross-device order of the board view (rows are
+   folded in `(hlc, origin, seq)` order per sync, so bus order can differ between devices).
 2. **Claims and tasks as folds.** `claims.py`, `task_actions.py`, `taskboard.py` write rows and read the
    claim fold; Conflict raised from the visible view; `coordinator_calls.py` call nodes replaced by `idem`.
 3. **Presence and the derived coordinator.** `workspace/presence.py` register, derivation, `status` line,

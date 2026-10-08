@@ -14,7 +14,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from ml_stack import agent_hooks, authority
+from ml_stack import authority
 from ml_stack.command import Group, flag, option
 from ml_stack.http import ServerError
 from ml_stack.log import say, warn
@@ -26,6 +26,7 @@ from ml_stack.workspace import (
     autostart_status,
     backlog,
     chat,
+    cli_setup,
     coordinator_client,
     coordinator_config,
     enforcement_cli,
@@ -36,6 +37,7 @@ from ml_stack.workspace import (
     limits,
     localcli,
     localroute,
+    mesh_sync,
     nudge,
     onboard,
     person_view,
@@ -335,25 +337,6 @@ def _init(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
     return {"token": ws.init(args.name), "note": f"keep this; set {TOKEN_ENV} to use it"}
 
 
-def _setup(args: argparse.Namespace, ws: Workspace) -> int:
-    for line in agent_hooks.install_report():
-        say(line)
-    if args.yes or args.rotate:
-        done = onboard.setup(ws, args.agents or list(onboard.DEFAULT_AGENTS), args.rotate,
-                             args.ttl_hours * 3600)
-        for label, group in (("created", done.minted), ("kept", done.kept),
-                             ("replaced", done.rotated), ("needs --rotate", done.lost)):
-            if group:
-                say(f"{label}: {', '.join(group)}")
-        say(f"token files: {done.directory} (private, never printed)")
-        for name in [*done.minted, *done.rotated, *done.kept]:
-            say(f"\n--- paste into {name} ---\n{onboard.snippet(name)}")
-        return 1 if any(not f.ok for f in onboard.doctor(ws)) else 0
-    plan = guide.Plan(args.agents, 0.0 if args.no_live else args.live_seconds, args.wait_seconds)
-    result = guide.walk(ws, plan)
-    return 0 if not plan.live_s or not result["unconfirmed"] else 1
-
-
 def _connect(args: argparse.Namespace, ws: Workspace) -> int:
     agent = args.agent or os.environ.get(tokens.AGENT_ENV, "")
     if agent:
@@ -402,13 +385,6 @@ def _join(args: argparse.Namespace, ws: Workspace) -> int:
     return 0
 
 
-def _doctor(args: argparse.Namespace, ws: Workspace) -> int:
-    found = onboard.doctor(ws)
-    for f in found:
-        say(("ok   " if f.ok else "FIX  ") + f.what + ("" if f.ok else f"  -> {f.fix}"))
-    return 0 if all(f.ok for f in found) else 1
-
-
 def _chat(args: argparse.Namespace, ws: Workspace) -> int:
     human.require_person("workspace chat")
     token = (tokens.read_file(Path(args.token_file).expanduser()) if args.token_file
@@ -417,11 +393,6 @@ def _chat(args: argparse.Namespace, ws: Workspace) -> int:
         signal.signal(sig, lambda *_: CANCELLED.set())
     chat.run(ws, token, Follow(board=args.board, dm=args.to, backlog=args.backlog),
              chat.Console(sys.stdin, say, CANCELLED))
-    return 0
-
-
-def _hello(args: argparse.Namespace, ws: Workspace) -> int:
-    say(f"sent message {onboard.hello(ws, args.name)['seq']} to {args.name}")
     return 0
 
 
@@ -551,7 +522,7 @@ BARE: tuple[tuple[str, str, list[Any], Callable[[argparse.Namespace, Workspace],
              help="replace this agent's token (repeatable)"),
         flag("--ttl-hours", type=float, default=720.0, help="how long new tokens last"),
         flag("--yes", action="store_true", help="no questions: token files for the names given"),
-        *LIVE], _setup),
+        *LIVE], cli_setup.setup),
     ("board-serve", "serve the read-only Board page on a loopback port; the person's identity, no token in the page",
      [flag("--port", type=int, default=0)], _board_serve),
     ("agent", "start a local model as an agent that takes and gives tasks, stop one, or list them; start and stop at a terminal",
@@ -561,9 +532,9 @@ BARE: tuple[tuple[str, str, list[Any], Callable[[argparse.Namespace, Workspace],
       flag("--to", default="", help="an agent id"), flag("--backlog", type=int, default=20),
       flag("--token-file", default="", help="the person's token file (default: the owner file)")],
      _chat),
-    ("doctor", "check the whole setup and say what to fix; at a terminal", [], _doctor),
+    ("doctor", "check the whole setup and say what to fix; at a terminal", [], cli_setup.doctor),
     ("hello", "send AGENT the first message ('workspace ready'); at a terminal", [flag("name")],
-     _hello),
+     cli_setup.hello),
     ("snippet", "print the paste block for AGENT (no secret in it)", [flag("name")],
      lambda a, w: say(onboard.snippet(a.name), end="") or 0),
     ("hook-snippet", "print the setting that makes a tool run `nudge` after each step; writes nothing",
@@ -671,7 +642,10 @@ TABLE: tuple[tuple[str, str, list[Any], Handler], ...] = (
         flag("--thread", type=int, default=0), flag("--ack", action="store_true")], _digest),
     ("wait", "block until a message arrives", [
         *READ, flag("--timeout", type=float, default=60.0)], _wait),
-    ("outbox", "messages you sent", [], lambda a, w, t: w.outbox(t)),
+    ("outbox", "messages you sent, each provisional until every paired device holds it", [],
+     lambda a, w, t: w.outbox(t)),
+    ("sync", "exchange journals with the paired devices (a person or lead)", [],
+     lambda a, w, t: mesh_sync.run(w, t)),
     ("ack", "mark messages up to SEQ read", [flag("seq", type=int)],
      lambda a, w, t: {"cursor": w.ack(t, a.seq)}),
     ("thread", "a message and its replies (first and newest by default)", [

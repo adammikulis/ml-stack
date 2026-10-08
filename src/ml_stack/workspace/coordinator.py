@@ -9,6 +9,7 @@ from ml_stack.workspace import (
     coordinator_calls,
     coordinator_config,
     device_sessions,
+    mesh_sync,
     onboard,
     tokens,
 )
@@ -80,6 +81,8 @@ def answer(ws, call, *, device=None, projects=None):
 
 
 def route(handler, body=None):
+    if mesh_sync.route(handler, body):
+        return True
     path = handler.path.split('?')[0]
     if path not in (PREFIX + 'info', PREFIX + 'call', PREFIX + 'join', PREFIX + 'ensure'):
         return False
