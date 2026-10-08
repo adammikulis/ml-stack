@@ -33,7 +33,7 @@ tag's shifted by GitHub's commit count; `dev-<sha9>` when upstream cannot say.
 **Source comes through `ml_stack.net` and git verifies it.** The ref is resolved to a full commit
 by `api.github.com` (`commits/<ref>`). The commit is fetched with `net.git.run`: the host policy
 applies (github.com is on the default allow-list; any other host ends in the needs-approval state
-with the exact `ml-stack-security approve-host HOST` line), https only, hooks off
+with the exact `ml-stack-security approve-host HOST` line), over HTTPS alone, hooks off
 (`core.hooksPath` is an empty directory, so a template or global hook does not run),
 `fetch.fsckObjects`, no submodules, `--depth 1`. `git rev-parse HEAD` must equal the commit that
 was asked for; then `.git` is deleted, so the build has no repository to consult. Nothing in the
@@ -50,6 +50,18 @@ cmake as `CMAKE_C_COMPILER`, `CMAKE_CXX_COMPILER`, `CMAKE_MAKE_PROGRAM` (ninja w
 tests prove both limits by a CMake project that tries to write outside and to fetch a URL.
 Linux uses the bubblewrap backend of `ml_stack.sandbox`; its argv is tested but it has not run on
 Linux. Windows is refused with a pointer to `build --from release`.
+
+**The compile is cached with ccache when it is installed.** Adjacent upstream commits share most
+translation units, so `llamacpp_ccache` passes `-DCMAKE_{C,CXX,OBJC,OBJCXX}_COMPILER_LAUNCHER=<ccache>`
+and sets `CCACHE_DIR` (`~/.ml-stack/llama.cpp/ccache`, under the ml-stack home), `CCACHE_MAXSIZE=5G`,
+`CCACHE_BASEDIR` (the build's work directory, so one commit's objects hit in another's) and
+`CCACHE_NOHASHDIR=1`. The sandbox policy gains that one directory through its `cache` grant and the
+read of ccache's own keg and libraries; `write` is still only the work directory. The build prints
+its ccache hits, misses and uncacheable count in one line at the end; without ccache it prints
+`ccache not found: building without a compile cache` and builds as before. The tests prove the
+flags, the variables, that the sandbox still refuses a write anywhere else, and that a real
+ccache under the real policy hits across two work directories; no full llama.cpp build was run for
+this change.
 
 **Backend is auto-detected and nothing is installed.** Metal on macOS, CUDA when `nvcc` is on PATH,
 Vulkan when the SDK is, CPU otherwise (`build_platform.cmake_flags`). A missing cmake, git,

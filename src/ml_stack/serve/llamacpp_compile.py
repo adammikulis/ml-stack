@@ -15,6 +15,7 @@ from ml_stack.httpguard import Refused
 from ml_stack.net import git as netgit
 from ml_stack.sandbox.policies import SYSTEM_EXEC, system_env
 from ml_stack.sandbox.policy import Limits, Net, Policy
+from ml_stack.serve import llamacpp_ccache
 from ml_stack.serve.build_paths import BuildFailed
 from ml_stack.serve.build_platform import cmake_flags, server_name
 from ml_stack.serve.llamacpp_upstream import Upstream
@@ -39,12 +40,14 @@ class Toolchain:
     sysroot: str
     reads: tuple[str, ...]
     make: str = ""
+    ccache: llamacpp_ccache.Ccache | None = None
 
     def arguments(self) -> list[str]:
         out = [f"-DCMAKE_C_COMPILER={self.cc}", f"-DCMAKE_CXX_COMPILER={self.cxx}"]
         if self.make:
             out += [f"-DCMAKE_MAKE_PROGRAM={self.make}"]
             out += ["-GNinja"] if Path(self.make).name == "ninja" else ["-GUnix Makefiles"]
+        out += self.ccache.arguments() if self.ccache else []
         return out + ([f"-DCMAKE_OSX_SYSROOT={self.sysroot}"] if self.sysroot else [])
 
 
@@ -101,8 +104,10 @@ def toolchain() -> Toolchain:
         trees.add(_tree(sysroot) if "/Developer/" not in sysroot else sysroot.split("/Developer/")[0] + "/Developer")
     if shutil.which("nvcc"):
         trees.add(_tree(shutil.which("nvcc") or ""))
+    cached = llamacpp_ccache.find()
+    trees.update(cached.reads if cached else ())
     return Toolchain(cmake, cc, cxx, sysroot,
-                     tuple(sorted(t for t in trees if t not in ("/", "") and Path(t).is_dir())), make)
+                     tuple(sorted(t for t in trees if t not in ("/", "") and Path(t).is_dir())), make, cached)
 
 
 def checkout(upstream: Upstream, sha: str, dest: Path, pipeline: net.Pipeline) -> None:
@@ -132,8 +137,12 @@ def checkout(upstream: Upstream, sha: str, dest: Path, pipeline: net.Pipeline) -
 def _policy(tools: Toolchain, source: Path, work: Path, wall: float) -> Policy:
     env = system_env(HOME=str(work), TMPDIR=str(work))
     env["PATH"] = os.pathsep.join([*(str(Path(t) / "bin") for t in tools.reads), env["PATH"]])
+    cached = tools.ccache
+    if cached:
+        env.update(cached.environment(work.parent))
     return Policy("llama-build", read=(str(source), *tools.reads), write=(str(work),),
                   exec=(*SYSTEM_EXEC, *tools.reads), net=Net.deny(), env=env,
+                  cache=cached.cache() if cached else "",
                   limits=Limits(wall_seconds=wall, output_bytes=50_000_000))
 
 
@@ -166,12 +175,19 @@ def compile_source(job: Job, say: Callable[[str], None] = lambda _text: None) ->
         ("compile", [tools.cmake, "--build", str(build), "--config", "Release", "--target",
                      CMAKE_TARGET, "-j", str(job.jobs)]),
     )
+    cached = tools.ccache
+    say(f"  ccache: {cached.exe}, cache {cached.directory} (limit {llamacpp_ccache.MAX_SIZE})" if cached
+        else f"  {llamacpp_ccache.ABSENT}")
+    if cached:
+        cached.reset(work.parent)
     for name, argv in steps:
-        say(f"  {name} (sandboxed: no network, writes only {work})")
+        say(f"  {name} (sandboxed: no network, writes only {' and '.join(filter(None, [str(work), policy.cache]))})")
         done = sandbox.run(argv, policy, cwd=str(work))
         if done.returncode != 0:
             tail = (done.stderr or done.stdout).strip()[-3000:]
             raise BuildFailed(f"{name} failed ({'timed out' if done.timed_out else done.returncode}):\n{tail}")
+    if cached:
+        say(f"  {cached.summary(work.parent)}")
     built = build / "bin" / server_name()
     if not built.is_file():
         raise BuildFailed(f"the build produced no {server_name()} in {built.parent}")
