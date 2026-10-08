@@ -337,7 +337,7 @@ def build_manifest(root: Path, rel: str, seen: dict, closures: Closures, argumen
             envs |= set(ENV_NAME.findall(text_of(root / path)))
     first_party = {k.split(".")[0] for k in closures.known}
     spawning = any(SPAWNS.search(text_of(root / p)) for p in members if p.endswith(".py"))
-    unseen = next((m.group(0) for p in members if p.endswith(".py")
+    unseen = next((m.group(0) for p in members if p.endswith(".py") and p.startswith("tests/")
                    for m in [UNSEEN.search(text_of(root / p))] if m), "")
     return {"files": {p: file_sha(root / p) for p in files},
             "dirs": {d: dir_sha(root / d) for d in sorted({*seen.get("dirs", ()), *(p for p in probed if (root / p).is_dir())})},

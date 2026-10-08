@@ -20,6 +20,7 @@ ALLOWED_ROOT_WRITES = (".pytest_cache", "__pycache__", ".testmondata", ".coverag
 MUTATING = {"os.mkdir": (0,), "os.rmdir": (0,), "os.remove": (0,), "os.rename": (0, 1), "os.symlink": (1,),
             "os.link": (1,), "os.truncate": (0,), "os.chmod": (0,), "shutil.rmtree": (0,),
             "shutil.copyfile": (1,), "shutil.move": (1,)}
+DIR_FDS = {"os.remove": (1,), "os.rmdir": (1,), "os.mkdir": (2,), "os.rename": (2, 3), "shutil.rmtree": (1,)}
 SHARED = "*"
 FILES: dict[str, dict] = {}
 CURRENT: list[str] = []
@@ -120,8 +121,10 @@ def _audit(event: str, args: tuple) -> None:
             if rel:
                 bucket["dirs"].add(Path(rel).parent.as_posix())
         elif event in MUTATING:
-            for index in MUTATING[event]:
-                if len(args) > index and isinstance(args[index], (str, bytes, os.PathLike)):
+            fds = DIR_FDS.get(event, ())
+            for place, index in enumerate(MUTATING[event]):
+                relative = place < len(fds) and len(args) > fds[place] and args[fds[place]] not in (None, -1)
+                if not relative and len(args) > index and isinstance(args[index], (str, bytes, os.PathLike)):
                     absolute = str(Path(_text(args[index])).absolute())
                     if not _write_ok(absolute):
                         bucket["violations"].add(f"{event.split('.')[-1]} {absolute}")

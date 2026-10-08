@@ -57,7 +57,8 @@ running; modules imported at collection are attributed from `sys.modules`.
 A hit needs a stored entry for the lookup key whose manifest still matches the checkout byte for
 byte. Nothing in either is a path, so two worktrees with identical content hit the same entry.
 
-Limits of what the plugin sees: `DirEntry.stat`, `fstat`, `utime`, `chown`, `setxattr`, `mmap`, `sqlite3` and C extensions (such as `ladybug`) touch files without a Python-level `open`, `os.stat`, `lstat`, `access` or listing event, and a function bound before the plugin loaded (`from os import stat`) bypasses the `os.stat` wrapper. A file whose import closure mentions any of `DirEntry`, `scandir`, `fstat`, `utime`, `chown`, `setxattr`, `mmap`, `sqlite3` or `ladybug` is therefore never stored.
+Limits of what the plugin sees: `DirEntry.stat`, `fstat`, `utime`, `chown`, `setxattr`, `mmap`, `sqlite3` and C extensions (such as `ladybug`) touch files without a Python-level `open`, `os.stat`, `lstat`, `access` or listing event, and a function bound before the plugin loaded (`from os import stat`) bypasses the `os.stat` wrapper. A file whose own code (the test file, its `tests/` helpers and conftests) mentions any of `DirEntry`, `scandir`, `fstat`, `utime`, `chown`, `setxattr`, `mmap`, `sqlite3` or `ladybug` is therefore never stored. Library code under `src/` that uses them is not scanned: a file that reaches such code is covered by the recorded reads, the tree digest for spawning code and the canary only.
+A removal or rename made relative to a directory file descriptor is not attributed.
 
 Known gaps: a module another test file had already imported and that is reached only through a
 run-time `importlib` call is not attributed; a file read by a child process of a test that spawns
