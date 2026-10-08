@@ -9,7 +9,10 @@ from pathlib import Path
 
 try:
     from . import Finding
+    from ._perfile import each
 except ImportError:  # loaded as a standalone file
+    each = None
+
     @dataclass(frozen=True)
     class Finding:  # type: ignore[no-redef]
         path: str
@@ -19,6 +22,7 @@ except ImportError:  # loaded as a standalone file
 
 NAME = "duplicate-bodies"
 OWNER = ""
+INCREMENTAL = True
 
 FLOOR = 4
 SKIP_NAMES = {"__init__", "__repr__", "__str__", "__eq__", "__hash__", "__post_init__"}
@@ -224,14 +228,22 @@ def python_files(root: Path) -> list[Path]:
 
 def index(root: Path, *, floor: int = FLOOR, loose: bool = True) -> dict[str, list[Entry]]:
     """`{signature: [entry, ...]}` for every function under src/ml_stack."""
-    groups: dict[str, list[Entry]] = {}
-    for path in python_files(root):
+    paths = python_files(root)
+
+    def rows(path: Path) -> list[list]:
         try:
             text = path.read_text(encoding="utf-8")
         except OSError:
-            continue
-        for entry, sig in functions_in(text, str(path.relative_to(root)), floor=floor, loose=loose):
-            groups.setdefault(sig, []).append(entry)
+            return []
+        return [[entry.line, entry.name, entry.statements, sig] for entry, sig in
+                functions_in(text, str(path.relative_to(root)), floor=floor, loose=loose)]
+
+    kept = [rows(p) for p in paths] if each is None else \
+        each(root, paths, rows, owner=index, salt=f"{floor}:{loose}")
+    groups: dict[str, list[Entry]] = {}
+    for path, found in zip(paths, kept, strict=True):
+        for line, name, size, sig in found:
+            groups.setdefault(sig, []).append(Entry(str(path.relative_to(root)), line, name, size))
     return groups
 
 

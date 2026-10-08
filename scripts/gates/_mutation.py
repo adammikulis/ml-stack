@@ -17,6 +17,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from random import Random
 
+from ._perfile import each
+
 SOURCE_ROOT = "src/ml_stack"
 TEST_ROOT = "tests"
 COPY_SKIP = {".git", "__pycache__", ".pytest_cache", ".ruff_cache", "dist", "build",
@@ -162,20 +164,20 @@ def _parses(source: str) -> bool:
 
 def candidates(root: Path) -> list[Target]:
     """Every function under src/ml_stack that at least one mutation operator reaches."""
-    out: list[Target] = []
-    base = root / SOURCE_ROOT
-    for path in sorted(base.rglob("*.py")):
-        if any(part in COPY_SKIP for part in path.parts):
-            continue
+    paths = [p for p in sorted((root / SOURCE_ROOT).rglob("*.py"))
+             if not any(part in COPY_SKIP for part in p.parts)]
+
+    def reachable(path: Path) -> list[list]:
         try:
             tree = ast.parse(path.read_text(encoding="utf-8"))
         except (OSError, SyntaxError, UnicodeDecodeError):
-            continue
-        where = path.relative_to(root).as_posix()
-        for qualname, node in functions(tree):
-            if len(_sites(node)) > 1:
-                out.append(Target(where, qualname, node.lineno))
-    return out
+            return []
+        return [[qualname, node.lineno] for qualname, node in functions(tree)
+                if len(_sites(node)) > 1]
+
+    return [Target(path.relative_to(root).as_posix(), qualname, lineno)
+            for path, found in zip(paths, each(root, paths, reachable, owner=candidates), strict=True)
+            for qualname, lineno in found]
 
 
 def sample(targets: list[Target], count: int, seed: str) -> list[Target]:

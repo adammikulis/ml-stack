@@ -6,10 +6,12 @@ import ast
 from pathlib import Path
 
 from . import Finding
-from ._util import calls, dotted, exempt, parse, python_files, rel
+from ._perfile import finder
+from ._util import calls, dotted, exempt, parse
 
 NAME = "file-locks"
 OWNER = "ml_stack.lock"
+INCREMENTAL = True
 ROOTS = ("src/ml_stack",)
 OWNS = ("src/ml_stack/lock.py",)
 MODULES = {"fcntl", "msvcrt"}
@@ -31,30 +33,31 @@ def _handle_transfer_only(tree: ast.Module, binding: str) -> bool:
         for node in references)
 
 
-def find(root: Path) -> list[Finding]:
+def scan(path: Path, where: str) -> list[Finding]:
     out = []
-    for path in python_files(root, ROOTS):
-        where = rel(path, root)
-        if exempt(where, OWNS):
-            continue
-        tree = parse(path)
-        if tree is None:
-            continue
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                for alias in node.names:
-                    if (alias.name.split(".")[0] in MODULES
-                            and not (alias.name == "msvcrt"
-                                     and _handle_transfer_only(tree, alias.asname or alias.name))):
-                        out.append(Finding(where, node.lineno, f"import {alias.name}"))
-            elif (isinstance(node, ast.ImportFrom) and node.module
-                  and node.module.split(".")[0] in MODULES
-                  and (node.module != "msvcrt" or any(
-                      alias.name != "open_osfhandle" for alias in node.names))):
-                out.append(Finding(where, node.lineno, f"from {node.module}"))
-        for node, name in calls(tree):
-            if name.endswith("flock") or dotted(node.func).endswith("flock"):
-                out.append(Finding(where, node.lineno, "flock"))
-            elif name == "msvcrt.locking":
-                out.append(Finding(where, node.lineno, "msvcrt.locking"))
+    if exempt(where, OWNS):
+        return out
+    tree = parse(path)
+    if tree is None:
+        return out
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if (alias.name.split(".")[0] in MODULES
+                        and not (alias.name == "msvcrt"
+                                 and _handle_transfer_only(tree, alias.asname or alias.name))):
+                    out.append(Finding(where, node.lineno, f"import {alias.name}"))
+        elif (isinstance(node, ast.ImportFrom) and node.module
+              and node.module.split(".")[0] in MODULES
+              and (node.module != "msvcrt" or any(
+                  alias.name != "open_osfhandle" for alias in node.names))):
+            out.append(Finding(where, node.lineno, f"from {node.module}"))
+    for node, name in calls(tree):
+        if name.endswith("flock") or dotted(node.func).endswith("flock"):
+            out.append(Finding(where, node.lineno, "flock"))
+        elif name == "msvcrt.locking":
+            out.append(Finding(where, node.lineno, "msvcrt.locking"))
     return out
+
+
+find = finder(ROOTS, scan)
