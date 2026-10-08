@@ -9,13 +9,14 @@ import os
 import secrets
 import stat
 import threading
+import time
 from functools import wraps
 from pathlib import Path
 
 from ml_stack import macauth, sealing
 from ml_stack.files import writing
 from ml_stack.fleet import updates
-from ml_stack.http import Sealed, open_stream
+from ml_stack.http import Sealed, ServerError, open_stream
 from ml_stack.lock import Busy
 from ml_stack.serve.reclaim import busy_now
 from ml_stack.windows_private import restrict, validate
@@ -91,7 +92,27 @@ def request_replacement(root: Path, port: int, running: dict, expected: str) -> 
         return url
 
     body = json.dumps({'version': 1, 'instance': instance, 'expected': expected}).encode()
-    with open_stream(endpoint, method='POST', data=body, token=capability, timeout=10,
+    deadline = time.monotonic() + 10
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise ControlError('Daemon replacement did not reach its idle boundary.')
+        try:
+            return _acknowledge(endpoint, body, capability, guard, instance, remaining)
+        except ServerError as exc:
+            if exc.status != 409:
+                raise
+            try:
+                refusal = json.loads(exc.body)
+            except (ValueError, UnicodeError):
+                raise exc from None
+            if not isinstance(refusal, dict) or refusal.get('retryable') is not True:
+                raise
+            time.sleep(min(0.1, max(0, deadline - time.monotonic())))
+
+
+def _acknowledge(endpoint, body, capability, guard, instance, timeout):
+    with open_stream(endpoint, method='POST', data=body, token=capability, timeout=timeout,
                      headers={'Content-Type': 'application/json', sealing.HEADER: '2'}, guard=guard) as response:
         if response.headers.get(sealing.HEADER) != '1':
             raise ControlError('Daemon replacement acknowledgment must authenticate with sealing.')
@@ -143,6 +164,7 @@ class Control:
         if not verdict.ok:
             handler._send(403, {'error': 'Daemon replacement requires its owned launcher.'})
             return True
+        retryable = False
         try:
             mode = handler.headers.get(sealing.HEADER, '')
             if mode in ('1', '2'):
@@ -155,7 +177,10 @@ class Control:
             if not isinstance(request, dict) or request.get('instance') != self.instance:
                 raise ControlError('Daemon replacement instance does not match.')
             with self.lock:
-                if self.stopping or self.active:
+                if self.stopping:
+                    raise ControlError('Daemon replacement is already in progress.')
+                if self.active:
+                    retryable = True
                     raise ControlError('Daemon has requests in progress; retry when it is idle.')
                 with contextlib.ExitStack() as admitted:
                     admitted.enter_context(self.admission())
@@ -164,7 +189,7 @@ class Control:
                     self.held = admitted.pop_all()
                     self.stopping = True
         except (ControlError, Busy, ValueError, OSError, sealing.SealError) as exc:
-            handler._send(409, {'error': str(exc)})
+            handler._send(409, {'error': str(exc), 'retryable': retryable})
             return True
         try:
             handler._send(202, {'instance': self.instance, 'stopping': True})
