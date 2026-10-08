@@ -32,6 +32,7 @@ def install(directory: Path, chosen: runtime.Runtime | None = None) -> list[Path
     chosen = runtime.verify(chosen) if chosen is not None else runtime.selected()
     if chosen is None:
         raise OSError("select an immutable runtime before installing its launchers")
+    runtime.confine_tests(directory)
     runtime.plain(directory)
     if (not directory.is_dir() or (os.name != "nt" and
             (directory.stat().st_uid != os.getuid() or directory.stat().st_mode & 0o022))):

@@ -163,7 +163,7 @@ def detach(module: str, argv: Sequence[str], *, log: Path, lines: Sequence[str] 
 
     started = time.strftime("%FT%T")
     rest = [str(a) for a in argv]
-    chosen = runtime.selected()
+    chosen = runtime.available()
     python = chosen.python if chosen is not None else runtime.python()
     command = [str(python), *(["-I"] if chosen is not None else []), "-m", module, *rest]
     environment = {**os.environ, "PYTHONUNBUFFERED": "1"}

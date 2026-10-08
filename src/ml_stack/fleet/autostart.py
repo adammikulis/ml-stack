@@ -720,7 +720,7 @@ def restart(*, run: Callable[[list[str]], int] | None = None,
     """
     from ml_stack import runtime
 
-    chosen = runtime.selected() if run is None and reexec is None else None
+    chosen = runtime.available() if run is None and reexec is None else None
     if chosen is not None and (getattr(sys, "frozen", False) or Path(sys.prefix) != chosen.prefix):
         from ml_stack import jobs
         args = [arg for arg in sys.argv[1:] if arg not in {"--restart", "--force-restart", "--no-browser"}]

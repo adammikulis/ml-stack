@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import subprocess
@@ -60,8 +61,12 @@ def current_wheel() -> Path | None:
     return found[0]
 
 
-def build(checkout: Path, commit: str, stage: Path, *, timeout: float) -> runtime.Runtime:
-    """Build an isolated runtime from the committed snapshot of one revision; its source stays in `stage`."""
+def build(checkout: Path, commit: str, stage: Path, *, timeout: float,
+          into: tuple[Path, dict] | None = None) -> runtime.Runtime:
+    """Build an isolated runtime from the committed snapshot of one revision; its source stays in `stage`.
+
+    `into` is the (prefix, creator record) the tree is created with.
+    """
     if not re.fullmatch(r"[0-9a-f]{40}", commit):
         raise ValueError("a runtime is built from a full commit")
     snapshot = stage / "source.zip"
@@ -73,11 +78,12 @@ def build(checkout: Path, commit: str, stage: Path, *, timeout: float) -> runtim
     if len(found) != 1:
         raise ValueError("source revision must build exactly one ml-stack wheel")
     stamp(found[0], commit, checkout)
-    return prepare(found[0], commit, timeout=timeout)
+    return prepare(found[0], commit, timeout=timeout, prefix=into[0] if into else None, creator=into[1] if into else None)
 
 
-def prepare(wheel: Path, commit: str, *, timeout: float) -> runtime.Runtime:
-    """Build and verify a separate owned Python prefix for a stamped wheel."""
+def prepare(wheel: Path, commit: str, *, timeout: float, prefix: Path | None = None,
+            creator: dict | None = None) -> runtime.Runtime:
+    """Build and verify a separate owned Python prefix for a stamped wheel; `creator` is recorded in it first."""
     if wheel_commit(wheel) != commit or not re.fullmatch(r"[0-9a-f]{40}", commit):
         raise ValueError("runtime wheel must match its full source revision")
     with zipfile.ZipFile(wheel) as archive:
@@ -104,9 +110,13 @@ def prepare(wheel: Path, commit: str, *, timeout: float) -> runtime.Runtime:
         family.mkdir(mode=0o700, exist_ok=True)
         runtime.protect(family)
         runtime._owned(family)
-        chosen = runtime.Runtime(family / uuid.uuid4().hex, commit, version, runtime.identity())
+        if prefix is not None and prefix.parent != family:
+            raise ValueError("a runtime prefix belongs in its own revision directory")
+        chosen = runtime.Runtime(prefix or family / uuid.uuid4().hex, commit, version, runtime.identity())
         chosen.prefix.mkdir(mode=0o700)
         runtime.protect(chosen.prefix)
+        if creator is not None:
+            (chosen.prefix / "created.json").write_text(json.dumps(creator), encoding="utf-8")
         try:
             _run([str(_host_python()), "-m", "venv", str(chosen.prefix)], timeout)
             cached = cache_wheel(wheel, commit, prefix=chosen.prefix)

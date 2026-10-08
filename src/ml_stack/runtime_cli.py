@@ -3,40 +3,43 @@
 from __future__ import annotations
 
 import argparse
+import json
 import subprocess
 import sys
 import time
 from pathlib import Path
 
-import json
-
-from ml_stack import runtime, runtime_board, runtime_deploy, runtime_store, worktreerules
+from ml_stack import runtime, runtime_board, runtime_deploy, runtime_store
 from ml_stack.fleet import runtime_wheel
 from ml_stack.home import expand
 from ml_stack.lock import held_by
 from ml_stack.platform import detached_kwargs
 
 
+def _source(path: Path) -> Path:
+    if not (path / "src" / "ml_stack" / "__init__.py").is_file():
+        raise runtime_deploy.DeployError(f"{path} is not an ml-stack source checkout")
+    return path
+
+
 def _checkout(named: str) -> Path:
     if named:
-        found = expand(named).resolve()
-        if not (found / ".git").exists():
-            raise runtime_deploy.DeployError(f"{found} is not a git checkout")
-        return found
-    for candidate in (runtime_store.read_state().get("checkout"), runtime_wheel.source_checkout(),
-                      (worktreerules.checkouts(Path.cwd()) or (None, None))[1]):
-        found = expand(str(candidate)) if candidate else None
-        if found is not None and (found / ".git").exists():
-            return found
-    raise runtime_deploy.DeployError("no source checkout: pass --checkout")
+        return _source(expand(named).resolve())
+    for candidate in (runtime_store.read_state().get("checkout"), runtime_wheel.source_checkout()):
+        if candidate:
+            return _source(expand(str(candidate)).resolve())
+    raise runtime_deploy.DeployError("no source checkout recorded: pass --checkout")
 
 
-def _launchers(named: str) -> Path:
+def _launchers(named: str) -> Path | None:
     recorded = runtime_store.read_state().get("launchers")
     chosen = named or (str(recorded) if recorded else "")
     if not chosen:
-        raise runtime_deploy.DeployError("no launcher directory recorded: pass --launchers once")
-    return expand(chosen)
+        return None
+    path = expand(chosen)
+    if not path.is_absolute() and not named:
+        raise runtime_deploy.DeployError(f"the recorded launcher directory {chosen!r} must be absolute")
+    return path.resolve()
 
 
 def plan_from(args: argparse.Namespace) -> runtime_deploy.Plan:
@@ -44,7 +47,7 @@ def plan_from(args: argparse.Namespace) -> runtime_deploy.Plan:
     checkout = _checkout(args.checkout)
     commit = runtime_deploy.resolve_commit(checkout, getattr(args, "ref", "HEAD"))
     return runtime_deploy.Plan(checkout, commit, _launchers(args.launchers),
-                               runtime_deploy.floor_of(checkout, commit), args.timeout, args.wait)
+                               runtime_deploy.floor_of(checkout, commit), args.timeout, args.wait, args.agent)
 
 
 def _start_background(argv: list[str]) -> None:
@@ -57,12 +60,18 @@ def _start_background(argv: list[str]) -> None:
                          stdout=log, stderr=subprocess.STDOUT, **detached_kwargs())
 
 
+def _building() -> str:
+    lock = runtime.directory() / "deploy.lock"
+    return held_by(lock) if lock.exists() else ""
+
+
 def _ensure(args: argparse.Namespace, argv: list[str]) -> int:
     plan = plan_from(args)
     if args.background:
-        if runtime_deploy.current(plan):
-            print(f"runtime {plan.commit[:7]} is current")
-        elif held_by(runtime.directory() / "deploy.lock"):
+        settled = runtime_deploy.settled(plan)
+        if settled:
+            print(f"runtime {plan.commit[:7]} is {settled}")
+        elif _building():
             print("runtime build already running")
         else:
             _start_background([word for word in argv if word != "--background"])
@@ -83,16 +92,23 @@ def _rollback(args: argparse.Namespace) -> int:
     return 0 if outcome.ok else 1
 
 
+def _verdict(plan: runtime_deploy.Plan) -> str:
+    settled = runtime_deploy.settled(plan)
+    if settled == "held":
+        return f"held, ensure will not build {plan.commit[:7]} until the branch moves"
+    return "yes" if settled else f"no, ensure would build {plan.commit[:7]}"
+
+
 def status_lines(plan: runtime_deploy.Plan) -> list[str]:
     """The installed runtime, the commit it should be, the fallbacks kept and the last outcome."""
     root = runtime.directory()
     row, record = runtime_store.selection(root), runtime_store.read_state(root)
     chosen = runtime_deploy.healthy(plan)
     lines = [f"runtimes     {root}",
-             f"source       {plan.checkout} at {plan.commit[:7]}" + (f" (floor {plan.floor[:7]})" if plan.floor else ""),
+             f"source       {plan.checkout} at {plan.commit[:7]}" + (f" (epoch floor {plan.floor})" if plan.floor else ""),
              f"selected     {str(row.get('commit', 'none'))[:7]} {'healthy' if chosen else 'NOT HEALTHY'}  {row.get('prefix', '')}",
-             f"current      {'yes' if runtime_deploy.current(plan) else 'no, ensure would build ' + plan.commit[:7]}",
-             f"launchers    {plan.launchers}"]
+             f"current      {_verdict(plan)}",
+             f"launchers    {plan.launchers or 'none recorded'}"]
     for candidate in runtime_store.candidates(root):
         mark = "*" if str(candidate.prefix) == row.get("prefix") else " "
         when = time.strftime("%F %T", time.localtime(runtime_store.verified_at(candidate.prefix)))
@@ -102,20 +118,19 @@ def status_lines(plan: runtime_deploy.Plan) -> list[str]:
     if record.get("last_failure"):
         failure = record["last_failure"]
         lines.append(f"last failure {failure.get('commit', '')[:7]}: {failure.get('detail', '')[-300:]}")
-    holder = held_by(root / "deploy.lock")
-    if holder:
-        lines.append(f"building     {holder}")
+    if _building():
+        lines.append(f"building     {_building()}")
     return lines
 
 
 def status_record(plan: runtime_deploy.Plan) -> dict:
     """The status as data: the selected commit, whether it is current and healthy, and the kept runtimes."""
     row = runtime_store.selection()
-    return {"selected": row.get("commit", ""), "wanted": plan.commit, "current": runtime_deploy.current(plan),
+    return {"selected": row.get("commit", ""), "wanted": plan.commit, "current": runtime_deploy.current(plan), "settled": runtime_deploy.settled(plan),
             "healthy": runtime_deploy.healthy(plan) is not None, "floor": plan.floor,
             "kept": [{"commit": c.commit, "prefix": str(c.prefix), "verified_at": runtime_store.verified_at(c.prefix)}
                      for c in runtime_store.candidates()],
-            "state": runtime_store.read_state(), "building": held_by(runtime.directory() / "deploy.lock")}
+            "state": runtime_store.read_state(), "building": _building()}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -134,7 +149,6 @@ def main(argv: list[str] | None = None) -> int:
     ensure.add_argument("--ref", default="HEAD")
     ensure.add_argument("--force", action="store_true", help="rebuild even when held or current")
     ensure.add_argument("--background", action="store_true", help="return at once; build in a detached process")
-    ensure.add_argument("--recover", action="store_true", help="accepted for launcher-started recovery")
     state = sub.add_parser("status", parents=[common], help="show the selected runtime and the fallbacks kept")
     state.add_argument("--json", action="store_true")
     back = sub.add_parser("rollback", parents=[common], help="select the newest earlier verified runtime")

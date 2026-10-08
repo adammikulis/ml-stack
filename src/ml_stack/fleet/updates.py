@@ -708,7 +708,7 @@ def follow_runtime(*, idle: Callable[[], bool], schedule: UpdateSchedule = _FOLL
                    ) -> threading.Thread | None:
     """Restart this process onto the selected runtime when it is behind it and nothing is in the way.
 
-    Selecting a runtime never waits for this; only the restart does. Returns None when no runtime is selected.
+    Returns None when no runtime is selected.
     """
     if not selected_commit():
         return None

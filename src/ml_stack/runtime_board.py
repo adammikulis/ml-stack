@@ -11,13 +11,15 @@ from ml_stack import hook_diagnostics
 from ml_stack.runtime_deploy import Outcome
 from ml_stack.workspace import cli, tokens
 
+COMMIT = re.compile(r"[0-9a-f]{40}")
 LIMIT = 190
 SHORT = 7
 
 
 def _text(outcome: Outcome, previous: str, verb: str) -> tuple[str, str]:
-    """The announcement kind and one line for an outcome; only validated commit prefixes enter it."""
-    now, was = outcome.commit[:SHORT], previous[:SHORT] or "none"
+    """The announcement kind and one line for an outcome."""
+    now = outcome.commit[:SHORT]
+    was = previous[:SHORT] if COMMIT.fullmatch(previous) else "none"
     if outcome.action == "switched":
         return "milestone", f"runtime {verb} {now} (was {was})"
     if outcome.action == "recovered":
@@ -38,7 +40,7 @@ def announce(outcome: Outcome, previous: str, *, verb: str = "ensure", agent: st
     if outcome.action in {"current", "busy", "held"}:
         return False
     who = agent or os.environ.get(tokens.AGENT_ENV, "")
-    if not who:
+    if not who or not COMMIT.fullmatch(outcome.commit):
         return False
     kind, text = _text(outcome, previous, verb)
     if kind == "blocked":

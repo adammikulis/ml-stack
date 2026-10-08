@@ -45,20 +45,28 @@ def run(command: list[str], stage: str, *, environment: dict | None = None):
     return done
 
 
+def primary_checkout(source: Path) -> Path:
+    """The primary checkout of the repository holding `source`, read from its .git file without running git."""
+    link = source / '.git'
+    if link.is_file():
+        text = link.read_text().strip()
+        if text.startswith('gitdir:'):
+            gitdir = Path(text.split(':', 1)[1].strip())
+            if gitdir.parent.name == 'worktrees':
+                return gitdir.parent.parent.parent
+    return source
+
+
 def refresh_runtime(stage: str, checkout: Path | None = None) -> None:
-    """Start a detached runtime build when the selected runtime is behind the checkout's HEAD."""
+    """Start a detached runtime build when the selected runtime is behind the checkout's HEAD; takes at most 6 seconds."""
     if os.environ.get('ML_STACK_RUNTIME_ENSURE') == 'off':
         return
     source = Path(__file__).resolve().parents[2]
-    primary = checkout or source
-    common = run(['git', '-C', str(source), 'rev-parse', '--path-format=absolute', '--git-common-dir'], stage)
-    if common and common.stdout.strip():
-        primary = Path(common.stdout.strip()).parent
     environment = dict(os.environ, PYTHONPATH=str(source / 'src'))
     try:
         done = subprocess.run([sys.executable, '-m', 'ml_stack.runtime_cli', 'ensure', '--background',
-                               '--checkout', str(primary)], capture_output=True, text=True, timeout=8,
-                              check=False, env=environment)
+                               '--checkout', str(checkout or primary_checkout(source))], capture_output=True,
+                              text=True, timeout=6, check=False, env=environment)
     except (OSError, subprocess.TimeoutExpired) as error:
         warning(stage, f'runtime refresh: {error}')
         return

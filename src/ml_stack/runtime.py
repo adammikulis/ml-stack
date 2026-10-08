@@ -9,6 +9,7 @@ import re
 import stat
 import subprocess
 import sys
+import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -162,9 +163,26 @@ def selected() -> Runtime | None:
     return verify(Runtime(Path(row["prefix"]), row["commit"], row["version"], row["identity"]))
 
 
+def available() -> Runtime | None:
+    """Return the selected runtime, or None when none is selected or it fails verification."""
+    try:
+        return selected()
+    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
+        return None
+
+
+def selection_prefix() -> Path | None:
+    """Return the prefix the selection file names, without running the interpreter."""
+    try:
+        row = json.loads((directory() / "selected.json").read_text(encoding="utf-8"))
+        return Path(row["prefix"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
 def python() -> Path:
     """Return the selected interpreter, or the current nonfrozen interpreter."""
-    chosen = selected()
+    chosen = available()
     if chosen is not None:
         return chosen.python
     if getattr(sys, "frozen", False):
@@ -174,7 +192,9 @@ def python() -> Path:
 
 def forward(module: str, argv: list[str]) -> bool:
     """Replace a launcher with the selected runtime when its prefix differs."""
-    chosen = selected()
+    if not getattr(sys, "frozen", False) and Path(sys.prefix) == selection_prefix():
+        return False
+    chosen = available()
     if chosen is None or (not getattr(sys, "frozen", False) and Path(sys.prefix) == chosen.prefix):
         return False
     os.execve(str(chosen.python), [str(chosen.python), "-I", "-m", module, *argv], environment())  # noqa: S606
@@ -182,36 +202,53 @@ def forward(module: str, argv: list[str]) -> bool:
 
 
 LAUNCHER = """#!/usr/bin/env python3
-import glob,json,os,subprocess,sys
+import glob,json,os,subprocess,sys,time
 root = {root!r}
 python = {python!r}
 env = {{k:v for k,v in os.environ.items() if k not in
        {{'PYTHONPATH','PYTHONHOME','VIRTUAL_ENV','_MEIPASS2','LD_LIBRARY_PATH','DYLD_LIBRARY_PATH'}}
        and not k.startswith('_PYI_')}}
+def read(path):
+    try:
+        with open(path) as stream:
+            row = json.load(stream)
+        return row if isinstance(row, dict) else {{}}
+    except (OSError, ValueError):
+        return {{}}
+def interpreter(prefix):
+    return os.path.join(prefix, 'Scripts/python.exe' if os.name == 'nt' else 'bin/python')
 def usable(py):
     prefix = os.path.dirname(os.path.dirname(py))
     found = any(glob.glob(os.path.join(prefix, where, 'ml_stack', '__init__.py'))
                 for where in ('lib/python*/site-packages', 'Lib/site-packages'))
     return os.path.isfile(py) and found and not os.path.exists(os.path.join(prefix, 'rejected'))
+def stamp(prefix):
+    try:
+        return float(read(os.path.join(prefix, 'verified.json')).get('verified_at'))
+    except (TypeError, ValueError):
+        return 0.0
 if not usable(python):
-    kept = []
-    for note in glob.glob(os.path.join(root, '*', '*', 'verified.json')):
-        try:
-            with open(note) as stream:
-                kept.append((json.load(stream)['verified_at'], os.path.join(os.path.dirname(note),
-                             'Scripts/python.exe' if os.name == 'nt' else 'bin/python')))
-        except (OSError, ValueError, KeyError):
-            pass
-    python = next((py for _, py in sorted(kept, reverse=True) if usable(py)), '')
+    held = read(os.path.join(root, 'deploy.json')).get('held')
+    held = held.get('commit') if isinstance(held, dict) else None
+    chosen = read(os.path.join(root, 'selected.json')).get('prefix')
+    others = sorted((os.path.dirname(path) for path in glob.glob(os.path.join(root, '*', '*', 'verified.json'))),
+                    key=stamp, reverse=True)
+    order = ([chosen] if isinstance(chosen, str) else []) + others
+    python = next((interpreter(p) for p in order if usable(interpreter(p))
+                   and read(os.path.join(p, 'verified.json')).get('commit') != held), '')
     if not python:
-        try:
-            with open(os.path.join(root, 'deploy.json')) as stream:
-                source = json.load(stream)['checkout']
-            subprocess.Popen([sys.executable, '-m', 'ml_stack.runtime_cli', 'ensure', '--recover'],
-                             env={{**env, 'PYTHONPATH': os.path.join(source, 'src')}}, stdin=subprocess.DEVNULL,
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
-        except (OSError, ValueError, KeyError):
-            pass
+        source = read(os.path.join(root, 'deploy.json')).get('checkout')
+        marker = os.path.join(root, 'recovery.stamp')
+        fresh = os.path.isfile(marker) and time.time() - os.path.getmtime(marker) < 60
+        if isinstance(source, str) and os.path.isfile(os.path.join(source, 'src', 'ml_stack', '__init__.py')) and not fresh:
+            try:
+                open(marker, 'w').close()
+                with open(os.path.join(root, 'ensure.log'), 'ab') as log:
+                    subprocess.Popen([sys.executable, '-P', '-m', 'ml_stack.runtime_cli', 'ensure'], cwd=source,
+                                     env={{**env, 'PYTHONPATH': os.path.join(source, 'src')}},
+                                     stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True)
+            except OSError:
+                pass
         sys.exit({name!r} + ': no usable ml-stack runtime; recovery started if a source checkout is recorded')
 os.execve(python, [python, '-I', *{arguments}, *sys.argv[1:]], env)
 """
@@ -226,8 +263,18 @@ def gateway(target: Path, module: str = "ml_stack.fleet.launch", function: str =
     write_launcher(target, module, function, chosen)
 
 
+def confine_tests(path: Path) -> None:
+    """Refuse a path outside the state root and the temporary directory while a test runs."""
+    if "PYTEST_CURRENT_TEST" not in os.environ:
+        return
+    roots = (Path(os.path.realpath(state())), Path(os.path.realpath(tempfile.gettempdir())))
+    if not any(Path(os.path.realpath(path)).is_relative_to(root) for root in roots):
+        raise OSError("a test may not write launchers outside the state root or the temporary directory")
+
+
 def write_launcher(target: Path, module: str, function: str, chosen: Runtime) -> None:
     """Atomically write a launcher for an already verified runtime."""
+    confine_tests(target)
     if not re.fullmatch(r"ml_stack(?:\.[a-z_][a-z0-9_]*)+", module):
         raise ValueError("launcher module must belong to ml-stack")
     if function and not re.fullmatch(r"[a-z_][a-z0-9_]*", function):
