@@ -32,6 +32,9 @@ subagent. Read it first. Apply the operational requirements below alongside it.
   and run incremental affected gates, then retry normal pushes as needed. Keep development synced
   throughout multi-device landing and cleanup, and report its final upstream state. Never force
   push, delete remote refs, push tags, or push `main`. Main promotion and releases remain the owner's.
+  Pull and push frequently: fetch and fast-forward development at the start and end of every task
+  and after every wait, and push each landed batch immediately; never leave local-only development
+  commits behind.
   Budgets and red-team debt only fall. Preserve independent authorization and review checks.
 
 ## Required briefing for every agent

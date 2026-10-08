@@ -400,6 +400,12 @@ Do not accumulate ready branches or local-only commits until the end of a sessio
 worker to finish, or defer publication behind cleanup, unrelated work or background full suites.
 After publication, promptly complete the merged branch's maintained worktree cleanup.
 
+**Pull and push as work lands.** Every landed batch is followed at once by `git fetch`, a
+reconcile of anything the remote gained, and a normal push of the development branch. Every agent
+that starts a task, finishes a task or returns from a wait fetches and fast-forwards the
+development branch first, so no one works on history another device has already moved. A
+local-only commit on the development branch is not left past the end of the task that made it.
+
 Verify that review and handoff recipients acknowledge the task and begin work. If a recipient
 is idle, schedule its follow-up task. With Codex collaboration tools, use `followup_task` for an
 idle or completed reviewer; `send_message` queues delivery without starting another turn.
