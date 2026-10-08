@@ -87,7 +87,7 @@ EGRESS = {
     "socket.create_connection",
 }
 EGRESS_PREFIX = ("ml_stack.http.", "ml_stack.httpguard.")
-HUMAN = {"require_person", "mint", "mint_pressed", "mint_clicked", "protect", "agent_may"}
+HUMAN = {"require_person", "mint", "mint_gated", "mint_pressed", "mint_clicked", "protect", "agent_may"}
 DESKTOP_WORDS = ("osascript", "notify-send", "powershell", "toast")
 KEYSTORE_WORDS = ("add-generic-password", "find-generic-password", "keyring", "secret-tool")
 READ_DIRS = ("ingest", "hub", "scrape", "sources", "datasheet", "gguf", "media", "net", "vision",
