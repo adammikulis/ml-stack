@@ -34,8 +34,8 @@ def enrolled(tmp_path, monkeypatch):
     kit = Kit(clean_env(monkeypatch, tmp_path))
     device = Device('a' * 64, 'test-device', 'test-host', '127.0.0.1', 1,
                     mine=True, secret=base64.urlsafe_b64encode(b'x' * 32).decode())
-    projects = SimpleNamespace(machine='authority', list=lambda: [
-        {'id': 'b' * 32, 'name': 'example', 'authority_machine': 'authority'}])
+    projects = SimpleNamespace(machine='authority', hosts=lambda host: host == 'https://authority:8770', list=lambda: [
+        {'id': 'b' * 32, 'name': 'example', 'board_host': 'https://authority:8770'}])
     document = {'name': 'codex', 'model': 'example-model', 'harness': 'codex',
                 'project': {'key': 'b' * 32, 'name': 'example'}}
     return kit, device, projects, document
@@ -176,7 +176,7 @@ def test_valid_session_records_new_claimed_model_and_harness(enrolled):
 def test_bound_session_refuses_different_authoritative_project(enrolled, credential):
     kit, device, projects, document = enrolled
     name, token = device_sessions.ensure(kit.ws, device, projects, document)
-    other = {'id': 'c' * 32, 'name': 'other', 'authority_machine': projects.machine}
+    other = {'id': 'c' * 32, 'name': 'other', 'board_host': 'https://authority:8770'}
     initial = projects.list()
     projects.list = lambda: [*initial, other]
     requested = {**document, 'project': {'key': other['id'], 'name': 'example'}}
@@ -257,7 +257,7 @@ def test_existing_session_loses_access_when_hosted_project_authorization_ends(en
 
     assert invoke()[0] == 200
     initial = projects.list()
-    projects.list = lambda: [] if change == 'unshared' else [{**initial[0], 'authority_machine': 'elsewhere'}]
+    projects.list = lambda: [] if change == 'unshared' else [{**initial[0], 'board_host': 'https://elsewhere:8770'}]
     assert kit.ws.auth(token).id == name
     assert invoke()[0] == 403
 

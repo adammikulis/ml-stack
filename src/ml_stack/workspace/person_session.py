@@ -36,7 +36,7 @@ class SessionWorkspace(Workspace):
                                request.handler.server.server_address[1], writes=True):
             raise Denied('the person request must come from this page')
         project = self._host.projects.get(self._project_id)
-        if (project.authority_machine != self._host.projects.machine or not project.board_host
+        if (not self._host.projects.hosts(project.board_host)
                 or not request.path.startswith(f'/ui/projects/{self._project_id}/')):
             raise Denied('the selected project requires its local authority')
         self.registry._storage()

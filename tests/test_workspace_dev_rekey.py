@@ -25,8 +25,7 @@ def enrolled(enrollment):
     host, project, body = enrollment
     code, issued = host.enroll(PROJECT, body, cluster="dev", cluster_id="c" * 64)
     assert code == 201, issued
-    request = {"agent_token": issued["token"], "cluster": "fresh-dev", "cluster_id": CURRENT,
-               "authority_machine": "local"}
+    request = {"agent_token": issued["token"], "cluster": "fresh-dev", "cluster_id": CURRENT}
     return host, project, issued, request
 
 
@@ -71,7 +70,7 @@ def test_renewal_never_restores_other_authority(enrollment, attack):
     elif attack == "project":
         entry["project"]["key"] = "b" * 32
     else:
-        project.authority_machine = "foreign"
+        project.board_host = "https://foreign:8770"
     ws.registry._save(rows)
     before = ws.registry.path.read_bytes()
     assert host.renew(PROJECT, request, cluster="fresh-dev", cluster_id=CURRENT)[0] == 403
@@ -138,7 +137,7 @@ def test_remote_renewal_uses_existing_capability_without_recovery(tmp_path, monk
     remote = RemoteWorkspace.__new__(RemoteWorkspace)
     remote.base, remote.project_id = tmp_path / "private", PROJECT
     remote.mode, remote.cluster, remote.cluster_id = "dev", "fresh-dev", CURRENT
-    remote.device_cert, remote.authority_machine = "pinned", "local"
+    remote.device_cert = "pinned"
     token = "mlws1.worker.existing"
     tokens.store(remote.base, "worker", token)
     requests = []
@@ -146,9 +145,8 @@ def test_remote_renewal_uses_existing_capability_without_recovery(tmp_path, monk
         requests.append((action, body))
         return {"id": "worker", "project_id": PROJECT, "cluster_id": CURRENT}
     monkeypatch.setattr(remote, "_request", request)
-    assert remote.renew("worker", "local")["id"] == "worker"
-    assert requests == [("renew", {"agent_token": token, "cluster": "fresh-dev", "cluster_id": CURRENT,
-                                  "authority_machine": "local"})]
+    assert remote.renew("worker")["id"] == "worker"
+    assert requests == [("renew", {"agent_token": token, "cluster": "fresh-dev", "cluster_id": CURRENT})]
     assert tokens.load(remote.base, "worker") == token
 
 
@@ -181,10 +179,10 @@ def test_bind_renews_saved_scope_and_persists_current_cluster(tmp_path, monkeypa
     monkeypatch.setattr(project_connection, "selected", lambda path: prior)
     events = []
     remote = SimpleNamespace(host=prior["host"], project_id=PROJECT, cluster_key="", cluster_id=CURRENT,
-                             mode="dev", authority_machine="local", token=lambda **kw: "existing")
-    remote.renew = lambda agent, authority: events.append((agent, authority))
+                             mode="dev", token=lambda **kw: "existing")
+    remote.renew = lambda agent: events.append(agent)
     remote.call = lambda *a: {"id": "worker", "role": "agent", "project": {"key": PROJECT, "cluster_id": CURRENT}}
     made = project_connection.bind(remote, root, "worker", "fresh-dev", local_agent="local-worker")
-    assert events == [("worker", "local")]
+    assert events == ["worker"]
     assert made["cluster_id"] == CURRENT
     assert project_connection._saved()[str(root)]["cluster_id"] == CURRENT

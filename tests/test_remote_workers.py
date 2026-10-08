@@ -62,10 +62,12 @@ def devices(tmp_path, monkeypatch):
     monkeypatch.setattr('ml_stack.home.machine_id', lambda: remote_workers.home.device_id())
     monkeypatch.setattr(guide.coordinator_bootstrap, 'ensure_host', lambda *args: None)
     roots, servers, runners, peers, spawned = {}, [], [], [], []
-    project = SimpleNamespace(name='sample', authority_machine='device-a', board_host='', root='')
+    project = SimpleNamespace(name='sample', board_host='', root='')
     class Projects:
         def __init__(self, machine):
             self.machine = machine
+        def hosts(self, board_host):
+            return bool(board_host) and board_host == project.board_host and self.machine == 'device-a'
         def get(self, ident):
             if ident != PROJECT:
                 raise ValueError('unknown project')
@@ -106,7 +108,7 @@ def devices(tmp_path, monkeypatch):
         monkeypatch.setattr(remote_workers.jobs, 'detach', lambda module, args, **kwargs:
                             spawned.append((module, args, kwargs)) or SimpleNamespace(pid=0, log=kwargs['log']))
         caller = actual_remote(peers[0].base_url, PROJECT, cluster=CLUSTER)
-        enrolled = caller.enroll('test-caller', model='test-runtime', harness='test-harness', authority_machine='device-a')
+        enrolled = caller.enroll('test-caller', model='test-runtime', harness='test-harness')
         caller_token = tokens.load(caller.base, enrolled['id'])
         target = actual_remote(peers[1].base_url, PROJECT, cluster=CLUSTER)
         body = {'agent_token': caller_token, 'cluster': CLUSTER, 'cluster_id': CLUSTER_ID,
@@ -364,7 +366,7 @@ def test_live_board_worker_refreshes_tls_transport_and_sidecar_after_rekey(devic
     old_token = worker.token
     cluster_id = _rotate_cluster(devices, group)
     current = RemoteWorkspace(devices.caller.host, PROJECT, cluster=group)
-    current.renew('test-caller', 'device-a')
+    current.renew('test-caller')
     current.call('send', devices.token, result['identity'], 'question', 'Report after the cluster refresh')
     rows = worker.wait(old_token, 0, raw=True)
     assert any('cluster refresh' in row['raw'] for row in rows)
@@ -422,7 +424,6 @@ def test_self_lan_authority_uses_the_signed_loopback_certificate(devices, monkey
     lan_host = f'https://{discovery.primary_ip()}:{authority_peer.beacon.port}'
     state.project.board_host = lan_host
     caller = RemoteWorkspace(lan_host, PROJECT, cluster=CLUSTER)
-    assert caller.authority_machine == 'device-a'
     assert caller.device_cert == authority_peer.beacon.cert
     assert caller.call('whoami', state.token)['id'] == 'test-caller'
     result = caller._request('worker', state.body)

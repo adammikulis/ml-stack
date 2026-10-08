@@ -17,12 +17,12 @@ SCOPE = {"key": PROJECT, "name": "fixture-project", "cluster": "dev", "cluster_i
 
 @pytest.fixture
 def enrollment(tmp_path):
-    project = SimpleNamespace(id=PROJECT, root=str(tmp_path), name="fixture-project", authority_machine="local", board_host="https://127.0.0.1:8770")
-    projects = SimpleNamespace(machine="local", get=lambda identifier: project,
+    project = SimpleNamespace(id=PROJECT, root=str(tmp_path), name="fixture-project", board_host="https://127.0.0.1:8770")
+    projects = SimpleNamespace(machine="local", hosts=lambda host: host == "https://127.0.0.1:8770", get=lambda identifier: project,
                                workspace_base=lambda identifier: tmp_path / identifier)
     host = WorkspaceHost(projects)
     body = {"name": "worker", "model": "gpt-6", "harness": "codex",
-            "cluster": "dev", "cluster_id": "c" * 64, "authority_machine": "local"}
+            "cluster": "dev", "cluster_id": "c" * 64}
     return host, project, body
 
 
@@ -49,7 +49,7 @@ def test_enrollment_bootstraps_only_project_agents_and_places_board(enrollment):
     assert not (ws.base / "tokens" / ".owner").exists()
 
 
-@pytest.mark.parametrize("field,value", [("cluster", "prod"), ("authority_machine", "foreign"),
+@pytest.mark.parametrize("field,value", [("cluster", "prod"),
                                           ("model", "bad model"), ("harness", "bad harness"),
                                           ("name", "owner")])
 def test_enrollment_rejects_invalid_claims(enrollment, field, value):
@@ -61,9 +61,9 @@ def test_enrollment_rejects_invalid_claims(enrollment, field, value):
 
 def test_foreign_authority_is_not_reassigned(enrollment):
     host, project, body = enrollment
-    project.authority_machine = "foreign"
+    project.board_host = "https://foreign:8770"
     assert host.enroll(PROJECT, body, cluster="dev", cluster_id="c" * 64)[0] == 403
-    assert project.authority_machine == "foreign"
+    assert project.board_host == "https://foreign:8770"
 
 
 def test_enrollment_rate_is_shared_across_claimed_names(enrollment):
@@ -250,3 +250,23 @@ def test_canonical_task_client_claim_maps_only_existing_allocation_and_refuses_i
     with pytest.raises(Denied, match="unavailable"):
         remote_task_client.command(remote, "private-agent-capability", args)
     assert len(calls) == 1
+
+
+def test_new_agent_id_enrolls_without_a_prior_selection(enrollment):
+    host, _, body = enrollment
+    code, issued = host.enroll(PROJECT, {**body, "name": "claude", "harness": "claude-code"},
+                               cluster="dev", cluster_id="c" * 64)
+    assert code == 201, issued
+    assert issued["id"].startswith("claude")
+    assert host.workspace(PROJECT).registry.info(issued["id"])["role"] == AGENT
+
+
+@pytest.mark.redteam
+def test_board_hosted_elsewhere_refuses_enrollment_and_renewal(enrollment):
+    host, project, body = enrollment
+    code, issued = host.enroll(PROJECT, body, cluster="dev", cluster_id="c" * 64)
+    assert code == 201, issued
+    project.board_host = "https://foreign:8770"
+    assert host.enroll(PROJECT, body, cluster="dev", cluster_id="c" * 64)[0] == 403
+    renewal = {"agent_token": issued["token"], "cluster": "dev", "cluster_id": "c" * 64}
+    assert host.renew(PROJECT, renewal, cluster="dev", cluster_id="c" * 64)[0] == 403

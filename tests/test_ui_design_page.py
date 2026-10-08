@@ -14,7 +14,7 @@ pytestmark = pytest.mark.slow
 def project_response(path, state):
     if path == "/ui/projects":
         return {"projects": [{"id": "project-a", "name": "Shared app", "peer": "mac-test",
-                              "authority_machine": "mac-authority", "state": "shared"}],
+                              "board_host": "mac-authority", "state": "shared"}],
                 "candidates": [{"id": "local-a", "name": "Local app"}],
                 "devices": [{"name": "old-device", "state": "upgrade_required"}]}
     if path.endswith("/board"):

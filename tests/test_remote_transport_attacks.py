@@ -135,12 +135,12 @@ def test_project_source_requires_authenticated_sealed_response(monkeypatch, head
 
 
 @pytest.mark.parametrize("override", [{"source_hash": "../../escape"}, {"archive_sha256": "wrong"},
-    {"id": "../../etc"}, {"name": []}, {"source_machine": {}}, {"authority_machine": []},
+    {"id": "../../etc"}, {"name": []}, {"source_machine": {}}, {"board_host": []},
     {"board_host": "http://8.8.8.8"}, {"board_host": "http://user:secret@127.0.0.1"},
     {"files": True}, {"files": 10001}, {"size_bytes": -1}, {"size_bytes": "128"}])
 def test_project_catalogue_schema_is_checked_before_snapshot_url(monkeypatch, override):
     project = {"id": "a" * 32, "name": "App", "source_machine": "source-a",
-               "authority_machine": "", "board_host": "", "source_hash": "b" * 64,
+               "board_host": "", "source_hash": "b" * 64,
                "archive_sha256": "c" * 64, "size_bytes": 10, "files": 1, **override}
     monkeypatch.setattr(project_client, "read", lambda *_args, **_kwargs: json.dumps({"machine": "source-a", "projects": [project]}).encode())
     with pytest.raises((project_client.ProjectError, OSError)):

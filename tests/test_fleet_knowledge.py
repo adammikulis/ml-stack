@@ -180,9 +180,9 @@ def test_registered_project_graph_requires_local_person(daemon, tmp_path):
     base = tmp_path / 'projects'
     base.mkdir()
     project = Project(id=project_id, name='Experiment', root=str(tmp_path / 'checkout'),
-                      source_machine='local', authority_machine='local')
+                      source_machine='local', board_host='https://local:8770')
     (base / 'projects.json').write_text(json.dumps({'projects': [asdict(project)]}))
-    daemon.ui.projects = ProjectRegistry(base, 'local')
+    daemon.ui.projects = ProjectRegistry(base, 'local', host='https://local:8770')
     workspace = daemon.ui.projects.workspace_base(project_id)
     workspace.mkdir(parents=True)
     with GraphStore(workspace / 'coordination.db') as graph:

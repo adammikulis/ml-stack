@@ -331,7 +331,9 @@ def host(tmp_path):
         def get(self, project_id):
             if project_id not in {PROJECT, OTHER}:
                 raise ValueError("unknown project")
-            return SimpleNamespace(name="ml-stack")
+            return SimpleNamespace(name="ml-stack", board_host="https://board.invalid:8770")
+        def hosts(self, board_host):
+            return board_host == "https://board.invalid:8770"
         def workspace_base(self, project_id):
             self.get(project_id)
             return tmp_path / project_id
@@ -566,9 +568,8 @@ def test_source_publication_does_not_initialize_board_and_explicit_invite_select
     status = host.status(project.id)
     assert status["state"] == "unconfigured"
     assert not (registry.root / "shared-workspaces").exists()
-    assert not project.authority_machine
+    assert not project.board_host
     host.invite(project.id)
-    assert project.authority_machine == "pc"
     assert project.board_host == "https://192.168.2.59:8770"
     assert host.status(project.id)["state"] == "awaiting_agents"
 
@@ -576,12 +577,12 @@ def test_source_publication_does_not_initialize_board_and_explicit_invite_select
 def test_foreign_canonical_authority_cannot_be_replaced_by_local_invite(repository, tmp_path):  # noqa: F811
     registry = ProjectRegistry(tmp_path / "daemon", "pc", (repository,), host="https://192.168.2.59:8770")
     project = registry.share(registry.candidates()[0]["id"], "ml-stack")
-    project.authority_machine, project.board_host = "mac", "https://192.168.2.27:8770"
+    project.board_host = "https://192.168.2.27:8770"
     host = WorkspaceHost(registry)
     assert host.status(project.id)["state"] == "connection_required"
-    with pytest.raises(ValueError, match="another workspace authority"):
+    with pytest.raises(ValueError, match="another workspace address"):
         host.invite(project.id)
-    assert project.authority_machine == "mac"
+    assert project.board_host == "https://192.168.2.27:8770"
 
 
 @pytest.mark.parametrize('action', ['join', 'enroll'])
@@ -598,7 +599,7 @@ def test_fresh_remote_capability_storage_is_private_before_request(tmp_path, mon
         return {'id': 'worker', 'token': 'mlws1.worker.fixture', 'project_id': PROJECT}
     monkeypatch.setattr(remote, '_request', request)
     result = (remote.join('invitation', 'worker') if action == 'join' else
-              remote.enroll('worker', model='fixture', harness='codex', authority_machine='fixture'))
+              remote.enroll('worker', model='fixture', harness='codex'))
     path = tokens.directory(remote.base) / 'worker'
     assert tokens.problem(path) == ''
     if remote_module.os.name != 'nt':
@@ -630,7 +631,7 @@ def test_remote_capability_request_refuses_unsafe_existing_storage(tmp_path, mon
         if action == 'join':
             remote.join('invitation', 'worker')
         else:
-            remote.enroll('worker', model='fixture', harness='codex', authority_machine='fixture')
+            remote.enroll('worker', model='fixture', harness='codex')
     assert not (tokens.directory(remote.base) / 'worker').exists()
     if unsafe == 'base-symlink':
         assert remote.base.is_symlink()

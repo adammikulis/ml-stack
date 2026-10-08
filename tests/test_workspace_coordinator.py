@@ -63,10 +63,10 @@ def shared(tmp_path, monkeypatch, installed_metadata):
     git.run(['init', str(kit.project_dir)])
     git.run(['remote', 'add', 'origin', 'https://example.invalid/shared-project.git'], cwd=kit.project_dir)
     kit.project_scope = {'key': projects.identity(kit.project_dir), 'name': 'shared-project'}
-    hosted = projects.ProjectRegistry(tmp_path / 'projects', 'coordinator-device')
+    hosted = projects.ProjectRegistry(tmp_path / 'projects', 'coordinator-device', host='https://coordinator:8770')
     hosted._projects[kit.project_scope['key']] = projects.Project(
         id=kit.project_scope['key'], name=kit.project_scope['name'], root=str(kit.project_dir),
-        source_machine=hosted.machine, authority_machine=hosted.machine, shared=True)
+        source_machine=hosted.machine, board_host=hosted.host, shared=True)
     hosted._save()
     device = Device('d' * 64, 'paired-device', 'paired-host', '127.0.0.1', 1,
                     mine=True, secret=base64.urlsafe_b64encode(b'd' * 32).decode())

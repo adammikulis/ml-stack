@@ -109,7 +109,8 @@ def test_auto_discovery_selects_only_the_project_authority(monkeypatch):
     monkeypatch.setattr(discovery, "memberships", lambda: [member])
     monkeypatch.setattr(remote.Peer, "discover", classmethod(lambda cls, **kwargs: [host, source]))
     monkeypatch.setattr(project_client, "catalogue", lambda peer: {"projects": [
-        {"id": PROJECT, "authority_machine": "authority-machine"}]})
+        {"id": PROJECT, "board_host": host.base_url}]})
+    monkeypatch.setattr(remote, "device_address", lambda peer, declared: peer.base_url == declared)
     assert connection._find_authority(PROJECT) == ("home", host.base_url)
 
 
@@ -120,7 +121,7 @@ def test_auto_discovery_refuses_conflicting_project_authorities(monkeypatch):
     monkeypatch.setattr(discovery, "memberships", lambda: [member])
     monkeypatch.setattr(remote.Peer, "discover", classmethod(lambda cls, **kwargs: hosts))
     monkeypatch.setattr(project_client, "catalogue", lambda peer: {"projects": [
-        {"id": PROJECT, "authority_machine": peer.beacon.machine}]})
+        {"id": PROJECT, "board_host": peer.base_url}]})
     with pytest.raises(Denied, match="conflicting workspace authorities"):
         connection._find_authority(PROJECT)
 

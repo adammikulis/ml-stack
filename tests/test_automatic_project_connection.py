@@ -14,10 +14,10 @@ from ml_stack.workspace.identity import Denied
 PROJECT = "a" * 32
 
 
-def peer(machine, authority="", host=""):
+def peer(machine, host=""):
     address = f"https://{machine}:8770"
     row = {"id": PROJECT, "name": "sample", "machine": machine,
-           "authority_machine": authority, "board_host": host}
+           "board_host": host}
     return SimpleNamespace(base_url=address, beacon=SimpleNamespace(machine=machine, cert="fixture"),
                            document={"machine": machine, "boards": [row]})
 
@@ -40,33 +40,32 @@ def test_unconfigured_boards_choose_one_stable_device(found, tmp_path):
     found.extend([peer("node-b"), peer("node-a")])
     result = automatic.discover(tmp_path)
     assert result["host"] == "https://node-a:8770"
-    assert result["authority_machine"] == "node-a"
     found.reverse()
     assert automatic.discover(tmp_path) == result
 
 
 def test_existing_authority_is_preserved(found, tmp_path):
-    found.extend([peer("node-a"), peer("node-b", "node-b", "https://node-b:8770")])
-    assert automatic.discover(tmp_path)["authority_machine"] == "node-b"
+    found.extend([peer("node-a"), peer("node-b", "https://node-b:8770")])
+    assert automatic.discover(tmp_path)["host"] == "https://node-b:8770"
 
 
 @pytest.mark.redteam
 def test_competing_authorities_are_refused(found, tmp_path):
-    found.extend([peer("node-a", "node-a", "https://node-a:8770"),
-                  peer("node-b", "node-b", "https://node-b:8770")])
+    found.extend([peer("node-a", "https://node-a:8770"),
+                  peer("node-b", "https://node-b:8770")])
     with pytest.raises(Denied, match="competing"):
         automatic.discover(tmp_path)
 
 
 @pytest.mark.redteam
 def test_advertised_authority_address_requires_matching_authenticated_peer(found, tmp_path):
-    found.append(peer("node-a", "node-a", "https://node-b:8770"))
+    found.append(peer("node-a", "https://node-b:8770"))
     with pytest.raises(Denied, match="address"):
         automatic.discover(tmp_path)
 
 
 def test_local_authority_accepts_its_lan_origin_from_loopback_discovery(found, tmp_path, monkeypatch):
-    node = peer("node-a", "node-a", "https://192.168.40.2:8770")
+    node = peer("node-a", "https://192.168.40.2:8770")
     node.base_url = "https://127.0.0.1:8770"
     found.append(node)
     monkeypatch.setattr(fleet_remote, "primary_ip", lambda: "192.168.40.2")
@@ -77,7 +76,7 @@ def test_local_authority_accepts_its_lan_origin_from_loopback_discovery(found, t
                                     "http://192.168.40.2:8770", "https://192.168.40.2:8770/other",
                                     "https://user@192.168.40.2:8770"])
 def test_local_origin_alias_requires_same_device_and_tls_port(found, tmp_path, monkeypatch, origin):
-    node = peer("node-a", "node-a", origin)
+    node = peer("node-a", origin)
     node.base_url = "https://127.0.0.1:8770"
     found.append(node)
     monkeypatch.setattr(fleet_remote, "primary_ip", lambda: "192.168.40.2")
@@ -102,8 +101,8 @@ def test_prod_does_not_discover_automatic_boards(found, tmp_path, monkeypatch):
 
 
 def test_missing_selected_authority_does_not_elect_replacement(found, tmp_path):
-    found.append(peer("node-a", "node-b", "https://node-b:8770"))
-    with pytest.raises(Denied, match="unavailable"):
+    found.append(peer("node-a", "https://node-b:8770"))
+    with pytest.raises(Denied, match="exactly one"):
         automatic.discover(tmp_path)
 
 
@@ -122,8 +121,7 @@ def test_enrollment_binds_returned_agent_identity(found, tmp_path, monkeypatch):
         "host": remote.host, "agent": agent, "cluster": cluster})
     result = automatic.connect(tmp_path, "worker", claim=("test-model", "codex"))
     assert result["agent"] == "worker-1"
-    assert events == [("worker", {"model": "test-model", "harness": "codex",
-                                  "authority_machine": "node-a"})]
+    assert events == [("worker", {"model": "test-model", "harness": "codex"})]
 
 
 @pytest.mark.redteam
@@ -151,8 +149,8 @@ def startup_remote(found, tmp_path, monkeypatch):
     class Remote:
         def __init__(self, host, project, **kwargs):
             self.host, self.project_id, self.base = host, project, tmp_path / "private"
-        def enroll(self, name, *, model, harness, authority_machine):
-            events.append(("enroll", name, model, harness, authority_machine))
+        def enroll(self, name, *, model, harness):
+            events.append(("enroll", name, model, harness))
             return {"id": "native-parent"}
         def delegate(self, parent, name):
             events.append(("delegate", parent, name))
@@ -173,7 +171,7 @@ def test_native_person_start_creates_durable_parent_and_revocable_child(startup_
     assert seat.name == "native-parent/worker"
     assert seat.remote is not None
     assert seat.lifecycle_base == seat.remote.base
-    assert startup_remote == [("enroll", "native-worker", "test-model", "codex", "node-a"),
+    assert startup_remote == [("enroll", "native-worker", "test-model", "codex"),
                               ("bind", "native-parent"),
                               ("delegate", "native-parent", "worker")]
 
@@ -245,3 +243,21 @@ def test_secondary_dev_membership_cannot_override_active_prod(monkeypatch):
         SimpleNamespace(group='production', mode='prod'), SimpleNamespace(group='development', mode='dev')])
     assert not automatic._active_dev({'cluster': 'development'})
     assert not automatic._active_dev({'cluster': 'production'})
+
+
+@pytest.mark.parametrize("stored", [{}, {"authority_machine": "retired-device"}])
+def test_saved_selection_without_an_authority_machine_attaches(tmp_path, monkeypatch, stored):
+    selection = {"host": "https://node-a:8770", "project_id": PROJECT, "agent": "",
+                 "cluster": "development", "cluster_key": "", **stored}
+    monkeypatch.setattr(automatic, "selected", lambda root: selection)
+    events = []
+    class Remote:
+        def __init__(self, host, project, **kwargs):
+            self.host, self.project_id = host, project
+        def enroll(self, name, **kwargs):
+            events.append((name, kwargs))
+            return {"id": name}
+    monkeypatch.setattr(automatic, "RemoteWorkspace", Remote)
+    monkeypatch.setattr(automatic, "bind", lambda remote, root, agent, cluster, **kwargs: {"agent": agent})
+    assert automatic.attach(tmp_path, "claude", selection) == {"agent": "claude"}
+    assert events == [("claude", {"model": "", "harness": ""})]

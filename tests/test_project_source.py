@@ -108,9 +108,9 @@ def test_checkout_uses_verified_blobs_without_filters(repository, tmp_path):
     git.run(["add", "--", ".gitattributes"], cwd=repository)
     manifest, packed = source.build(repository, IDENTIFIER)
     result = source.checkout(packed, IDENTIFIER, manifest["source_hash"], tmp_path / "checkout",
-                             authority={"machine": "pc", "host": "https://pc:8770"})
+                             authority={"host": "https://pc:8770"})
     assert (result / "run.sh").read_bytes() == b"#!/bin/sh\necho hello\n"
-    assert read_json(result / ".ml-stack-project.json", {})["authority"]["machine"] == "pc"
+    assert read_json(result / ".ml-stack-project.json", {})["authority"]["host"] == "https://pc:8770"
     assert git.run(["status", "--porcelain"], cwd=result).stdout.strip() == "?? .ml-stack-project.json"
 
 
@@ -119,7 +119,7 @@ def test_registry_requires_explicit_selection_and_unshare_closes_source(reposito
     with pytest.raises(source.ProjectError):
         registry.share(str(repository))
     project = registry.share(registry.candidates()[0]["id"])
-    assert project.authority_machine == ""
+    assert project.board_host == ""
     with pytest.raises(source.ProjectError):
         registry.workspace_base(project.id)
     registry.claim_authority(project.id)
@@ -132,10 +132,10 @@ def test_registry_requires_explicit_selection_and_unshare_closes_source(reposito
 
 def test_remote_checkout_cannot_create_another_authority(repository, tmp_path):
     write_json(repository / ".ml-stack-project.json", {"kind": "project-checkout", "project_id": IDENTIFIER,
-                                                        "authority": {"machine": "other"}})
-    registry = ProjectRegistry(tmp_path / "daemon", "pc", (repository,))
+                                                        "authority": {"host": "https://other:8770"}})
+    registry = ProjectRegistry(tmp_path / "daemon", "pc", (repository,), "https://pc:8770")
     project = registry.share(registry.candidates()[0]["id"])
-    with pytest.raises(source.ProjectError, match="authority"):
+    with pytest.raises(source.ProjectError, match="another workspace address"):
         registry.claim_authority(project.id)
 
 

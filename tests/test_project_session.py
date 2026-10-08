@@ -47,7 +47,7 @@ def sessions(tmp_path, monkeypatch):
             return {"id": name}
     remote = Remote()
     project_connection.bind(remote, root, "legacy-agent", "development")
-    choice = {"host": remote.host, "project_id": PROJECT, "authority_machine": "fixture-device",
+    choice = {"host": remote.host, "project_id": PROJECT,
               "cluster": "development", "root": str(root), "automatic": True, "agent": ""}
     local = SimpleNamespace(registry=SimpleNamespace(info=lambda actor: {"model": "fixture-model", "harness": "codex"}))
     monkeypatch.setattr(cli, "Workspace", lambda: local)

@@ -43,7 +43,7 @@ def bind(remote: RemoteWorkspace, root: Path, agent: str, cluster: str = "", **o
             and prior["project_id"] == remote.project_id and getattr(remote, "mode", "prod") == "dev"
             and (prior.get("cluster_id") or prior.get("local_agent"))
             and prior.get("cluster_id") != remote.cluster_id):
-        remote.renew(agent, remote.authority_machine)
+        remote.renew(agent)
     who = remote.call("whoami", agent_token or remote.token(agent=agent))
     if agent_token and who.get("id") != agent:
         raise Denied("the saved project capability belongs to another agent")
@@ -145,13 +145,13 @@ def _find_authority(project_id: str) -> tuple[str, str] | None:
             except (OSError, ValueError, ServerError):
                 continue
             published.extend(row for row in rows if row["id"] == project_id)
-        authorities = {row["authority_machine"] for row in published if row["authority_machine"]}
-        if len(authorities) > 1:
+        boards = {row["board_host"] for row in published if row["board_host"]}
+        if len(boards) > 1:
             raise Denied("this project has conflicting workspace authorities on the network")
-        if not authorities:
+        if not boards:
             continue
-        authority = next(iter(authorities))
-        hosts = [peer for peer in peers if peer.beacon and peer.beacon.machine == authority]
+        board = next(iter(boards))
+        hosts = [peer for peer in peers if remote.device_address(peer, board)]
         if len(hosts) != 1:
             raise Denied("the project's workspace authority is missing or ambiguous on this network")
         candidates.append((member.group, hosts[0].base_url))

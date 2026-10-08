@@ -29,15 +29,15 @@ class ProjectBoardRoutes:
                 return True
             if match[2] == "tasks":
                 project = projects.get(match[1])
-                if project.authority_machine != projects.machine or not project.board_host:
+                if not projects.hosts(project.board_host):
                     self.send(409, {"error": "Open Tasks on this project's authoritative device.",
-                                    "authority_machine": project.authority_machine})
+                                    "board_host": project.board_host})
                     return True
                 return host.person_tasks(self, match[1],
                                          project={"key": match[1], "name": project.name})
             if match[2].startswith("board/"):
                 project = projects.get(match[1])
-                if project.authority_machine != projects.machine or not project.board_host:
+                if not projects.hosts(project.board_host):
                     self.send(409, {"error": "open the Board on this project's authoritative device"})
                     return True
                 return host.person_board(self, match[1])
@@ -45,7 +45,7 @@ class ProjectBoardRoutes:
                 self.send(200, host.status(match[1]))
             elif match[2] == "invite" and self.method == "POST":
                 project = projects.get(match[1])
-                if project.authority_machine not in {"", projects.machine}:
+                if project.board_host and not projects.hosts(project.board_host):
                     raise ValueError("Create agent access on the project's authority device")
                 network_host = lan_host(self.ui.peer_port)
                 if not network_host:
@@ -53,7 +53,6 @@ class ProjectBoardRoutes:
                 req = self.body()
                 made = host.invite(match[1], str(req.get("hint") or ""), int(req.get("uses") or 1))
                 made["host"] = network_host
-                made["authority_machine"] = projects.get(match[1]).authority_machine
                 groups = [member.group for member in memberships(self.ui.cluster_key_path)]
                 selected_cluster = groups[0] if len(groups) == 1 else "CLUSTER"
                 made["command"] = (f"ml-stack-workspace remote join {made['code']} --name NAME "

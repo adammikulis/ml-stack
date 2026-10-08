@@ -33,13 +33,13 @@ def canonical(tmp_path):
         agent = ws.mint(owner, "demo-worker")
         ws.send(agent, "#general", "note", ident)
         workspaces[ident] = ws
-    projects = {ident: SimpleNamespace(name="fixture", authority_machine="local", board_host="http://127.0.0.1:8770")
+    projects = {ident: SimpleNamespace(name="fixture", board_host="http://127.0.0.1:8770")
                 for ident in workspaces}
     def get(ident):
         if ident not in projects:
             raise ValueError("Project is not registered here")
         return projects[ident]
-    registry = SimpleNamespace(machine="local", get=get,
+    registry = SimpleNamespace(machine="local", hosts=lambda host: host == "http://127.0.0.1:8770", get=get,
                                workspace_base=lambda ident: workspaces[ident].base)
     sessions = Sessions()
     session = sessions.open("fixture-person")
@@ -93,9 +93,8 @@ def test_canonical_person_board_rejects_foreign_requests(canonical, kwargs):
 def test_missing_remote_or_unconfigured_project_never_falls_back(canonical):
     call, _, projects = canonical
     assert call("boards", project="c" * 32)[0] == 409
-    projects[PROJECT].authority_machine = "foreign"
+    projects[PROJECT].board_host = "http://foreign:8770"
     assert call("boards")[0] == 409
-    projects[PROJECT].authority_machine = "local"
     projects[PROJECT].board_host = ""
     assert call("boards")[0] == 409
 

@@ -51,14 +51,12 @@ class RemoteWorkspace:
         self.cluster_id = hashlib.sha256(key).hexdigest()
         self.fleet_token = derive_token(key)
         self.device_cert = ""
-        self.authority_machine = ""
         if parts.scheme == "https":
             peers = Peer.discover(key=key, timeout_s=2)
             matched = [peer for peer in peers if device_address(peer, self.host)]
             if len(matched) != 1:
                 raise Denied("the project host was not authenticated by cluster discovery; check its address and cluster")
             self.device_cert = matched[0].beacon.cert if matched[0].beacon else ""
-            self.authority_machine = getattr(matched[0].beacon, "machine", "")
             if self.device_cert:
                 http.pin(parts.netloc, tls.pinned_context(self.device_cert))
         label = hashlib.sha256(f"{self.host}/{project_id}".encode()).hexdigest()
@@ -103,12 +101,12 @@ class RemoteWorkspace:
         return {"id": name, "project_id": self.project_id, "host": self.host,
                 "token_file": str(path), "state": "connected"}
 
-    def enroll(self, name: str, *, model: str, harness: str, authority_machine: str) -> dict:
+    def enroll(self, name: str, *, model: str, harness: str) -> dict:
         """Save a newly issued private Dev project agent capability."""
         self._prepare_storage()
         result = self._request("enroll", {"name": name, "model": model,
                                           "harness": harness, "cluster": self.cluster, "cluster_id": self.cluster_id,
-                                          "authority_machine": authority_machine, "device": device_metadata.current()})
+                                          "device": device_metadata.current()})
         name, token = str(result["id"]), str(result["token"])
         if result.get("project_id") != self.project_id:
             raise Denied("agent enrollment returned another project")
@@ -116,10 +114,9 @@ class RemoteWorkspace:
         return {"id": name, "project_id": self.project_id, "host": self.host,
                 "token_file": str(path), "state": "connected"}
 
-    def renew(self, agent: str, authority_machine: str) -> dict:
+    def renew(self, agent: str) -> dict:
         """Renew the existing private automatic capability for the current Dev cluster."""
-        if (self.mode != "dev" or not self.device_cert or not authority_machine
-                or authority_machine != self.authority_machine):
+        if self.mode != "dev" or not self.device_cert:
             raise Denied("agent renewal requires its authenticated Dev project authority")
         self._prepare_storage()
         lock = self.base / "remote-sessions.lock"
@@ -127,8 +124,7 @@ class RemoteWorkspace:
         with held(lock):
             token = tokens.load(self.base, agent)
             result = self._request("renew", {"agent_token": token, "cluster": self.cluster,
-                                             "cluster_id": self.cluster_id,
-                                             "authority_machine": authority_machine})
+                                             "cluster_id": self.cluster_id})
             if (result.get("id") != agent or result.get("project_id") != self.project_id
                     or result.get("cluster_id") != self.cluster_id):
                 raise Denied("agent renewal returned another identity or project cluster")

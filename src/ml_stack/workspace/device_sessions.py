@@ -14,7 +14,7 @@ def _project(projects, requested):
     if projects is None or type(requested) is not dict or set(requested) - {'key', 'name'}:
         raise Denied('agent registration requires an existing hosted project')
     candidates = [row for row in projects.list()
-                  if row['authority_machine'] == projects.machine
+                  if projects.hosts(row['board_host'])
                   and (row['id'] == requested['key'] if requested.get('key')
                        else row['name'] == requested.get('name'))]
     if len(candidates) != 1:

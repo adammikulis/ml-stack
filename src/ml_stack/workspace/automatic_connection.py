@@ -165,7 +165,7 @@ def _boards(peer, document, project_id):
         if not isinstance(row, dict):
             raise Denied("the project host returned an invalid Board entry")
         for field, maximum in (("id", 32), ("name", 256), ("machine", 256),
-                               ("authority_machine", 256), ("board_host", 2048)):
+                               ("board_host", 2048)):
             value = row.get(field)
             if not isinstance(value, str) or len(value) > maximum:
                 raise Denied("the project host returned an invalid Board entry")
@@ -218,25 +218,21 @@ def discover(root: Path, *, cluster_key=None, cluster="", port=None):
         found.extend(_boards(peer, document, project_id))
     if not found:
         return None
-    authorities = {row["authority_machine"] for _, row in found if row["authority_machine"]}
-    if len(authorities) > 1:
+    declared = {row["board_host"] for _, row in found if row["board_host"]}
+    if len(declared) > 1:
         raise Denied("this project has competing canonical Board authorities")
-    if authorities:
-        authority = next(iter(authorities))
-        hosts = [(peer, row) for peer, row in found if row["machine"] == authority]
+    if declared:
+        board = next(iter(declared))
+        hosts = [(peer, row) for peer, row in found if device_address(peer, board)]
         if len(hosts) != 1:
-            raise Denied("the canonical Board authority is unavailable or ambiguous")
+            raise Denied("the canonical Board address does not match exactly one authenticated device")
         peer, row = hosts[0]
-        declared = {candidate["board_host"] for _, candidate in found
-                    if candidate["authority_machine"] == authority and candidate["board_host"]}
-        if len(declared) != 1 or not device_address(peer, next(iter(declared))):
-            raise Denied("the canonical Board address does not match its authenticated device")
     else:
         peer, row = min(found, key=lambda item: (item[1]["machine"], item[0].base_url))
         if sum(candidate["machine"] == row["machine"] for _, candidate in found) != 1:
             raise Denied("the selected Board device is ambiguous")
     return {"host": peer.base_url, "project_id": project_id,
-            "authority_machine": row["machine"], "cluster": member.group,
+            "cluster": member.group,
             "cluster_key": str(cluster_key) if cluster_key else ""}
 
 
@@ -279,8 +275,7 @@ def _attach(root: Path, name: str, choice: dict, *, claim):
                     local_agent=prior.get("local_agent", ""))
     if not name:
         raise Denied("select your own agent name with --name NAME")
-    joined = remote.enroll(name, model=claim[0], harness=claim[1],
-                           authority_machine=choice["authority_machine"])
+    joined = remote.enroll(name, model=claim[0], harness=claim[1])
     if session and joined["id"] != name and not joined["id"].startswith(name + "-"):
         raise Denied("the shared project Board returned another native session identity")
     return bind(remote, root, joined["id"], choice["cluster"],
@@ -319,8 +314,7 @@ def startup(root: Path, name: str, parent: str = "", *, claim=("", "")) -> Seat 
                     remote=remote, lifecycle_base=remote.base)
     if agent_started or choice is None:
         raise Denied("this native session has no authenticated project parent")
-    made = remote.enroll(f"native-{name}"[:48], model=claim[0], harness=claim[1],
-                         authority_machine=choice["authority_machine"])
+    made = remote.enroll(f"native-{name}"[:48], model=claim[0], harness=claim[1])
     bind(remote, root, made["id"], choice["cluster"])
     child = remote.delegate(made["id"], name)
     return Seat(child["id"], minted=True, base=remote.base,

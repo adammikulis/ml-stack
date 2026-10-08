@@ -105,7 +105,7 @@ def validate_project(project: dict) -> None:
     if not isinstance(project, dict):
         raise ProjectError("Peer returned an invalid project entry")
     for field, length in (("id", 32), ("name", 256), ("source_machine", 256),
-                          ("authority_machine", 256), ("board_host", 2048)):
+                          ("board_host", 2048)):
         value = project.get(field)
         if not isinstance(value, str) or len(value) > length:
             raise ProjectError(f"Invalid project {field}")
@@ -153,12 +153,12 @@ def available(ui) -> dict:
                             "state": "upgrade_required" if getattr(exc, "status", 0) in {404, 501} else "offline",
                             "error": str(exc)})
     for project in projects:
-        authorities = {p["authority_machine"] for p in projects if p["id"] == project["id"] and p["authority_machine"]}
-        if len(authorities) > 1:
+        boards = {p["board_host"] for p in projects if p["id"] == project["id"] and p["board_host"]}
+        if len(boards) > 1:
             project["state"] = "conflict"
     workspaces = [{**board, "is_self": True, "local_authority": True}
                   for board in ui.projects.boards()
-                  if board["authority_machine"] == ui.projects.machine and board["board_host"]] if ui.projects else []
+                  if ui.projects.hosts(board["board_host"])] if ui.projects else []
     return {"projects": projects, "devices": devices, "workspaces": workspaces,
             "candidates": ui.projects.candidates() if ui.projects else [],
             "local": ui.projects.list() if ui.projects else []}
@@ -173,7 +173,7 @@ def receive(peer: Peer, identifier: str, base: Path) -> Path:
     if hashlib.sha256(data).hexdigest() != project["archive_sha256"]:
         raise ProjectError("Project archive digest mismatch")
     return checkout(data, identifier, project["source_hash"], base,
-                    authority={"machine": project["authority_machine"], "host": project.get("board_host", ""),
+                    authority={"host": project.get("board_host", ""),
                                "source_machine": project["source_machine"], "source_host": peer.base_url})
 
 

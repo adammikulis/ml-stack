@@ -118,10 +118,9 @@ def attached_authority(root: Path) -> dict:
     authority = attached.get("authority", {})
     if not isinstance(authority, dict):
         raise source.ProjectError("Project authority metadata is invalid")
-    for key in ("machine", "host"):
-        value = authority.get(key, "")
-        if not isinstance(value, str) or len(value) > 2048 or any(ord(c) < 32 for c in value):
-            raise source.ProjectError("Project authority metadata is invalid")
+    value = authority.get("host", "")
+    if not isinstance(value, str) or len(value) > 2048 or any(ord(c) < 32 for c in value):
+        raise source.ProjectError("Project authority metadata is invalid")
     return authority
 
 
@@ -131,7 +130,6 @@ class Project:
     name: str
     root: str
     source_machine: str
-    authority_machine: str = ""
     board_host: str = ""
     shared: bool = False
     source_hash: str = ""
@@ -158,7 +156,7 @@ class ProjectRegistry:
         self._projects: dict[str, Project] = {}
         stored = read_json(self.path, {})
         for row in stored.get("projects", []):
-            project = Project(**row)
+            project = Project(**{key: value for key, value in row.items() if key in Project.__dataclass_fields__})
             source.project_id(project.id)
             self._projects[project.id] = project
         for path in candidates:
@@ -171,7 +169,7 @@ class ProjectRegistry:
                 if identifier not in self._projects:
                     self._projects[identifier] = Project(
                         id=identifier, name=path.name, root=str(path), source_machine=self.machine,
-                        authority_machine=authority.get("machine", ""), board_host=authority.get("host", ""))
+                        board_host=authority.get("host", ""))
             except (OSError, git.GitFailed, source.ProjectError):
                 continue
 
@@ -191,8 +189,7 @@ class ProjectRegistry:
             project = self._projects.get(identifier)
             if project is None:
                 project = Project(id=identifier, name=canonical.name, root=str(canonical),
-                                  source_machine=self.machine, authority_machine=authority.get("machine", ""),
-                                  board_host=authority.get("host", ""))
+                                  source_machine=self.machine, board_host=authority.get("host", ""))
                 self._projects[identifier] = project
             self._candidates[identifier] = canonical
             self._save()
@@ -231,7 +228,6 @@ class ProjectRegistry:
                               source_machine=self.machine, shared=True, source_hash=manifest["source_hash"],
                               archive_sha256=hashlib.sha256(packed).hexdigest(), size_bytes=manifest["size_bytes"],
                               files=len(manifest["files"]), excluded_files=manifest["excluded_files"],
-                              authority_machine=prior.authority_machine if prior else authority.get("machine", ""),
                               board_host=prior.board_host if prior else authority.get("host", ""))
             target = self._bundle(project)
             with writing(target) as temporary:
@@ -265,23 +261,23 @@ class ProjectRegistry:
 
     def workspace_base(self, identifier: str) -> Path:
         project = self.get(identifier)
-        if project.authority_machine != self.machine:
+        if not self.hosts(project.board_host):
             raise source.ProjectError("Project workspace belongs to another device")
         return self.root / "shared-workspaces" / project.id
 
-    def claim_authority(self, identifier: str, *, expected_machine: str = "") -> Project:
+    def hosts(self, board_host: str) -> bool:
+        """Whether a Board address is this device's workspace address."""
+        return bool(board_host) and board_host == self.host
+
+    def claim_authority(self, identifier: str) -> Project:
         """Select this device as the canonical workspace authority."""
         with self.lock:
             project = self.get(identifier)
-            if expected_machine and expected_machine != self.machine:
-                raise source.ProjectError("Selected workspace device does not match this device")
-            if project.authority_machine and project.authority_machine != self.machine:
-                raise source.ProjectError("Project already has another workspace authority")
             if not self.host:
                 raise source.ProjectError("This device has no reachable workspace address")
             if project.board_host and project.board_host != self.host:
                 raise source.ProjectError("Project already has another workspace address")
-            project.authority_machine, project.board_host = self.machine, self.host
+            project.board_host = self.host
             self._save()
             return project
 
@@ -292,7 +288,7 @@ class ProjectRegistry:
 
     def _board(self, project: Project) -> dict:
         return {"id": project.id, "name": project.name, "machine": self.machine,
-                "authority_machine": project.authority_machine, "board_host": project.board_host}
+                "board_host": project.board_host}
 
     def catalogue(self, *, include_boards: bool = False) -> dict:
         code = bootstrap()

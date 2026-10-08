@@ -56,5 +56,5 @@ def test_canonical_tasks_refuse_foreign_project_metadata_and_agent_owner(canonic
     owner = tokens.read_file(tokens.directory(ws.base) / tokens.OWNER_FILE)
     tokens.store(ws.base, tokens.OWNER_FILE, ws.mint(owner, 'another-worker'))
     assert task_call(canonical)[0] == 403
-    projects[OTHER].authority_machine = 'foreign-device'
+    projects[OTHER].board_host = 'http://foreign:8770'
     assert task_call(canonical, OTHER)[0] == 409

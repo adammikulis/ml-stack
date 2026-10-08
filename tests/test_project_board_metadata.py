@@ -27,13 +27,13 @@ def test_metadata_registration_never_exports_source(repository, tmp_path, monkey
     assert registry.list() == []
     assert registry.catalogue()["boards"] == []
     assert registry.catalogue(include_boards=True)["boards"] == [{"id": identifier, "name": "project", "machine": "device",
-                                                "authority_machine": "", "board_host": ""}]
+                                                "board_host": ""}]
     assert not (tmp_path / "registry" / "project-bundles").exists()
     with pytest.raises(source.ProjectError, match="not shared"):
         registry.snapshot(identifier, "")
     with pytest.raises(source.ProjectError, match="another device"):
         registry.workspace_base(identifier)
-    registry.claim_authority(identifier, expected_machine="device")
+    registry.claim_authority(identifier)
     assert registry.workspace_base(identifier).name == identifier
     loaded = ProjectRegistry(tmp_path / "registry", "device", host="https://device:8770")
     assert loaded.get(identifier).board_host == "https://device:8770"
@@ -51,25 +51,23 @@ def test_same_git_origin_has_same_board_identity(repository, tmp_path):
 
 
 @pytest.mark.redteam
-@pytest.mark.parametrize("authority, expected, error", [
-    ({}, "foreign", "does not match"),
-    ({"machine": "foreign", "host": "https://foreign:8770"}, "device", "another workspace authority"),
-    ({"machine": "device", "host": "https://old:8770"}, "device", "another workspace address"),
+@pytest.mark.parametrize("authority, error", [
+    ({"host": "https://foreign:8770"}, "another workspace address"),
+    ({"host": "https://old:8770"}, "another workspace address"),
 ])
-def test_authority_claim_refuses_device_or_host_remapping(repository, tmp_path, authority, expected, error):
+def test_authority_claim_refuses_host_remapping(repository, tmp_path, authority, error):
     identifier = identity(repository)
     write_json(repository / ".ml-stack-project.json", {"kind": "project-checkout", "project_id": identifier,
                                                         "authority": authority})
     registry = ProjectRegistry(tmp_path / "registry", "device", (repository,), "https://device:8770")
     with pytest.raises(source.ProjectError, match=error):
-        registry.claim_authority(identifier, expected_machine=expected)
+        registry.claim_authority(identifier)
     project = registry.get(identifier)
-    assert project.authority_machine == authority.get("machine", "")
     assert project.board_host == authority.get("host", "")
 
 
 @pytest.mark.redteam
-@pytest.mark.parametrize("authority", [[], {"machine": []}, {"host": "x" * 2049}, {"host": "bad\naddress"}])
+@pytest.mark.parametrize("authority", [[], {"host": "x" * 2049}, {"host": "bad\naddress"}])
 def test_malformed_checkout_authority_is_not_registered(repository, tmp_path, authority):
     write_json(repository / ".ml-stack-project.json", {"kind": "project-checkout",
                                                         "project_id": identity(repository),
@@ -107,14 +105,14 @@ def test_register_native_project_is_metadata_only_and_persistent(repository, tmp
     identifier = identity(repository)
     registry = ProjectRegistry(tmp_path / "registry", "device", host="https://device:8770")
     assert registry.register(nested, identifier) == {"id": identifier, "name": "project", "machine": "device",
-                                                      "authority_machine": "", "board_host": ""}
+                                                      "board_host": ""}
     assert registry.get(identifier).root == str(repository)
     assert registry.list() == []
     assert not (registry.root / "project-bundles").exists()
     with pytest.raises(source.ProjectError, match="not shared"):
         registry.snapshot(identifier, "")
-    registry.claim_authority(identifier, expected_machine="device")
-    assert registry.register(repository, identifier)["authority_machine"] == "device"
+    registry.claim_authority(identifier)
+    assert registry.register(repository, identifier)["board_host"] == "https://device:8770"
     loaded = ProjectRegistry(registry.root, "device")
     assert loaded.get(identifier).board_host == "https://device:8770"
     assert loaded.list() == []
@@ -141,18 +139,17 @@ def test_native_registration_refuses_unbounded_or_relative_path(tmp_path, root):
 
 
 @pytest.mark.parametrize('configuration', [
-    ('device', 'https://device:8770', True),
-    ('foreign', 'https://foreign:8770', False),
-    ('', '', False),
-    ('device', '', False),
+    ('https://device:8770', True),
+    ('https://foreign:8770', False),
+    ('', False),
 ])
 def test_person_workspace_catalogue_includes_unshared_local_authority_only(repository, tmp_path, monkeypatch,
                                                                           configuration):
-    authority, host, visible = configuration
+    host, visible = configuration
     registry = ProjectRegistry(tmp_path / 'registry', 'device', (repository,), 'https://device:8770')
     identifier = identity(repository)
     registered = registry.get(identifier)
-    registered.authority_machine, registered.board_host = authority, host
+    registered.board_host = host
     monkeypatch.setattr(project_client, 'peers', lambda ui: [])
     monkeypatch.setattr(source, 'build', lambda *args: pytest.fail('workspace catalogue published source'))
     result = project_client.available(SimpleNamespace(projects=registry))
@@ -162,7 +159,19 @@ def test_person_workspace_catalogue_includes_unshared_local_authority_only(repos
     assert registry.catalogue()['boards'] == []
     assert result['workspaces'] == ([{
         'id': identifier, 'name': 'project', 'machine': 'device',
-        'authority_machine': authority, 'board_host': host,
+        'board_host': host,
         'is_self': True, 'local_authority': True,
     }] if visible else [])
     assert not (tmp_path / 'registry' / 'project-bundles').exists()
+
+
+def test_registry_loads_projects_saved_with_an_authority_machine(tmp_path):
+    identifier = "a" * 32
+    write_json(tmp_path / "projects.json", {"projects": [{
+        "id": identifier, "name": "old", "root": str(tmp_path), "source_machine": "device",
+        "authority_machine": "retired", "board_host": "https://device:8770"}]})
+    registry = ProjectRegistry(tmp_path, "device", host="https://device:8770")
+    assert registry.get(identifier).board_host == "https://device:8770"
+    assert registry.hosts(registry.get(identifier).board_host)
+    assert not registry.hosts("")
+    assert not registry.hosts("https://elsewhere:8770")

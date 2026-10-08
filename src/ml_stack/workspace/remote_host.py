@@ -132,14 +132,14 @@ class WorkspaceHost:
 
     def status(self, project_id: str) -> dict:
         project = self.projects.get(project_id)
-        authority = getattr(project, "authority_machine", None)
-        if authority == "":
+        board_host = project.board_host
+        if not board_host:
             return {"project_id": project_id, "name": project.name, "state": "unconfigured",
-                    "authority_machine": "", "board_host": "", "agents": [], "boards": [],
+                    "board_host": "", "agents": [], "boards": [],
                     "messages": [], "history": []}
-        if authority and authority != getattr(self.projects, "machine", authority):
+        if not self.projects.hosts(board_host):
             return {"project_id": project_id, "name": project.name, "state": "connection_required",
-                    "authority_machine": authority, "board_host": project.board_host,
+                    "board_host": board_host,
                     "agents": [], "boards": [], "messages": [], "history": []}
         ws = self.workspace(project_id)
         agents = [row for row in ws.registered() if row["role"] == AGENT]
@@ -155,8 +155,7 @@ class WorkspaceHost:
         messages = [ws.deliver(row) for row in ws.board._rows()
                     if row.get("to") in chosen][-20:]
         return {"project_id": project_id, "name": project.name,
-                "authority_machine": getattr(project, "authority_machine", ""),
-                "board_host": getattr(project, "board_host", ""),
+                "board_host": board_host,
                 "agents": agents,
                 "boards": sorted(chosen), "messages": messages,
                 "history": read_json(ws.base / "adopted-history.json", {}).get("messages", []),
@@ -186,12 +185,10 @@ class WorkspaceHost:
             if (not cluster or not cluster_id or body.get("cluster") != cluster
                     or body.get("cluster_id") != cluster_id):
                 raise Denied("agent enrollment requires its authenticated Dev cluster")
-            if body.get("authority_machine") != self.projects.machine:
-                raise Denied("agent enrollment requires the selected local project authority")
-            if not project.authority_machine:
-                project = self.projects.claim_authority(project_id, expected_machine=self.projects.machine)
-            if project.authority_machine != self.projects.machine or not project.board_host:
-                raise Denied("agent enrollment requires the selected local project authority")
+            if not project.board_host:
+                project = self.projects.claim_authority(project_id)
+            if not self.projects.hosts(project.board_host):
+                raise Denied("agent enrollment requires this device to host the project's Board")
             ws = self.workspace(project_id)
             Rates(ws.base / "enrollment", 10, 600, ws.clock).admit("dev-cluster")
             wanted = str(body.get("name") or "")
@@ -232,9 +229,8 @@ class WorkspaceHost:
             if (not cluster or not cluster_id or body.get("cluster") != cluster
                     or body.get("cluster_id") != cluster_id):
                 raise Denied("agent renewal requires its authenticated Dev cluster")
-            if (body.get("authority_machine") != self.projects.machine
-                    or project.authority_machine != self.projects.machine or not project.board_host):
-                raise Denied("agent renewal requires the selected local project authority")
+            if not self.projects.hosts(project.board_host):
+                raise Denied("agent renewal requires this device to host the project's Board")
             ws = self.workspace(project_id)
             who = ws.registry.renew_dev_project(str(body.get("agent_token") or ""),
                                                  project_id, cluster, cluster_id)

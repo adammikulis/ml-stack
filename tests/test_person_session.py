@@ -17,8 +17,8 @@ PROJECT = 'a' * 32
 
 @pytest.fixture
 def bound(tmp_path):
-    project = SimpleNamespace(authority_machine='local', board_host='https://127.0.0.1:8770')
-    projects = SimpleNamespace(machine='local', get=lambda ident: project,
+    project = SimpleNamespace(board_host='https://127.0.0.1:8770')
+    projects = SimpleNamespace(machine='local', hosts=lambda host: host == 'https://127.0.0.1:8770', get=lambda ident: project,
                                workspace_base=lambda ident: tmp_path / ident)
     host = WorkspaceHost(projects)
     sessions = Sessions()
@@ -70,7 +70,7 @@ def test_actor_rechecks_live_session_project_and_person(bound, change):
     elif change == 'expiry':
         session.expires_at = 0
     elif change == 'authority':
-        project.authority_machine = 'foreign'
+        project.board_host = 'https://foreign:8770'
     elif change == 'origin':
         request.handler.headers['Origin'] = 'https://evil.test'
     elif change == 'host':

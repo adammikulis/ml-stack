@@ -107,7 +107,7 @@ projects-view #project-command { white-space:pre-wrap; overflow-wrap:anywhere; }
       this.board.hidden = false;
       this.querySelector("#project-empty").hidden = true;
       this.querySelector('#project-title').textContent = project.name;
-      this.querySelector('#project-authority').textContent = `Board authority: ${project.authority_machine || 'unconfigured'}`;
+      this.querySelector('#project-authority').textContent = `Board authority: ${project.board_host || 'unconfigured'}`;
       this.querySelector('#project-source').textContent = `Source available on ${project.is_self ? 'this device' : project.source_host || project.host || project.peer || 'a pool device'}`;
       this.querySelector('#project-host-board').checked = false;
       this.querySelector('#project-access').hidden = true;
@@ -129,7 +129,7 @@ projects-view #project-command { white-space:pre-wrap; overflow-wrap:anywhere; }
       this.querySelector('#project-checkout').disabled = this.busy || ['conflict', 'upgrade_required'].includes(result.state || project.state);
       this.querySelector('#project-board-state').textContent = !available
         ? result.state === 'connection_required'
-          ? `Connect to the existing board on ${result.board_host || project.board_host || project.authority_machine}. Create agent access on the authority device.`
+          ? `Connect to the existing board on ${result.board_host || project.board_host}. Create agent access on the authority device.`
           : result.error || (project.state === 'conflict' ? 'Project authority conflict. Resolve it before connecting agents.' : 'Shared board unavailable. Update or reconnect the authority device.')
         : {connected: 'Agents connected to the shared board', offline: 'Registered agents are offline',
           unconfigured: 'Board not connected/configured', awaiting_agents: 'Waiting for agents to connect'}[result.state]

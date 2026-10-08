@@ -32,7 +32,7 @@ def test_tasks_filters_artifacts_and_independent_review_payload(tmp_path, playwr
         with playwright.chromium.launch(headless=True) as browser:
             page = browser.new_page(viewport={'width': 390, 'height': 844})
             project_id = 'b' * 32
-            page.route('**/ui/projects', lambda route: route.fulfill(json={'workspaces': [{'id': project_id, 'name': 'Demo workspace', 'local_authority': True, 'board_host': 'http://canonical', 'authority_machine': 'device-1'}]}))
+            page.route('**/ui/projects', lambda route: route.fulfill(json={'workspaces': [{'id': project_id, 'name': 'Demo workspace', 'local_authority': True, 'board_host': 'http://canonical'}]}))
             page.route(f'**/ui/projects/{project_id}/tasks', respond)
             page.goto(f'http://127.0.0.1:{server.port}/ui/#tasks')
             viewer = page.locator('tasks-view')
@@ -188,7 +188,7 @@ def test_tasks_join_selected_person_workspace_with_real_backend(tmp_path, playwr
             assert not posts
             assert all('person_project' not in row for row in ws.registry._load().values())
             if foreign_authority:
-                registry.get(project).authority_machine = 'foreign-device'
+                registry.get(project).board_host = 'http://foreign:8770'
             join.click()
             assert posts == [f'http://127.0.0.1:{server.port}/ui/projects/{project}/board/connect']
             if foreign_authority:

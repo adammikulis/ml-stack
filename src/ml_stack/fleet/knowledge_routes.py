@@ -90,7 +90,7 @@ class KnowledgeRoutes:
         projects = getattr(self.ui, "projects", None)
         if projects is not None and self._local_person():
             for project in islice(projects.boards(), 200):
-                if project["authority_machine"] != projects.machine:
+                if not projects.hosts(project["board_host"]):
                     continue
                 base = projects.workspace_base(project["id"])
                 if (base / "coordination.db").is_file():
