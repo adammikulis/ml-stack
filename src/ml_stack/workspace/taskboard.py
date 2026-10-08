@@ -66,7 +66,7 @@ class TaskBoard:
         if role == HUMAN or mode == 'open':
             return bool(role == HUMAN or member)
         parent = self.ws.registry.info(worker).get('parent', '') if worker else ''
-        return bool(identity in task['reviewers'] and member or identity == task['created_by'] == parent)
+        return bool((identity in task['reviewers'] and member) or identity == task['created_by'] == parent)
 
     def _reviewer(self, who, task: dict[str, Any], *, economic: bool = True) -> None:
         self.ws._may(who, 'read')
