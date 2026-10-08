@@ -49,8 +49,8 @@ class TaskBoard:
 
     def _project_grant(self, identity: str, task: dict[str, Any]) -> bool:
         info = self.ws.registry.info(identity)
-        return bool(self.ws.registry.role_of(identity) and task['project']
-                    and info.get('project') == task['project'])
+        return bool(self.ws.registry.role_of(identity)
+                    and (not task['project'] or info.get('project') == task['project']))
 
     def _scope(self, who, task: dict[str, Any]) -> None:
         if not task_scope.eligible(self.ws, who, task):
@@ -64,11 +64,9 @@ class TaskBoard:
         if economic and who.role != HUMAN and reviewer_account and worker_account \
                 and reviewer_account['base_id'] == worker_account['base_id']:
             raise Denied('independent economic review requires a different enrolled device account')
-        parent = self.ws.registry.info(worker).get('parent', '') if worker else ''
-        designated = who.id in task['reviewers'] and self._project_grant(who.id, task)
-        if who.id == worker or not (who.role == HUMAN or designated
-                                   or who.id == task['created_by'] == parent):
-            raise Denied('independent review requires person or existing delegated project authority')
+        member = self._project_grant(who.id, task)
+        if who.id == worker or not (who.role == HUMAN or member):
+            raise Denied('independent review requires a person or a registered project member other than the worker')
 
     def assert_reviewer(self, token: str, ident: str) -> dict[str, Any]:
         """Recheck live reviewer authority independently of stored review claims."""
@@ -83,7 +81,7 @@ class TaskBoard:
         who, spec = self._auth(token, 'send'), task_spec(spec)
         for identity in spec['assignees'] + spec['reviewers']:
             if not self.ws.registry.role_of(identity) or not self._project_grant(identity, spec):
-                raise Denied('designated identities require existing person-set project grants')
+                raise Denied('designated identities must be registered in the task project')
         if (spec['assignees'] or spec['reviewers']) and who.role != HUMAN and not self._project_grant(who.id, spec):
             raise Denied('the task creator lacks delegated project authority')
         with self._store() as graph:
