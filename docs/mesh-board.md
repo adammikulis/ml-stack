@@ -434,17 +434,19 @@ version (`fleet/discovery.py:53`) is bumped; no migration is kept.
 4. Section 5.3: rule unchanged, evaluated from replicated summaries. Section 7: the coordinator-lease slice
    becomes slice 3 above and the presence slice writes the register. Section 8 question 1 is removed.
 
-## 11. Open questions only the owner can answer
+## 11. Decisions
 
-1. `offline_cap` and member `valid_until` at 30 days: acceptable as the bound on a stolen or revoked
-   device's working window, or shorter?
-2. Pool-wide `member-add` confirmation by a second member or the person at N >= 3: required (this design),
-   or is any one paired device allowed to add members alone?
-3. A pool with no common git remote (LAN only): may a peer's checkout act as the push target for landing,
-   or is landing refused until a remote is reachable?
-4. A joiner at N = 2 has no second witness: accept the partner's snapshot, or replay full journals?
-5. Move the device signing key into the OS keystore with agent refusal, so an agent with file access cannot
-   sign as the device, at the cost of keystore prompts in headless runs?
-6. Encrypt the replica at rest, and the posted-files store, which is encrypted under one device's keystore
-   key (`filestore.py:1-30`) and so is not replicable?
-7. Agent id as `name@device`, or bare names with collisions refused at pairing?
+1. The offline window for a revoked or stolen device is 7 days, renewed on every sync; `member`
+   `valid_until` and token expiry use the same bound.
+2. Adding a device to a pool always needs the person's approval, through the chat-attested
+   authorization channel in `docs/person-delegation.md`. A second member's confirmation at
+   N >= 3 may be added later and is not required.
+3. Landing the shared development branch needs a reachable git remote. A peer's checkout is never
+   the push target. Work continues on branches while no remote is reachable.
+4. At N = 2 a joiner replays the partner's full journals and verifies them; a snapshot is accepted
+   only once a second member can witness it.
+5. The device signing key lives in the OS keystore where an attended keystore exists. A headless
+   device uses a 0600 file key, and `status` shows which kind each device uses.
+6. The replica is encrypted at rest under the device's key. The posted-files store stays on the
+   device that holds it and is not replicated until a design for its key exists.
+7. Agent ids are `name@device`. A bare name resolves to the agent on the local device.
