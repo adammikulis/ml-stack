@@ -177,7 +177,11 @@ class MlBoard extends MlElement {
                  ...(this.base().startsWith("/ui/") ? globalThis.fleetModel?.headers || {"X-ML-Stack-UI":"1"} : {})},
         ...(document ? {body:JSON.stringify(document)} : {})});
       const answer = await response.json().catch(() => ({}));
-      if (!response.ok) throw Error(line(answer.error || response.status, 160));
+      if (!response.ok) {
+        const error = Error(line(answer.error || response.status, 160));
+        error.personSetupRequired = answer.person_setup_required === true;
+        throw error;
+      }
       return answer;
     } finally { this.requests.delete(controller); }
   }
@@ -215,11 +219,13 @@ class MlBoard extends MlElement {
       this.dms = d.conversations ?? [];
       try { this.agents = (await this.get("agents")).agents || []; } catch { this.agents = []; }
       this.error = "";
+      this.personSetupRequired = false;
       const view = this.view.kind === "none" && this.boards.length
         ? {kind:"board", name:(this.boards.find(board => board.name === "#general") || this.boards[0]).name} : this.view;
       await this.open(view, false);
     } catch (e) {
       if (revision !== this.loadRevision || this.stopped) return;
+      this.personSetupRequired = e.personSetupRequired === true;
       this.error = `The workspace did not answer (${line(e.message, 40)}).`;
     }
     this.update();
@@ -269,7 +275,7 @@ class MlBoard extends MlElement {
   update() {
     if (!this.nav) return;
     this.emit("board-navigation", {boards:this.boards, dms:this.dms, agents:this.agents,
-      me:this.me, view:this.view, error:this.error || ""});
+      me:this.me, view:this.view, personSetupRequired:this.personSetupRequired === true, error:this.error || ""});
     const item = (label, count, current, onclick, title = "") => h("button", {title,
       type: "button", "aria-current": current ? "true" : null, onclick },
     h("span", {}, line(label, 160)), count ? h("span", { class: "count" }, String(count)) : null);
@@ -359,7 +365,13 @@ class MlBoard extends MlElement {
   pane() {
     const v = this.view;
     if (this.error) return [h("p", {class:"state error", role:"alert"}, this.error),
-      h("button", {class:"back", type:"button", onclick:() => this.load()}, "Retry")];
+      h("button", {class:"back", type:"button", onclick:async () => {
+        if (this.personSetupRequired) {
+          try { await this.request("connect", {}, {}); }
+          catch (error) { this.error = line(error.message, 160); this.update(); return; }
+        }
+        await this.load();
+      }}, this.personSetupRequired ? "Join workspace as person" : "Retry")];
     if (this.loading) return [h("p", {class:"state", role:"status"}, "Loading conversation…")];
     if (v.kind === "none") return [h("p", { class: "state" }, "Choose a board or a conversation.")];
     if (v.kind === "board") return [this.title(line(v.name, 60), this.readonly ? "read only" : "live"),

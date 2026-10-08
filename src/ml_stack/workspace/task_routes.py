@@ -4,13 +4,13 @@ import json
 
 from ml_stack.fleet.request_fields import object_body
 from ml_stack.workspace import coordinator_config, limits, localroute, task_outcomes, tokens
-from ml_stack.workspace.boardroute import Request
+from ml_stack.workspace.boardroute import Request, _checked
 from ml_stack.workspace.identity import HUMAN, Denied
 from ml_stack.workspace.service import Workspace
 from ml_stack.workspace.taskboard import TaskBoard
 
 
-def route(request, *, workspace=None, prefix="/ui/tasks", project=None) -> bool:
+def route(request, *, workspace=None, prefix="/ui/tasks", project=None, actor=None) -> bool:
     if request.path != prefix:
         return False
     configured = coordinator_config.load(limits.root()) if workspace is None else {}
@@ -23,15 +23,16 @@ def route(request, *, workspace=None, prefix="/ui/tasks", project=None) -> bool:
         return True
     if request.method == 'POST':
         headers = {key.lower(): value for key, value in request.handler.headers.items()}
-        refused = localroute._post_refusal(Request(request.method, request.path, headers,
-                                           request.handler.server.server_address[1], True))
+        refused = (_checked(request.method, headers, request.handler.server.server_address[1], writes=True)
+                   if actor is not None else localroute._post_refusal(Request(request.method, request.path, headers,
+                                           request.handler.server.server_address[1], True)))
         if refused:
             code, _extra, raw = refused
             request.send(code, json.loads(raw))
             return True
     try:
         ws = Workspace() if workspace is None else workspace
-        token = tokens.read_file(tokens.directory(ws.base) / tokens.OWNER_FILE)
+        token = actor if actor is not None else tokens.read_file(tokens.directory(ws.base) / tokens.OWNER_FILE)
         if ws.auth(token).role != HUMAN:
             raise Denied('task inspection requires the workspace person owner')
         board = TaskBoard(ws)

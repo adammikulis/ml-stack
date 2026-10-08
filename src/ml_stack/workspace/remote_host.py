@@ -26,6 +26,7 @@ from ml_stack.workspace.claims import Conflict, normal
 from ml_stack.workspace.identity import AGENT, Denied
 from ml_stack.workspace.integration_git import git
 from ml_stack.workspace.modelid import CLAIMED, clean_harness, clean_model
+from ml_stack.workspace.person_session import SessionWorkspace, SetupRequired
 from ml_stack.workspace.project_history import adopt
 from ml_stack.workspace.rates import RateLimited, Rates
 from ml_stack.workspace.remote_protocol import METHODS
@@ -77,15 +78,49 @@ class WorkspaceHost:
     def workspace(self, project_id: str) -> Workspace:
         return Workspace(self.projects.workspace_base(project_id))
 
+    def _person_request(self, request, project_id, dispatch):
+        if request.method not in ("GET", "POST"):
+            request.send(405, {"error": "person routes support GET and POST"})
+            return True
+        try:
+            ws = SessionWorkspace(self, request, project_id)
+            return dispatch(ws)
+        except SetupRequired as error:
+            request.send(503, {'error': str(error), 'person_setup_required': True})
+        except Denied as error:
+            request.send(403, {'error': str(error)})
+        except (ValueError, TypeError, UnicodeError) as error:
+            request.send(400, {'error': str(error)})
+        return True
+
     def person_board(self, request, project_id: str) -> bool:
         """Dispatch the authenticated person's selected project Board request."""
-        return fleet_routes.route(request, workspace=self.workspace(project_id),
-                                  prefix=f"/ui/projects/{project_id}/board/")
+        def dispatch(ws):
+            if request.path == f'/ui/projects/{project_id}/board/connect':
+                length = request.header('Content-Length', '0')
+                if (not length.isascii() or not length.isdigit() or len(length) > 8
+                        or int(length) > 1024):
+                    raise ValueError('joining requires a bounded JSON object')
+                if request.method != 'POST':
+                    request.send(405, {'error': 'joining requires POST'})
+                    return True
+                body = json.loads(request.handler.rfile.read(int(length)))
+                if not isinstance(body, dict) or body:
+                    raise ValueError('joining accepts an empty JSON object')
+                request.send(200, ws.connect())
+                return True
+            ws.auth(ws._actor)
+            return fleet_routes.route(request, workspace=ws, actor=ws._actor,
+                                      prefix=f'/ui/projects/{project_id}/board/')
+        return self._person_request(request, project_id, dispatch)
 
     def person_tasks(self, request, project_id: str, *, project: dict) -> bool:
         """Dispatch canonical project task requests from authenticated people."""
-        return task_routes.route(request, workspace=self.workspace(project_id),
-                                 prefix=request.path, project=project)
+        def dispatch(ws):
+            ws.auth(ws._actor)
+            return task_routes.route(request, workspace=ws, actor=ws._actor,
+                                     prefix=request.path, project=project)
+        return self._person_request(request, project_id, dispatch)
 
     def prepare(self, project_id: str) -> dict:
         if hasattr(self.projects, "claim_authority"):

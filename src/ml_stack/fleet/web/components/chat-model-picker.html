@@ -210,6 +210,9 @@ chat-view #chat-activity-output { max-height:240px; overflow:auto; white-space:p
       this.channels.replaceChildren(...data.boards.map(row => button(
         `${row.name}${row.unread ? ` · ${row.unread}` : ''}`,
         [data.view.name, data.view.board].includes(row.name), {kind:'board', name:row.name})));
+      if (data.personSetupRequired) this.channels.append(M.el('button', {type:'button', onclick:() => {
+        M.go('board');
+      }}, 'Join workspace as person'));
       if (!data.boards.length) this.channels.append(M.el('p', {class:'hint'}, data.error || 'No team channels in this workspace.'));
       const peers = new Map();
       for (const row of data.dms) {
@@ -222,7 +225,7 @@ chat-view #chat-activity-output { max-height:240px; overflow:auto; white-space:p
           view:{kind:'dm', a:data.me, b:agent.id}});
       }
       const newMessage = data.me ? M.el('details', {}, M.el('summary', {}, '+ New direct message'), this.board.newDm()) : null;
-      this.direct.replaceChildren(newMessage, ...[...peers.values()].map(row => button(row.label,
+      this.direct.replaceChildren(...(newMessage ? [newMessage] : []), ...[...peers.values()].map(row => button(row.label,
         data.view.kind === 'dm' && [data.view.a,data.view.b].includes(row.id), row.view, row.id)));
       if (!peers.size) this.direct.append(M.el('p', {class:'hint'}, 'Agents and direct messages appear here.'));
     }

@@ -4,7 +4,7 @@ from ml_stack.workspace import boardroute
 from ml_stack.workspace.service import Workspace
 
 
-def route(request, *, workspace=None, prefix="/ui/board/") -> bool:
+def route(request, *, workspace=None, prefix="/ui/board/", actor=None) -> bool:
     if not request.path.startswith(prefix):
         return False
     headers = {key.lower(): value for key, value in request.handler.headers.items()}
@@ -21,7 +21,7 @@ def route(request, *, workspace=None, prefix="/ui/board/") -> bool:
     call = boardroute.Request(
         request.method, request.handler.path.replace(prefix, "/board/", 1),
         headers, request.handler.server.server_address[1], True, raw)
-    status, extra, body = boardroute.respond(Workspace() if workspace is None else workspace, call)
+    status, extra, body = boardroute.respond(Workspace() if workspace is None else workspace, call, actor=actor)
     request.handler.send_response(status)
     for key, value in extra.items():
         request.handler.send_header(key, value)
