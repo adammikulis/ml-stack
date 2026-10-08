@@ -92,7 +92,7 @@ def test_unavailable_tasks_hide_unknown_lanes_and_recover(tmp_path, playwright, 
             page.goto(f'http://127.0.0.1:{server.port}/ui/#tasks')
             viewer = page.locator('tasks-view')
             if not failing:
-                expect(viewer.get_by_role('button', name='Previously loaded task', exact=True)).to_be_visible()
+                expect(viewer.locator('.task-row').filter(has_text='Previously loaded task')).to_be_visible()
                 failing = True
                 viewer.get_by_role('button', name='Refresh', exact=True).click()
             expect(viewer.locator('.status')).to_contain_text('Task data unavailable:')
@@ -105,7 +105,7 @@ def test_unavailable_tasks_hide_unknown_lanes_and_recover(tmp_path, playwright, 
             page.screenshot(path=f'/private/tmp/poolside-tasks-unavailable-{status}.png', full_page=True)
             failing = False
             viewer.get_by_role('button', name='Refresh', exact=True).click()
-            expect(viewer.get_by_role('button', name='Previously loaded task', exact=True)).to_be_visible()
+            expect(viewer.locator('.task-row').filter(has_text='Previously loaded task')).to_be_visible()
             expect(viewer.locator('.task-remaining-number')).to_have_text('1')
             expect(viewer.get_by_label('Search tasks')).to_be_enabled()
     finally:
