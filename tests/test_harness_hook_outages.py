@@ -1,6 +1,7 @@
 """Hook outage diagnostics and completion admission."""
 import io
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -14,7 +15,8 @@ def unavailable(*args, **kwargs):
 
 def test_post_outage_does_not_reverse_a_completed_tool(monkeypatch, capsys):
     monkeypatch.setattr(harnesshook.harness_remote, 'context', unavailable)
-    monkeypatch.setattr(harnesshook, 'nudge', lambda label, rail=None: '')
+    monkeypatch.setattr(harnesshook, '_reader_run', lambda *args, **kwargs:
+                        SimpleNamespace(returncode=1, stdout='', stderr='connection refused'))
     out = io.StringIO()
     assert harnesshook.run(['post', '--label', 'worker', '--root', '/project'], io.StringIO('{}'), out) == 0
     context = json.loads(out.getvalue())['hookSpecificOutput']['additionalContext']
@@ -98,7 +100,7 @@ def test_post_checkpoint_outage_preserves_pending_message_alert(monkeypatch):
 
     def pending(label, rail=None):
         seen.append(label)
-        return '1 waiting for you; run inbox'
+        return '1 waiting for you; run inbox\nworkspace notification unavailable: connection refused'
 
     monkeypatch.setattr(harnesshook, 'nudge', pending)
     out = io.StringIO()
@@ -110,15 +112,9 @@ def test_post_checkpoint_outage_preserves_pending_message_alert(monkeypatch):
 
 
 def test_post_lifecycle_failure_preserves_stop_message_alert(monkeypatch):
-
-    def broken(*args, **kwargs):
-        raise RuntimeError('checkpoint missing shadow')
-
-    remote = type('Remote', (), {'base': '/project'})()
-    worker = type('Worker', (), {'id': 'worker'})()
-    monkeypatch.setattr(harnesshook.harness_remote, 'context', lambda *args, **kwargs: (remote, worker))
-    monkeypatch.setattr(harnesshook.worktree_lifecycle, 'checkpoint', broken)
-    monkeypatch.setattr(harnesshook, 'nudge', lambda _label, rail=None, **kwargs: 'urgent message waiting; run inbox')
+    monkeypatch.setattr(harnesshook, '_reader_run', lambda *args, **kwargs:
+                        SimpleNamespace(returncode=1, stdout='urgent message waiting; run inbox',
+                                        stderr='checkpoint missing shadow'))
     result = harnesshook.post('worker', harnesshook.Rail('plan-and-go', 'worker', ['/project']))
     context = result['hookSpecificOutput']['additionalContext']
     assert 'checkpoint missing shadow' in context

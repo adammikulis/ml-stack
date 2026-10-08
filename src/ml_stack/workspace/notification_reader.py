@@ -1,4 +1,4 @@
-"""Read-only notification identities from saved project sessions."""
+"""Session-bound notification metadata and coding checkpoints."""
 
 import hashlib
 import sys
@@ -7,7 +7,12 @@ from pathlib import Path
 from ml_stack import worktreerules
 from ml_stack.hook_diagnostics import reason
 from ml_stack.log import say, warn
-from ml_stack.workspace import project_connection, tokens
+from ml_stack.workspace import (
+    integration_git as repo,
+    project_connection,
+    tokens,
+    worktree_lifecycle,
+)
 from ml_stack.workspace.identity import AGENT, Denied, valid_id
 
 
@@ -58,8 +63,8 @@ def binding(label: str, cwd: Path, session: str) -> dict:
     return configured
 
 
-def read(label: str, cwd: Path, session: str, *, canonical=None) -> str:
-    """Return unread-message metadata under an existing authenticated capability."""
+def authenticated(label: str, cwd: Path, session: str, *, canonical=None):
+    """Return the authenticated existing project reader and capability."""
     chosen = binding(label, cwd, session)
     actor = chosen['agent']
     if canonical is not None:
@@ -67,7 +72,7 @@ def read(label: str, cwd: Path, session: str, *, canonical=None) -> str:
         if (who.id != actor or who.role != AGENT or remote.project_id != chosen['project_id']
                 or remote.host != chosen['host'].rstrip('/')):
             raise Denied('notification context does not match the saved project reader')
-        return remote.call('nudge', tokens.load(remote.base, actor))
+        return remote, actor, tokens.load(remote.base, actor)
     remote = project_connection.RemoteWorkspace(
         chosen['host'], chosen['project_id'], cluster=chosen.get('cluster', ''),
         cluster_key=Path(chosen['cluster_key']) if chosen.get('cluster_key') else None)
@@ -76,12 +81,47 @@ def read(label: str, cwd: Path, session: str, *, canonical=None) -> str:
     if (who.get('id') != actor or who.get('role') != AGENT
             or who.get('project', {}).get('key') != chosen['project_id']):
         raise Denied('notification capability does not match the saved project reader')
+    return remote, actor, token
+
+
+def read(label: str, cwd: Path, session: str, *, canonical=None) -> str:
+    """Return unread metadata under the saved authenticated capability."""
+    remote, _, token = authenticated(label, cwd, session, canonical=canonical)
     return remote.call('nudge', token)
+
+
+def compact(line: str) -> str:
+    """Place urgent action before bounded sender details."""
+    head, separator, urgent = line.partition('. A direct ')
+    if separator:
+        return ('A direct ' + urgent)[:180] + '. ' + head[:45]
+    return line[:220]
+
+
+def checkpoint(base: Path, actor: str) -> None:
+    """Checkpoint changed commits and branches under the authenticated reader."""
+    for scope in worktree_lifecycle.scopes(base, actor):
+        path = Path(scope['path'])
+        if not path.exists():
+            continue
+        commit = repo.git(path, 'rev-parse', 'HEAD')
+        branch = repo.git(path, 'branch', '--show-current')
+        if commit not in scope.get('commits', ()) or branch not in scope.get('branches', ()):
+            worktree_lifecycle.remember(base, actor, scope['label'], str(path))
+
+
+def notify(label: str, cwd: Path, session: str) -> None:
+    """Emit unread metadata before checkpointing the same authenticated identity."""
+    remote, actor, token = authenticated(label, cwd, session)
+    line = compact(remote.call('nudge', token))
+    if line:
+        say(line, flush=True)
+    checkpoint(remote.base, actor)
 
 
 if __name__ == '__main__':
     try:
-        say(read(sys.argv[1], Path(sys.argv[2]), sys.argv[3]))
+        notify(sys.argv[1], Path(sys.argv[2]), sys.argv[3])
     except (Denied, OSError, RuntimeError, ValueError, KeyError) as error:
         warn(reason(error))
         raise SystemExit(1) from None

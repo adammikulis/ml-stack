@@ -103,11 +103,11 @@ def test_inspector_rejects_path_traversal_and_redacts_modified_records(capsys):
 def test_nudge_failure_keeps_reference_visible_in_post_context(monkeypatch, capsys):
     def fail(*args, **kwargs):
         raise FileNotFoundError("workspace launcher missing")
-    monkeypatch.setattr(harnesshook.subprocess, "run", fail)
+    monkeypatch.setattr(harnesshook, "_reader_run", fail)
     answer = harnesshook.post("fixture")
     context = answer["hookSpecificOutput"]["additionalContext"]
     held = _record()
-    assert held["stage"] == "nudge" and held["id"] in context
+    assert held["stage"] == "reader" and held["id"] in context
     assert held["id"] in capsys.readouterr().err
 
 
