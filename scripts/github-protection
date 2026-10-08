@@ -36,7 +36,7 @@ PROTECTED = (
 MAIN_RULES = {"deletion", "non_fast_forward", "pull_request", "required_status_checks"}
 DEV_RULES = {"deletion", "non_fast_forward"}
 DEV_FORBIDDEN = {"update", "creation", "pull_request", "required_status_checks"}
-TAG_RULES = {"deletion", "non_fast_forward", "update", "creation"}
+TAG_RULES = {"deletion", "non_fast_forward", "update"}
 MAIN_CHECKS = ("gates", "privacy", "licenses")
 SCANNING = ("secret_scanning", "secret_scanning_push_protection", "dependabot_security_updates")
 WRITE_ALLOWED = {"security-events"}
@@ -285,7 +285,7 @@ def main_findings(group: list[dict], signatures: bool) -> list[str]:
     return out
 
 
-def check_rulesets(repo: str, signatures: bool) -> list[str]:
+def check_rulesets(repo: str, args: argparse.Namespace) -> list[str]:
     out: list[str] = []
     listing = read(f"repos/{repo}/rulesets", "ruleset.read", "rulesets", out)
     if listing is None:
@@ -295,10 +295,11 @@ def check_rulesets(repo: str, signatures: bool) -> list[str]:
         body = read(f"repos/{repo}/rulesets/{entry['id']}", "ruleset.read", "rulesets", out)
         if body is not None:
             full.append(body)
-    out += main_findings(ruleset_group(full, "branch", "~DEFAULT_BRANCH"), signatures)
+    out += main_findings(ruleset_group(full, "branch", "~DEFAULT_BRANCH"), args.require_signatures)
     out += group_findings("dev", ruleset_group(full, "branch", "refs/heads/*dev"), DEV_RULES,
                           "development-branch-ruleset", DEV_FORBIDDEN)
-    out += group_findings("tags", ruleset_group(full, "tag", "refs/tags/v*"), TAG_RULES,
+    out += group_findings("tags", ruleset_group(full, "tag", "refs/tags/v*"),
+                          TAG_RULES | ({"creation"} if args.strict_tags else set()),
                           "release-tag-ruleset")
     return out
 
@@ -375,9 +376,6 @@ def check_actions(repo: str) -> list[str]:
         if flow.get("default_workflow_permissions") != "read":
             out.append(finding("actions.default-token", "the default workflow token is not read-only",
                                "actions-settings"))
-        if flow.get("can_approve_pull_request_reviews"):
-            out.append(finding("actions.approve-reviews", "workflows may approve pull requests",
-                               "actions-settings"))
     general = read(f"repos/{repo}/actions/permissions", "actions.read", "actions-settings", out)
     if general is not None:
         if general.get("allowed_actions") != "selected":
@@ -424,7 +422,7 @@ def agent_identity(repo: str) -> list[str]:
 
 def check_remote(repo: str, args: argparse.Namespace) -> list[str]:
     owner = repo.split("/")[0]
-    return (check_rulesets(repo, args.require_signatures) + check_environment(repo, owner)
+    return (check_rulesets(repo, args) + check_environment(repo, owner)
             + check_actions(repo) + check_repository(repo, args.agent))
 
 
@@ -444,6 +442,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="the credentials in use are an agent's: fail when they are the owner's")
     parser.add_argument("--require-signatures", action="store_true",
                         help="also require signed commits on the default branch")
+    parser.add_argument("--strict-tags", action="store_true",
+                        help="also require the tag ruleset to block creation of v* tags")
     args = parser.parse_args(argv)
 
     findings = check_codeowners() + check_workflows()

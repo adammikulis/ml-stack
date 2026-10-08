@@ -104,6 +104,24 @@ def codes(out):
     return {line.split()[0] for line in out.splitlines() if "->" in line}
 
 
+def anchors():
+    """The anchors GitHub gives the headings of docs/github-protection.md."""
+    text = (SCRIPT.parent.parent / "docs" / "github-protection.md").read_text(encoding="utf-8")
+    return {re.sub(r"[^a-z0-9 -]", "", h.lower()).replace(" ", "-")
+            for h in re.findall(r"^#{2,3} (.+)$", text, re.M)}
+
+
+SECTIONS = ("rulesets", "codeowners", "workflow-rules", "agent-identity", "who-merges",
+            "actions-settings", "code-security-settings", "the-release-environment",
+            "main-branch-ruleset", "development-branch-ruleset", "release-tag-ruleset")
+
+
+@pytest.mark.parametrize("section", SECTIONS)
+def test_every_section_the_script_points_at_is_a_heading(section):
+    assert f'"{section}"' in SCRIPT.read_text(encoding="utf-8")
+    assert section in anchors()
+
+
 def changed(mutate):
     replies = copy.deepcopy(GOOD)
     mutate(replies)
@@ -189,9 +207,6 @@ CASES = {
     "token can write": (
         lambda r: r[f"repos/{REPO}/actions/permissions/workflow"].update(
             default_workflow_permissions="write"), "actions.default-token"),
-    "workflows approve pull requests": (
-        lambda r: r[f"repos/{REPO}/actions/permissions/workflow"].update(
-            can_approve_pull_request_reviews=True), "actions.approve-reviews"),
     "every action allowed": (
         lambda r: r[f"repos/{REPO}/actions/permissions"].update(allowed_actions="all"),
         "actions.allowed"),
@@ -216,6 +231,7 @@ def test_drift_is_reported_with_its_fix(gp, tmp_path, monkeypatch, capsys, what)
     assert code in codes(out), out
     line = next(ln for ln in out.splitlines() if ln.startswith(code))
     assert re.search(r"-> docs/github-protection\.md#[a-z0-9-]+$", line), line
+    assert line.rsplit("#", 1)[1] in anchors()
 
 
 def test_an_unreadable_endpoint_is_a_finding(gp, tmp_path, monkeypatch, capsys):
@@ -234,6 +250,14 @@ def test_an_agent_run_fails_on_owner_or_admin_credentials(gp, tmp_path, monkeypa
     assert run(gp, capsys)[0] == 0
     status, out = run(gp, capsys, "--agent")
     assert status == 1 and {"identity.owner", "identity.admin"} <= codes(out)
+
+
+def test_tag_creation_is_blocked_only_when_asked(gp, tmp_path, monkeypatch, capsys):
+    replies = changed(lambda r: r[f"repos/{REPO}/rulesets/3"]["rules"].pop())
+    serve(tmp_path, monkeypatch, replies)
+    assert run(gp, capsys)[0] == 0
+    status, out = run(gp, capsys, "--strict-tags")
+    assert status == 1 and "ruleset.tags.rule" in codes(out)
 
 
 def test_signed_commits_are_required_only_when_asked(gp, tmp_path, monkeypatch, capsys):

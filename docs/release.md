@@ -5,9 +5,13 @@
 1. Work lands on the development branch (`0.2dev`). A push to `main` is the owner's.
 2. A push to `main` runs `release-please.yml`, which opens or updates a release pull request from the
    `feat:` and `fix:` commit subjects. Merging that pull request tags `vX.Y.Z`.
-3. `release.yml` builds the wheel, a CycloneDX SBOM (`sbom.cdx.json`), the macOS, Windows and Linux bundles,
-   uploads to PyPI when the repository variable `PYPI_ENABLED` is `true`, and attaches everything to the GitHub release.
-   `release-dry-run.yml` builds the same on pull requests without publishing.
+3. `release.yml` calls `release-build.yml`, which builds the wheel, a CycloneDX SBOM (`sbom.cdx.json`) and the macOS,
+   Windows and Linux bundles with read-only permissions. Its `guard` job requires the tag to name the checked-out
+   commit and that commit to be an ancestor of `main`. Its `pypi` and `publish` jobs run in the `release` environment,
+   which needs the owner's approval: `pypi` uploads when the repository variable `PYPI_ENABLED` is `true`, and
+   `publish` signs the bundles and attaches everything to the GitHub release.
+   `release-dry-run.yml` calls `release-build.yml` on pull requests, without publishing and without a write grant.
+   The environment, the rulesets and the other repository settings are in [github-protection.md](github-protection.md).
 
 ## Checks before a release
 
@@ -24,13 +28,13 @@
 ## PyPI trusted publishing
 
 See `HANDOFF.md` for the name-similarity waiver PyPI has to grant first. Then, on PyPI, add a pending publisher for
-project `ml-stack`: owner `adammikulis`, repository `ml-stack`, workflow `release.yml`, no environment. Set the
-repository variable `PYPI_ENABLED` to `true`. No token is stored anywhere.
+project `ml-stack`: owner `adammikulis`, repository `ml-stack`, workflow `release.yml`, environment `release`. Set the
+repository variable `PYPI_ENABLED` to `true`. No token is stored anywhere. See [github-protection.md](github-protection.md#pypi).
 
 ## Signing and verifying a download
 
 The publish job signs every `ml-stack-*.zip` with `ssh-keygen -Y sign -n ml-stack-release`, using the Ed25519
-private key in the repository secret `RELEASE_SIGNING_KEY`, and attaches `<asset>.zip.sig` beside it. The job fails
+private key in the secret `RELEASE_SIGNING_KEY` of the `release` environment, and attaches `<asset>.zip.sig` beside it. The job fails
 when the secret is empty or no signature was written.
 
 `signing.RELEASE_KEY` (`src/ml_stack/fleet/signing.py`) holds the matching public key as one `ssh-ed25519 AAAA...`
@@ -53,8 +57,8 @@ git config commit.gpgsign true
 The key is made and kept by `scripts/release-key`, run by a person at a terminal (it refuses an agent and a process
 with no terminal). It needs `ssh-keygen` and an authenticated `gh` in this repository.
 
-- `scripts/release-key create [--write]` generates an Ed25519 key, sets the repository secret `RELEASE_SIGNING_KEY`
-  from stdin, stores the private key in the OS keystore (credential `ML_STACK_RELEASE_SIGNING_KEY`) and prints the
+- `scripts/release-key create [--write]` generates an Ed25519 key, sets the secret `RELEASE_SIGNING_KEY` of the
+  `release` environment from stdin, stores the private key in the OS keystore (credential `ML_STACK_RELEASE_SIGNING_KEY`) and prints the
   public line. `--write` sets `RELEASE_KEY` in `src/ml_stack/fleet/signing.py`; commit that file. It refuses when a key
   is already stored.
 - `scripts/release-key show-public` prints the stored key's public line.
@@ -62,8 +66,13 @@ with no terminal). It needs `ssh-keygen` and an authenticated `gh` in this repos
   signed before it verify only against the old public key.
 - `scripts/release-key agent` loads the stored key into ssh-agent.
 
-If `gh` fails, nothing is stored and `signing.py` is unchanged. Until `RELEASE_KEY` is set, no release asset and no
-tracked commit verifies.
+If `gh` fails, nothing is stored and `signing.py` is unchanged.
+
+`RELEASE_KEY` must be set before a release is published: `scripts/release-key create --write` at the owner's terminal,
+then commit `src/ml_stack/fleet/signing.py`. Without it the signed-update path fails closed. `updates.download_release`
+deletes every downloaded asset with "no release key is set" and installs nothing, and `ml-stack-cluster join --track`
+refuses every fetched commit with the same message, so no machine updates itself from a release or a tracked branch.
+A release published before the key is set is signed with a key nothing pins, and its assets verify against nothing.
 
 To check an asset by hand: `ssh-keygen -Y check-novalidate -n ml-stack-release -s <asset>.zip.sig < <asset>.zip`
 confirms the signature is well formed, and `ssh-keygen -Y verify -f allowed_signers -I ml-stack-release -n
@@ -71,19 +80,15 @@ ml-stack-release -s <asset>.zip.sig < <asset>.zip` checks it against a file hold
 Build provenance attestations (`actions/attest-build-provenance`) are not enabled; they need `attestations: write` on
 the calling workflows in `release-please.yml`.
 
-## Recommended GitHub settings
+## GitHub settings
 
-Only the repository owner can change these.
+[github-protection.md](github-protection.md) holds the target configuration: the rulesets for `main`, the
+development branches and `v*` tags, the `release` environment and its reviewer, the Actions defaults, secret scanning
+with push protection, the credentials agents use, and a command and rollback for each. Only the repository owner
+applies them. `scripts/github-protection --check` prints what differs.
 
-- Branch protection or a ruleset for `main`: pull request required, status checks `test`, `gates`, `privacy`, `licenses`
-  and the CodeQL `analyze` jobs required, force pushes and deletion blocked. `0.2dev` needs no more than blocking
-  deletion.
 - Settings > Code security: enable private vulnerability reporting (`SECURITY.md` points to it), Dependabot alerts and
-  security updates, secret scanning with push protection, and the dependency graph (the dependency-review workflow needs it).
-- Settings > Actions > General: default `GITHUB_TOKEN` permission read-only; allow actions from GitHub and verified creators
-  (every action here is pinned by commit SHA); require approval for first-time contributors; do not send write tokens to
-  workflows from pull requests.
-- Tag ruleset for `v*`: restrict creation to the owner; block deletion and force updates.
+  the dependency graph (the dependency-review workflow needs it).
 - The README one-line installers fetch `packaging/install.sh` from `main`. Pin a tag in the URL when you document one.
 
 ## Standalone conversation smoke test
