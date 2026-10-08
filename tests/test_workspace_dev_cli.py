@@ -52,9 +52,9 @@ def test_cli_enrolls_authenticated_local_agent_without_manual_metadata(monkeypat
     monkeypatch.setattr(project_connection, "RemoteWorkspace", lambda *a, **kw: remote)
     monkeypatch.setattr(project_connection, "CanonicalWorkspace", lambda remote, token: (remote, token))
     args = SimpleNamespace(agent="worker", token_file="")
-    canonical, token = cli._context(args, choice)
+    board_ws, token = cli._context(args, choice)
     assert enrolled == [(tmp_path, "worker", (model, harness), choice)]
-    assert canonical == (remote, token) and token == "project-token"
+    assert board_ws == (remote, token) and token == "project-token"
     assert args.agent == "worker-device"
 
 
@@ -396,7 +396,7 @@ def test_setup_saved_standard_agent_attaches_without_device_registration(tmp_pat
     assert not (kit.base / 'device-accounts.db').exists()
 
 
-def test_saved_canonical_git_grant_refuses_another_repository(repository, tmp_path, monkeypatch):
+def test_saved_git_grant_refuses_another_repository(repository, tmp_path, monkeypatch):
     import json
 
     from workspace_kit import Kit, clean_env

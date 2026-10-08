@@ -93,7 +93,7 @@ def test_invalid_native_extra_body_does_not_launch(monkeypatch, native, body):
         manager._process(None, command, {'CLAUDE_CODE_EXTRA_BODY': body}, context)
 
 
-def test_canonical_stop_cancels_native_turn(tmp_path, monkeypatch):
+def test_stop_cancels_native_turn(tmp_path, monkeypatch):
     stop = threading.Event()
     cancelled = []
     conversation = SimpleNamespace(id='conversation')
@@ -144,7 +144,7 @@ def test_proposal_binds_committed_files_and_deletions(tmp_path):
         task_coding._proposal(localagent.Agent('worker', 'qwen'), task, tmp_path, turn, 'python')
 
 
-def test_canonical_pi_launcher_receives_independent_budget_and_clamped_effort(tmp_path, monkeypatch):
+def test_pi_launcher_receives_independent_budget_and_clamped_effort(tmp_path, monkeypatch):
     from ml_stack import coding
     from ml_stack.fleet.conversations import Conversations
 

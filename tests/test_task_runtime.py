@@ -101,7 +101,7 @@ def test_native_cancellation_preserves_the_supervisor_cause(tmp_path, monkeypatc
     assert result['blocked_reason'] == cause
 
 
-def test_canonical_runtime_has_no_implicit_wall_cap(tmp_path, monkeypatch):
+def test_runtime_has_no_implicit_wall_cap(tmp_path, monkeypatch):
     board = Board(tmp_path)
     board.task["limits"] = {"max_wall_s": None}
     monkeypatch.setattr(task_runtime.tokens, "load", lambda *_: "token")

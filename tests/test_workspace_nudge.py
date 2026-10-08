@@ -134,7 +134,7 @@ class _Board:
         return getattr(self.kit.ws, operation)(self.kit.t["bob"], *args, **kwargs)
 
 
-def test_prompt_hook_on_a_canonical_board_injects_the_waiting_line(kit, monkeypatch, tmp_path, capsys):
+def test_prompt_hook_on_a_board_injects_the_waiting_line(kit, monkeypatch, tmp_path, capsys):
     from types import SimpleNamespace
 
     from ml_stack.workspace import cli as ws_cli, project_connection as connection

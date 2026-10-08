@@ -58,9 +58,9 @@ def test_agent_connect_selects_explicit_project_instead_of_current_board(tmp_pat
         return current
     monkeypatch.setattr(project_connection, "selected", selected)
     monkeypatch.setattr(cli.coordinator_client, "client", lambda *a: pytest.fail("global fallback"))
-    canonical = SimpleNamespace(auth=lambda token: SimpleNamespace(id="worker"),
+    board_ws = SimpleNamespace(auth=lambda token: SimpleNamespace(id="worker"),
                                 registry=SimpleNamespace(info=lambda name: {"project": {"key": "requested-board"}}))
-    monkeypatch.setattr(cli, "_context", lambda args, connection: (canonical, "session")
+    monkeypatch.setattr(cli, "_context", lambda args, connection: (board_ws, "session")
                         if connection is target else pytest.fail("wrong board"))
     results = []
     monkeypatch.setattr(cli, "_show", lambda args, result: results.append(result))
@@ -162,7 +162,7 @@ def test_unavailable_selected_project_cannot_fall_back_to_global_authority(monke
     assert cli._runner(lambda *a: pytest.fail("unavailable project dispatch"))(SimpleNamespace(json=True)) == 3
 
 
-def test_canonical_client_recovers_and_remembers_device_scoped_identity(tmp_path, monkeypatch):
+def test_client_recovers_and_remembers_device_scoped_identity(tmp_path, monkeypatch):
     remote = RemoteWorkspace.__new__(RemoteWorkspace)
     remote.base, remote.project_id = tmp_path / "sessions", PROJECT
     requests = []
@@ -184,7 +184,7 @@ def test_canonical_client_recovers_and_remembers_device_scoped_identity(tmp_path
 
 
 @pytest.mark.parametrize("status, recovered", [(403, True), (503, False)])
-def test_canonical_client_recovers_expiry_and_preserves_outage_failure(tmp_path, monkeypatch, status, recovered):
+def test_client_recovers_expiry_and_preserves_outage_failure(tmp_path, monkeypatch, status, recovered):
     remote = RemoteWorkspace.__new__(RemoteWorkspace)
     remote.base, remote.project_id = tmp_path / "sessions", PROJECT
     tokens.store(remote.base, "worker", "mlws1.worker.saved")
@@ -211,7 +211,7 @@ def test_canonical_client_recovers_expiry_and_preserves_outage_failure(tmp_path,
 
 @pytest.mark.parametrize("unsafe", ["is a symlink or Windows reparse point", "belongs to another user",
                                      "mode 644 lets others read it"])
-def test_canonical_recovery_refuses_unsafe_credential_storage(tmp_path, monkeypatch, unsafe):
+def test_recovery_refuses_unsafe_credential_storage(tmp_path, monkeypatch, unsafe):
     remote = RemoteWorkspace.__new__(RemoteWorkspace)
     remote.base, remote.project_id = tmp_path / "sessions", PROJECT
     credential = tokens.store(remote.base, "worker", "mlws1.worker.saved")
@@ -224,7 +224,7 @@ def test_canonical_recovery_refuses_unsafe_credential_storage(tmp_path, monkeypa
         remote.token(agent="worker")
 
 
-def test_canonical_transport_is_per_identity_including_delegated_and_explicit_tokens(tmp_path, monkeypatch):
+def test_transport_is_per_identity_including_delegated_and_explicit_tokens(tmp_path, monkeypatch):
     remote = RemoteWorkspace.__new__(RemoteWorkspace)
     remote.base, remote.project_id, remote.fleet_token = tmp_path / "sessions", PROJECT, "dev-mac"
     tokens.prepare(remote.base)
@@ -263,7 +263,7 @@ def test_delegated_credentials_never_recover_as_paired_top_identity(tmp_path, mo
         remote.token(agent="parent/child")
 
 
-def test_canonical_recovery_serializes_read_ensure_and_store(tmp_path, monkeypatch):
+def test_recovery_serializes_read_ensure_and_store(tmp_path, monkeypatch):
     first, second = RemoteWorkspace.__new__(RemoteWorkspace), RemoteWorkspace.__new__(RemoteWorkspace)
     for remote in (first, second):
         remote.base, remote.project_id = tmp_path / "sessions", PROJECT
@@ -313,7 +313,7 @@ def test_canonical_recovery_serializes_read_ensure_and_store(tmp_path, monkeypat
     assert tokens.load(first.base, "worker") == results[0]
 
 
-def test_canonical_first_use_accepts_directory_created_by_another_client(tmp_path, monkeypatch):
+def test_first_use_accepts_directory_created_by_another_client(tmp_path, monkeypatch):
     remote = RemoteWorkspace.__new__(RemoteWorkspace)
     remote.base, remote.project_id = tmp_path / "sessions", PROJECT
     tokens.prepare(remote.base)
@@ -459,8 +459,8 @@ def test_signed_sealed_fleet_and_agent_capabilities_both_required(host, tmp_path
         project_connection.bind(remote, project_root, "mac")
         monkeypatch.chdir(project_root)
         args = SimpleNamespace(agent="", token_file="")
-        canonical, selected_token = cli._context(args)
-        canonical.announce(selected_token, "joined", "Mac agent attached", "")
+        board_ws, selected_token = cli._context(args)
+        board_ws.announce(selected_token, "joined", "Mac agent attached", "")
         assert "Mac agent attached" in host.status(PROJECT)["messages"][0]["text"]
         with pytest.raises(ServerError):
             request_json(f"{base}/workspace/v1/projects/{PROJECT}/board",
@@ -574,7 +574,7 @@ def test_source_publication_does_not_initialize_board_and_explicit_invite_select
     assert host.status(project.id)["state"] == "awaiting_agents"
 
 
-def test_foreign_canonical_authority_cannot_be_replaced_by_local_invite(repository, tmp_path):  # noqa: F811
+def test_foreign_authority_cannot_be_replaced_by_local_invite(repository, tmp_path):  # noqa: F811
     registry = ProjectRegistry(tmp_path / "daemon", "pc", (repository,), host="https://192.168.2.59:8770")
     project = registry.share(registry.candidates()[0]["id"], "ml-stack")
     project.board_host = "https://192.168.2.27:8770"
@@ -642,7 +642,7 @@ def test_remote_capability_request_refuses_unsafe_existing_storage(tmp_path, mon
 
 @pytest.mark.parametrize('limit,widen,expected', [(0, False, 3), (0, True, 3),
                                                (1, False, 1), (-1, False, 1)])
-def test_canonical_inbox_reads_all_pending_messages_with_cli_defaults(host, limit, widen, expected):
+def test_inbox_reads_all_pending_messages_with_cli_defaults(host, limit, widen, expected):
     sender, reader = joined(host, name='sender'), joined(host, name='reader')
     for number in range(3):
         code, sent = call(host, sender, 'send', 'reader', 'note', f'message {number}')

@@ -24,7 +24,7 @@ class Request(ProjectBoardRoutes, Base):
 
 
 @pytest.fixture
-def canonical(tmp_path):
+def project_board(tmp_path):
     workspaces = {}
     for ident in (PROJECT, OTHER):
         ws = Workspace(tmp_path / ident)
@@ -69,8 +69,8 @@ def canonical(tmp_path):
     return call, workspaces, projects
 
 
-def test_selected_canonical_project_messages_and_person_post(canonical):
-    call, workspaces, _ = canonical
+def test_selected_project_messages_and_person_post(project_board):
+    call, workspaces, _ = project_board
     status, result = call("messages?board=%23general")
     assert status == 200
     assert [row["body"] for row in result["messages"]] == [PROJECT]
@@ -85,13 +85,13 @@ def test_selected_canonical_project_messages_and_person_post(canonical):
 @pytest.mark.parametrize("kwargs", [{"cookie": ""}, {"ip": "192.0.2.8"},
                                    {"method": "POST", "origin": "http://evil.test",
                                     "body": {"to": "#general", "body": "hostile"}}])
-def test_canonical_person_board_rejects_foreign_requests(canonical, kwargs):
-    call, _, _ = canonical
+def test_person_board_rejects_foreign_requests(project_board, kwargs):
+    call, _, _ = project_board
     assert call("post" if kwargs.get("method") == "POST" else "boards", **kwargs)[0] == 403
 
 
-def test_missing_remote_or_unconfigured_project_never_falls_back(canonical):
-    call, _, projects = canonical
+def test_missing_remote_or_unconfigured_project_never_falls_back(project_board):
+    call, _, projects = project_board
     assert call("boards", project="c" * 32)[0] == 409
     projects[PROJECT].board_host = "http://foreign:8770"
     assert call("boards")[0] == 409
@@ -99,8 +99,8 @@ def test_missing_remote_or_unconfigured_project_never_falls_back(canonical):
     assert call("boards")[0] == 409
 
 
-def test_person_identity_is_required_and_never_created(canonical):
-    call, workspaces, _ = canonical
+def test_person_identity_is_required_and_never_created(project_board):
+    call, workspaces, _ = project_board
     ws = workspaces[PROJECT]
     owner_path = tokens.directory(ws.base) / tokens.OWNER_FILE
     owner_path.unlink()
@@ -114,12 +114,12 @@ def test_person_identity_is_required_and_never_created(canonical):
 
 
 @pytest.mark.parametrize("method", ["PUT", "DELETE", "PATCH"])
-def test_canonical_person_board_refuses_unsupported_methods(canonical, method):
-    assert canonical[0]("boards", method=method)[0] == 405
+def test_person_board_refuses_unsupported_methods(project_board, method):
+    assert project_board[0]("boards", method=method)[0] == 405
 
 
-def test_canonical_person_threads_direct_messages_and_ack(canonical):
-    call, workspaces, _ = canonical
+def test_person_threads_direct_messages_and_ack(project_board):
+    call, workspaces, _ = project_board
     status, root = call("post", method="POST", body={"to": "#general", "body": "root"})
     assert status == 200
     status, _reply = call("post", method="POST", body={"to": "#general", "body": "reply", "reply_to": root["seq"]})
@@ -137,21 +137,21 @@ def test_canonical_person_threads_direct_messages_and_ack(canonical):
 
 
 @pytest.mark.parametrize('scheme', ['http', 'https'])
-def test_canonical_person_post_accepts_exact_browser_origin(canonical, scheme):
-    status, sent = canonical[0]('post', method='POST', origin=f'{scheme}://127.0.0.1:8770',
+def test_person_post_accepts_exact_browser_origin(project_board, scheme):
+    status, sent = project_board[0]('post', method='POST', origin=f'{scheme}://127.0.0.1:8770',
                                 body={'to': '#general', 'body': 'browser message'})
     assert status == 200 and sent['to'] == '#general'
 
 
 @pytest.mark.parametrize('origin', ['https://127.0.0.1:8771', 'https://localhost:8770',
                                    'https://evil.test:8770', 'https://127.0.0.1:8770/'])
-def test_canonical_person_post_rejects_different_browser_origin(canonical, origin):
-    assert canonical[0]('post', method='POST', origin=origin,
+def test_person_post_rejects_different_browser_origin(project_board, origin):
+    assert project_board[0]('post', method='POST', origin=origin,
                          body={'to': '#general', 'body': 'foreign message'})[0] == 403
 
 
-def test_canonical_person_task_create_rejects_other_project(canonical):
-    call, _, _ = canonical
+def test_person_task_create_rejects_other_project(project_board):
+    call, _, _ = project_board
     path = f'/ui/projects/{PROJECT}/tasks'
     status, task = call('', path=path, method='POST', body={
         'spec': {'title': 'Replay', 'acceptance': ['Replay passes']}})
@@ -164,8 +164,8 @@ def test_canonical_person_task_create_rejects_other_project(canonical):
 @pytest.mark.parametrize(('length', 'expected'), [('-1', 403), ('NaN', 403), (' 2', 400),
                                                ('000000002', 400), ('1025', 400),
                                                ('99999999', 403), ('\u0661', 403)])
-def test_person_connect_rejects_invalid_content_length_without_registry_mutation(canonical, length, expected):
-    call, workspaces, _ = canonical
+def test_person_connect_rejects_invalid_content_length_without_registry_mutation(project_board, length, expected):
+    call, workspaces, _ = project_board
     ws = workspaces[PROJECT]
     agents = ws.registry._load()
     agents['demo-owner'].pop('person_project')
@@ -178,8 +178,8 @@ def test_person_connect_rejects_invalid_content_length_without_registry_mutation
 
 @pytest.mark.parametrize('raw', [b'{', b'', b'null', b'[]', b'"person"', b'{"role":"human"}',
                                b'{"project_id":"foreign"}'])
-def test_person_connect_rejects_invalid_json_without_registry_mutation(canonical, raw):
-    call, workspaces, _ = canonical
+def test_person_connect_rejects_invalid_json_without_registry_mutation(project_board, raw):
+    call, workspaces, _ = project_board
     ws = workspaces[PROJECT]
     agents = ws.registry._load()
     agents['demo-owner'].pop('person_project')

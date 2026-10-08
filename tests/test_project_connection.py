@@ -45,7 +45,7 @@ def project(tmp_path, monkeypatch):
     return root
 
 
-def test_normal_cli_sends_to_saved_canonical_board(project, monkeypatch):
+def test_normal_cli_sends_to_saved_board(project, monkeypatch):
     remote = Remote()
     connection.bind(remote, project, "mac", "default")
     monkeypatch.chdir(project)
@@ -77,7 +77,7 @@ def test_unconfigured_shared_checkout_never_uses_local_workspace(project):
         connection.selected(project)
 
 
-def test_offline_canonical_connection_does_not_fall_back(project, monkeypatch):
+def test_offline_connection_does_not_fall_back(project, monkeypatch):
     connection.bind(Remote(), project, "mac")
     monkeypatch.chdir(project)
     def offline(*args, **kwargs):

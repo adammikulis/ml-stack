@@ -50,10 +50,10 @@ def test_diagnostic_redacts_credentials(secret, monkeypatch):
 
 
 @pytest.mark.parametrize('role', ['read-only', 'approve-first', 'plan-and-go'])
-def test_launcher_keeps_normal_role_policy_without_canonical_admission(monkeypatch, tmp_path, role):
-    def no_canonical(*args, **kwargs):
+def test_launcher_keeps_normal_role_policy_without_admission(monkeypatch, tmp_path, role):
+    def no_board_context(*args, **kwargs):
         pytest.fail('resource-free launcher requested mutation authority')
-    monkeypatch.setattr(harnesshook.harness_remote, 'context', no_canonical)
+    monkeypatch.setattr(harnesshook.harness_remote, 'context', no_board_context)
     monkeypatch.setattr(harnesshook, '_ask', lambda *args, **kwargs: (False, 'test declined'))
     args = {'command': 'ml-stack --no-browser'}
     rail = harnesshook.Rail(role, 'worker', [str(tmp_path)])
@@ -63,7 +63,7 @@ def test_launcher_keeps_normal_role_policy_without_canonical_admission(monkeypat
     assert action == ('allow' if expected.action == 'allow' else 'deny')
 
 
-def test_launcher_suffix_does_not_bypass_canonical_mutation_authority(monkeypatch, tmp_path):
+def test_launcher_suffix_does_not_bypass_mutation_authority(monkeypatch, tmp_path):
     monkeypatch.setattr(harnesshook.harness_remote, 'context', unavailable)
     args = {'command': f'ml-stack --no-browser; rm -rf {tmp_path / "owned"}'}
     result = harnesshook.pre({'tool_name': 'Bash', 'tool_input': args, 'cwd': str(tmp_path)},

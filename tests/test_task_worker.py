@@ -96,7 +96,7 @@ def test_failed_lease_cleanup_publishes_stopped_status_and_preserves_grant(board
     assert board.board.get(board.parent, board.task['id'])['state'] == 'queued'
 
 
-def test_pi_worker_is_accepted_and_waits_for_a_canonical_allocation(board, monkeypatch, tmp_path):
+def test_pi_worker_is_accepted_and_waits_for_a_allocation(board, monkeypatch, tmp_path):
     agent = task_worker.la.load(board.ws, 'native-worker')
     task_worker.la.save(board.ws, replace(agent, harness='pi'))
     stop = tmp_path / 'stop'

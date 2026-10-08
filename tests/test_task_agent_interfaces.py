@@ -19,7 +19,7 @@ def actor(monkeypatch, board, token):
     monkeypatch.setenv(TOKEN_ENV, token)
 
 
-def test_cli_lists_and_reads_canonical_task_with_fixed_actor(board):
+def test_cli_lists_and_reads_task_with_fixed_actor(board):
     result = run_cli(board.base, board.child, 'tasks', '--json')
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout)['tasks'][0]['id'] == board.task['id']

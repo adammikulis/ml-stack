@@ -272,7 +272,7 @@ def test_launcher_exception_reports_pending_scope_and_preserves_failure(setup):
 
 
 @pytest.mark.redteam
-def test_nested_reservation_retains_canonical_checkout_provenance(setup):
+def test_nested_reservation_retains_checkout_provenance(setup):
     kit = setup
     target = kit.checkout.parent / 'reserved-checkout'
     kit.ws.claim(kit.sender, 'worktree', str(target / 'nested'), label='helper')
