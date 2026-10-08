@@ -1,7 +1,7 @@
 {
- "surfaces": 834,
+ "surfaces": 835,
  "by_status": {
-  "covered": 510,
+  "covered": 511,
   "partial": 197,
   "uncovered": 53,
   "n/a": 74,
@@ -86,7 +86,7 @@
    "unmapped": 0
   },
   "route": {
-   "covered": 95,
+   "covered": 96,
    "partial": 58,
    "uncovered": 0,
    "n/a": 0,
@@ -10349,6 +10349,43 @@
     "tests/test_harness_rails.py::TestSeat::test_a_fake_endpoint_cannot_verify_a_delegated_agents_model"
    ],
    "note": "Coding is a declared authenticated Fleet extension; only same-origin person UI can start turns, browser bodies cannot set identity or policy, native argv/session resume retains maintained role hooks, cancellation revokes the temporary agent"
+  },
+  {
+   "id": "route:workspace/fleet_routes.py:/ui/board/*",
+   "kind": "route",
+   "source": "workspace/fleet_routes.py:route",
+   "trust": "network peer or local browser",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "covered",
+   "tests": [
+    "tests/test_fleet_board_routes.py::test_local_person_posts_dm_and_thread_without_exposing_credentials",
+    "tests/test_fleet_board_routes.py::test_joined_session_is_required_before_owner_identity_is_used",
+    "tests/test_fleet_board_routes.py::test_foreign_browser_cannot_send_as_person",
+    "tests/test_fleet_board_routes.py::test_malformed_or_impersonating_post_does_not_deliver",
+    "tests/test_fleet_board_routes.py::test_page_cannot_post_announcements_or_use_agent_owner_file",
+    "tests/test_fleet_board_routes.py::test_oversized_post_and_unsupported_methods_do_not_mutate",
+    "tests/test_fleet_board_routes.py::test_ack_marks_only_an_existing_visible_message_in_its_scope",
+    "tests/test_project_board_ui.py::test_selected_project_messages_and_person_post",
+    "tests/test_project_board_ui.py::test_person_board_rejects_foreign_requests",
+    "tests/test_project_board_ui.py::test_missing_remote_or_unconfigured_project_never_falls_back",
+    "tests/test_project_board_ui.py::test_person_identity_is_required_and_never_created",
+    "tests/test_project_board_ui.py::test_person_board_refuses_unsupported_methods",
+    "tests/test_project_board_ui.py::test_person_threads_direct_messages_and_ack",
+    "tests/test_project_board_ui.py::test_person_post_accepts_exact_browser_origin",
+    "tests/test_project_board_ui.py::test_person_post_rejects_different_browser_origin",
+    "tests/test_redteam_board.py::test_the_route_never_writes_and_refuses_other_hosts_sites_and_traversal",
+    "tests/test_redteam_board.py::test_an_agent_cannot_read_another_board_or_pair_through_any_command",
+    "tests/test_redteam_board.py::test_boards_and_subscriptions_cannot_be_made_without_limit",
+    "tests/test_workspace_board.py::test_the_route_reads_only_and_checks_host_origin_and_fetch_site",
+    "tests/test_redteam_board.py::test_the_one_write_route_refuses_every_way_a_hostile_page_could_reach_it",
+    "tests/test_redteam_board.py::test_a_post_cannot_borrow_another_identity_or_smuggle_options",
+    "tests/test_workspace_quiet.py::test_a_new_agent_has_no_subscriptions_and_its_inbox_holds_no_board_traffic",
+    "tests/test_workspace_quiet.py::test_the_lead_and_the_person_cannot_leave_announcements_and_an_agent_can_only_mute",
+    "tests/test_workspace_quiet.py::test_message_text_never_changes_a_subscription",
+    "tests/test_workspace_model.py::test_a_hostile_model_or_harness_is_refused_everywhere",
+    "tests/test_redteam_board.py::test_following_and_the_live_route_give_an_agent_nothing_it_could_not_already_read"
+   ],
+   "note": "Fleet and exact registered local projects delegate to the maintained person-only Board parser; HTTP and HTTPS exact browser origins, membership, visible acknowledgements, malformed and oversized bodies, missing UI authority, foreign projects and agent owner credentials are exercised without identity creation"
   },
   {
    "id": "route:workspace/work_reputation.py:/ui/work-reputation/standings",
