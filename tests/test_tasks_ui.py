@@ -66,3 +66,47 @@ def test_tasks_filters_artifacts_and_independent_review_payload(tmp_path, playwr
             page.screenshot(path='/private/tmp/ml-stack-tasks-mobile.png', full_page=True)
     finally:
         server.close()
+
+
+@pytest.mark.parametrize('status', [403, 503])
+def test_unavailable_tasks_hide_unknown_lanes_and_recover(tmp_path, playwright, status):
+    server = Serving(tmp_path)
+    server.ui.settings.setup_done = True
+    project_id = 'b' * 32
+    failing = status == 403
+    task = {'id': 'task:' + 'a' * 32, 'title': 'Previously loaded task', 'description': '',
+            'state': 'queued', 'acceptance': ['Verified outcome'], 'created_at': 1}
+
+    def respond(route):
+        if failing:
+            route.fulfill(status=status, json={'error': 'Project access unavailable'})
+        else:
+            route.fulfill(json={'tasks': [task], 'overview': task_summary.overview([task], 100)})
+
+    try:
+        with playwright.chromium.launch(headless=True) as browser:
+            page = browser.new_page()
+            page.route('**/ui/projects', lambda route: route.fulfill(json={'workspaces': [
+                {'id': project_id, 'name': 'Test workspace', 'local_authority': True, 'board_host': 'http://canonical'}]}))
+            page.route(f'**/ui/projects/{project_id}/tasks', respond)
+            page.goto(f'http://127.0.0.1:{server.port}/ui/#tasks')
+            viewer = page.locator('tasks-view')
+            if not failing:
+                expect(viewer.get_by_role('button', name='Previously loaded task', exact=True)).to_be_visible()
+                failing = True
+                viewer.get_by_role('button', name='Refresh', exact=True).click()
+            expect(viewer.locator('.status')).to_contain_text('Task data unavailable:')
+            expect(viewer.locator('.task-layout')).to_be_hidden()
+            expect(viewer.locator('.task-column')).to_have_count(0)
+            expect(viewer.get_by_text('No matching tasks.', exact=True)).to_have_count(0)
+            expect(viewer.locator('.task-remaining-number')).to_have_text('—')
+            expect(viewer.locator('[data-task-count=queued] strong')).to_have_text('—')
+            expect(viewer.get_by_role('button', name='Open Projects', exact=True)).to_be_visible()
+            page.screenshot(path=f'/private/tmp/poolside-tasks-unavailable-{status}.png', full_page=True)
+            failing = False
+            viewer.get_by_role('button', name='Refresh', exact=True).click()
+            expect(viewer.get_by_role('button', name='Previously loaded task', exact=True)).to_be_visible()
+            expect(viewer.locator('.task-remaining-number')).to_have_text('1')
+            expect(viewer.get_by_label('Search tasks')).to_be_enabled()
+    finally:
+        server.close()
