@@ -144,6 +144,6 @@ def test_failed_previous_project_does_not_replace_current_project_status(tmp_pat
             expect(viewer.locator('.status')).not_to_contain_text('Previous project denied')
             expect(viewer.locator('.task-remaining-number')).to_have_text('0')
             expect(viewer.locator('.task-layout')).to_be_visible()
-            assert all('Previous project denied' not in text for text in page.evaluate('taskStatusHistory'))
+            assert all('Task data unavailable:' not in text for text in page.evaluate('taskStatusHistory'))
     finally:
         server.close()
