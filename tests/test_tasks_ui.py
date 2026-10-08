@@ -110,3 +110,33 @@ def test_unavailable_tasks_hide_unknown_lanes_and_recover(tmp_path, playwright, 
             expect(viewer.get_by_label('Search tasks')).to_be_enabled()
     finally:
         server.close()
+
+
+def test_failed_previous_project_does_not_replace_current_project_status(tmp_path, playwright):
+    server = Serving(tmp_path)
+    server.ui.settings.setup_done = True
+    first, second = 'b' * 32, 'c' * 32
+    pending = []
+    try:
+        with playwright.chromium.launch(headless=True) as browser:
+            page = browser.new_page()
+            page.route('**/ui/projects', lambda route: route.fulfill(json={'workspaces': [
+                {'id': key, 'name': name, 'local_authority': True, 'board_host': 'http://canonical'}
+                for key, name in [(first, 'Previous project'), (second, 'Current project')]]}))
+            page.route(f'**/ui/projects/{first}/tasks', lambda route: pending.append(route))
+            page.route(f'**/ui/projects/{second}/tasks', lambda route: route.fulfill(json={
+                'tasks': [], 'overview': task_summary.overview([], 100)}))
+            page.goto(f'http://127.0.0.1:{server.port}/ui/#tasks')
+            viewer = page.locator('tasks-view')
+            expect(viewer.locator('.status')).to_have_text('Updating task overview…')
+            page.wait_for_function("document.querySelector('tasks-view').loading")
+            viewer.get_by_label('Task project workspace').select_option(second)
+            page.wait_for_timeout(50)
+            assert len(pending) == 1
+            pending[0].fulfill(status=403, json={'error': 'Previous project denied'})
+            expect(viewer.locator('.status')).to_contain_text('Updated ')
+            expect(viewer.locator('.status')).not_to_contain_text('Previous project denied')
+            expect(viewer.locator('.task-remaining-number')).to_have_text('0')
+            expect(viewer.locator('.task-layout')).to_be_visible()
+    finally:
+        server.close()
