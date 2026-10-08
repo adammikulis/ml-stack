@@ -211,7 +211,6 @@ def test_plugin_names_roots_ignores_and_versions_are_in_the_key(project):
     assert keys.lookup(project, FILE, ["-q", "--ignore", "tests/other"]).key != base
     assert keys.lookup(project, FILE, ["-q", "-c", "other.ini"]).key != base
     assert keys.lookup(project, FILE, ["-q", "--rootdir=elsewhere"]).key != base
-    assert "pytest" in keys.lookup(project, FILE, ["-q"]).parts["pytest"] or True
     assert keys.lookup(project, FILE, ["-q"]).parts.get("pytest")
 
 
