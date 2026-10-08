@@ -54,6 +54,8 @@ def guard(command: str, tool: str = "Bash", **env: str) -> int:
     ('git push --tags', "a tag is a release"),
     ('git push origin --delete work', "a deletion is not a push of the development branch"),
     ('git merge --ff-only work && git push origin main', "still main after a merge"),
+    ('ML_STACK_PUSH_MAIN=yes git push origin main', "the variable an agent can set opens nothing"),
+    ('git merge --ff-only 0.2dev && ML_STACK_PUSH_MAIN=yes git push origin main', "nor after a merge"),
     ('ML_STACK_PUSH_MAIN=yes git push --force origin main',
      "the opener opens a push of main, never a forced one"),
     ('ML_STACK_PUSH_MAIN=yes git push --all origin', "nor every branch at once"),
@@ -99,8 +101,6 @@ def test_the_shells_that_should_have_been_commands_are_refused(command, why):
     'git rev-list --left-right --count origin/main...main',
     'PYTHONPATH=src python3 -m pytest tests -q -n 4',
     'ML_STACK_WINDOW_POSITION=3460,20 ml-stack-scrape look https://example.invalid',
-    'ML_STACK_PUSH_MAIN=yes git push origin main',
-    'git merge --ff-only 0.2dev && ML_STACK_PUSH_MAIN=yes git push origin main',
 ])
 def test_ordinary_work_is_not_refused(command):
     """A guard that fires on ordinary commands is a guard that gets switched off."""

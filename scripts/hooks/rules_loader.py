@@ -8,15 +8,12 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-AGENT_MARKERS = ("CLAUDECODE", "ML_STACK_AGENT", "ML_STACK_NONINTERACTIVE", "CODEX_THREAD_ID", "CODEX_SESSION_ID")
 
 
-def guard_off() -> str:
-    """"off" when MLSTACK_GUARD=off and no agent marker is set, "hard" when it is set under a running
-    agent (only the hard rules apply), else an empty string."""
-    if os.environ.get("MLSTACK_GUARD") != "off":
-        return ""
-    return "hard" if any(os.environ.get(name) for name in AGENT_MARKERS) else "off"
+def guard_off() -> bool:
+    """Whether MLSTACK_GUARD=off turns the soft rules off; the hooks run only for an agent's calls, so the hard
+    rules stay in force."""
+    return os.environ.get("MLSTACK_GUARD") == "off"
 
 
 def load():

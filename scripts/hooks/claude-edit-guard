@@ -298,10 +298,18 @@ PERSON_STORE = re.compile(r"(^|/)\.ml-stack/person(/|$)")
 """The person record: statements, authorizations and the key that seals them."""
 
 
+def in_person_store(path: str) -> bool:
+    """Whether ``path`` (links resolved) lies in the person record, in the default place or under the active
+    state root."""
+    if not path:
+        return False
+    real = Path(path).resolve()
+    root = (Path(os.environ.get("ML_STACK_HOME") or "~/.ml-stack") / "person").expanduser().resolve()
+    return real == root or root in real.parents or any(PERSON_STORE.search(p) for p in (path, str(real)))
+
+
 def main() -> int:
     switched = rules_loader.guard_off()
-    if switched == "off":
-        return ALLOWED
     try:
         event = json.load(sys.stdin)
     except Exception:
@@ -310,7 +318,7 @@ def main() -> int:
     if tool not in TOOLS:
         return ALLOWED
     given = event.get("tool_input") or {}
-    if PERSON_STORE.search(str(given.get("file_path") or given.get("notebook_path") or "")):
+    if in_person_store(str(given.get("file_path") or given.get("notebook_path") or "")):
         return refuse("the person record is written only by the harness hooks when the person types", hard=True)
     if switched:
         return ALLOWED

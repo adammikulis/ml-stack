@@ -1,4 +1,4 @@
-"""Fixtures for the person-record tests: transcripts in the shapes Claude Code writes, a repository on a development branch, and the hooks run as real child processes."""
+"""Fixtures for the person-record tests: transcripts in the shapes Claude Code writes, a repository one commit ahead of its remote's main, and the hooks run as real child processes."""
 
 from __future__ import annotations
 
@@ -13,17 +13,25 @@ ROOT = Path(__file__).resolve().parent.parent
 HOOKS = ROOT / "scripts" / "hooks"
 VERSION = "2.1.293"
 SESSION = "sess-person-1"
-DEV = "0.9dev"
-PROPOSAL_TEXT = "The tests pass. I'll push the dev branch to origin now."
+PROPOSAL_TEXT = "The tests pass. I'll push main to origin now."
+ZERO = "0" * 40
 ENV_DROPPED = ("CLAUDECODE", "ML_STACK_NONINTERACTIVE", "CLAUDE_CODE_SESSION_ATTENDED", "ML_STACK_AGENT",
-               "ML_STACK_SESSION_ID", "MLSTACK_GUARD", "CODEX_THREAD_ID", "CODEX_SESSION_ID")
+               "ML_STACK_SESSION_ID", "MLSTACK_GUARD", "CODEX_THREAD_ID", "CODEX_SESSION_ID", "CLAUDE_CONFIG_DIR")
 
 
 def environment(state: Path, **more: str) -> dict[str, str]:
-    """A child environment whose ml-stack state lives under ``state``."""
+    """A child environment whose ml-stack state is ``state`` and whose Claude folder is beside it."""
     env = {k: v for k, v in os.environ.items() if k not in ENV_DROPPED}
-    env.update(ML_STACK_HOME=str(state), ML_STACK_NO_REAL_KEYSTORE="1", **more)
+    env.update(ML_STACK_HOME=str(state), ML_STACK_NO_REAL_KEYSTORE="1",
+               CLAUDE_CONFIG_DIR=str(state.parent / "claude"), **more)
     return env
+
+
+def project_dir(state: Path) -> Path:
+    """Where the session transcripts of the test live."""
+    where = state.parent / "claude" / "projects" / "-test-project"
+    where.mkdir(parents=True, exist_ok=True)
+    return where
 
 
 def human(prompt: str, prompt_id: str, **fields) -> dict:
@@ -72,13 +80,34 @@ def git(where: Path, *args: str) -> str:
                           env=env).stdout.strip()
 
 
-def repository(where: Path, branch: str = DEV) -> Path:
-    """A repository whose primary checkout is on ``branch``."""
-    subprocess.run(["git", "init", "-q", "-b", branch, str(where)], check=True)
-    (where / "README.md").write_text("x\n")
-    git(where, "add", "README.md")
-    git(where, "commit", "-q", "-m", "x")
+def commit(where: Path, name: str) -> str:
+    """Commit a new file called ``name`` and return the commit."""
+    (where / name).write_text(name + "\n")
+    git(where, "add", name)
+    git(where, "commit", "-q", "-m", f"add {name}")
+    return git(where, "rev-parse", "HEAD")
+
+
+def repository(where: Path) -> Path:
+    """A repository whose ``main`` is one commit ahead of ``origin/main``; the first commit is ``base``."""
+    remote = where.with_name(where.name + "-remote.git")
+    subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(remote)], check=True)
+    subprocess.run(["git", "init", "-q", "-b", "main", str(where)], check=True)
+    commit(where, "base.txt")
+    git(where, "remote", "add", "origin", str(remote))
+    git(where, "push", "-q", "origin", "main")
+    commit(where, "release.txt")
     return where
+
+
+def tip(repo: Path, ref: str = "main") -> str:
+    return git(repo, "rev-parse", ref)
+
+
+def target(repo: Path, sha: str = "", remote: str = "origin") -> str:
+    """The target a release-main approval of ``sha`` (default main) is bound to."""
+    sha = sha or tip(repo)
+    return f"{repo.resolve()}@{remote}:{sha}:{git(repo, 'rev-parse', sha + '^{tree}')}"
 
 
 def prompt_event(prompt: str, prompt_id: str, path: Path, cwd: Path, **more) -> dict:
@@ -90,16 +119,14 @@ def prompt_event(prompt: str, prompt_id: str, path: Path, cwd: Path, **more) -> 
 def run_hook(event: dict, state: Path, **env: str) -> subprocess.CompletedProcess:
     """Run scripts/hooks/claude-user-prompt on ``event`` as a child process."""
     return subprocess.run([sys.executable, str(HOOKS / "claude-user-prompt")], input=json.dumps(event),
-                          text=True, capture_output=True, timeout=30, check=False,
+                          text=True, capture_output=True, timeout=60, check=False,
                           env=environment(state, **env))
 
 
-def consume(cwd: Path, state: Path, *, session: str = SESSION, remote: str = "origin",
-            kind: str = "push-dev") -> subprocess.CompletedProcess:
-    """Run scripts/hooks/person-consume in ``cwd`` as the session ``session``."""
-    return subprocess.run([sys.executable, str(HOOKS / "person-consume"), kind, remote], cwd=cwd, text=True,
-                          capture_output=True, timeout=30, check=False,
-                          env=environment(state, ML_STACK_SESSION_ID=session))
+def person_consume(cwd: Path, state: Path, *args: str, stdin: str = "", **env: str) -> subprocess.CompletedProcess:
+    """Run scripts/hooks/person-consume in ``cwd``."""
+    return subprocess.run([sys.executable, str(HOOKS / "person-consume"), *args], cwd=cwd, input=stdin, text=True,
+                          capture_output=True, timeout=60, check=False, env=environment(state, **env))
 
 
 def say(tmp: Path, state: Path, repo: Path, prompt: str, **options) -> subprocess.CompletedProcess:
@@ -107,11 +134,37 @@ def say(tmp: Path, state: Path, repo: Path, prompt: str, **options) -> subproces
     run on it; ``prompt_id`` names the turn and any other option goes into the hook event."""
     before, entry = options.pop("before", ()), options.pop("entry", human)
     prompt_id = options.pop("prompt_id", "p-1")
-    path = transcript(tmp / f"{prompt_id}.jsonl", *before, entry(prompt, prompt_id))
+    path = transcript(project_dir(state) / f"{SESSION}.jsonl", *before, entry(prompt, prompt_id))
     return run_hook(prompt_event(prompt, prompt_id, path, repo, **options), state)
+
+
+def proposal(repo: Path, state: Path, sha: str = "") -> tuple[str, str, str]:
+    """The approval question, the approving answer and the declining answer `person-consume propose` prints."""
+    done = person_consume(repo, state, "propose", *([sha] if sha else []))
+    assert done.returncode == 0, done.stderr
+    text, _, options = done.stdout.strip().partition("\n\noptions: ")
+    yes, _, no = options.partition(" | ")
+    return text, yes, no
+
+
+def answer_event(repo: Path, question: str, label: str, **more) -> dict:
+    """The PostToolUse input for an AskUserQuestion the person answered."""
+    return {"hook_event_name": "PostToolUse", "tool_name": "AskUserQuestion", "session_id": SESSION,
+            "cwd": str(repo), "tool_response": {"answers": {question: label}, "annotations": {}}, **more}
+
+
+def approve(tmp: Path, state: Path, repo: Path, sha: str = "") -> subprocess.CompletedProcess:
+    """Bind the session (a typed prompt), then answer the approval question for ``sha`` with its approval."""
+    say(tmp, state, repo, "hello", prompt_id="bind")
+    question, yes, _ = proposal(repo, state, sha)
+    return run_hook(answer_event(repo, question, yes), state)
 
 
 def rows(state: Path) -> list[dict]:
     """Every record in the person log under ``state``."""
     log = state / "person" / "statements.log"
     return [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
+
+
+def authorized(state: Path) -> list[dict]:
+    return [r for r in rows(state) if r["type"] == "authorization"]

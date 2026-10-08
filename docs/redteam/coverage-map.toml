@@ -59,20 +59,21 @@ note = "the health probe reads one loopback URL from the verified manifest; an e
 match = ["parser:workspace/person_transcript.py"]
 status = "covered"
 count = 1
-tests = ["tests/test_redteam_person_statement.py::test_a_look_alike_never_becomes_an_authorization",
+tests = ["tests/test_redteam_person_statement.py::test_no_typed_phrasing_becomes_an_authorization",
          "tests/test_person_hooks.py::test_a_prompt_the_person_did_not_type_leaves_no_record",
          "tests/test_person_hooks.py::test_a_missing_transcript_entry_fails_closed_after_a_bounded_wait",
          "tests/test_person_hooks.py::test_an_unreadable_transcript_and_a_mismatched_text_fail_closed",
-         "tests/test_person_hooks.py::test_a_reply_after_a_long_gap_a_compaction_or_another_question_authorizes_nothing"]
+         "tests/test_person_hooks.py::test_a_transcript_the_calling_agent_wrote_elsewhere_records_nothing",
+         "tests/test_person_hooks.py::test_a_hundred_megabyte_transcript_is_read_from_its_tail_within_the_hook_budget"]
 note = "a transcript entry that is not a typed human prompt on a pinned Claude Code version, is missing, unreadable or differs from the hook prompt records nothing; a forged line by a same-user process is the documented threat-model limit"
 
 [[group]]
-match = ["spawn:workspace/person_targets.py:_git"]
+match = ["spawn:workspace/person_targets.py:_run"]
 status = "covered"
 count = 1
-tests = ["tests/test_person_hooks.py::test_the_changed_branch_between_reply_and_push_is_a_different_target",
-         "tests/test_person_hooks.py::test_a_changed_target_does_not_match"]
-note = "fixed git argument vectors with a timeout; the target an authorization binds is derived from the checkout, never from prompt or model text"
+tests = ["tests/test_person_hooks.py::test_another_commit_another_repository_or_another_remote_does_not_match",
+         "tests/test_person_guards.py::test_an_approval_covers_exactly_one_fast_forward_to_the_approved_commit"]
+note = "fixed git argument vectors with a timeout; the repository, remote, commit and tree an authorization binds are read from git, never from prompt or model text"
 
 [[group]]
 match = ["spawn:fleet/projects.py:local_root"]

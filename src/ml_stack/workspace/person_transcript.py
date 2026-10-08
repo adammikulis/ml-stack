@@ -4,17 +4,20 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-__all__ = ["PINNED_VERSIONS", "Turn", "wait_for_turn"]
+from ml_stack import home
+
+__all__ = ["PINNED_VERSIONS", "Turn", "claude_projects", "path_problem", "wait_for_turn"]
 
 PINNED_VERSIONS = ("2.1.293", "2.1.294")
 HUMAN_SOURCES = ("typed", "queued")
-MAX_BYTES = 256 * 1024 * 1024
+TAIL_BYTES = 8 * 1024 * 1024
 LOOKBACK = 400
 RETRY_S = 0.1
 
@@ -49,11 +52,42 @@ def _text(content: Any) -> str | None:
     return None
 
 
+def claude_projects() -> Path:
+    """The folder Claude Code keeps session transcripts in, resolved."""
+    root = os.environ.get("CLAUDE_CONFIG_DIR") or str(home.user_home() / ".claude")
+    return (Path(root).expanduser() / "projects").resolve()
+
+
+def path_problem(path: str, session_id: str, env_session: str = "") -> str:
+    """Why ``path`` is not the transcript of ``session_id`` under the Claude projects folder, or an empty
+    string: it must be an owned regular file, not a link, named ``<session_id>.jsonl``, and the session the
+    calling process exports, when there is one, must be the same."""
+    where = Path(path)
+    try:
+        info = where.lstat()
+        inside = where.resolve().is_relative_to(claude_projects())
+    except OSError as error:
+        return f"transcript unreadable: {error}"
+    if env_session and env_session != session_id:
+        return "session differs from the calling process's session"
+    if where.is_symlink() or where.resolve() != Path(os.path.normpath(where.absolute())) or not inside:
+        return "transcript is not a plain file under the Claude projects folder"
+    if info.st_uid != os.getuid() or where.name != session_id + ".jsonl":
+        return "transcript is not this user's file for this session"
+    return ""
+
+
 def _entries(path: Path) -> list[dict[str, Any]]:
-    if path.stat().st_size > MAX_BYTES:
-        raise ValueError("transcript too large")
+    """The entries in the last ``TAIL_BYTES`` of the transcript."""
+    with path.open("rb") as handle:
+        size = handle.seek(0, os.SEEK_END)
+        handle.seek(max(0, size - TAIL_BYTES))
+        data = handle.read()
+    lines = data.splitlines()
+    if size > TAIL_BYTES and lines:
+        lines = lines[1:]
     out = []
-    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+    for line in lines:
         try:
             row = json.loads(line)
         except ValueError:

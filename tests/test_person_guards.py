@@ -1,4 +1,4 @@
-"""What consumes the person record (the pre-push hook), what must not write it, and the hard rules of the Bash and edit guards."""
+"""What consumes the person record (the pre-push hook and the Bash guard), what must not write it, and the hard rules of the guards."""
 
 from __future__ import annotations
 
@@ -11,133 +11,237 @@ import sys
 
 import pytest
 from person_support import (
-    DEV,
     HOOKS,
-    PROPOSAL_TEXT,
     ROOT,
     SESSION,
-    assistant,
+    ZERO,
+    approve,
+    commit,
     environment,
     git,
     repository,
     rows,
     say,
+    tip,
 )
 
-from ml_stack.workspace import person_store
+from ml_stack.workspace import person_ancestry, person_store
 from ml_stack.workspace.graphlog import GraphLog
 
-PROPOSAL = assistant(PROPOSAL_TEXT)
-ZERO = "0" * 40
+AGENT = {"CLAUDECODE": "1"}
 
 
 @pytest.fixture
 def world(tmp_path):
-    return tmp_path, tmp_path / "state", repository(tmp_path / "repo")
+    repo = repository(tmp_path / "repo")
+    git(repo, "checkout", "-q", "-b", "0.9dev")
+    return tmp_path, tmp_path / "state", repo
 
 
-def push(repo, state, *refs, sha="", session=SESSION, **env):
-    sha = sha or git(repo, "rev-parse", "HEAD")
+def line(local, remote, ref="main", target_ref=""):
+    return f"refs/heads/{ref} {local} refs/heads/{target_ref or ref} {remote}\n"
+
+
+def release(repo):
+    return line(tip(repo), tip(repo, "origin/main"))
+
+
+def push(repo, state, text, **env):
     source = repo / ".git" / "push-input"
-    source.write_text("".join(f"refs/heads/{r} {sha} refs/heads/{r} {ZERO}\n" for r in refs))
+    source.write_text(text)
     hook = repo / ".git" / "hooks" / "pre-push"
     hook.write_text("#!/bin/sh\nexec sh " + shlex.quote((HOOKS / "pre-push").as_posix()) + ' "$@"\n')
     hook.chmod(0o755)
     return subprocess.run(["git", "hook", "run", "--to-stdin=" + str(source), "pre-push", "--", "origin",
                            "https://example.invalid/x.git"], cwd=repo, text=True, capture_output=True,
-                          env=environment(state, PYTHON=sys.executable, ML_STACK_SESSION_ID=session, **env))
+                          env=environment(state, PYTHON=sys.executable, **env))
 
 
-def test_the_development_push_consumes_the_authorization_once(world):
+def test_the_approved_release_goes_through_once_and_is_recorded(world):
     tmp, state, repo = world
-    say(tmp, state, repo, "yes", before=(PROPOSAL,))
-    first = push(repo, state, DEV, CLAUDECODE="1")
+    approve(tmp, state, repo)
+    first = push(repo, state, release(repo), **AGENT)
     assert first.returncode == 0, first.stderr
-    assert "authorized by the person's statement" in first.stderr
-    second = push(repo, state, DEV, CLAUDECODE="1")
-    assert second.returncode == 0 and "authorized by the person" not in second.stderr
+    assert "main released with the person's approval" in first.stderr
+    second = push(repo, state, release(repo), **AGENT)
+    assert second.returncode != 0 and "no live release-main authorization" in second.stderr
     assert [r["state"] for r in rows(state) if r["type"] == "transition"] == ["used"]
 
 
-def test_the_existing_policy_still_lets_an_agent_push_the_development_branch_unauthorized(world):
+def test_a_push_of_main_without_an_approval_is_refused_and_says_how_to_ask(world):
+    _tmp, state, repo = world
+    done = push(repo, state, release(repo), **AGENT)
+    assert done.returncode != 0 and "refused:" in done.stderr and "person-consume propose" in done.stderr
+
+
+def test_the_opener_variable_no_longer_opens_main_for_an_agent(world):
     _, state, repo = world
-    done = push(repo, state, DEV, CLAUDECODE="1")
-    assert done.returncode == 0 and done.stderr == "" and rows(state) == []
+    assert push(repo, state, release(repo), ML_STACK_PUSH_MAIN="yes", **AGENT).returncode != 0
 
 
-def test_another_sessions_authorization_is_not_consumed(world):
+def test_the_development_branch_needs_no_approval_and_consumes_nothing(world):
     tmp, state, repo = world
-    say(tmp, state, repo, "yes", before=(PROPOSAL,))
-    done = push(repo, state, DEV, session="someone-else", CLAUDECODE="1")
-    assert done.returncode == 0 and "authorized by the person" not in done.stderr
-
-
-@pytest.mark.parametrize("refs,sha", [(("main",), ""), ((DEV, "main"), ""), ((DEV,), ZERO), (("topic",), "")])
-def test_a_live_authorization_never_opens_main_a_deletion_or_another_branch(world, refs, sha):
-    tmp, state, repo = world
-    say(tmp, state, repo, "yes", before=(PROPOSAL,))
-    done = push(repo, state, *refs, sha=sha, CLAUDECODE="1")
-    assert done.returncode != 0 and "refused" in done.stderr
-    assert [r for r in rows(state) if r["type"] == "transition"] == []
-
-
-def test_a_person_pushing_from_their_own_terminal_meets_nothing(world):
-    tmp, state, repo = world
-    say(tmp, state, repo, "yes", before=(PROPOSAL,))
-    done = push(repo, state, "main", CLAUDECODE="")
+    approve(tmp, state, repo)
+    done = push(repo, state, line(tip(repo, "HEAD"), ZERO, "0.9dev"), **AGENT)
     assert done.returncode == 0 and done.stderr == ""
     assert [r for r in rows(state) if r["type"] == "transition"] == []
 
 
-def guard(name, event, **env):
+def refused(repo, state, text, **env):
+    done = push(repo, state, text, **{**AGENT, **env})
+    return done.returncode != 0
+
+
+def test_an_approval_covers_exactly_one_fast_forward_to_the_approved_commit(world):
+    tmp, state, repo = world
+    approve(tmp, state, repo)
+    approved, remote = tip(repo), tip(repo, "origin/main")
+    git(repo, "checkout", "-q", "main")
+    newer = commit(repo, "later.txt")
+    git(repo, "checkout", "-q", "0.9dev")
+    git(repo, "branch", "-q", "side", remote)
+    git(repo, "checkout", "-q", "side")
+    divergent = commit(repo, "side.txt")
+    git(repo, "checkout", "-q", "0.9dev")
+    refs_ok = line(approved, remote)
+    bad = {
+        "a commit made after the approval": line(newer, remote),
+        "not a fast-forward": line(approved, divergent),
+        "HEAD:main resolving to the base": line(remote, remote, "HEAD", "main"),
+        "a deletion": line(ZERO, remote),
+        "a new main": line(approved, ZERO),
+        "a tag": line(approved, ZERO, "v1").replace("refs/heads/v1", "refs/tags/v1"),
+        "two refs": refs_ok + line(approved, ZERO, "0.9dev"),
+        "another branch name": line(approved, remote, "main", "release"),
+    }
+    for label, text in bad.items():
+        assert refused(repo, state, text), label
+    assert [r for r in rows(state) if r["type"] == "transition"] == []
+    assert push(repo, state, refs_ok, **AGENT).returncode == 0
+
+
+def test_an_approval_in_one_repository_does_not_cover_another_with_the_same_names(world):
+    tmp, state, repo = world
+    approve(tmp, state, repo)
+    other = repository(tmp / "second")
+    assert refused(other, state, release(other))
+    assert not refused(repo, state, release(repo))
+
+
+def test_a_person_pushing_from_their_own_terminal_meets_nothing(world):
+    _, state, repo = world
+    if person_ancestry.under_harness():
+        pytest.skip("this run is itself under an agent harness")
+    done = push(repo, state, release(repo), CLAUDECODE="")
+    assert done.returncode == 0 and done.stderr == ""
+
+
+def test_dropping_the_marker_variable_does_not_make_an_agent_a_person(world):
+    if person_ancestry.under_harness():
+        pytest.skip("this run is itself under an agent harness")
+    tmp, state, repo = world
+    say(tmp, state, repo, "hello", prompt_id="bind")
+    assert refused(repo, state, release(repo), CLAUDECODE="")
+    assert refused(repo, state, line(tip(repo), ZERO, "v1").replace("refs/heads/v1", "refs/tags/v1"), CLAUDECODE="")
+
+
+def guard(name, event, state, **env):
     return subprocess.run([sys.executable, str(HOOKS / name)], input=json.dumps(event), text=True,
-                          capture_output=True, timeout=30, check=False, env={**environment(ROOT / ".none"), **env})
+                          capture_output=True, timeout=60, check=False, env=environment(state, **env))
 
 
-def bash(command, **env):
-    return guard("claude-bash-guard", {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": str(ROOT)},
-                 **env)
+def bash(command, state, cwd=ROOT, **env):
+    return guard("claude-bash-guard", {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": str(cwd)},
+                 state, **env)
 
 
-HARD = ["git push --force origin 0.9dev", "git push origin main", "git push origin --tags", "git push origin --delete x",
-        "ml-stack-workspace mint someone --role human", "cat ~/.ml-stack/person/statements.log",
-        "python3 -c 'from ml_stack.workspace.person_record import mark_used'"]
+FORCES = ["git push --force origin main", "git push origin main --force-with-lease", "git push -f origin 0.9dev",
+          "git push origin --tags", "git push origin --delete work", "git push --all origin", "git push --mirror"]
+PREFIXES = ["", "env -u CLAUDECODE ", "env -i ", "env FOO=1 ", "unset CLAUDECODE; ", "sh -c 'X' ", "bash -c \"X\" ",
+            "sudo ", "(", "git -C /tmp/x "]
+OTHERS = ["ml-stack-workspace mint someone --role human", "cat ~/.ml-stack/person/statements.log",
+          "python3 -c 'from ml_stack.workspace.person_record import mark_used'",
+          "python3 -c 'from ml_stack.workspace import person_store'", "python3 -m ml_stack.workspace.person_hook",
+          f"python3 {HOOKS}/claude-user-prompt < /tmp/event.json", f"{HOOKS}/person-consume consume origin",
+          "CLAUDE_CONFIG_DIR=/tmp/x python3 -c 1"]
 
 
-@pytest.mark.parametrize("command", HARD)
-@pytest.mark.parametrize("marker", [{"CLAUDECODE": "1"}, {"ML_STACK_AGENT": "x"}, {"CODEX_THREAD_ID": "t"}])
-def test_a_hard_rule_holds_when_the_guard_is_switched_off_under_an_agent(command, marker):
-    done = bash(command, MLSTACK_GUARD="off", **marker)
-    assert done.returncode == 2, command
-    assert "No switch opens this rule" in done.stderr
+def wrap(prefix, command):
+    if prefix.endswith("-C /tmp/x "):
+        return command.replace("git ", "git -C /tmp/x ", 1)
+    if "X" in prefix:
+        return prefix.replace("X", command)
+    return prefix + command
 
 
-@pytest.mark.parametrize("command", HARD)
-def test_the_hard_rules_also_hold_with_the_guard_on(command):
-    assert bash(command).returncode == 2
+@pytest.mark.parametrize("prefix", PREFIXES)
+@pytest.mark.parametrize("command", FORCES)
+def test_force_tag_delete_and_mirror_pushes_are_refused_through_every_prefix(tmp_path, prefix, command):
+    for env in ({}, {"MLSTACK_GUARD": "off"}, {"MLSTACK_GUARD": "off", **AGENT}):
+        done = bash(wrap(prefix, command), tmp_path / "state", **env)
+        assert done.returncode == 2, (prefix, command, env)
+        assert "No switch opens this rule" in done.stderr
 
 
-def test_the_switch_still_turns_off_a_soft_rule_and_a_person_keeps_it():
-    assert bash("git add -A").returncode == 2
-    assert bash("git add -A", MLSTACK_GUARD="off", CLAUDECODE="1").returncode == 0
-    assert bash("git push --force origin x", MLSTACK_GUARD="off").returncode == 0
+@pytest.mark.parametrize("prefix", PREFIXES)
+def test_a_push_of_main_without_an_approval_is_refused_through_every_prefix(tmp_path, prefix):
+    for env in ({}, {"MLSTACK_GUARD": "off"}):
+        done = bash(wrap(prefix, "git push origin main"), tmp_path / "state", **env)
+        assert done.returncode == 2 and "person-consume propose" in done.stderr
 
 
-def edit(path, **env):
-    return guard("claude-edit-guard", {"tool_name": "Write", "tool_input": {"file_path": path, "content": "x\n"},
-                                       "cwd": str(ROOT)}, **env)
+@pytest.mark.parametrize("command", OTHERS)
+def test_the_person_record_minting_and_hook_rules_hold_with_the_guard_switched_off(tmp_path, command):
+    for env in ({}, {"MLSTACK_GUARD": "off"}, {"MLSTACK_GUARD": "off", **AGENT}):
+        assert bash(command, tmp_path / "state", **env).returncode == 2, (command, env)
 
 
-@pytest.mark.parametrize("path", ["/home/u/.ml-stack/person/statements.log", "/home/u/.ml-stack/person/statements.log.head.key",
-                                  "/home/u/.ml-stack/person"])
-def test_nothing_writes_the_person_store_even_with_the_guard_off(path):
-    for env in ({}, {"MLSTACK_GUARD": "off", "CLAUDECODE": "1"}):
-        done = edit(path, **env)
-        assert done.returncode == 2 and "no switch opens this rule" in done.stderr
+def test_the_guard_lets_an_agent_ask_the_approval_question_and_write_about_the_record(tmp_path):
+    state = tmp_path / "state"
+    assert bash(f"{HOOKS}/person-consume propose", state).returncode == 0
+    for text in ('git commit -m "docs: mention ~/.ml-stack/person/statements.log and person_record"',
+                 "git add scripts/hooks/person-consume scripts/hooks/claude-user-prompt",
+                 "scripts/test all tests/test_person_hooks.py", "grep -rn 'git push origin main' docs/"):
+        assert bash(text, state).returncode == 0, text
 
 
-def test_the_edit_guard_switch_still_works_for_a_soft_rule(tmp_path):
-    assert edit(str(tmp_path / "x.txt"), MLSTACK_GUARD="off", CLAUDECODE="1").returncode == 0
+def test_a_push_of_main_passes_the_guard_only_while_this_session_holds_an_approval(world):
+    tmp, state, repo = world
+    assert bash("git push origin main", state, cwd=repo).returncode == 2
+    approve(tmp, state, repo)
+    assert bash("git push origin main", state, cwd=repo).returncode == 0
+    assert bash("git push --force origin main", state, cwd=repo).returncode == 2
+    assert bash("git push origin --tags", state, cwd=repo).returncode == 2
+    assert bash("git push origin main", state, cwd=tmp).returncode == 2
+
+
+def test_the_switch_still_turns_off_a_soft_rule_and_nothing_else(tmp_path):
+    state = tmp_path / "state"
+    assert bash("git add -A", state).returncode == 2
+    assert bash("git add -A", state, MLSTACK_GUARD="off").returncode == 0
+    assert bash("git add -A", state, MLSTACK_GUARD="off", **AGENT).returncode == 0
+
+
+def edit(path, state, **env):
+    return guard("claude-edit-guard", {"tool_name": "Write", "tool_input": {"file_path": str(path), "content": "x\n"},
+                                       "cwd": str(ROOT)}, state, **env)
+
+
+def test_nothing_writes_the_person_store_through_a_path_a_link_or_a_moved_root(tmp_path):
+    state = tmp_path / "state"
+    (state / "person").mkdir(parents=True)
+    link = tmp_path / "innocent"
+    link.symlink_to(state / "person")
+    targets = [state / "person" / "statements.log", link / "x", "/home/u/.ml-stack/person/statements.log.head.key"]
+    for path in targets:
+        for env in ({}, {"MLSTACK_GUARD": "off", **AGENT}):
+            done = edit(path, state, **env)
+            assert done.returncode == 2 and "no switch opens this rule" in done.stderr, (path, env)
+
+
+def test_an_ordinary_file_and_the_soft_switch_still_work(tmp_path):
+    assert edit(tmp_path / "x.txt", tmp_path / "state").returncode == 0
+    assert edit(tmp_path / "x.txt", tmp_path / "state", MLSTACK_GUARD="off", **AGENT).returncode == 0
 
 
 def importers(module):
@@ -160,21 +264,21 @@ def test_only_the_hook_logic_and_the_consumer_import_the_writers():
     assert importers("person_record") == ["workspace/person_auth.py", "workspace/person_hook.py"]
 
 
-def test_no_agent_reachable_module_imports_the_hook_logic_or_the_consumer():
+def test_no_agent_reachable_module_imports_the_hook_logic_or_the_consumers():
     assert importers("person_hook") == []
-    assert importers("person_auth") == []
+    assert importers("person_release") == ["workspace/person_hook.py"]
+    assert importers("person_auth") == ["workspace/person_release.py"]
     assert importers("person_transcript") == ["workspace/person_hook.py"]
 
 
 def test_the_scripts_that_reach_the_person_record_are_the_hooks_only():
     reaching = sorted(p.name for p in HOOKS.iterdir()
-                      if p.is_file() and re.search(r"person_(hook|auth|record)", p.read_text(errors="replace")))
-    assert reaching == ["claude-bash-guard", "person-consume", "workspace_hook.py"]
+                      if p.is_file() and re.search(r"person_(hook|auth|record|release)", p.read_text(errors="replace")))
+    assert reaching == ["person-consume", "workspace_hook.py"]
 
 
-def test_no_console_script_or_module_main_writes_the_record():
-    project = (ROOT / "pyproject.toml").read_text()
-    assert not re.search(r"person_(record|hook|auth)", project)
+def test_no_console_script_names_the_record_writers():
+    assert not re.search(r"person_(record|hook|auth|release)", (ROOT / "pyproject.toml").read_text())
 
 
 def test_the_board_append_refuses_a_person_attestation_from_every_caller(tmp_path):
@@ -187,7 +291,7 @@ def test_the_board_append_refuses_a_person_attestation_from_every_caller(tmp_pat
 
 def test_the_board_view_shows_the_record_as_attested_by_the_hook_and_never_as_a_person(world, monkeypatch):
     tmp, state, repo = world
-    say(tmp, state, repo, "yes", before=(PROPOSAL,))
+    approve(tmp, state, repo)
     monkeypatch.setenv("ML_STACK_HOME", str(state))
     from ml_stack.workspace import person_view
     shown = person_view.listing()

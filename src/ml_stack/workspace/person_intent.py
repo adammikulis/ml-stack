@@ -1,48 +1,38 @@
-"""The model-free reading of what the person typed: a closed lexicon decides whether it authorizes, revokes, needs a question or means nothing."""
+"""The model-free reading of what the person typed. Typed words never authorize: they revoke, or say that the structured approval question is needed."""
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
 
-__all__ = ["KINDS", "Reading", "interpret", "is_affirmative", "proposal_kinds"]
+__all__ = ["KINDS", "Reading", "interpret", "proposal_kinds"]
 
-KINDS = ("push-dev",)
+KINDS = ("release-main",)
 MAX_WORDS = 12
 
-AFFIRM = {"yes", "yep", "yeah", "ok", "okay", "sure", "go", "do", "please", "approved", "confirmed"}
-AFFIRM_PHRASES = {"go ahead", "do it", "sounds good", "yes please", "looks good"}
-FILLER = AFFIRM | {"it", "that", "ahead", "sounds", "good", "looks", "great", "perfect", "fine", "now",
-                   "thanks", "thank", "you", "lets", "let", "s", "push", "the", "dev", "development",
-                   "branch", "and"}
+AFFIRM = {"yes", "yep", "yeah", "ok", "okay", "sure", "go", "do", "please", "approved", "confirmed", "sounds",
+          "good", "looks", "it", "ahead"}
 NEGATION = {"no", "not", "dont", "don", "never", "stop", "wait", "hold", "cancel", "without", "nothing",
             "nope", "undo", "revoke", "nevermind"}
-CONDITIONAL = {"if", "unless", "once", "after", "when", "until", "provided", "depending", "assuming",
-               "before", "first", "but"}
-FORBIDDEN = {"main", "master", "tag", "tags", "tagged", "release", "releases", "force", "forced", "delete",
-             "deletion", "mirror", "sudo", "keystore", "budget", "budgets", "token"}
-OTHER_ACTIONS = {"restart", "restore", "deploy", "remove", "install", "merge", "reset", "daemon", "launcher",
-                 "launchers", "worktree", "wheel"}
+NEVER = {"tag", "tags", "tagged", "force", "forced", "delete", "deletion", "mirror", "sudo", "keystore", "budget",
+         "budgets", "token", "all"}
+VERBS = r"push|pushing|publish|release|releasing|ship|merge"
+ACTIONS = re.compile(r"\b(?:push|delete|remove|run|rerun|force|merge|release|tag|reset|rebase|drop|restart|restore|"
+                     r"deploy|install|revert|kill|clean)\w*")
 REVOKE_PHRASES = {"stop", "cancel that", "cancel", "never mind", "nevermind", "stop that", "revoke"}
-LEAD_IN = r"(?:(?:ok|okay|yes|yeah|yep|sure|please|go ahead and|go ahead|you may|you can|you could|now|then|and) )*"
-PUSH_OBJECT = r"(?:the )?(?:dev|development)(?: branch)?"
-IMPERATIVE = re.compile(rf"^{LEAD_IN}push (?:{PUSH_OBJECT}|(?P<branch>[\w./-]+))(?: (?:now|please|to origin|for me))*$")
-PRONOUN = re.compile(rf"^{LEAD_IN}push (?:it|that|this)(?: (?:now|please|to origin|for me))*$")
-PROPOSAL_SENTENCE = re.compile(
-    r"\b(?:i'?ll|i will|i'm going to|i am going to|shall i|should i|want me to|ready to|about to|let me|"
-    r"going to|i can|can i|may i|ok to|okay to|next step is to)\b[^.?!\n]*\bpush(?:ing)?\b")
-GENERIC_OBJECTS = {"the", "dev", "development", "origin", "to", "it", "that", "this", "now", "our", "my"}
+RELEASE = re.compile(rf"\b(?:{VERBS})\b[^.?!]*\bmain\b|\bmain\b[^.?!]*\b(?:{VERBS})\b")
 QUOTED = re.compile(r"[\"`“”]|^>|\n>")
+PROPOSAL = re.compile(r"\b(?:i'?ll|i will|i'm going to|shall i|should i|want me to|ready to|about to|let me|"
+                      r"going to|can i|may i)\b")
 
 
 @dataclass(frozen=True, slots=True)
 class Reading:
-    """What a prompt means: ``authorize`` a ``kind``, ``revoke``, ``ask`` for a confirmation, ``refuse``
-    a kind chat cannot authorize, or ``none``."""
+    """What a prompt means: ``revoke``, ``ask`` for the approval question for a ``kind``, ``refuse`` a request
+    chat can never approve, or ``none``. No reading authorizes."""
 
     action: str
     kind: str = ""
-    how: str = ""
     reason: str = ""
 
 
@@ -54,91 +44,42 @@ def _words(text: str) -> list[str]:
     return [word.strip(".") for word in spaced.split() if word.strip(".")]
 
 
-def _normal(text: str) -> str:
-    return " ".join(_words(text))
-
-
-def is_affirmative(text: str) -> bool:
-    """Whether ``text`` is a bare yes from the closed lexicon, with no question, negation or condition."""
-    words = _words(text)
-    if not words or len(words) > MAX_WORDS or "?" in text:
-        return False
-    if set(words) & (NEGATION | CONDITIONAL | FORBIDDEN | OTHER_ACTIONS):
-        return False
-    return (words[0] in AFFIRM or " ".join(words[:2]) in AFFIRM_PHRASES) and set(words) <= FILLER
-
-
-def proposal_kinds(message: str, dev_branch: str) -> tuple[str, ...]:
-    """The kinds the assistant's last message proposes: ``push-dev`` when it names pushing the development
-    branch, ``other`` for anything else it proposes, ordered and without duplicates."""
+def proposal_kinds(message: str) -> tuple[str, ...]:
+    """The kinds the assistant's last message proposes: ``release-main`` for pushing or releasing main, and
+    ``other`` when it asks another question or names another action."""
     found: list[str] = []
-    text = message.lower()
-    for sentence in re.split(r"(?<=[.?!])\s+|\n", text):
-        if not PROPOSAL_SENTENCE.search(sentence):
+    proposing = False
+    for sentence in re.split(r"(?<=[.?!])\s+|\n", message.lower()):
+        verbs = {m.group(0) for m in ACTIONS.finditer(sentence)}
+        if not verbs:
             continue
-        named = re.search(r"\bpush(?:ing)?\s+(?:origin\s+)?([\w./-]+)", sentence)
-        branch = named.group(1) if named else ""
-        dev = dev_branch.lower()
-        names_dev = bool(re.search(r"\b(?:dev|development)\b", sentence)) or bool(dev and dev in sentence)
-        other_branch = branch not in GENERIC_OBJECTS | {dev} and not names_dev
-        kind = "other" if set(_words(sentence)) & FORBIDDEN or not names_dev or other_branch else "push-dev"
-        if kind not in found:
-            found.append(kind)
-    for word in OTHER_ACTIONS:
-        if re.search(rf"\b(?:i'?ll|shall i|want me to|going to)\b[^.?!\n]*\b{word}\b", text) and "other" not in found:
+        release = bool(RELEASE.search(sentence)) and PROPOSAL.search(sentence) is not None
+        if release and not proposing and len(verbs) == 1:
+            proposing = True
+            found.append("release-main")
+        else:
             found.append("other")
-    return tuple(found)
+    return tuple(dict.fromkeys(found))
 
 
-def _revokes(text: str, words: list[str]) -> bool:
-    if _normal(text) in REVOKE_PHRASES or text.strip().lower() == "/revoke":
-        return True
-    return len(words) <= MAX_WORDS and bool(set(words) & NEGATION) and "push" in words
-
-
-def interpret(prompt: str, proposal: tuple[str, ...] = (), dev_branch: str = "") -> Reading:
-    """Read ``prompt`` against the kinds the assistant's last message proposed; ``dev_branch`` is the
-    development branch the guard derives, which a sentence may name but never change."""
+def interpret(prompt: str, proposal: tuple[str, ...] = ()) -> Reading:
+    """Read ``prompt`` against the kinds the assistant's last message proposed."""
     text = prompt.strip()
     words = _words(text)
     if not words:
         return NONE
-    if _revokes(text, words):
+    normal = " ".join(words)
+    if normal in REVOKE_PHRASES or text.lower() == "/revoke" or (
+            len(words) <= MAX_WORDS and set(words) & NEGATION and set(words) & {"push", "release", "ship", "main"}):
         return Reading("revoke", reason="revoked")
     if text.lower().startswith("/allow"):
-        asked = _normal(text[len("/allow"):])
-        if asked == "push dev":
-            return Reading("authorize", "push-dev", "explicit")
-        return Reading("refuse", reason="only push-dev can be allowed from chat")
-    if QUOTED.search(text) or len(words) > MAX_WORDS or re.search(r"[.!;]\s+\S", text.rstrip(".!")) or "\n" in text:
+        return Reading("refuse", reason="an authorization comes from the approval question, not from /allow")
+    if QUOTED.search(text) or len(words) > MAX_WORDS or "\n" in text or "?" in text or set(words) & NEGATION:
         return NONE
-    mentions_push = "push" in words or "pushing" in words
-    if mentions_push and set(words) & FORBIDDEN:
-        return Reading("refuse", reason="pushing main, tags, releases and forced pushes are the owner's")
-    if "?" in text or set(words) & NEGATION:
-        return NONE
-    if set(words) & CONDITIONAL and (mentions_push or (proposal and set(words) & AFFIRM)):
-        kind = "push-dev" if mentions_push else (proposal[0] if proposal[0] in KINDS else "")
-        return Reading("ask", kind, reason="conditional")
-    normal = _normal(text)
-    named = None if PRONOUN.match(normal) else IMPERATIVE.match(normal)
-    if named:
-        branch = named.group("branch") or ""
-        if branch and branch != dev_branch.lower():
-            return Reading("refuse", reason="the named branch is not the development branch")
-        return Reading("authorize", "push-dev", "imperative")
-    if PRONOUN.match(normal) or is_affirmative(text):
-        return _reply(proposal)
-    if words[0] in AFFIRM and proposal:
-        return Reading("ask", proposal[0] if proposal[0] in KINDS else "", reason="not a bare confirmation")
+    if set(words) & NEVER and re.search(rf"\b(?:{VERBS})\b", normal):
+        return Reading("refuse", reason="tags, forced pushes and deletions are the owner's")
+    if RELEASE.search(normal):
+        return Reading("ask", "release-main", "typed words do not approve a release")
+    if words[0] in AFFIRM and set(words) <= AFFIRM and "release-main" in proposal:
+        return Reading("ask", "release-main", "a typed yes does not approve a release")
     return NONE
-
-
-def _reply(proposal: tuple[str, ...]) -> Reading:
-    if not proposal:
-        return NONE
-    if len(proposal) > 1:
-        return Reading("ask", reason="the last message proposed more than one action")
-    if proposal[0] not in KINDS:
-        return Reading("ask", reason="the last message proposed an action chat cannot authorize")
-    return Reading("authorize", proposal[0], "reply")

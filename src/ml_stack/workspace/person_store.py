@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from ml_stack import home
+from ml_stack.lock import Busy, only_one
 from ml_stack.sentinel.events import EventLog
 
 __all__ = ["ATTESTATION", "DEFAULT_MINUTES", "MAX_MINUTES", "VERSION", "Authorization", "Unreadable",
-           "authorizations", "directory", "open_log", "records"]
+           "authorizations", "bound_sessions", "consume_lock", "directory", "open_log", "records"]
 
 ATTESTATION = "person-attestation"
 VERSION = 1
@@ -95,3 +97,18 @@ def authorizations(rows: list[dict[str, Any]], now: float | None = None) -> list
 def newest_clock(rows: list[dict[str, Any]], clock: Callable[[], float] = time.time) -> bool:
     """Whether no record is dated after the present."""
     return all(r.get("ts", 0) <= clock() + CLOCK_SKEW_S for r in rows)
+
+
+@contextmanager
+def consume_lock(log: EventLog) -> Iterator[None]:
+    """Hold the lock that orders consuming, revoking and expiring authorizations."""
+    try:
+        with only_one(log.path.with_name(log.path.name + ".consume"), timeout=5.0, announce=lambda _: None):
+            yield
+    except Busy as error:
+        raise Unreadable(str(error)) from error
+
+
+def bound_sessions(rows: list[dict[str, Any]]) -> dict[tuple[int, float], str]:
+    """The session each recorded harness process `(pid, create_time)` was last bound to."""
+    return {(r["pid"], r["created"]): r["session_id"] for r in rows if r.get("type") == "binding"}

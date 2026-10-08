@@ -14,10 +14,10 @@ from ml_stack.workspace import person_store
 from ml_stack.workspace.person_store import ATTESTATION, VERSION
 
 __all__ = ["EXCERPT_CHARS", "SOURCE", "Grant", "Heard", "expire_session", "mark_used", "prompt_hash", "record_answer",
-           "record_authorization", "record_statement", "revoke_session"]
+           "record_authorization", "record_binding", "record_statement", "revoke_session"]
 
 SOURCE = "harness-hook:UserPromptSubmit"
-EXCERPT_CHARS = 160
+EXCERPT_CHARS = 80
 
 
 def prompt_hash(text: str) -> str:
@@ -45,6 +45,7 @@ class Heard:
     text: str
     ident: str = ""
     version: str = ""
+    transcript: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,7 +66,8 @@ def record_statement(log: EventLog, heard: Heard) -> dict[str, Any]:
     return _append(log, {"type": "statement", "session_id": heard.session_id, "project": heard.project,
                          "cwd": heard.cwd, "prompt_sha256": prompt_hash(heard.text),
                          "excerpt": _excerpt(heard.text), "prompt_id": heard.ident,
-                         "claude_version": heard.version, "source": SOURCE})
+                         "claude_version": heard.version, "transcript_dir": heard.transcript,
+                         "source": SOURCE})
 
 
 def record_answer(log: EventLog, heard: Heard, label: str, annotated: bool) -> dict[str, Any]:
@@ -93,21 +95,28 @@ def mark_used(log: EventLog, auth_id: str, *, by: str, target: str) -> dict[str,
                          "target": target})
 
 
-def _end(log: EventLog, rows: list[dict[str, Any]], session_id: str, state: str,
-         reason: str) -> list[str]:
-    ended = []
-    for auth in person_store.authorizations(rows):
-        if auth.session_id == session_id and auth.state == "live":
-            _append(log, {"type": "transition", "auth_id": auth.id, "state": state, "reason": reason})
-            ended.append(auth.id)
+def _end(log: EventLog, session_id: str, state: str, reason: str) -> list[str]:
+    ended: list[str] = []
+    if not log.path.exists():
+        return ended
+    with person_store.consume_lock(log):
+        for auth in person_store.authorizations(person_store.records(log)):
+            if auth.session_id == session_id and auth.state == "live":
+                _append(log, {"type": "transition", "auth_id": auth.id, "state": state, "reason": reason})
+                ended.append(auth.id)
     return ended
+
+
+def record_binding(log: EventLog, session_id: str, pid: int, created: float) -> dict[str, Any]:
+    """Append that the harness process ``pid`` (started at ``created``) runs ``session_id``."""
+    return _append(log, {"type": "binding", "session_id": session_id, "pid": pid, "created": created})
 
 
 def revoke_session(log: EventLog, session_id: str, reason: str) -> list[str]:
     """End every live authorization spoken in ``session_id``; returns their ids."""
-    return _end(log, person_store.records(log), session_id, "revoked", reason)
+    return _end(log, session_id, "revoked", reason)
 
 
 def expire_session(log: EventLog, session_id: str, reason: str) -> list[str]:
     """Close every live authorization of a session that ended or began again; returns their ids."""
-    return _end(log, person_store.records(log), session_id, "expired", reason)
+    return _end(log, session_id, "expired", reason)

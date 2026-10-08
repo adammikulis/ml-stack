@@ -226,6 +226,10 @@ class EventLog:
                     out.append(record)
         return out
 
+    def mac(self, data: bytes) -> str:
+        """An HMAC of ``data`` under the key kept beside the log."""
+        return self._head.mac(data)
+
     def head(self) -> str:
         """``count hash``: the line to write down somewhere an attacker cannot reach."""
         chain = self._chain()

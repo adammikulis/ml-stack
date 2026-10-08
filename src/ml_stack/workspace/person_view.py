@@ -27,4 +27,12 @@ def _row(row: dict[str, Any]) -> dict[str, Any]:
     return {"kind": person_store.ATTESTATION, "ok": True, "record": row.get("type"), "seq": row.get("seq"),
             "hash": str(row.get("hash", ""))[:12], "ts": row.get("ts"),
             "text": f"attested by the harness hook for session {session}",
-            "detail": {k: row[k] for k in DETAIL if k in row}}
+            "detail": _detail(row)}
+
+
+def _detail(row: dict[str, Any]) -> dict[str, Any]:
+    """The row's fields; an answer's excerpt is the question the model wrote, shown as quoted model text."""
+    detail = {k: row[k] for k in DETAIL if k in row}
+    if row.get("type") == "answer":
+        detail["quoted_model_text"] = detail.pop("excerpt", "")
+    return detail

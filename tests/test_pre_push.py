@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+from ml_stack.workspace.person_ancestry import under_harness
+
 HOOK = Path(__file__).resolve().parent.parent / "scripts" / "hooks" / "pre-push"
 ZERO = "0" * 40
 
@@ -71,9 +73,9 @@ def test_main_rides_along_with_the_development_branch_and_is_still_refused(check
     assert "refs/heads/main" in done.stderr and "refs/heads/0.9dev" not in done.stderr
 
 
-def test_main_goes_through_when_the_owner_has_opened_it(checkout):
+def test_the_opener_variable_does_not_open_main_for_an_agent(checkout):
     done = push(checkout, "main", CLAUDECODE="1", ML_STACK_PUSH_MAIN="yes")
-    assert done.returncode == 0, done.stderr
+    assert done.returncode != 0
 
 
 def test_the_opener_opens_main_and_nothing_else(checkout):
@@ -105,6 +107,7 @@ def test_main_is_refused_even_when_the_primary_checkout_is_on_it(tmp_path):
     assert push(tmp_path, "main", CLAUDECODE="1").returncode != 0
 
 
+@pytest.mark.skipif(under_harness(), reason="a run under an agent harness is not a person's terminal")
 def test_a_person_is_not_stopped(checkout):
     """No terminal sets CLAUDECODE, and neither does a GUI client, so the owner's own
     push meets nothing -- the one push this hook must never be in the way of."""

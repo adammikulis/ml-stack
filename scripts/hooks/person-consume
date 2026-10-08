@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
-"""Consumes the live person authorization for KIND in this session: exit 0 and print its id, or exit 1 and say why.
+"""The guards' side of the person record, run from the pre-push hook and the Bash guard.
 
-    person-consume push-dev REMOTE   the guard derives the target from the checkout it runs in
+    person-consume consume REMOTE   pre-push input on stdin: use the release-main approval for exactly that push
+    person-consume peek             exit 0 when this session holds a live release-main approval for this repository
+    person-consume propose [SHA]    print the approval question git supports for main (default: local main)
+    person-consume harness          exit 0 when an ancestor process is an agent harness
 """
 
 from __future__ import annotations
@@ -11,22 +14,15 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-from ml_stack.workspace import person_auth, person_targets
+from ml_stack.workspace import person_release
 
 
 def main(argv: list[str]) -> int:
-    """Return 0 when an authorization was consumed."""
-    if len(argv) != 3 or argv[1] != "push-dev":
-        print(__doc__, file=sys.stderr)
-        return 2
-    target = person_targets.push_dev_target(os.getcwd(), argv[2])
-    identity = person_auth.Identity(os.environ.get("ML_STACK_SESSION_ID", ""), os.environ.get("ML_STACK_AGENT_LABEL", ""))
-    try:
-        print(person_auth.consume("push-dev", target, identity))
-    except person_auth.NotAuthorized as error:
-        print(str(error), file=sys.stderr)
-        return 1
-    return 0
+    """Return the command's exit code; its output goes to stdout when it succeeds and stderr otherwise."""
+    code, text = person_release.run(argv[1:], sys.stdin.read() if argv[1:2] == ["consume"] else "", os.getcwd())
+    if text:
+        (sys.stdout if code == 0 else sys.stderr).write(text + "\n")
+    return code
 
 
 if __name__ == "__main__":

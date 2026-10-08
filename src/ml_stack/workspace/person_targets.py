@@ -1,37 +1,47 @@
-"""The exact target of an authorizable action, derived from the checkout and never from anything a model wrote."""
+"""The facts a guard derives from the checkout it runs in, never from anything a model wrote."""
 
 from __future__ import annotations
 
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
-__all__ = ["development_branch", "project_of", "push_dev_target"]
+__all__ = ["Checkout", "git_ok", "inspect", "run_git"]
+
+GIT_TIMEOUT_S = 2.0
 
 
-def _git(cwd: str | Path, *args: str) -> str:
+@dataclass(frozen=True, slots=True)
+class Checkout:
+    """The primary checkout of a repository and the remote its ``main`` pushes to."""
+
+    project: str
+    remote: str
+
+
+def _run(cwd: str | Path, *args: str) -> subprocess.CompletedProcess[str] | None:
     try:
-        done = subprocess.run(["git", "-C", str(cwd), *args], capture_output=True, text=True, check=False,
-                              timeout=10)
+        return subprocess.run(["git", "-C", str(cwd), *args], capture_output=True, text=True, check=False,
+                              timeout=GIT_TIMEOUT_S)
     except (OSError, subprocess.TimeoutExpired):
-        return ""
-    return done.stdout.strip() if done.returncode == 0 else ""
+        return None
 
 
-def project_of(cwd: str | Path) -> str:
-    """The primary checkout of the repository ``cwd`` is in, or ``cwd`` when it is in none."""
-    common = _git(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir")
-    return str(Path(common).parent) if common else str(cwd)
+def run_git(cwd: str | Path, *args: str) -> str:
+    """The stdout of a bounded git call; empty when it fails."""
+    done = _run(cwd, *args)
+    return done.stdout.strip() if done is not None and done.returncode == 0 else ""
 
 
-def development_branch(cwd: str | Path) -> str:
-    """The branch the primary checkout is on; empty when it is detached or ``main``."""
-    branch = _git(project_of(cwd), "branch", "--show-current")
-    return "" if branch == "main" else branch
+def git_ok(cwd: str | Path, *args: str) -> bool:
+    """Whether a bounded git call exits 0."""
+    done = _run(cwd, *args)
+    return done is not None and done.returncode == 0
 
 
-def push_dev_target(cwd: str | Path, remote: str = "") -> str:
-    """``remote:branch`` for pushing the development branch; empty when there is none to push."""
-    branch = development_branch(cwd)
-    if not branch:
-        return ""
-    return f"{remote or _git(project_of(cwd), 'config', f'branch.{branch}.remote') or 'origin'}:{branch}"
+def inspect(cwd: str | Path) -> Checkout:
+    """The checkout ``cwd`` belongs to, from two bounded git calls."""
+    common = run_git(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    project = str(Path(common).parent) if common else str(cwd)
+    remote = run_git(project, "config", "branch.main.remote") if common else ""
+    return Checkout(project, remote or "origin")
