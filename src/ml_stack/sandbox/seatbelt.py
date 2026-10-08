@@ -19,6 +19,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from ml_stack.sandbox.backend import Availability, Wrapped, program_of
+from ml_stack.sandbox.path_language import expressions
 from ml_stack.sandbox.policy import NetMode, Policy, PolicyError, checked_path
 
 __all__ = ["BINARY", "DEPRECATION", "ProfileError", "Seatbelt", "profile", "quote"]
@@ -91,8 +92,27 @@ def _filter(kind: str, paths: Sequence[str]) -> str:
     return " ".join(f"({kind} {quote(p)})" for p in paths)
 
 
+def _literal_rules(operation: str, paths: Sequence[str]) -> list[str]:
+    """Keep the same literal union without an unbounded compiler expression."""
+    unique = list(dict.fromkeys(paths))
+    return [f"(allow {operation} {_filter('literal', unique[index:index + 128])})"
+            for index in range(0, len(unique), 128)]
+
+
 def _existing(paths: Sequence[str]) -> list[str]:
     return [p for p in paths if os.path.lexists(p) and os.path.realpath(p) == p]
+
+
+def executable_links(program: str) -> list[str]:
+    links = []
+    path = Path(program)
+    while path.is_symlink():
+        if str(path) in links or len(links) >= 16:
+            raise ProfileError("command: executable symlink chain exceeds bound or loops")
+        links.append(checked_path(path, what="executable link", link=True))
+        target = path.readlink()
+        path = Path(os.path.normpath(target if target.is_absolute() else path.parent / target))
+    return links
 
 
 def profile(policy: Policy, program: str, tag: str) -> str:
@@ -114,23 +134,41 @@ def profile(policy: Policy, program: str, tag: str) -> str:
         "(allow signal (target self))",
         "(allow process-info* (target self))",
         "(allow process-info-pidinfo (target self))",
-        "(allow user-preference-read)",
+        *([] if policy.strict else ["(allow user-preference-read)"]),
         f"(allow process-exec {_filter('subpath', execs)})",
         f"(allow file-read* {_filter('subpath', reads)})",
-        f"(allow file-read-metadata {_filter('literal', _ancestors(reads + writes))})",
+
         '(allow file-read-data (literal "/"))',
-        f"(allow file-read* {_filter('literal', DEVICES_READ)})",
-        f"(allow file-write* {_filter('literal', DEVICES_WRITE)})",
-        f"(allow file-ioctl {_filter('literal', DEVICES_WRITE)})",
-        f"(allow file-read-metadata {_filter('literal', SYMLINKS)})",
-        '(allow ipc-posix-shm-read-data (ipc-posix-name "apple.shm.notification_center"))',
+        f"(allow file-read* {_filter('literal', tuple(p for p in DEVICES_READ if not policy.strict or p != '/dev/tty'))})",
+        f"(allow file-write* {_filter('literal', tuple(p for p in DEVICES_WRITE if not policy.strict or p != '/dev/tty'))})",
+        f"(allow file-ioctl {_filter('literal', tuple(p for p in DEVICES_WRITE if not policy.strict or p != '/dev/tty'))})",
+
+        *([] if policy.strict else ['(allow ipc-posix-shm-read-data (ipc-posix-name "apple.shm.notification_center"))']),
         "(allow sysctl-read " + " ".join(
             [f"(sysctl-name {quote(s)})" for s in SYSCTLS]
             + [f"(sysctl-name-prefix {quote(s)})" for s in SYSCTL_PREFIXES]) + ")",
-        "(allow mach-lookup " + " ".join(f"(global-name {quote(s)})" for s in MACH_SERVICES) + ")",
+        *([] if policy.strict else ["(allow mach-lookup " + " ".join(f"(global-name {quote(s)})" for s in MACH_SERVICES) + ")"]),
     ]
+    if policy.read_files:
+        if policy.strict:
+            out += ["(allow file-read* " + value + ")" for value in expressions(policy.read_files, quote)]
+        else:
+            out += _literal_rules("file-read*", policy.read_files)
+    if policy.read_dirs:
+        out += _literal_rules("file-read-data", policy.read_dirs)
+    literals = [*policy.read_files, *policy.read_dirs, *policy.read_metadata]
+    metadata = [*_ancestors(reads + writes), *executable_links(program), *SYMLINKS,
+                *policy.read_metadata, *policy.read_dirs, *_ancestors(literals)]
+    covered = set(policy.read_files)
+    out += _literal_rules("file-read-metadata", [path for path in metadata if path not in covered])
     if writes:
         out.append(f"(allow file-write* {_filter('subpath', writes)})")
+    for endpoint in policy.unix_sockets:
+        out.append(f"(allow network-outbound (remote unix-socket (literal {quote(endpoint)})))")
+    for namespace in policy.unix_namespaces:
+        out += [f"(allow network-bind (local unix-socket (subpath {quote(namespace)})))",
+                f"(allow network-inbound (local unix-socket (subpath {quote(namespace)})))",
+                f"(allow network-outbound (remote unix-socket (subpath {quote(namespace)})))"]
     out += _network(policy)
     if policy.gpu:
         out += _gpu()
@@ -183,7 +221,7 @@ class Seatbelt:
                                 if path else f"{BINARY} is missing")
         return Availability(True)
 
-    def wrap(self, argv: Sequence[str], policy: Policy) -> Wrapped:
+    def wrap(self, argv: Sequence[str], policy: Policy, *, profile_path: Path | None = None) -> Wrapped:
         if not _WARNED.is_set():
             _WARNED.set()
             logger.warning("%s", DEPRECATION)
@@ -193,6 +231,11 @@ class Seatbelt:
         program = checked_path(program_of(argv, policy.env.get("PATH", "")), what="command", link=True)
         tag = secrets.token_hex(6)
         text = profile(policy, program, tag)
+        if profile_path is not None:
+            fd = os.open(profile_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(fd, "w") as stream:
+                stream.write(text)
+            return Wrapped([BINARY, "-f", str(profile_path), "--", *argv], tag=tag)
         return Wrapped([BINARY, "-p", text, "--", *argv], tag=tag)
 
     def denials(self, tag: str, since: float) -> list[dict[str, str]]:

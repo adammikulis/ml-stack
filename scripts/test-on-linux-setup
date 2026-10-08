@@ -8,7 +8,12 @@ DEPS='pytest pytest-xdist pyyaml numpy psutil pillow networkx gguf safetensors'
 # The runners have cmake; the image has not, and tests/test_serve_build.py configures a
 # checkout with it. PyPI's wheel carries the binary, so it caches with the venv.
 DEPS="$DEPS cmake"
-EXTRAS='.[test,store,hub,web,plot,privacy,guardrails,mcp,memory,fleet-onboard,pdf]'
+EXTRAS='[test,store,hub,web,plot,privacy,guardrails,mcp,memory,fleet-onboard,pdf]'
+SLOW=""
+if printf '%s\n' "$@" | grep -qx -- '--slow'; then
+  SLOW=1
+  EXTRAS="${EXTRAS%]},scrape]"
+fi
 if printf '%s\n' "$@" | grep -qx -- '--redteam'; then
   EXTRAS="${EXTRAS%]},redteam]"
 fi
@@ -16,10 +21,16 @@ fi
 mkdir -p /work
 tar -C /src -cf - --exclude __pycache__ . | tar -C /work -xf -
 git config --global --add safe.directory /work
+mkdir -p /wheel
+python -m pip wheel --quiet --no-deps --wheel-dir /wheel /work
+WHEEL=(/wheel/ml_stack-*.whl)
+[ "${#WHEEL[@]}" -eq 1 ]
+[ -f "${WHEEL[0]}" ]
+WHEEL="${WHEEL[0]}"
 
 # Keyed by the stamp, so a concurrent run needing a different one builds a sibling
 # instead of deleting the env this run may be using.
-HASH="$( { echo "$DEPS $EXTRAS $IMAGE"; cat /work/pyproject.toml; } | sha256sum | cut -d' ' -f1)"
+HASH="$( { echo "wheel-v1 $DEPS $EXTRAS $IMAGE"; cat /work/pyproject.toml; } | sha256sum | cut -d' ' -f1)"
 ENV_DIR="/venv/$HASH/env"
 STAMP="/venv/$HASH/stamp"
 mkdir -p /venv
@@ -36,10 +47,9 @@ if [ ! -f "$STAMP" ]; then
   "$ENV_DIR/bin/pip" install -q --upgrade pip build
   "$ENV_DIR/bin/pip" install -q $DEPS
   "$ENV_DIR/bin/pip" install -q torch --index-url https://download.pytorch.org/whl/cpu
-  "$ENV_DIR/bin/pip" install -q -e "/work/$EXTRAS"
+  "$ENV_DIR/bin/pip" install -q "$WHEEL$EXTRAS"
   "$ENV_DIR/bin/python" -m spacy download en_core_web_sm
-  # Only the dependencies belong in the shared env; this run's own editable install of
-  # ml-stack goes in its private venv below.
+  # The shared environment retains dependencies; the private environment owns ml-stack.
   "$ENV_DIR/bin/pip" uninstall -y -q ml-stack
   touch "$STAMP"
 fi
@@ -60,9 +70,7 @@ for dir in /venv/*/; do
   exec 8>&-
 done
 
-# This run's own venv, outside the shared volume, seeing the shared env's dependencies
-# through a .pth file. Its editable install of ml-stack, and the entry points that
-# registers, belong to this run alone.
+# The private environment installs this run's wheel and shares cached dependencies.
 PRIV=/priv-venv
 python -m venv "$PRIV"
 PURELIB='import sysconfig; print(sysconfig.get_path("purelib"))'
@@ -70,12 +78,16 @@ SHARED_SITE="$("$ENV_DIR/bin/python" -c "$PURELIB")"
 PRIV_SITE="$("$PRIV/bin/python" -c "$PURELIB")"
 rm -rf "$SHARED_SITE/tests"
 echo "$SHARED_SITE" > "$PRIV_SITE/shared-env.pth"
-"$PRIV/bin/pip" install -q --no-deps -e /work
+"$PRIV/bin/pip" install -q --no-deps "$WHEEL"
 
 # As a person runs it, and as CI runs it. Root ignores a 0o500 directory, so the tests
 # that check a refusal on an unwritable path see no refusal.
 groupadd --non-unique --gid "$HOST_GID" tester
 useradd --uid "$HOST_UID" --gid "$HOST_GID" --create-home tester
+if [ -n "$SLOW" ]; then
+  export PLAYWRIGHT_BROWSERS_PATH=/home/tester/.cache/ms-playwright
+  "$PRIV/bin/python" -m playwright install --with-deps chromium
+fi
 chown -R "$HOST_UID:$HOST_GID" /work /home/tester "$PRIV"
 export HOME=/home/tester
 # A fake server the tests write into a temp directory runs `python3` off PATH; the
@@ -84,3 +96,6 @@ export HOME=/home/tester
 export PATH="$PRIV/bin:$ENV_DIR/bin:$PATH"
 printf 'export PATH=%q\n' "$PATH" > /test-env
 printf 'export HOME=/home/tester\n' >> /test-env
+if [ -n "$SLOW" ]; then
+  printf 'export PLAYWRIGHT_BROWSERS_PATH=%q\n' "$PLAYWRIGHT_BROWSERS_PATH" >> /test-env
+fi

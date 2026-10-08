@@ -356,7 +356,8 @@ def _rpc_socket(server, token):
     import socket
     connection = socket.create_connection(server.server_address, timeout=5)
     stream = connection.makefile("rwb")
-    stream.write(json.dumps({"token": token, "operation": "acquire", "label": "rpc proof"}).encode() + b"\n")
+    stream.write(json.dumps({"token": token, "operation": "acquire", "label": "rpc proof", "parent": None,
+                                  "phase": "test", "heavy": False}).encode() + b"\n")
     stream.flush()
     return connection, stream
 
@@ -369,7 +370,7 @@ def test_invalid_rpc_token_cannot_acquire_capacity(tmp_path, monkeypatch):
     try:
         server.admitted.set()
         server.collected.set()
-        connection, stream = _rpc_socket(server, "invalid")
+        connection, stream = _rpc_socket(server, "0" * 48)
         with connection, stream:
             assert "invalid admission token" in json.loads(stream.readline())["error"]
         assert rpc.testslots.status()["in_use"] == 0
@@ -702,3 +703,25 @@ def test_record_removed_after_identity_check_is_republished_locked(tmp_path, mon
         assert module._alive(removed[0])
         assert module.status()["in_use"] == 1
     assert not list((tmp_path / "slots").glob("*.slot"))
+
+
+def test_a_long_node_id_is_admitted_with_a_bounded_label(monkeypatch):
+    import contextlib
+    import types
+
+    import testslots_pytest
+
+    labels = []
+
+    @contextlib.contextmanager
+    def request(operation, **fields):
+        labels.append(fields["label"])
+        yield
+
+    monkeypatch.setattr(testslots_pytest.testslots_rpc, "request", request)
+    item = types.SimpleNamespace(nodeid="tests/test_x.py::test_y[" + "z" * 600 + "]", path="tests/test_x.py")
+    protocol = testslots_pytest.pytest_runtest_protocol(item, None)
+    next(protocol)
+    with contextlib.suppress(StopIteration):
+        next(protocol)
+    assert len(labels[0]) <= 256 and labels[0].endswith("]")

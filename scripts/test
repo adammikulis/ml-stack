@@ -38,6 +38,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -76,14 +77,14 @@ def pytest_command(workers: int, *rest: str) -> list[str]:
     return [sys.executable, "-m", "pytest", "-q", "-rfE", "-n", str(workers), *rest]
 
 
-def run(command: list[str], env: dict[str, str] | None = None, tier: str = "") -> int:
+def run(command: list[str], env: dict[str, str] | None = None, tier: str = "", *, artifact_output: bool = False) -> int:
     """Run pytest; named test files reuse earlier passes, and a tier or gate run refreshes the store."""
     if env is not None or tier not in testreuse_run.TIERS:
-        return launch(command, env, tier)
+        return launch(command, env, tier, artifact_output=artifact_output)
     files = testreuse_run.selectors(command, ROOT)
     reuse = REUSE["on"] and files is not None and tier != "gate"
     session = testreuse_run.Session(ROOT, command, files, reuse_store(), REUSE["events"])
-    report = session.run(lambda shown: launch(shown, env, tier), lambda: tree_hash(ROOT), reuse)
+    report = session.run(lambda shown: launch(shown, env, tier, artifact_output=artifact_output), lambda: tree_hash(ROOT), reuse)
     REUSE["report"] = report
     print("\n".join(report.lines()), flush=True)
     return report.status
@@ -99,19 +100,65 @@ def jobs_store() -> testjobs.Jobs:
     return testjobs.Jobs(reuse_store().folder)
 
 
-def launch(command: list[str], env: dict[str, str] | None = None, tier: str = "") -> int:
-    """Run pytest in the repository and write its local evidence artifact."""
-    given = next((a.split("=", 1)[1] for a in command if a.startswith("--junitxml=")), "")
-    if given:
-        junit, shown = Path(given), list(command)
+@dataclass
+class OutputRecord:
+    junit: Path
+    artifacts: object = None
+    strict: bool = False
+    given: bool = False
+
+
+def report_run(record: OutputRecord, text: str) -> None:
+    if record.strict:
+        record.artifacts.sinks["console.log"].write((text + "\n").encode())
     else:
+        print(text, file=sys.stderr)
+
+
+def confining(environment: dict[str, str]) -> bool:
+    """Whether this run asks for the macOS Seatbelt confinement kernel."""
+    return sys.platform == "darwin" and environment.get("DEV_TEST_CONFINE") == "1"
+
+
+def launch(command: list[str], env: dict[str, str] | None = None, tier: str = "", *, artifact_output: bool = False) -> int:
+    """Run pytest in the repository and record its local evidence artifacts."""
+    environment = dict(os.environ if env is None else env)
+    environment.pop("DEV_TEST_JOB", None)
+    given = next((a.split("=", 1)[1] for a in command if a.startswith("--junitxml=")), "")
+    artifacts = None
+    if confining(environment):
+        from test_kernel_outputs import ArtifactOutputs
+        artifacts = ArtifactOutputs(environment, strict=artifact_output)
+        junit = artifacts.directory / "junit.xml"
+    elif given:
+        junit = Path(given)
+    else:
+        if artifact_output:
+            raise RuntimeError("test: private artifact output requires --confine on macOS")
         descriptor, name = tempfile.mkstemp(suffix=".xml")
         os.close(descriptor)
         junit = Path(name)
-        shown = [*command, f"--junitxml={junit}"]
-    print("+", " ".join(command), flush=True)
-    environment = dict(os.environ if env is None else env)
-    environment.pop("DEV_TEST_JOB", None)
+    try:
+        if artifact_output:
+            artifacts.announce()
+        record = OutputRecord(junit, artifacts, artifact_output, bool(given) and artifacts is None)
+        if artifact_output:
+            with artifacts.redirect():
+                try:
+                    return execute_run(command, environment, tier, record)
+                finally:
+                    artifacts.observe()
+        return execute_run(command, environment, tier, record)
+    finally:
+        if artifacts is not None:
+            artifacts.close()
+
+
+def execute_run(command, environment, tier, record: OutputRecord):
+    junit, artifacts, artifact_output = record.junit, record.artifacts, record.strict
+    shown = list(command) if record.given else [*command, f"--junitxml={junit}"]
+    if not artifact_output:
+        print("+", " ".join(command), flush=True)
     environment["PYTHONPATH"] = os.pathsep.join(
         (str(ROOT / "src"), str(ROOT / "scripts"), environment.get("PYTHONPATH", "")))
     index = shown.index("-n")
@@ -121,28 +168,50 @@ def launch(command: list[str], env: dict[str, str] | None = None, tier: str = ""
     if environment.get("DEV_TEST_REUSE_RECORD"):
         shown.extend(["-p", "testreuse_plugin"])
     executed_tree = tree_hash(ROOT)
+    if not executed_tree:
+        raise RuntimeError("test: source identity is unavailable before launch")
     began = time.monotonic()
     load = os.getloadavg()[0] if hasattr(os, "getloadavg") else 0.0
-    status = testslots_runner.run_pytest(shown, want, env=environment)
+    failure = None
+    try:
+        status = (testslots_runner.run_artifact_pytest(shown, want, environment, artifacts) if artifact_output
+                  else testslots_runner.run_pytest(shown, want, env=environment))
+    except (OSError, RuntimeError, ValueError) as exc:
+        status, failure = 4, exc
     if status == 5 and any("::" in value for value in command):
-        print("test: the explicit node selector matched no tests", file=sys.stderr)
+        report_run(record, "test: the explicit node selector matched no tests")
         status = 4
     if tree_hash(ROOT) != executed_tree:
-        print("test: source tree changed during the run", file=sys.stderr)
+        report_run(record, "test: source tree changed during the run")
         status = 4
     wall = time.monotonic() - began
     if tier in ("full", "all") and not [a for a in command if a.startswith("tests/") or a == "-k"]:
         measured(command, junit, wall, load)
-    artifact_fd, artifact_name = tempfile.mkstemp(suffix=".result.json")
-    os.close(artifact_fd)
-    record_run(Run(ROOT, tier, command, junit, status, wall, executed_tree), Path(artifact_name))
-    print(f"test: evidence {artifact_name}", flush=True)
     kept = os.environ.get("DEV_TEST_JOB")
     if kept and junit.is_file():
         shutil.copy(junit, jobs_store().path(kept) / f"junit-{time.time_ns()}.xml")
-    if not given:
-        junit.unlink(missing_ok=True)
+    save_evidence(Run(ROOT, tier, command, junit, status, wall, executed_tree), record)
+    if failure is not None:
+        raise failure
     return status
+
+
+def save_evidence(result: Run, record: OutputRecord):
+    if record.artifacts is None:
+        descriptor, name = tempfile.mkstemp(suffix=".result.json")
+        os.close(descriptor)
+        artifact = Path(name)
+    else:
+        artifact = record.artifacts.directory / "evidence.result.json"
+    if record.strict:
+        record_run(result, artifact, destination=record.artifacts.sinks["evidence.result.json"],
+                   boundary=record.artifacts.boundary())
+        record.artifacts.validate()
+    else:
+        record_run(result, artifact)
+        print(f"test: evidence {artifact}", flush=True)
+        if not record.given:
+            record.junit.unlink(missing_ok=True)
 
 
 def measured(command: list[str], junit: Path, wall: float, load: float) -> None:
@@ -298,7 +367,7 @@ def gate(args: argparse.Namespace, rest: list[str]) -> int:
                                     capture_output=True, text=True, check=False).stdout
         began = time.monotonic()
         print(f"gate: {name}", flush=True)
-        status = (run(command, tier="gate") if "pytest" in command
+        status = (run(command, tier="gate", artifact_output=args.artifact_output) if "pytest" in command
                   else subprocess.run(command, cwd=ROOT, check=False).returncode)
         if name == "command reference":
             after = subprocess.run(["git", "diff", "--", "docs/commands.md"], cwd=ROOT,
@@ -457,6 +526,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--base", default=BASE, help="branch quick diffs against")
     parser.add_argument("--slow", action="store_true", help="quick: include slow tests")
     parser.add_argument("--explain", action="store_true", help="quick: say what selected what")
+    parser.add_argument("--artifact-output", action="store_true", help="macOS with --confine: keep test output in private inert artifacts")
+    parser.add_argument("--confine", action="store_true", help="macOS: run pytest under the Seatbelt confinement kernel")
     args, rest = parser.parse_known_args(argv)
     REUSE["on"] = not args.no_reuse
     seat = testboard.acting()
@@ -467,6 +538,10 @@ def main(argv: list[str] | None = None) -> int:
         os.environ["DEV_TEST_AGENT"] = json.dumps({**seat.identity, "job": os.environ.get("DEV_TEST_JOB", "")})
     else:
         os.environ.pop("DEV_TEST_AGENT", None)
+    if args.confine:
+        os.environ["DEV_TEST_CONFINE"] = "1"
+    if args.artifact_output and args.tier not in ("gate", "all"):
+        parser.error("--artifact-output supports only reviewed gate or explicit all-tier selectors")
     if args.tier in JOB_COMMANDS:
         return job_command(args, rest, argv)
     if args.tier == "heavy":
@@ -491,7 +566,7 @@ def main(argv: list[str] | None = None) -> int:
         return quick(args, rest)
     if args.tier == "gate":
         return gate(args, rest)
-    return run(pytest_command(args.workers, *tiers[args.tier], *rest), tier=args.tier)
+    return run(pytest_command(args.workers, *tiers[args.tier], *rest), tier=args.tier, artifact_output=args.artifact_output)
 
 
 if __name__ == "__main__":

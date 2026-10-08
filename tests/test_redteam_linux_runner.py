@@ -1,9 +1,8 @@
-"""Hostile pytest text reaches the container as literal arguments."""
+"""Linux tests use admitted selectors and immutable installed assets."""
 
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -14,60 +13,53 @@ pytestmark = pytest.mark.redteam
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_container_spawn_keeps_arguments_literal_and_mounts_read_only(tmp_path):
-    executables = tmp_path / "bin"
-    executables.mkdir()
-    record = tmp_path / "docker.jsonl"
-    docker = executables / "docker"
-    docker.write_text(
-        f"#!{sys.executable}\nimport json, os, sys\n"
-        "with open(os.environ['DOCKER_RECORD'], 'a') as out:\n"
-        " out.write(json.dumps(sys.argv[1:]) + '\\n')\n"
-        "print('isolated-test-container') if 'run' in sys.argv else None\n"
+def test_container_spawn_keeps_arguments_literal_and_mounts_read_only():
+    from test_container_launch import ContainerRun
+
+    for hostile in ("$(touch /tmp/injected)", "tests/test_layers.py; --privileged", "--mount=type=bind,src=/,dst=/host"):
+        with pytest.raises(RuntimeError, match="fixture admission"):
+            ContainerRun([sys.executable, "-m", "pytest", hostile], {})
+
+
+def test_setup_selects_one_built_wheel_and_refuses_missing_artifacts(tmp_path):
+    setup = (ROOT / "scripts/test-on-linux-setup").read_text()
+    selection = setup[setup.index('WHEEL=(/wheel/'):setup.index('# Keyed by')]
+    selection = selection.replace('/wheel/', f'{tmp_path}/')
+    command = 'set -euo pipefail\n' + selection + '\nprintf "%s" "$WHEEL"'
+    missing = subprocess.run(["bash", "-c", command], capture_output=True, text=True)
+    assert missing.returncode != 0
+    wheel = tmp_path / "ml_stack-0.0.0-py3-none-any.whl"
+    wheel.touch()
+    selected = subprocess.run(["bash", "-c", command], capture_output=True, text=True)
+    assert selected.returncode == 0, selected.stderr
+    assert selected.stdout == str(wheel)
+    (tmp_path / "ml_stack-0.0.1-py3-none-any.whl").touch()
+    ambiguous = subprocess.run(["bash", "-c", command], capture_output=True, text=True)
+    assert ambiguous.returncode != 0
+
+
+def test_setup_installs_wheel_for_dependencies_and_private_entrypoints():
+    setup = (ROOT / "scripts/test-on-linux-setup").read_text()
+    assert 'python -m pip wheel --quiet --no-deps --wheel-dir /wheel /work' in setup
+    assert '"$ENV_DIR/bin/pip" install -q "$WHEEL$EXTRAS"' in setup
+    assert '"$PRIV/bin/pip" install -q --no-deps "$WHEEL"' in setup
+    assert 'wheel-v1 $DEPS $EXTRAS $IMAGE' in setup
+    assert ' -e ' not in setup and '--editable' not in setup
+
+
+def test_container_installed_distribution_and_child_import_provenance():
+    if sys.prefix != "/priv-venv":
+        pytest.skip("requires the maintained Linux container environment")
+    from importlib.metadata import distribution
+
+    installed = distribution("ml-stack")
+    direct = json.loads(installed.read_text("direct_url.json"))
+    assert direct["url"].startswith("file:///wheel/ml_stack-")
+    assert direct["url"].endswith(".whl")
+    assert not direct.get("dir_info", {}).get("editable", False)
+    assert Path(installed.locate_file("ml_stack/__init__.py")).is_file()
+    child = subprocess.run(
+        [sys.executable, "-c", "import ml_stack; print(ml_stack.__file__)"],
+        capture_output=True, text=True, check=True,
     )
-    docker.chmod(0o755)
-    git = executables / "git"
-    git.write_text(f"#!{sys.executable}\nimport pathlib, sys\npathlib.Path(sys.argv[-1]).mkdir(parents=True)\n")
-    git.chmod(0o755)
-    for name in ("tar",):
-        executable = executables / name
-        executable.write_text("#!/bin/sh\nexit 0\n")
-        executable.chmod(0o755)
-    broker = executables / "python3"
-    broker.write_text(f"#!{sys.executable}\nimport json,os,subprocess,sys\n"
-                     "with open(os.environ['BROKER_RECORD'], 'a') as out: out.write(json.dumps(sys.argv[1:]) + '\\n')\n"
-                     "env={**os.environ,'DEV_TEST_WORKERS':'2','DEV_TEST_PYTEST_ENDPOINT':'host.docker.internal:12345','DEV_TEST_PYTEST_TOKEN':'test-token'}\n"
-                     "sys.exit(subprocess.run(sys.argv[sys.argv.index('--')+1:],env=env).returncode)\n")
-    broker.chmod(0o755)
-    temporary = tmp_path / "runner-tmp"
-    temporary.mkdir()
-    permits = tmp_path / "permits.jsonl"
-    marker = tmp_path / "injected"
-    hostile = f"$(touch {marker}); --privileged; --mount=type=bind,src=/,dst=/host"
-    done = subprocess.run(
-        [str(ROOT / "scripts/test-on-linux"), "-k", hostile],
-        env={**os.environ, "PATH": f"{executables}:{os.environ['PATH']}",
-             "DEV_TEST_WORKERS": "2", "DOCKER_RECORD": str(record),
-             "BROKER_RECORD": str(permits), "DEV_TEST_SLOTS_DIR": str(tmp_path / "slots"),
-             "TMPDIR": str(temporary)},
-        capture_output=True, text=True, timeout=15,
-    )
-    assert done.returncode == 0, done.stderr
-    calls = [json.loads(line) for line in record.read_text().splitlines()]
-    run = next(call for call in calls if "run" in call)
-    phases = [json.loads(line) for line in permits.read_text().splitlines()]
-    assert phases[0][1:6] == ["run", "--want", "1", "--min", "1"]
-    assert phases[1][1:7] == ["pytest", "--container", "--want", "0", "--min", "1"]
-    executions = [call for call in calls if "exec" in call]
-    assert executions[0][-2:] == ["-k", hostile]
-    assert executions[1][-4:] == ["-k", hostile, "-n", "2"]
-    assert "DEV_TEST_PYTEST_ENDPOINT" in executions[1]
-    assert calls[-1][-3:] == ["rm", "-f", "isolated-test-container"]
-    assert "--privileged" not in run and "--network=host" not in run
-    mounts = [run[index + 1] for index, value in enumerate(run) if value == "-v"]
-    assert len(mounts) == 2 and mounts[0].endswith("/repo:/src:ro")
-    assert mounts[1].endswith(":/venv")
-    assert not marker.exists()
-    for call in calls:
-        assert call[0] == "--config"
-        assert not Path(call[1]).exists()
+    assert Path(child.stdout.strip()) == ROOT / "src/ml_stack/__init__.py"

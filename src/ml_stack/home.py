@@ -15,7 +15,10 @@ from pathlib import Path
 
 from ml_stack.files import promote
 
-__all__ = ["CACHE_ENV", "OVERRIDES", "ROOT_ENV", "cache", "device_id", "expand", "home", "machine_id",
+if os.name == "posix":
+    import pwd
+
+__all__ = ["CACHE_ENV", "OVERRIDES", "ROOT_ENV", "account_roots", "cache", "device_id", "expand", "home", "machine_id",
            "moved", "state", "user_home"]
 
 ROOT_ENV = "ML_STACK_HOME"
@@ -42,6 +45,13 @@ OVERRIDES = {
 def user_home() -> Path:
     """The account's home directory."""
     return Path.home()
+
+
+def account_roots() -> tuple[Path, Path]:
+    """Return the actual account's default state and cache roots."""
+    account = Path(pwd.getpwuid(os.getuid()).pw_dir) if os.name == "posix" else user_home()
+    account = account.resolve()
+    return account / DEFAULT_NAME, account / ".cache" / "ml_stack"
 
 
 def expand(path: str | Path) -> Path:

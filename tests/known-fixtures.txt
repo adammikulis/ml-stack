@@ -276,3 +276,6 @@ c. Agent
 node kind
 Slice 2
 Slice 4
+
+# not a person: code phrases the recogniser reads as people
+worktree pointer
