@@ -311,6 +311,11 @@ broker allocation. File areas use repository identity plus relative path across 
 physical worktree claims remain separate. Claim only the required area, not an entire repository
 that would serialize unrelated changes.
 
+A clean checkout can fast-forward or switch to an exact independently reviewed commit under
+its physical worktree and branch claims. Do not reserve every incoming source file for that
+baseline move. Preserve unique branch history before switching. New source edits, custom
+staging and conflict resolutions still require their named canonical source-area claims.
+
 Overlap checks and handoffs are atomic. Record the authenticated owner, actual process identity
 and birth time, source commit and environment where the maintained allocation supports them.
 Claims never grant project permissions, bypass person approval or permit another agent's
