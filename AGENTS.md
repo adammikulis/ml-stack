@@ -458,6 +458,12 @@ and fallback can start full runs. Invalid selectors fail before admission; never
 replace a missing selector with an unreviewed omission. Do not run a full suite after every
 intermediate commit. Use the available WSL device for scoped Linux verification.
 
+**A run's fixed cost is budgeted.** A scoped run spends its time on the tests, not on setup: fixed
+overhead above 5 seconds, or a quarter of the wall time, is a defect to fix in the runner or a
+fixture. Anything whose cost scales with the machine's state (files under the home, installed
+runtimes, queue depth) and not with the change is a bug. Measure with `--durations` before blaming
+the tests, and never leave a state walk unbounded.
+
 The maintained tiers are `fast` (neither slow nor heavy), `full` (not slow), `slow` (only slow)
 and `all` (including slow). `tests/README.md` describes their mechanics; the policy above
 controls when each is authorized. Run the relevant slow tests for packaging, page and Fleet
@@ -750,7 +756,7 @@ document and quotes no figure. A number without those four is not a measurement,
 
 ### Vocabulary
 
-The group of paired devices is a **pool**, from a pool of one device to a pool of N. New code, flags,
+The group of paired devices is a **pool**, from a pool of one device to a pool of N devices. New code, flags,
 identifiers, files, interface text and docs say pool and never cluster or fleet for it. The word
 cluster is kept only where it means something else, such as clustering in data. Existing uses of
 cluster and fleet are renamed together with the product rename in `docs/poolside-refactor-plan.md`.
