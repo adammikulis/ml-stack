@@ -12,7 +12,48 @@
 
 [ratchet]
 uncovered = 53
-partial = 198
+partial = 197
+
+[[group]]
+match = ["human:fleet/autostart_apply.py:install", "human:fleet/autostart_apply.py:rollback"]
+status = "covered"
+count = 2
+tests = ["tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+         "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+         "tests/test_redteam_human_floor.py::test_no_tool_an_agent_is_offered_is_a_human_only_action",
+         "tests/test_autostart_apply.py::test_an_agent_is_refused_install_and_rollback_before_anything_is_read",
+         "tests/test_autostart_apply.py::test_no_terminal_means_no_install",
+         "tests/test_autostart_apply.py::test_the_person_must_type_the_manifest_id",
+         "tests/test_autostart_apply.py::test_an_expired_manifest_is_refused_and_nothing_is_written",
+         "tests/test_autostart_apply.py::test_a_manifest_prepared_on_another_device_is_refused",
+         "tests/test_autostart_apply.py::test_replaying_an_installed_manifest_is_refused",
+         "tests/test_autostart_apply.py::test_changing_a_staged_unit_between_prepare_and_install_is_refused",
+         "tests/test_autostart_apply.py::test_a_unit_and_manifest_edited_together_still_differ_from_what_prepare_renders",
+         "tests/test_autostart_apply.py::test_a_destination_outside_the_allowed_set_is_refused",
+         "tests/test_autostart_apply.py::test_a_symlinked_unit_directory_is_refused",
+         "tests/test_autostart_apply.py::test_a_symlinked_destination_file_is_refused",
+         "tests/test_autostart_apply.py::test_a_manifest_edited_to_run_something_else_is_refused",
+         "tests/test_autostart_apply.py::test_a_missing_or_replaced_exec_target_is_refused_at_install"]
+note = "install and rollback refuse any agent marker or missing terminal before reading the manifest; an expired, replayed, other-device, tampered or redirected manifest writes nothing"
+
+[[group]]
+match = ["spawn:fleet/autostart_backends.py:run"]
+status = "covered"
+count = 1
+tests = ["tests/test_autostart_hostile.py::test_run_hands_every_argument_to_the_program_unchanged",
+         "tests/test_autostart_hostile.py::test_run_reports_a_program_that_cannot_start_as_a_failure",
+         "tests/test_autostart_hostile.py::test_run_bounds_a_program_that_never_exits",
+         "tests/test_autostart_prepare.py::test_arguments_with_spaces_quotes_and_percent_stay_single_argv_elements"]
+note = "service-manager commands are argument lists with no shell; hostile characters in an argument reach the program as one literal element, and a program that hangs or cannot start is a failure"
+
+[[group]]
+match = ["egress:fleet/autostart_apply.py:healthy"]
+status = "covered"
+count = 1
+tests = ["tests/test_autostart_hostile.py::test_an_error_or_a_non_json_answer_is_not_healthy",
+         "tests/test_autostart_hostile.py::test_a_slow_answer_is_not_healthy",
+         "tests/test_autostart_hostile.py::test_nothing_listening_is_not_healthy"]
+note = "the health probe reads one loopback URL from the verified manifest; an error status, non-JSON body, slow answer or closed port is an unhealthy unit, never an exception"
 
 [[group]]
 match = ["spawn:fleet/projects.py:local_root"]
