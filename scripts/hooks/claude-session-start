@@ -18,7 +18,7 @@ def main() -> int:
         return 0
     workspace_hook.persist_session(environment)
     if not event.get("agent_id"):
-        workspace_hook.refresh_runtime("SessionStart")
+        workspace_hook.refresh_runtime("SessionStart", agent="claude")
     model = event.get("model") or os.environ.get("ANTHROPIC_MODEL", "")
     if isinstance(model, dict):
         model = model.get("id", "")

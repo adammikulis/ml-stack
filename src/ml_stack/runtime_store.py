@@ -25,7 +25,7 @@ REJECTED = "rejected"
 def trees(root: Path | None = None) -> list[Path]:
     """Every runtime prefix under the runtimes directory, whatever its state."""
     root = root or runtime.directory()
-    return sorted(prefix for family in root.glob("[0-9a-f]" * 40) if family.is_dir()
+    return sorted(prefix for family in root.glob("[0-9a-f]" * 40) if family.is_dir() and not family.is_symlink()
                   for prefix in family.iterdir() if prefix.is_dir() and not prefix.is_symlink())
 
 
@@ -41,9 +41,15 @@ def mark_created(prefix: Path, agent: str, command: str) -> None:
 
 
 def ours(prefix: Path) -> bool:
-    """Whether this tool created the tree or verified it; any other tree is never changed or removed."""
+    """Whether this tool created the tree; any other tree is never changed, selected as a fallback or removed."""
     row = read_json(prefix / CREATED, {})
-    return (isinstance(row, dict) and row.get("tool") == TOOL) or bool(verified_at(prefix))
+    return isinstance(row, dict) and row.get("tool") == TOOL
+
+
+def unmanaged(root: Path | None = None) -> list[dict]:
+    """Trees in the runtimes directory this tool did not create: path, size in bytes and whether a process is inside."""
+    return [{"path": str(tree), "bytes": sum(f.stat().st_size for f in tree.rglob("*") if f.is_file() and not f.is_symlink()),
+             "in_use": bool(running_within(tree))} for tree in trees(root) if not ours(tree)]
 
 
 def mark_verified(chosen: runtime.Runtime, epoch: int = 0) -> None:
@@ -145,6 +151,6 @@ def collect(protect: set[Path], *, keep: int = KEEP, root: Path | None = None) -
         discard(prefix)
         gone.append(prefix)
     for family in root.glob("[0-9a-f]" * 40):
-        if family.is_dir() and not any(family.iterdir()):
+        if family.is_dir() and not family.is_symlink() and not any(family.iterdir()):
             family.rmdir()
     return gone

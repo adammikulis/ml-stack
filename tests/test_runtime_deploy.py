@@ -252,7 +252,7 @@ def test_two_ensures_do_not_build_twice(world):
     repo, launchers, _ = world
     commit(repo, "a")
     built = []
-    runtime_deploy._prepare_root()
+    runtime_deploy.prepare_root()
     with only_one(runtime.directory() / "deploy.lock", note="other build"):
         outcome = runtime_deploy.ensure(plan_for(repo, launchers), builder=builder(log=built))
     assert outcome.action == "busy" and built == []
@@ -352,7 +352,8 @@ def test_a_current_runtime_answers_without_taking_the_build_lock(world):
         assert runtime_deploy.ensure(plan_for(repo, launchers), builder=builder()).action == "current"
 
 
-def fake_tree(root, commit_id, verified_at, name, *, importable=True, created=True):
+def fake_tree(root, commit_id, verified_at, name, **options):
+    importable, created = options.get("importable", True), options.get("created", True)
     prefix = root / commit_id / f"{len(name):032x}"
     (prefix / "bin").mkdir(parents=True)
     python = prefix / "bin" / "python"
@@ -426,7 +427,7 @@ def test_launcher_recovery_spawn_is_validated_logged_rate_limited_and_ignores_th
 
 
 def test_launcher_directories_are_absolute_and_a_relative_recorded_one_is_refused(world, monkeypatch, tmp_path):
-    runtime_deploy._prepare_root()
+    runtime_deploy.prepare_root()
     runtime_store.write_state({"launchers": "relative/bin"})
     with pytest.raises(runtime_deploy.DeployError, match="absolute"):
         runtime_cli._launchers("")
@@ -443,7 +444,7 @@ def test_a_checkout_comes_only_from_the_flag_or_the_record_and_must_be_an_ml_sta
     with pytest.raises(runtime_deploy.DeployError, match="ml-stack"):
         runtime_cli._checkout(str(tmp_path))
     assert runtime_cli._checkout(str(repo)) == repo.resolve()
-    runtime_deploy._prepare_root()
+    runtime_deploy.prepare_root()
     runtime_store.write_state({"checkout": str(tmp_path)})
     with pytest.raises(runtime_deploy.DeployError):
         runtime_cli._checkout("")
@@ -479,7 +480,7 @@ def test_a_failure_before_the_selection_restores_the_previous_launchers_and_disc
 
 def test_an_unusable_selection_never_stops_the_callers_that_would_forward_to_it(world, tmp_path):
     from ml_stack import jobs
-    runtime_deploy._prepare_root()
+    runtime_deploy.prepare_root()
     (runtime.directory() / "selected.json").write_text("{not json")
     assert runtime.available() is None
     assert runtime.forward("json.tool", []) is False
@@ -488,7 +489,7 @@ def test_an_unusable_selection_never_stops_the_callers_that_would_forward_to_it(
 
 
 def test_forward_does_not_verify_when_this_process_runs_from_the_selected_prefix(world, monkeypatch):
-    runtime_deploy._prepare_root()
+    runtime_deploy.prepare_root()
     (runtime.directory() / "selected.json").write_text(json.dumps({"prefix": sys.prefix, "commit": "a" * 40}))
     monkeypatch.setattr(runtime, "verify", lambda row: pytest.fail("verified"))
     assert runtime.forward("json.tool", []) is False
@@ -519,7 +520,7 @@ def test_a_rollback_hold_does_not_block_recovery_and_background_does_not_spawn_w
 
 def test_discarding_a_tree_unlaunches_it_even_when_deletion_fails(world, monkeypatch):
     import shutil
-    runtime_deploy._prepare_root()
+    runtime_deploy.prepare_root()
     prefix = fake_tree(runtime.directory(), "d" * 40, 5.0, "tree-d")
     monkeypatch.setattr(shutil, "rmtree", lambda *a, **k: None)
     runtime_store.discard(prefix)
@@ -637,15 +638,16 @@ def test_the_acting_identity_is_the_workspace_agent_and_collides_with_its_harnes
     target = world[2] / "area"
     target.mkdir()
     store.claim(Identity(who.id, AGENT), "install", str(target), {"ttl_s": 600})
-    with runtime_deploy.owning([target], wait_s=0.1, who=who, store=store):
-        pass
     other = Identity("somebody-else", AGENT)
-    with pytest.raises(runtime_deploy.DeployError), runtime_deploy.owning([target], wait_s=0.1, who=other, store=store):
-        pass
+    with runtime_deploy.owning([target], wait_s=0.1, who=who, store=store):
+        assert store.who("install", str(target))["owner"] == who.id
+        with pytest.raises(runtime_deploy.DeployError), runtime_deploy.owning([target], wait_s=0.1, who=other, store=store):
+            pass
 
 
 def test_the_canonical_acting_identity_is_the_physical_owner_and_needs_the_claim_capability(world, monkeypatch):
     from types import SimpleNamespace
+
     from ml_stack.workspace import harness_remote, project_connection
     repo, launchers, _ = world
     commit(repo, "a")
@@ -663,7 +665,7 @@ def test_the_canonical_acting_identity_is_the_physical_owner_and_needs_the_claim
 
 
 def test_a_symlinked_family_directory_is_never_listed_collected_or_deleted(world, tmp_path):
-    runtime_deploy._prepare_root()
+    runtime_deploy.prepare_root()
     outside = tmp_path / "outside"
     prefix = fake_tree(outside, "a" * 40, 5.0, "tree-x")
     (runtime.directory() / ("a" * 40)).symlink_to(outside / ("a" * 40))
@@ -683,7 +685,7 @@ def test_the_launcher_fallback_needs_this_tools_creation_record(tmp_path):
 
 
 def test_status_lists_trees_it_does_not_manage_and_never_collects_them(world, capsys):
-    runtime_deploy._prepare_root()
+    runtime_deploy.prepare_root()
     foreign = foreign_trees(runtime.directory())
     live = subprocess.Popen(["sleep", "30"], cwd=foreign[2])
     try:
@@ -749,7 +751,7 @@ def test_a_malformed_git_file_does_not_stop_the_session_hook(tmp_path, monkeypat
 
 
 def test_the_background_log_is_private_and_the_runtimes_root_is_owner_only(world):
-    repo, launchers, _ = world
+    repo, _, _ = world
     commit(repo, "a")
     runtime_cli._start_background(["status", "--checkout", str(repo)])
     time.sleep(0.5)
@@ -779,7 +781,7 @@ def snapshot(prefixes):
 
 def test_foreign_trees_survive_ensure_rollback_recovery_and_collection(world):
     repo, launchers, _ = world
-    runtime_deploy._prepare_root()
+    runtime_deploy.prepare_root()
     foreign = foreign_trees(runtime.directory())
     before = snapshot(foreign)
     live = subprocess.Popen(["sleep", "60"], cwd=foreign[2])

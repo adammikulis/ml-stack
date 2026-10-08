@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
@@ -51,9 +52,8 @@ def plan_from(args: argparse.Namespace) -> runtime_deploy.Plan:
 
 
 def _start_background(argv: list[str]) -> None:
-    root = runtime.directory()
-    root.mkdir(parents=True, exist_ok=True)
-    with (root / "ensure.log").open("ab") as log:
+    root = runtime_deploy.prepare_root()
+    with os.fdopen(os.open(root / "ensure.log", os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600), "ab") as log:
         log.write(f"started: {time.strftime('%FT%T')} argv: {' '.join(argv)}\n".encode())
         log.flush()
         subprocess.Popen([sys.executable, "-m", "ml_stack.runtime_cli", *argv], stdin=subprocess.DEVNULL,
@@ -78,7 +78,7 @@ def _ensure(args: argparse.Namespace, argv: list[str]) -> int:
             print(f"runtime {plan.commit[:7]} is building in the background; log: {runtime.directory() / 'ensure.log'}")
         return 0
     previous = str(runtime_store.selection().get("commit", ""))
-    outcome = runtime_deploy.ensure(plan, force=args.force)
+    outcome = runtime_deploy.ensure(plan, force=args.force, force_build=args.force_build)
     runtime_board.announce(outcome, previous, verb="ensure", agent=args.agent, label=args.label)
     print(f"{outcome.action} {outcome.commit[:7]} {outcome.detail}".strip())
     return 0 if outcome.ok else 1
@@ -120,6 +120,8 @@ def status_lines(plan: runtime_deploy.Plan) -> list[str]:
         lines.append(f"last failure {failure.get('commit', '')[:7]}: {failure.get('detail', '')[-300:]}")
     if _building():
         lines.append(f"building     {_building()}")
+    for tree in runtime_store.unmanaged(root):
+        lines.append(f"unmanaged    {tree['path']}  {tree['bytes']} bytes  {'process inside' if tree['in_use'] else 'idle'}")
     return lines
 
 
@@ -130,7 +132,8 @@ def status_record(plan: runtime_deploy.Plan) -> dict:
             "healthy": runtime_deploy.healthy(plan) is not None, "floor": plan.floor,
             "kept": [{"commit": c.commit, "prefix": str(c.prefix), "verified_at": runtime_store.verified_at(c.prefix)}
                      for c in runtime_store.candidates()],
-            "state": runtime_store.read_state(), "building": _building()}
+            "state": runtime_store.read_state(), "building": _building(),
+            "unmanaged": runtime_store.unmanaged()}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -148,6 +151,7 @@ def main(argv: list[str] | None = None) -> int:
     ensure = sub.add_parser("ensure", parents=[common], help="make the checkout's commit the selected runtime")
     ensure.add_argument("--ref", default="HEAD")
     ensure.add_argument("--force", action="store_true", help="rebuild even when held or current")
+    ensure.add_argument("--force-build", action="store_true", help="build again at once after a failed build (needs an agent)")
     ensure.add_argument("--background", action="store_true", help="return at once; build in a detached process")
     state = sub.add_parser("status", parents=[common], help="show the selected runtime and the fallbacks kept")
     state.add_argument("--json", action="store_true")

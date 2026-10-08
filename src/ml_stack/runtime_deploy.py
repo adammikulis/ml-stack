@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import contextlib
-import hashlib
-import io
+import argparse
 import json
 import os
 import re
+import stat
 import subprocess
 import tempfile
 import time
@@ -18,9 +17,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ml_stack import runtime, runtime_launchers, runtime_store
+from ml_stack.files import writing
 from ml_stack.fleet import runtime_wheel
 from ml_stack.lock import Busy, only_one
-from ml_stack.workspace import cli, limits, project_connection, tokens
+from ml_stack.workspace import cli, harness_remote, limits, project_connection, tokens
 from ml_stack.workspace.claims import Claims, Conflict
 from ml_stack.workspace.identity import AGENT, Denied, Identity
 
@@ -41,6 +41,7 @@ class DeployError(RuntimeError):
 
 
 RECOVERABLE = (*FAILURES, DeployError)
+BACKOFF_S = 600.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,34 +108,37 @@ def source_epoch(source: Path) -> int:
     return parse_epoch(path.read_text(encoding="utf-8")) if path.is_file() else 0
 
 
-def acting(plan: Plan) -> Identity:
-    """The authenticated workspace agent running this command, namespaced by its project like a physical claim owner."""
+def acting(plan: Plan) -> Identity | None:
+    """The authenticated workspace agent running this command, as a physical claim owner; None when there is none."""
     name = plan.agent or os.environ.get(tokens.AGENT_ENV, "")
     if not name:
-        raise DeployError("no authenticated agent: pass --agent or set ML_STACK_WORKSPACE_AGENT")
-    out = io.StringIO()
-    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
-        try:
-            code = cli.main(["whoami", "--agent", name, "--json"])
-        except SystemExit:
-            code = 2
+        return None
+    args = argparse.Namespace(agent=name, token_file="", label="")
     try:
-        row = json.loads(out.getvalue())
-    except ValueError:
-        row = {}
-    if code or not isinstance(row, dict) or row.get("role") != AGENT or not isinstance(row.get("id"), str):
-        raise DeployError(f"{name!r} is not an authenticated workspace agent")
-    bound = project_connection.selected(plan.checkout)
-    if bound:
-        authority = hashlib.sha256(f"{bound.get('host')}/{bound.get('project_id')}".encode()).hexdigest()[:32]
-        return Identity(f"canonical:{authority}:{row['id']}", AGENT)
-    return Identity(row["id"], AGENT)
+        ws, token = cli._context(args, cli._project_connection(plan.checkout))
+        if isinstance(ws, project_connection.CanonicalWorkspace):
+            info = ws.remote.call("whoami", token)
+            if (info.get("id") != name or info.get("role") != AGENT or "claim" not in info.get("can", ())
+                    or info.get("project", {}).get("key") != ws.remote.project_id):
+                return None
+            return harness_remote.physical_owner(ws.remote, Identity(name, AGENT, info.get("parent", ""),
+                                                                      tuple(info.get("can", ()))))
+        who = ws.auth(token)
+    except (Denied, OSError, ValueError, KeyError, SystemExit):
+        return None
+    return who if who.role == AGENT and "claim" in who.can else None
 
 
 @contextmanager
-def owning(paths: list[Path], *, wait_s: float, who: Identity, note: str = "runtime deploy",
+def owning(paths: list[Path], *, wait_s: float, who: Identity | None, note: str = "runtime deploy",
            store: Claims | None = None) -> Iterator[None]:
-    """Hold an `install` claim as `who` on each path, waiting for a live other owner up to `wait_s` for each."""
+    """Hold an `install` claim as `who` on each path, waiting for a live other owner up to `wait_s` for each.
+
+    With no agent there is no claim; the deploy lock alone serialises builds.
+    """
+    if who is None:
+        yield
+        return
     if store is None:
         base = limits.root()
         store = Claims(base, limits.load(base).claim_ttl_s)
@@ -219,16 +223,38 @@ def _switch_paths(plan: Plan) -> list[Path]:
     return [*([plan.launchers] if plan.launchers is not None else []), runtime.directory() / "selected.json"]
 
 
+def _snapshot(directory: Path | None) -> dict[Path, tuple[bytes, int]]:
+    """The bytes and mode of every console launcher in a directory."""
+    if directory is None:
+        return {}
+    return {path: (path.read_bytes(), stat.S_IMODE(path.stat().st_mode))
+            for path in directory.glob("ml-stack*") if path.is_file() and not path.is_symlink()}
+
+
+def _restore(directory: Path | None, original: dict[Path, tuple[bytes, int]]) -> None:
+    """Put the snapshotted launchers back and remove console launchers that were not there."""
+    if directory is None:
+        return
+    with suppress(OSError):
+        for path in directory.glob("ml-stack*"):
+            if path not in original and path.is_file() and not path.is_symlink():
+                path.unlink()
+        for path, (data, mode) in original.items():
+            with writing(path) as temporary:
+                temporary.write_bytes(data)
+                temporary.chmod(mode)
+
+
 def build_and_switch(plan: Plan, builder: Builder = build, who: Identity | None = None) -> runtime.Runtime:
     """Build, smoke and select the plan's commit under install claims; a failure before the selection keeps the previous runtime."""
     who = who or acting(plan)
     prefix = runtime.directory() / plan.commit / uuid.uuid4().hex
     with owning([prefix, *_switch_paths(plan)], wait_s=plan.wait_s, who=who, note=f"runtime build {plan.commit[:7]}"), \
             tempfile.TemporaryDirectory(prefix="ml-stack-runtime-") as temporary:
-        stage, previous = Path(temporary).resolve(), runtime.available()
+        stage, original = Path(temporary).resolve(), _snapshot(plan.launchers)
         built, published = builder(plan, stage, prefix), False
         try:
-            runtime_store.mark_created(built.prefix, who.id, "ensure")
+            runtime_store.mark_created(built.prefix, who.id if who else plan.agent or os.environ.get(tokens.AGENT_ENV, ""), "ensure")
             if built.commit != plan.commit:
                 raise DeployError(f"built {built.commit}, expected {plan.commit}")
             smoke(built, stage / "source", stage)
@@ -242,9 +268,7 @@ def build_and_switch(plan: Plan, builder: Builder = build, who: Identity | None 
             published = True
         except BaseException:
             if not published:
-                if previous is not None and plan.launchers is not None:
-                    with suppress(*FAILURES, DeployError):
-                        runtime_launchers.install(plan.launchers, previous)
+                _restore(plan.launchers, original)
                 runtime_store.discard(built.prefix)
             raise
         _record(plan)
@@ -300,7 +324,7 @@ def _reject_below_floor(plan: Plan, keep: Path) -> None:
             runtime_store.reject(candidate.prefix, "below the source checkout's runtime floor")
 
 
-def _prepare_root() -> Path:
+def prepare_root() -> Path:
     root = runtime.directory()
     if not root.exists():
         root.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -309,16 +333,16 @@ def _prepare_root() -> Path:
     return root
 
 
-def ensure(plan: Plan, *, force: bool = False, builder: Builder = build) -> Outcome:
+def ensure(plan: Plan, *, force: bool = False, force_build: bool = False, builder: Builder = build) -> Outcome:
     """Make the plan's commit the selected runtime, recovering a broken selection first."""
     state = "" if force else settled(plan)
     if state:
         held = runtime_store.read_state().get("held") or {}
         return Outcome(state, plan.commit, str(held.get("reason", "")) if state == "held" else "")
-    root = _prepare_root()
+    root = prepare_root()
     try:
         with only_one(root / "deploy.lock", wait=False, note="ensure"):
-            return _ensured(plan, force, builder)
+            return _ensured(plan, force, force_build, builder)
     except Busy as exc:
         return Outcome("busy", plan.commit, str(exc))
 
@@ -338,8 +362,16 @@ def _recovered(plan: Plan, who: Identity) -> tuple[runtime.Runtime | None, list[
     return chosen, [f"selected {chosen.commit[:7]} in place of a broken selection"]
 
 
-def _ensured(plan: Plan, force: bool, builder: Builder) -> Outcome:
+def _failed_recently(plan: Plan) -> bool:
+    failure = runtime_store.read_state().get("last_failure")
+    return (isinstance(failure, dict) and failure.get("commit") == plan.commit
+            and time.time() - float(failure.get("at", 0.0)) < BACKOFF_S)
+
+
+def _ensured(plan: Plan, force: bool, force_build: bool, builder: Builder) -> Outcome:
     who = acting(plan)
+    if force_build and who is None:
+        raise DeployError("--force-build needs an authenticated agent: pass --agent or set ML_STACK_WORKSPACE_AGENT")
     chosen, steps = _recovered(plan, who)
     held = runtime_store.read_state().get("held")
     if not force and chosen is not None and chosen.commit == plan.commit:
@@ -347,6 +379,9 @@ def _ensured(plan: Plan, force: bool, builder: Builder) -> Outcome:
         return Outcome("recovered" if steps else "current", plan.commit, "; ".join(steps))
     if not force and chosen is not None and isinstance(held, dict) and held.get("commit") == plan.commit:
         return Outcome("recovered" if steps else "held", plan.commit, "; ".join([*steps, str(held.get("reason", ""))]))
+    if not force_build and _failed_recently(plan):
+        return Outcome("recovered" if steps else "backoff", plan.commit,
+                       "; ".join([*steps, f"the last build of {plan.commit[:7]} failed; retrying after {BACKOFF_S:.0f}s or with --force-build"]))
     try:
         built = build_and_switch(plan, builder, who)
     except RECOVERABLE as exc:
@@ -361,10 +396,12 @@ def _ensured(plan: Plan, force: bool, builder: Builder) -> Outcome:
 
 def rollback(plan: Plan, to: str = "") -> Outcome:
     """Select an earlier verified runtime and hold the commit that was selected."""
-    root = _prepare_root()
+    root = prepare_root()
     try:
         with only_one(root / "deploy.lock", wait=False, note="rollback"):
             who = acting(plan)
+            if who is None:
+                raise DeployError("rollback needs an authenticated agent: pass --agent or set ML_STACK_WORKSPACE_AGENT")
             now = runtime_store.selection(root)
             target = next((c for c in runtime_store.candidates(root)
                            if str(c.prefix) != now.get("prefix") and (not to or c.commit.startswith(to))), None)

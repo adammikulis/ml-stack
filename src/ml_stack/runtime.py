@@ -222,6 +222,8 @@ def usable(py):
     found = any(glob.glob(os.path.join(prefix, where, 'ml_stack', '__init__.py'))
                 for where in ('lib/python*/site-packages', 'Lib/site-packages'))
     return os.path.isfile(py) and found and not os.path.exists(os.path.join(prefix, 'rejected'))
+def made(prefix):
+    return read(os.path.join(prefix, 'created.json')).get('tool') == 'ml-stack-runtime'
 def stamp(prefix):
     try:
         return float(read(os.path.join(prefix, 'verified.json')).get('verified_at'))
@@ -233,7 +235,7 @@ if not usable(python):
     chosen = read(os.path.join(root, 'selected.json')).get('prefix')
     others = sorted((os.path.dirname(path) for path in glob.glob(os.path.join(root, '*', '*', 'verified.json'))),
                     key=stamp, reverse=True)
-    order = ([chosen] if isinstance(chosen, str) else []) + others
+    order = ([chosen] if isinstance(chosen, str) else []) + [p for p in others if made(p)]
     python = next((interpreter(p) for p in order if usable(interpreter(p))
                    and read(os.path.join(p, 'verified.json')).get('commit') != held), '')
     if not python:
@@ -243,7 +245,7 @@ if not usable(python):
         if isinstance(source, str) and os.path.isfile(os.path.join(source, 'src', 'ml_stack', '__init__.py')) and not fresh:
             try:
                 open(marker, 'w').close()
-                with open(os.path.join(root, 'ensure.log'), 'ab') as log:
+                with os.fdopen(os.open(os.path.join(root, 'ensure.log'), os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600), 'ab') as log:
                     subprocess.Popen([sys.executable, '-P', '-m', 'ml_stack.runtime_cli', 'ensure'], cwd=source,
                                      env={{**env, 'PYTHONPATH': os.path.join(source, 'src')}},
                                      stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True)
@@ -267,6 +269,8 @@ def confine_tests(path: Path) -> None:
     """Refuse a path outside the state root and the temporary directory while a test runs."""
     if "PYTEST_CURRENT_TEST" not in os.environ:
         return
+    if "ML_STACK_HOME" not in os.environ:
+        raise OSError("a test must set ML_STACK_HOME before it touches runtimes or launchers")
     roots = (Path(os.path.realpath(state())), Path(os.path.realpath(tempfile.gettempdir())))
     if not any(Path(os.path.realpath(path)).is_relative_to(root) for root in roots):
         raise OSError("a test may not write launchers outside the state root or the temporary directory")

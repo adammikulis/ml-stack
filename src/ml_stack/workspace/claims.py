@@ -49,13 +49,12 @@ def alive(pid: int) -> bool:
 
 
 def _holder_alive(claim: dict[str, Any]) -> bool:
-    """Whether the claim's pid runs and, when its start time was recorded, is the process that took it."""
+    """Whether the claim's pid runs and did not start after the claim was taken (a reused pid did)."""
     pid = int(claim["pid"])
     if not alive(pid):
         return False
-    recorded = claim.get("pid_started")
-    seen = started_at(pid) if recorded else None
-    return not recorded or seen is None or abs(seen - float(recorded)) < 2.0
+    seen = started_at(pid)
+    return seen is None or seen <= float(claim["since"]) + 1.0
 
 
 def normal(kind: str, key: str) -> str:
@@ -153,8 +152,6 @@ class Claims:
             now = self.clock()
             made = {"kind": kind, "key": key, "owner": who.id, "pid": int(pid), "since": now,
                     "expires": now + (ttl_s or self.ttl_s), "note": note[:200]}
-            if pid:
-                made["pid_started"] = float((fields or {}).get("pid_started") or started_at(int(pid)) or 0.0)
             claims[f"{kind}:{key}"] = made
             self._save(claims)
             if self.on_stolen:
