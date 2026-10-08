@@ -40,11 +40,11 @@ def push(where: Path, *refs: str, sha: str = "", base: str = ZERO,
          **env: str) -> subprocess.CompletedProcess:
     sha = sha or git(where, "rev-parse", "HEAD")
     lines = "".join(f"refs/heads/{r} {sha} refs/heads/{r} {base}\n" for r in refs)
-    hook = where / ".git" / "hooks" / "pre-push"
+    hook = Path(git(where, "rev-parse", "--path-format=absolute", "--git-common-dir")) / "hooks" / "pre-push"
     hook.write_text("#!/bin/sh\nexec sh " + shlex.quote(HOOK.as_posix()) + " \"$@\"\n",
                     encoding="utf-8", newline="\n")
     hook.chmod(hook.stat().st_mode | 0o111)
-    source = where / ".git" / "push-input"
+    source = hook.parent.parent / "push-input"
     source.write_text(lines, encoding="utf-8")
     return subprocess.run(
         ["git", "hook", "run", "--to-stdin=" + str(source), "pre-push", "--",
@@ -144,6 +144,17 @@ def test_a_merged_worktree_blocks_the_development_branch_until_removed_or_locked
     assert shlex.join(["git", "worktree", "remove", tree.as_posix()]) in done.stderr
     git(checkout, "worktree", "lock", str(tree))
     assert push(checkout, "0.9dev", CLAUDECODE="1").returncode == 0
+
+
+def test_the_development_branch_pushes_from_a_clean_sibling_worktree(checkout):
+    tree = checkout.parent / "side"
+    git(checkout, "worktree", "add", "-q", "-b", "side-work", str(tree))
+    tip = git(checkout, "rev-parse", "0.9dev")
+    # git exports GIT_DIR to a hook; the hook must still read the primary checkout's branch
+    env = {"CLAUDECODE": "1", "GIT_DIR": git(tree, "rev-parse", "--absolute-git-dir")}
+    assert push(tree, "0.9dev", sha=tip, **env).returncode == 0
+    assert push(tree, "main", sha=tip, **env).returncode != 0
+    assert push(tree, "side-work", sha=tip, **env).returncode != 0
 
 
 def test_a_worktree_with_its_own_commits_does_not_block(checkout):
