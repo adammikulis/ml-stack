@@ -28,6 +28,16 @@ class Waiting:
     rows: list[dict[str, Any]]
     now: float
 
+    def summary(self) -> dict[str, Any]:
+        """The reader, the time and each unread row's sequence, sender, label, kind and time; no text."""
+        keys = ("seq", "to", "from", "label", "type", "ts")
+        return {"me": self.me, "now": self.now, "rows": [{k: r.get(k) for k in keys} for r in self.rows]}
+
+    @classmethod
+    def of(cls, summary: dict[str, Any]) -> Waiting:
+        """The `Waiting` a `summary` describes."""
+        return cls(str(summary["me"]), list(summary["rows"]), float(summary["now"]))
+
     def urgent(self) -> list[dict[str, Any]]:
         """Direct questions, tasks, handoffs and blocked notices addressed to the reader."""
         return [r for r in self.rows if r["to"] == self.me and r.get("type") in URGENT]

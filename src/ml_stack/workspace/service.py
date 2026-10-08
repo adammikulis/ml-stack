@@ -499,6 +499,10 @@ class Workspace:
         self._may(who, "read")
         return Waiting(who.id, self._unread(who, 1 << 30), self.clock())
 
+    def waiting_summary(self, token: str) -> dict[str, Any]:
+        """The kinds, senders and times of what waits unread for the token's owner, never text."""
+        return self.waiting(token).summary()
+
     def nudge(self, token: str) -> str:
         """One line giving kinds, senders and age of what waits for the token's owner, never
         text, or "" when nothing does."""

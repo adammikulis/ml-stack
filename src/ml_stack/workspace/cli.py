@@ -500,7 +500,7 @@ def _hook(args: argparse.Namespace) -> int:
     stdin = sys.stdin.read() if args.hook == "stop" and not sys.stdin.isatty() else ""
     try:
         ws, token = _context(args)
-        out = nudge.output(args.hook, ws.waiting(token), stdin)
+        out = nudge.output(args.hook, nudge.Waiting.of(ws.waiting_summary(token)), stdin)
     except tuple(kind for kind, _ in CODES):
         return 0
     if out:

@@ -11,6 +11,7 @@ from workspace_kit import Kit, clean_env, cli
 
 from ml_stack.sentinel import human
 from ml_stack.workspace import onboard
+from ml_stack.workspace.remote_protocol import METHODS
 
 LONG_AGO = 3 * 3600 + 12 * 60 + 20
 
@@ -131,6 +132,51 @@ def test_the_installer_is_for_a_person(tmp_path):
     out = cli(tmp_path / "ws", "", "install-hooks", "--settings", str(tmp_path / "s.json"),
               env_extra={"CLAUDECODE": "1"})
     assert out.returncode == 3 and not (tmp_path / "s.json").exists()
+
+
+class _Board:
+    """A canonical board that answers each operation from a real workspace."""
+
+    host = "http://127.0.0.1:8770"
+    project_id = "a" * 32
+    cluster_key = ""
+
+    def __init__(self, kit):
+        self.kit = kit
+        self.calls = []
+
+    def token(self, **kwargs):
+        return "capability"
+
+    def call(self, operation, token, *args, **kwargs):
+        self.calls.append(operation)
+        if operation == "whoami":
+            return {"id": "bob", "role": "agent", "can": ["read"], "project": {"key": self.project_id}}
+        assert operation in METHODS
+        return getattr(self.kit.ws, operation)(self.kit.t["bob"], *args, **kwargs)
+
+
+def test_prompt_hook_on_a_canonical_board_injects_the_waiting_line(kit, monkeypatch, tmp_path, capsys):
+    from types import SimpleNamespace
+
+    from ml_stack.workspace import cli as ws_cli
+    from ml_stack.workspace import project_connection as connection
+    monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "home"))
+    root = tmp_path / "project"
+    root.mkdir()
+    board = _Board(kit)
+    connection.bind(board, root, "bob", "default")
+    monkeypatch.chdir(root)
+    monkeypatch.setattr(connection, "RemoteWorkspace", lambda *a, **k: board)
+    kit.ws.send(kit.t["alice"], "bob", "question", "SECRET-BODY which port?")
+    args = SimpleNamespace(cmd="nudge", hook="prompt", agent="", token_file="", label="", json=False)
+    assert ws_cli._nudging(args) == 0
+    shape = json.loads(capsys.readouterr().out)
+    text = shape["hookSpecificOutput"]["additionalContext"]
+    assert shape["hookSpecificOutput"]["hookEventName"] == "UserPromptSubmit"
+    assert text.startswith("workspace: 1 waiting for you (1 question; from alice;")
+    assert "SECRET" not in text
+    assert "waiting_summary" in board.calls
 
 
 def test_the_stamp_file_name_needs_no_posix_uid(monkeypatch):
