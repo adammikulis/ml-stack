@@ -60,7 +60,7 @@ def claim(ws, graph, who, task, allocation):
 def working(board, token, ident):
     who = board._auth(token, 'claim')
     with held(board.ws.base / 'coordination.lock'):
-        with GraphStore(board.ws.base / 'coordination.db') as graph:
+        with GraphStore(board.ws.base / 'coordination.db', read_only=True) as graph:
             task = board._task(graph, ident)
             if task['state'] != 'working' or task.get('worker') != who.id:
                 raise Denied('only the current task worker may change a working task')

@@ -33,6 +33,16 @@ def _saved() -> dict:
         raise Denied("board connection record is unreadable; local fallback is disabled") from exc
 
 
+def _save(path: Path, connections: dict, before: str) -> None:
+    """Write the connections record, unless it is the text just read."""
+    text = json.dumps(connections)
+    if text == before:
+        return
+    with writing(path) as tmp:
+        restrict(tmp) if os.name == "nt" else tmp.chmod(0o600)
+        tmp.write_text(text, encoding="utf-8")
+
+
 def bind(remote: RemoteWorkspace, root: Path, agent: str, cluster: str = "", **options: str) -> dict:
     """Bind a local project root to an authenticated board identity."""
     if set(options) - {"local_agent", "agent_token"}:
@@ -72,6 +82,7 @@ def bind(remote: RemoteWorkspace, root: Path, agent: str, cluster: str = "", **o
         made["session"] = session
     with held(path.with_suffix(".lock")):
         connections = _saved()
+        before = json.dumps(connections)
         existing = connections.get(str(root))
         if existing and (existing["host"], existing["project_id"]) != (made["host"], made["project_id"]):
             raise Denied("this project already uses another board")
@@ -86,9 +97,7 @@ def bind(remote: RemoteWorkspace, root: Path, agent: str, cluster: str = "", **o
             if existing and existing.get("sessions"):
                 made["sessions"] = existing["sessions"]
             connections[str(root)] = made
-        with writing(path) as tmp:
-            restrict(tmp) if os.name == "nt" else tmp.chmod(0o600)
-            tmp.write_text(json.dumps(connections), encoding="utf-8")
+        _save(path, connections, before)
     return {"root": str(root), **made, "state": "connected"}
 
 
