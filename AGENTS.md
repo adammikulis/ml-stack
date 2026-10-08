@@ -574,7 +574,10 @@ under the table -- what the budgets add up to, what the tree holds, the distance
 -- and every site that is over. `tests/test_budgets.py` fails when a number rises, and also
 when it falls without being recorded, so a branch that lowers one runs `scripts/budgets
 --update` and commits the file; `--update` refuses to raise a number. `scripts/budgets --show
-METRIC` lists the sites, and `SKIP_BUDGETS=1` skips the pre-commit check.
+METRIC` lists the sites, and `SKIP_BUDGETS=1` skips the pre-commit check. The checkers keep
+their results per file, and pyright's per import closure, in a machine-local cache under the temporary
+directory, so an edit re-reads the files it can change and the counts equal a full run;
+`ML_STACK_GATES_FULL=1` ignores the cache.
 
 Two entries are not ceilings. `floors-only-rise` holds `tests-collected`: it may not *fall*,
 because a module that stops being collected leaves the suite still saying passed.

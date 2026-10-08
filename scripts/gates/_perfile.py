@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Callable, Iterable
+from functools import cache
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,12 @@ from ._util import python_files, rel
 
 REPO = Path(__file__).resolve().parents[2]
 HERE = Path(__file__).resolve().parent
+
+
+@cache
+def where(path: Path, root: Path) -> str:
+    """The path relative to root, worked out once per pair."""
+    return rel(path, root)
 
 
 def cached_here(root: Path) -> bool:
@@ -48,10 +55,10 @@ def each(root: Path, paths: Iterable[Path], compute: Callable[[Path], Any],
     new: dict[str, list] = {}
     out: list[Any] = []
     for path in paths:
-        where, seen = rel(path, root), _store.file_digest(path)
-        have = old.get(where)
+        at, seen = where(path, root), _store.file_digest(path)
+        have = old.get(at)
         value = have[1] if have and have[0] == seen else compute(path)
-        new[where] = [seen, value]
+        new[at] = [seen, value]
         out.append(value)
     if new != old or stored.get("stamp") != stamp:
         _store.save(name, {"stamp": stamp, "files": new})
