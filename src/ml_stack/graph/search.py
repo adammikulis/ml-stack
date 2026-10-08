@@ -16,7 +16,7 @@ appearing first in one.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 RRF_K = 60
@@ -116,10 +116,31 @@ def reranked(rows: Sequence[Mapping[str, Any]], near: Mapping[str, float], *,
     return window + list(rows[top:])
 
 
+def reranked_by(rows: Sequence[Mapping[str, Any]], text: str,
+                reranker: Callable[[str, list[dict[str, Any]]], list[float]], *,
+                top: int = RERANK) -> list[dict[str, Any]]:
+    """Those hits with the first ``top`` put in the order a model scores them against ``text``.
+
+    ``reranker`` is given the question and the window's rows and returns one score each
+    (higher is closer). As in `reranked`, membership never changes, nothing outside the
+    window moves and equal scores keep the order fusion gave them. A reranker that answers
+    with the wrong number of scores is a bug in the reranker, so it raises.
+    """
+    window = [dict(row) for row in rows[:top]]
+    if len(window) < 2:
+        return [dict(row) for row in rows]
+    scores = list(reranker(text, window))
+    if len(scores) != len(window):
+        raise ValueError(f"reranker scored {len(scores)} of {len(window)} hits")
+    order = sorted(range(len(window)), key=lambda i: -scores[i])
+    return [window[i] for i in order] + [dict(row) for row in rows[top:]]
+
+
 def hybrid(graph: Mapping[str, Any], text: str, *, store: Any = None,
            vector: Sequence[float] | None = None, model: str = "",
            limit: int = LIMIT, rich: bool = False,
-           rerank: bool = True) -> list[dict[str, Any]]:
+           rerank: bool | Callable[[str, list[dict[str, Any]]], list[float]] = True,
+           ) -> list[dict[str, Any]]:
     """The three ways, fused. Whatever is unavailable simply does not vote.
 
     ``store`` supplies the word index and the vectors; ``vector`` is the question already
@@ -137,6 +158,10 @@ def hybrid(graph: Mapping[str, Any], text: str, *, store: Any = None,
     because it changes the order and not the membership, which is the cheapest kind of
     change to be wrong about: the same entries come back either way, and what moves is
     which of them a model reads first. ``rerank=False`` is the fused order as it was.
+
+    ``rerank`` may instead be a callable, a model's opinion in place of the vectors': it is
+    given ``text`` and the first `RERANK` fused hits and returns a score for each, and those
+    are put in its order (see `reranked_by`). The vectors are not asked for then.
     """
     found = lexical(graph, text, limit=limit * 2, rich=True)
     rankings: list[list[str]] = [[r["id"] for r in found]]
@@ -163,7 +188,7 @@ def hybrid(graph: Mapping[str, Any], text: str, *, store: Any = None,
                 # the same `limit * 2` either way -- what fusion returns must not depend on
                 # whether the order is about to be adjusted.
                 close = list(store.similar(vector, model=model,
-                                           limit=limit * (4 if rerank else 2)))
+                                           limit=limit * (4 if rerank is True else 2)))
                 vote([r["id"] for r in close][:limit * 2], MEANING)
                 near = {str(r["id"]): float(r["similarity"]) for r in close
                         if isinstance(r.get("similarity"), (int, float))}
@@ -180,4 +205,6 @@ def hybrid(graph: Mapping[str, Any], text: str, *, store: Any = None,
             row["score"] = round(score, 3)
             row["matched"] = list(voters.get(node_id, ()))
         rows.append(row)
+    if callable(rerank):
+        return reranked_by(rows, text, rerank)
     return reranked(rows, near) if rerank and near else rows

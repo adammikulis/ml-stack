@@ -47,6 +47,7 @@ from ml_stack.serve.backend import (
 from ml_stack.serve.manager import ServerManager, serve
 from ml_stack.serve.preflight import Check, Preflight, Report
 from ml_stack.testing.answers import answers_in
+from ml_stack.testing.rerank_fake import rerank_results
 
 __all__ = [
     "DRAFTING",
@@ -622,6 +623,8 @@ class FakeLlamaServer:
             return _json({"content": " ".join(str(n) for n in body.get("tokens") or [])})
         if bare in ("/v1/embeddings", "/embedding", "/embeddings"):
             return _json({"data": [{"index": 0, "embedding": [0.1, 0.2, 0.3]}]})
+        if bare in ("/v1/rerank", "/rerank"):
+            return _json({"results": rerank_results(body)})
         if len(parts) == 2 and parts[0] == "slots" and parts[1].isdigit():
             return self._slot(int(parts[1]), query, body)
         return _json({"error": f"no such route: {bare}"}, status=404)
