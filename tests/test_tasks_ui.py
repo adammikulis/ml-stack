@@ -202,3 +202,42 @@ def test_tasks_join_selected_person_workspace_with_real_backend(tmp_path, playwr
             page.screenshot(path=f'/private/tmp/poolside-tasks-person-join-{foreign_authority}.png', full_page=True)
     finally:
         server.close()
+
+
+def test_task_join_completion_does_not_reload_another_selected_project(tmp_path, playwright):
+    server = Serving(tmp_path)
+    server.ui.settings.setup_done = True
+    first, second = 'b' * 32, 'c' * 32
+    pending, current_reads = [], []
+
+    def current(route):
+        current_reads.append(route.request.url)
+        route.fulfill(json={'tasks': [], 'overview': task_summary.overview([], 100)})
+
+    try:
+        with playwright.chromium.launch(headless=True) as browser:
+            page = browser.new_page()
+            page.route('**/ui/projects', lambda route: route.fulfill(json={'workspaces': [
+                {'id': key, 'name': name, 'local_authority': True, 'board_host': 'http://canonical'}
+                for key, name in [(first, 'Join this project'), (second, 'Other project')]]}))
+            page.route(f'**/ui/projects/{first}/tasks', lambda route: route.fulfill(status=503, json={
+                'error': 'Join this workspace as person to use conversations and tasks.', 'person_setup_required': True}))
+            page.route(f'**/ui/projects/{first}/board/connect', lambda route: pending.append(route))
+            page.route(f'**/ui/projects/{second}/tasks', current)
+            page.goto(f'http://127.0.0.1:{server.port}/ui/#tasks')
+            viewer = page.locator('tasks-view')
+            join = viewer.get_by_role('button', name='Join workspace as person', exact=True)
+            expect(join).to_be_visible()
+            page.evaluate("window.taskJoinButton = [...document.querySelectorAll('tasks-view button')].find(node=>node.textContent==='Join workspace as person')")
+            join.click()
+            expect(join).to_be_disabled()
+            viewer.get_by_label('Task project workspace').select_option(second)
+            expect(viewer.locator('.status')).to_contain_text('Updated ')
+            assert len(pending) == len(current_reads) == 1
+            pending[0].fulfill(json={'me': 'person', 'project_id': first})
+            page.wait_for_function('window.taskJoinButton.disabled === false')
+            assert len(current_reads) == 1
+            expect(viewer.get_by_label('Task project workspace')).to_have_value(second)
+            expect(viewer.locator('.status')).to_contain_text('Updated ')
+    finally:
+        server.close()
