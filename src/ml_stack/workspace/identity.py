@@ -153,16 +153,29 @@ class Registry:
 
     def info(self, name: str) -> dict[str, Any]:
         """``name``'s role, expiry and whether it was revoked; no secret, no hash."""
-        entry = self._load().get(name, {})
+        agents = self._load()
+        entry = agents.get(name, {})
+        parent_name = entry.get('parent', '')
+        parent = agents.get(parent_name, {}) if parent_name != name else {}
+        device = dict(entry.get('device', {}))
+        parent_device = dict(parent.get('device', {}))
+        if parent and (not device or device.get('inherited_from') == parent_name):
+            device = device_metadata.inherited(parent_device, parent_name)
+        else:
+            device = device_metadata.normalize(device)
+        harness = str(entry.get('harness', ''))
+        harness_state = str(entry.get('harness_state', entry.get('model_state', '') if harness else ''))
+        if not harness and parent.get('harness'):
+            harness, harness_state = str(parent['harness']), INHERITED
         return {"role": str(entry.get("role", "")), "expires": float(entry.get("expires", 0.0)),
                 "revoked": bool(entry.get("revoked", not entry)), "parent": entry.get("parent", ""),
                 "can": list(entry.get("can", CAPS)), "project": dict(entry.get("project", {})),
                 "depth": int(entry.get("depth", 0)), "invited_by": str(entry.get("invited_by", "")),
                 "strikes": int(entry.get("strikes", 0)),
-                "model": str(entry.get("model", "")), "harness": str(entry.get("harness", "")),
+                "model": str(entry.get("model", "")), "harness": harness,
                 "model_state": str(entry.get("model_state", "")),
-                "harness_state": str(entry.get("harness_state", entry.get("model_state", "") if entry.get("harness") else "")),
-                "device": dict(entry.get("device", {})),
+                "harness_state": harness_state,
+                "device": device,
                 "models": list(entry.get("models", [])),
                 "label_models": dict(entry.get("label_models", {})),
                 "created": float(entry.get("created", 0)), "presentation": dict(entry.get("presentation", {}))}
@@ -220,10 +233,7 @@ class Registry:
     def record_device_claim(self, token: str, metadata: dict) -> None:
         """Record an authenticated actor's device report without granting device authority."""
         who = self.authenticate(token)
-        if not isinstance(metadata, dict):
-            raise ValueError('device metadata is an object')
-        self._record_device(who.id, {**metadata, 'verification': 'agent-reported',
-                                    'source': 'agent-report', 'peer_id': None})
+        self._record_device(who.id, device_metadata.reported(metadata, observed_at=self.clock()))
 
     def _record_device(self, name: str, metadata: dict) -> None:
         """Persist normalized device provenance supplied by the trusted registration adapter."""
@@ -563,7 +573,8 @@ class Registry:
             agents[child] = {"role": AGENT, "hash": _hash(secret), "created": now,
                              "minted_by": by.id, "parent": by.id, "can": list(wanted),
                              "expires": min(now + ttl_s, stop) if stop else now + ttl_s,
-                             "revoked": False, "device": dict(agents[by.id].get("device", {}))}
+                             "revoked": False,
+                             "device": device_metadata.inherited(agents[by.id].get("device", {}), by.id)}
             self._save(agents)
         return f"{PREFIX}{child}.{secret}"
 

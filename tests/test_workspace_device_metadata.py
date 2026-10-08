@@ -2,7 +2,7 @@
 import pytest
 from workspace_kit import Kit, clean_env
 
-from ml_stack.workspace import device_metadata, onboard
+from ml_stack.workspace import device_metadata, onboard, tokens
 from ml_stack.workspace.identity import Denied
 
 
@@ -77,3 +77,67 @@ def test_subagent_brief_names_actual_runtime_device_without_prompt_history(monke
     text = onboard.brief('helper', 'lead')
     assert 'macOS · workstation (local-observed)' in text
     assert 'provenance grants no permissions' in text
+
+
+def test_child_missing_profile_derives_parent_facts_without_registry_writes(kit):
+    token = kit.agent('parent')
+    kit.ws.registry._record_device('parent', device())
+    kit.ws.claim_model(token, 'Qwen3.8-Flash', 'codex')
+    child = kit.ws.delegate(token, 'helper')['id']
+    registry = kit.ws.registry
+    stored = registry._load()
+    stored[child]['device'] = {}
+    registry._save(stored)
+    before = registry.path.read_bytes()
+    shown = registry.info(child)
+    assert shown['device']['hostname'] == 'workstation'
+    assert shown['device']['verification'] == 'inherited'
+    assert shown['device']['parent_verification'] == 'local-observed'
+    assert shown['device']['source'] == 'parent-registry'
+    assert shown['device']['inherited_from'] == 'parent'
+    assert shown['harness'] == 'codex' and shown['harness_state'] == 'inherited'
+    assert registry.path.read_bytes() == before
+    assert shown['parent'] == 'parent'
+    assert shown['can'] == stored[child]['can']
+
+
+def test_child_own_profile_wins_and_caller_cannot_forge_inheritance(kit):
+    token = kit.agent('parent')
+    kit.ws.registry._record_device('parent', device())
+    child = kit.ws.delegate(token, 'helper')
+    registry = kit.ws.registry
+    child_token = tokens.load(kit.ws.base, child['id'])
+    assert child_token
+    registry.record_device_claim(child_token, {**device('Windows'),
+                                 'inherited_from': 'unrelated', 'source': 'parent-registry',
+                                 'verification': 'inherited', 'parent_verification': 'paired'})
+    shown = registry.info(child['id'])
+    assert shown['device']['os'] == 'Windows'
+    assert shown['device']['verification'] == 'agent-reported'
+    assert shown['device']['source'] == 'agent-report'
+    assert shown['device']['inherited_from'] == ''
+    assert shown['device']['parent_verification'] == 'unknown'
+    assert registry.info('parent')['device']['os'] == 'macOS'
+    registry.record_device_claim(child_token, device())
+    own = registry.info(child['id'])['device']
+    assert own['os'] == 'macOS' and own['hostname'] == 'workstation'
+    assert own['verification'] == 'agent-reported' and own['inherited_from'] == ''
+    kit.ws.claim_model(child_token, 'claude-sonnet-4-6', 'claude-code')
+    own_info = registry.info(child['id'])
+    assert own_info['harness'] == 'claude-code' and own_info['harness_state'] == 'claimed'
+
+
+def test_unknown_profile_is_nonempty_and_missing_parent_does_not_invent_device(kit):
+    kit.agent('worker')
+    registry = kit.ws.registry
+    stored = registry._load()
+    stored['worker']['device'] = {}
+    stored['worker']['parent'] = 'missing-parent'
+    registry._save(stored)
+    before = registry.path.read_bytes()
+    shown = registry.info('worker')
+    assert shown['device'] and shown['device']['label'] == 'Unknown device'
+    assert shown['device']['verification'] == 'unknown'
+    assert shown['device']['hostname'] == ''
+    assert shown['harness'] == ''
+    assert registry.path.read_bytes() == before
