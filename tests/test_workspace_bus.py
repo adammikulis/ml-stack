@@ -123,18 +123,20 @@ def test_the_registry_stores_a_hash_so_reading_it_does_not_give_an_identity(kit)
     assert tokens.problem(kit.base) == ""
 
 
-def test_roles_limit_who_can_mint_and_revoke(kit):
+def test_only_a_person_mints_and_revokes_others(kit):
     lead = kit.agent("lead-1", "lead")
     worker = kit.agent("worker")
-    assert kit.ws.mint(lead, "helper", "agent")
-    for role in ("lead", "human"):
+    assert kit.ws.mint(kit.owner, "helper", "agent")
+    for role in ("agent", "lead", "human"):
         with pytest.raises(Denied):
             kit.ws.mint(lead, "x" + role, role)
-    with pytest.raises(Denied):
-        kit.ws.mint(worker, "another", "agent")
+        with pytest.raises(Denied):
+            kit.ws.mint(worker, "y" + role, role)
     with pytest.raises(Denied):
         kit.ws.revoke(lead, "owner")
-    kit.ws.revoke(lead, "helper")
+    with pytest.raises(Denied):
+        kit.ws.revoke(lead, "helper")
+    kit.ws.revoke(kit.owner, "helper")
 
 
 def test_revoked_and_expired_tokens_stop_working(kit):

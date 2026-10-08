@@ -175,10 +175,11 @@ class Workspace:
         return token
 
     def mint(self, token: str, name: str, role: str = "agent", ttl_s: float = 0.0) -> str:
-        """A token for ``name``, if the caller's role may mint ``role``."""
+        """A token for ``name``, if the caller is a person."""
         who = self.auth(token)
         if who.role != HUMAN:
-            self.registry.within(who.id, self.limits.mints_per_identity, self.limits.agents_live)
+            self.audit("auth.denied", who.id, reason="mint needs a person")
+            raise Denied(f"a {who.role} token cannot mint a {role} token")
         made = self.registry.mint(who, name, role, ttl_s or self.limits.token_ttl_s)
         self.audit("mint", who.id, agent=name, role=role)
         return made
