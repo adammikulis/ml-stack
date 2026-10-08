@@ -19,7 +19,7 @@ from ml_stack.platform import detached_kwargs
 
 def _checkout(named: str) -> Path:
     if named:
-        found = expand(named)
+        found = expand(named).resolve()
         if not (found / ".git").exists():
             raise runtime_deploy.DeployError(f"{found} is not a git checkout")
         return found
