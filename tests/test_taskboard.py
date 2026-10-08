@@ -7,7 +7,7 @@ import pytest
 from taskboard_kit import accepted, board, proposed
 
 from ml_stack.graph.store import GraphStore
-from ml_stack.workspace import resource_allocations, tokens
+from ml_stack.workspace import enforcement, resource_allocations, tokens
 from ml_stack.workspace.identity import Denied
 from ml_stack.workspace.taskboard import TaskBoard, record, save
 
@@ -142,6 +142,7 @@ def test_duplicate_claim_and_released_resource_never_grant_task_ownership(board)
 @pytest.mark.redteam
 @pytest.mark.parametrize('reviewer', ['self', 'unrelated', 'missing'])
 def test_only_actual_person_or_creator_parent_can_accept_proposal(board, reviewer):
+    enforcement.set_mode(board.ws, board.parent, '', 'strict')
     proposed(board)
     token = board.child if reviewer == 'self' else board.agent('other') if reviewer == 'unrelated' else ''
     with pytest.raises(Denied):
@@ -242,6 +243,7 @@ def test_owned_blockage_records_elapsed_time_without_verified_progress(board):
 
 @pytest.mark.redteam
 def test_designated_peer_requires_existing_project_grant_and_cannot_self_review(board):
+    enforcement.set_mode(board.ws, board.parent, '', 'strict')
     peer = board.agent('independent-reviewer')
     owner = board.ws.auth(board.owner)
     project = {'root': '/approved/project'}

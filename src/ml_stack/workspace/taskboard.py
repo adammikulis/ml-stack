@@ -95,7 +95,9 @@ class TaskBoard:
         who, spec = self._auth(token, 'send'), task_spec(spec)
         for identity in spec['assignees'] + spec['reviewers']:
             if not self.ws.registry.role_of(identity) or not self._project_grant(identity, spec):
-                raise Denied('designated identities must be registered in the task project')
+                raise Denied('designated identities require existing person-set project grants'
+                             if enforcement.mode(self.ws, spec['project']) == 'strict' else
+                             'designated identities must be registered in the task project')
         if (spec['assignees'] or spec['reviewers']) and who.role != HUMAN and not self._project_grant(who.id, spec):
             raise Denied('the task creator lacks delegated project authority')
         with self._store() as graph:

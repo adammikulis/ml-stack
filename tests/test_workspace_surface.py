@@ -52,7 +52,8 @@ def test_the_token_can_come_from_a_file_and_stdin_can_carry_the_body(kit, tmp_pa
     file.write_text(kit.agent("worker") + "\n")
     file.chmod(0o600)
     done = cli(kit.base, "", "whoami", "--token-file", str(file), "--json")
-    assert json.loads(done.stdout) == {"id": "worker", "role": "agent", "project": {}, "model": "unknown",
+    assert json.loads(done.stdout) == {"id": "worker", "role": "agent", "project": {},
+                                       "enforcement": "open", "model": "unknown",
                                        "model_state": "", "harness": ""}
     code = ("import subprocess,sys\n"
             "r = subprocess.run([sys.executable,'-m','ml_stack.workspace.cli','send','worker',"
