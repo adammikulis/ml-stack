@@ -470,7 +470,7 @@ the tests, and never leave a state walk unbounded.
 The maintained tiers are `fast` (neither slow nor heavy), `full` (not slow), `slow` (only slow)
 and `all` (including slow). `tests/README.md` describes their mechanics; the policy above
 controls when each is authorized. Run the relevant slow tests for packaging, page and Fleet
-changes. Scoped runs default to one worker. Use `-n 1` for sequential ordering; explicit `-n 0`
+changes. Scoped runs default to an automatic pool of what the broker grants. Use `-n 1` for sequential ordering; explicit `-n 0`
 requests an automatic pool up to broker capacity. Explicit worker ceilings remain effective.
 Never run bare `pytest -n N` outside maintained admission.
 

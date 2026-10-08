@@ -286,8 +286,8 @@ def main() -> int:
                         help="ratchet --update: record a higher time (refused for an agent)")
     parser.add_argument("--junit", type=Path, help="heavy: the junit file to read")
     parser.add_argument("--over", type=float, default=12.0, help="heavy: seconds per module")
-    parser.add_argument("-n", "--workers", type=int, default=1,
-                        help="xdist worker ceiling (default: 1); explicit 0 = automatic pool up to broker capacity")
+    parser.add_argument("-n", "--workers", type=int, default=0,
+                        help="xdist worker ceiling (default: 0 = automatic pool up to what the broker grants); -n 1 runs sequentially")
     parser.add_argument("--base", default=BASE, help="branch quick diffs against")
     parser.add_argument("--slow", action="store_true", help="quick: include slow tests")
     parser.add_argument("--explain", action="store_true", help="quick: say what selected what")

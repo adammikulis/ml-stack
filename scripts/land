@@ -58,7 +58,7 @@ def main() -> int:
     parser.add_argument("--apply", action="store_true", help="finish: do it (default is a dry run)")
     parser.add_argument("--target", default=lg.TARGET, help="branch to land on")
     parser.add_argument("--conflicts", choices=["eject", "stop"], default="eject")
-    parser.add_argument("-n", "--workers", type=int, default=1, help="affected-test worker ceiling")
+    parser.add_argument("-n", "--workers", type=int, default=0, help="affected-test worker ceiling (default 0: what the broker grants)")
     parser.add_argument("--repo", type=Path, default=Path.cwd(), help="a checkout of the repository")
     args = parser.parse_args()
     root = lg.toplevel(args.repo)

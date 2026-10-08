@@ -7,7 +7,7 @@ invented.
 
 ## Running them
 
-One command per tier, `scripts/test <tier>`; `-n N` sets a worker ceiling (default 1; explicit `-n 0` requests an automatic pool) and any other
+One command per tier, `scripts/test <tier>`; `-n N` sets a worker ceiling (default 0: an automatic pool up to what the broker grants; `-n 1` is sequential) and any other
 argument goes to pytest. Each run queues for them in the machine-wide budget
 (`scripts/testslots.py`; `python scripts/testslots.py status`) and uses what it is granted, so
 run the tiers, not a bare `pytest -n N`. `DEV_TEST_BUDGET` sets the budget (default logical CPU count minus one). Agents must not disable the queue with `DEV_TEST_SLOTS=off`.

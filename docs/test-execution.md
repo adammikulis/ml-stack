@@ -4,7 +4,7 @@ Run tests with `python scripts/test fast`, `full`, `slow`, `all`, or `quick`.
 Explicit test paths are checked before broker admission using pytest’s argument parser.
 A missing file or directory, or a node selector that collects no tests, returns
 exit status 4, including in `quick`; an empty affected-test selection remains valid.
-`-n N` limits the worker pool; scoped runs default to one worker. Explicit `-n 0` requests
+`-n N` limits the worker pool; scoped runs default to an automatic pool of what the broker grants (`-n 0`); `-n 1` runs sequentially. `-n 0` requests
 an automatic pool up to broker capacity. Explicit worker ceilings remain effective.
 Every checkout shares the same admission broker.
 
