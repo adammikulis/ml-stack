@@ -9,6 +9,7 @@ from ml_stack.workspace.screen import injection_markers
 
 WINDOW_S = 60.0
 KINDS = frozenset({'status', 'done', 'milestone', 'blocked'})
+UNMETERED = frozenset({'joined', 'done'})  # starting and finishing are never rate limited
 FIELDS = ('from', 'role', 'label', 'to', 'type', 'subject', 'reply_to', 'thread',
           'body', 'model', 'model_state', 'report_ttl_s')
 
@@ -39,6 +40,6 @@ def emit(ws, who, row: dict, *, announce: bool, ttl_s: float):
             row['report_ttl_s'] = ttl_s
             if previous := duplicate(ws, row):
                 return ws.deliver(previous, raw=True)
-        if announce:
+        if announce and row["type"] not in UNMETERED:
             ws._announcement_quota(who)
         return ws._post_new(who, row, ttl_s)

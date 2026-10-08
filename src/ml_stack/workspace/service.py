@@ -336,7 +336,8 @@ class Workspace:
     def _announcement_quota(self, who: Identity) -> None:
         lim = self.limits
         horizon = self.clock() - lim.announce_window_s
-        recent = [r for r in self.bus.outbox(who.id, 50) if r["to"] == ANNOUNCE and r["ts"] > horizon]
+        recent = [r for r in self.bus.outbox(who.id, 50) if r["to"] == ANNOUNCE and r["type"] not in reports.UNMETERED
+                  and r["ts"] > horizon]
         if len(recent) >= lim.announce_per_window:
             self.audit("write.refused", who.id, what="announcement", why="rate")
             raise RateLimited(f"{who.id} made {len(recent)} announcements in "

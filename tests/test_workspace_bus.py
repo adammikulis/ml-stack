@@ -212,6 +212,17 @@ def test_a_flooding_sender_is_limited_and_others_are_not(kit):
     assert any(r.get("why") == "rate" for r in kit.ws.audit_log.rows())
 
 
+def test_joined_and_done_announcements_are_never_rate_limited(kit):
+    kit.limits(announce_per_window=2)
+    agent = kit.agent("worker")
+    kit.ws.announce(agent, "milestone", "landed a")
+    kit.ws.announce(agent, "milestone", "landed b")
+    with pytest.raises(RateLimited):
+        kit.ws.announce(agent, "milestone", "landed c")
+    assert kit.ws.announce(agent, "done", "finished")
+    assert kit.ws.announce(agent, "joined", "again")
+
+
 def test_the_rate_window_slides(kit):
     now = [1000.0]
     kit.limits(sends_per_window=2, window_s=10.0)

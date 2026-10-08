@@ -24,7 +24,9 @@ still names the branch. The `SubagentStart` and `SubagentStop` hooks join and re
 subagent's workspace access under the lead's identity, so a subagent prompt carries the
 `--agent <lead name> --label LABEL` line from AGENTS.md and needs no invite or token. The
 `.claude/agents/branch-worker.md` agent is the one-branch worker: it reads AGENTS.md and this
-file, announces, works in its worktree, commits named files and reports.
+file, announces, works in its worktree, commits named files and reports. The harness confines it
+to that fresh tree, so `.claude/agents/branch-finisher.md` (no isolation) is the one for a branch
+that already has a claimed sibling worktree.
 
 ## Contact comes first
 
