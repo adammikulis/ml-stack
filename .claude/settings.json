@@ -42,6 +42,16 @@
           }
         ]
       }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/scripts/hooks/claude-subagent-stop"
+          }
+        ]
+      }
     ]
   },
   "env": {

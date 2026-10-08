@@ -429,7 +429,7 @@ def _brief(args: argparse.Namespace, ws: Workspace) -> int:
     args.token_file = getattr(args, "token_file", "")
     context, token = _context(args)
     me = context.auth(token).id
-    say(onboard.brief(args.name, me), end="")
+    say(onboard.brief(args.name, me, args.registered), end="")
     return 0
 
 
@@ -583,7 +583,8 @@ BARE: tuple[tuple[str, str, list[Any], Callable[[argparse.Namespace, Workspace],
     ("install-hooks", "write the nudge hooks (PostToolUse, Stop, UserPromptSubmit) into Claude Code's "
      "settings; at a terminal", [flag("--settings", default="~/.claude/settings.json",
                                       help="the Claude Code settings file")], _install_hooks),
-    ("brief", "print the short brief a parent pastes into a subagent's prompt", [flag("name")],
+    ("brief", "print the short brief a parent pastes into a subagent's prompt",
+     [flag("name"), flag("--registered", action="store_true", help="the parent's hooks register and announce the subagent")],
      _brief),
 )
 

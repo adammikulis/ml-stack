@@ -13,12 +13,44 @@ import rules_loader
 import workspace_hook
 
 
+ALIASES = {"sonnet": "claude-sonnet-5-5", "opus": "claude-opus-5-5", "haiku": "claude-haiku-4-5-20251001",
+           "fable": "claude-fable-5-1"}
+
+
+def label_of(event: dict) -> str:
+    return f"{event.get('agent_type') or 'subagent'}-{str(event.get('agent_id') or '')[:6]}".strip("-").lower()
+
+
+def definition_model(event: dict) -> str:
+    """The model id an agent definition's `model:` names, or an empty string when it inherits."""
+    kind = str(event.get("agent_type") or "")
+    root = Path(event.get("cwd") or ".")
+    for path in (root / ".claude" / "agents" / f"{kind}.md", Path.home() / ".claude" / "agents" / f"{kind}.md"):
+        try:
+            head = path.read_text().split("---")[1]
+        except (OSError, IndexError):
+            continue
+        for line in head.splitlines():
+            key, _, value = line.partition(":")
+            if key.strip() == "model":
+                value = value.strip()
+                return ALIASES.get(value, value if value.startswith("claude-") else "")
+    return ""
+
+
 def workspace_brief(event: dict) -> str:
-    label = f"{event.get('agent_type') or 'subagent'}-{str(event.get('agent_id') or '')[:6]}".strip("-").lower()
+    label = label_of(event)
     environment = workspace_hook.session_environment(event, "SubagentStart")
     if environment is None:
         return ""
-    done = workspace_hook.run(["ml-stack-workspace", "brief", label, "--agent", "claude-code"],
+    model = definition_model(event)
+    if model:
+        workspace_hook.run(["ml-stack-workspace", "hello-model", label, model, "--agent", "claude-code"],
+                           "SubagentStart", environment=environment)
+    purpose = " ".join(str(event.get("description") or event.get("agent_type") or "subagent").split())[:150]
+    joined = workspace_hook.run(["ml-stack-workspace", "announce", "joined", f"{label}: {purpose}",
+                                 "--agent", "claude-code", "--label", label], "SubagentStart", environment=environment)
+    done = workspace_hook.run(["ml-stack-workspace", "brief", label, "--agent", "claude-code", "--registered"],
                               "SubagentStart", environment=environment)
     return done.stdout.strip() if done else ""
 

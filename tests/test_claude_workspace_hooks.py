@@ -113,9 +113,10 @@ def test_subagent_event_includes_brief_and_actual_primary_branch_rules(commands,
     assert f'primary checkout {repository.resolve()} is on the development branch development' in context
     assert 'Acquire authenticated claims before mutation' in context and 'separate sibling worktrees' in context
     records = json.loads(commands[1].read_text())
-    assert len(records) == 1
-    assert records[0] == {'argv': ['brief', 'explore-abcdef', '--agent', 'claude-code'],
-                          'session': 'native-parent', 'harness': 'claude-code'}
+    assert [record['argv'] for record in records] == [
+        ['announce', 'joined', 'explore-abcdef: Explore', '--agent', 'claude-code', '--label', 'explore-abcdef'],
+        ['brief', 'explore-abcdef', '--agent', 'claude-code', '--registered']]
+    assert all(record['session'] == 'native-parent' and record['harness'] == 'claude-code' for record in records)
 
 
 @pytest.mark.parametrize('stage', ['SessionStart', 'SubagentStart'])
@@ -231,3 +232,16 @@ def test_invalid_native_session_does_not_export_or_register(commands, tmp_path, 
     done = invoke('claude-session-start', {'session_id': session, 'model': 'claude-sonnet-4-6'})
     assert done.returncode == 0 and 'invalid native session_id' in done.stderr
     assert not target.exists() and not commands[1].exists()
+
+
+def test_subagent_stop_records_transcript_model_and_announces_done(commands, tmp_path):
+    transcript = tmp_path / 'agent.jsonl'
+    transcript.write_text('{"message": {"role": "user"}}\n{"message": {"model": "claude-haiku-4-5-20251001"}}\n')
+    done = invoke('claude-subagent-stop', {'agent_type': 'Explore', 'agent_id': 'abcdef12345',
+                                           'agent_transcript_path': str(transcript),
+                                           'last_assistant_message': 'found it'})
+    assert done.returncode == 0 and not done.stderr
+    records = json.loads(commands[1].read_text())
+    assert [record['argv'] for record in records] == [
+        ['hello-model', 'explore-abcdef', 'claude-haiku-4-5-20251001', '--agent', 'claude-code'],
+        ['announce', 'done', 'explore-abcdef: found it', '--agent', 'claude-code', '--label', 'explore-abcdef']]
