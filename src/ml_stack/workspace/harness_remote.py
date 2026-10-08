@@ -182,6 +182,26 @@ def release_revoked(remote, identity, snapshot):
         store._save(current)
 
 
+LOCAL_KINDS = ('port', 'server', 'install')
+
+
+def local_command(remote, who, args):
+    """Claim, release or look up a device-local port, server or install in the physical store."""
+    kind, key = args.kind, args.key
+    if kind == 'install':
+        key = str((Path.cwd() / key).resolve())
+    key = normal(kind, key)
+    store, principal = claims(), physical_owner(remote, who)
+    if args.cmd == 'who':
+        return store.who(kind, key) or {'owner': None}
+    if args.cmd == 'release':
+        return {'released': [store.release(principal, kind, key)]}
+    if args.ttl or args.pid:
+        raise Denied('canonical reservation uses bounded defaults; renew TTL with heartbeat')
+    store.reserve(principal, [(kind, key)], {'note': args.note})
+    return {'reserved': [{'kind': kind, 'key': key}]}
+
+
 def cli_command(remote, token, args):
     """Dispatch project-confined canonical claim operations under the exact CLI identity."""
     info = remote.call('whoami', token)
@@ -214,8 +234,10 @@ def cli_command(remote, token, args):
         rows = [*rows, *local]
         return {'renewed': len(rows), 'capped': [f"{r['kind']}:{r['key']}" for r in rows if r.get('capped')]}
     kind, key = args.kind, args.key
+    if kind in LOCAL_KINDS:
+        return local_command(remote, who, args)
     if kind not in ('branch', 'area', 'file', 'worktree'):
-        raise Denied('canonical CLI claims require a branch or a bounded checkout path')
+        raise Denied('canonical CLI claims require a branch, a bounded checkout path, a port, a server or an install')
     required = [(kind, key)]
     if kind == 'area':
         required = [('file', str((Path.cwd() / key).resolve()))]

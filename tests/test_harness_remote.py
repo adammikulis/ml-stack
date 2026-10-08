@@ -248,7 +248,7 @@ def cli_args(**changes):
                               'key': '', 'ttl': 0, 'pid': 0, 'note': '', **changes})
 
 
-@pytest.mark.parametrize('change', [{'agent': 'foreign'}, {'kind': 'install'}, {'ttl': 5}, {'pid': 1}])
+@pytest.mark.parametrize('change', [{'agent': 'foreign'}, {'kind': 'tag'}, {'ttl': 5}, {'pid': 1}])
 def test_canonical_cli_refuses_unbound_or_unsupported_claims(setup, change):
     args = cli_args(key=str(setup.checkout / 'source.py'), **change)
     with pytest.raises(Denied):
@@ -262,6 +262,20 @@ def test_canonical_cli_claim_maps_bounded_source_and_physical_area(setup):
     harness_remote.cli_command(setup.remote, 'fixture', cli_args(key=target))
     assert recorded == [('area', 'source.py')]
     assert harness_remote.claims().who('area', target)['owner'] == harness_remote.physical_owner(setup.remote, setup.who).id
+
+
+@pytest.mark.parametrize('kind,key', [('port', '8123'), ('server', 'qwen-27b'), ('install', 'runtime-tree')])
+def test_canonical_cli_claims_device_local_resources_without_a_source_area(setup, kind, key):
+    setup.remote.native_reserve = lambda *args: pytest.fail('board reservation for a local resource')
+    owner = harness_remote.physical_owner(setup.remote, setup.who).id
+    done = harness_remote.cli_command(setup.remote, 'fixture', cli_args(kind=kind, key=key))
+    assert done['reserved'][0]['kind'] == kind
+    key = done['reserved'][0]['key']
+    held = harness_remote.cli_command(setup.remote, 'fixture', cli_args(cmd='who', kind=kind, key=key))
+    assert held['owner'] == owner
+    harness_remote.cli_command(setup.remote, 'fixture', cli_args(cmd='release', kind=kind, key=key))
+    assert harness_remote.cli_command(setup.remote, 'fixture',
+                                      cli_args(cmd='who', kind=kind, key=key)) == {'owner': None}
 
 
 def test_canonical_cli_heartbeat_preserves_requested_ttl(setup):
