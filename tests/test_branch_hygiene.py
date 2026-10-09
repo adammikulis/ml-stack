@@ -162,6 +162,30 @@ def test_a_merge_that_takes_a_weakened_file_whole_from_the_other_parent_is_not_j
     assert out.returncode == 0, out.stderr
 
 
+def test_a_merge_that_combines_both_sides_is_judged_only_on_what_it_wrote_itself(tmp_path) -> None:
+    """The side branch dropped an assertion in its own commit, and this side added a test to the
+    same file. The merged file matches neither parent, but the dropped assertion is the other
+    side's, not the merge's: `git diff --cc` shows no weakening."""
+    where = tmp_path / "c"
+    where.mkdir()
+    sh(where, "git", "init", "-q", "-b", "0.2dev")
+    (where / "tests").mkdir()
+    spread = BEFORE + "\n\n\ndef test_a():\n    assert 1\n\n\ndef test_b():\n    assert 2\n"
+    (where / GUARD).write_text(spread)
+    sh(where, "git", "add", GUARD)
+    assert sh(where, "git", "commit", "-qm", "base", "--no-verify").returncode == 0
+    sh(where, "git", "checkout", "-qb", "side")
+    (where / GUARD).write_text(spread.replace("    assert other()\n", ""))
+    sh(where, "git", "commit", "-qam", "side weakens", "--no-verify")
+    sh(where, "git", "checkout", "-q", "0.2dev")
+    (where / GUARD).write_text(spread + "\n\ndef test_extra():\n    assert 3\n")
+    sh(where, "git", "commit", "-qam", "extra", "--no-verify")
+    merged = sh(where, "git", "merge", "--no-commit", "--no-ff", "side")
+    assert merged.returncode == 0, merged.stdout
+    out = sh(where, sys.executable, str(HOOK), "--staged")
+    assert out.returncode == 0, out.stderr
+
+
 def test_a_merge_that_resolves_a_guard_test_down_by_hand_is_still_reported(tmp_path) -> None:
     where = merge_repo(tmp_path)
     sh(where, "git", "merge", "--no-commit", "--no-ff", "side")
