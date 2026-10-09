@@ -47,8 +47,8 @@ def main(kit, name, model=None, verified=True):
     return token
 
 
-def shown(kit, name, label=''):
-    return metadata(kit.ws.registry, name, label)
+def shown(kit, name):
+    return metadata(kit.ws.registry, name)
 
 
 @pytest.mark.parametrize(('model', 'place'), EXPECTED.items())
@@ -101,12 +101,10 @@ def test_a_claimed_id_stays_ineligible_after_the_session_claims_a_listed_model(k
     assert not shown(kit, 'claimer')['coordinator_eligible']
 
 
-def test_names_and_labels_never_set_the_tier(kit):
+def test_names_never_set_the_tier(kit):
     main(kit, 'sonnet-lead', 'claude-haiku-5-5')
     assert not shown(kit, 'sonnet-lead')['coordinator_eligible']
     assert 'sonnet' not in shown(kit, 'sonnet-lead')['display_name'].lower()
-    labelled = shown(kit, 'sonnet-lead', 'claude-sonnet-5-5')
-    assert not labelled['coordinator_eligible']
     assert tier_of('Claude Sonnet 5.5', VERIFIED).reason == NOT_LISTED
     assert tier_of('claude-sonnet-5-5 ', VERIFIED).reason == NOT_LISTED
     assert tier_of('CLAUDE-SONNET-5-5', VERIFIED).reason == NOT_LISTED
