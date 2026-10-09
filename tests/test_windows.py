@@ -592,8 +592,9 @@ class TestDiscoveryAndTheFirewall:
         finding = found[0]
         assert not finding.good and finding.root
         assert "ml-stack traind" in finding.said and "ml-stack discovery" in finding.said
-        assert "protocol=TCP localport=8770" in finding.fix
-        assert "protocol=UDP localport=8771" in finding.fix
+        assert finding.fix[:2] == ["cmd", "/c"]
+        assert "protocol=TCP localport=8770" in finding.fix[2]
+        assert "protocol=UDP localport=8771" in finding.fix[2]
         assert "administrator" in finding.note
 
     def test_setup_is_satisfied_once_netsh_finds_them(self, windows, monkeypatch):
