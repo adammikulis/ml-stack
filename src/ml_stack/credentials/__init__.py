@@ -132,6 +132,8 @@ def _rewriting() -> Iterator[None]:
     except lock.Busy as exc:
         raise CredentialError(f"another ml-stack command is changing {wrapped_path().name}; "
                               "try again in a moment") from exc
+    except OSError as exc:
+        raise CredentialError(str(exc)) from exc
 
 
 def _keep(name: str, value: str) -> None:

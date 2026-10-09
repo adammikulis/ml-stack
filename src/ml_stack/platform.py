@@ -197,27 +197,41 @@ def private_file(path: Path | str) -> None:
             capture_output=True, check=False, timeout=30)
 
 
+def _windows_sid() -> str:
+    """The SID of the account this process runs as (from ``whoami /user``), or an empty string. A SID
+    is used rather than ``USERNAME``, which can be unset or name a different account than the token."""
+    try:
+        done = subprocess.run(["whoami", "/user", "/fo", "csv", "/nh"], capture_output=True, text=True,
+                              check=False, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    fields = [field.strip('"') for field in done.stdout.strip().split(",")]
+    return fields[-1] if done.returncode == 0 and fields[-1].startswith("S-1-") else ""
+
+
 def private_dir(path: Path | str) -> bool:
     """Make the directory ``path`` (and what is made in it later) for its owner alone.
 
-    ``chmod(0o700)`` on POSIX. On Windows ``icacls`` drops the inherited entries (SYSTEM,
-    Administrators, Users) and grants the owner full control inherited by files and
-    subdirectories. Whether the call took effect: False when there is no ``USERNAME`` or
-    ``icacls`` failed, so a caller can say so; it never raises.
+    ``chmod(0o700)`` on POSIX. On Windows two ``icacls`` calls, in this order so a failure never
+    leaves a directory nobody can use: grant the account's SID full control inherited by files and
+    subdirectories, then drop the inherited entries (SYSTEM, Administrators, Users). Whether it took
+    effect: False when the SID is unknown or either call failed, so a caller can say so; it never raises.
     """
     p = Path(path)
     if not is_windows():
         p.chmod(0o700)
         return True
-    owner = os.environ.get("USERNAME", "")
-    if not owner:
+    sid = _windows_sid()
+    if not sid:
         return False
-    try:
-        done = subprocess.run(["icacls", str(p), "/inheritance:r", "/grant:r", f"{owner}:(OI)(CI)F"],
-                              capture_output=True, check=False, timeout=30)
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return done.returncode == 0
+    for args in (["/grant:r", f"*{sid}:(OI)(CI)F"], ["/inheritance:r"]):
+        try:
+            done = subprocess.run(["icacls", str(p), *args], capture_output=True, check=False, timeout=30)
+        except (OSError, subprocess.SubprocessError):
+            return False
+        if done.returncode != 0:
+            return False
+    return True
 
 
 def open_path(path: Path | str) -> str:

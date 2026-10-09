@@ -75,16 +75,20 @@ def recall(group: str = "", path: Path | str | None = None) -> str | None:
 
 
 def forget(group: str, path: Path | str | None = None) -> None:
-    """Drop the stored passphrase for ``group``."""
-    with lock.rewriting(passphrases_path(path)):
-        rows = _held(path)
-        kept = {g: v for g, v in rows.items() if g != group}
-        if kept == rows:
-            return
-        if kept:
-            write_json(passphrases_path(path), kept)
-        else:
-            passphrases_path(path).unlink(missing_ok=True)
+    """Drop the stored passphrase for ``group``; a file another command holds, or one that cannot be
+    locked, is reported and left as it was."""
+    try:
+        with lock.rewriting(passphrases_path(path)):
+            rows = _held(path)
+            kept = {g: v for g, v in rows.items() if g != group}
+            if kept == rows:
+                return
+            if kept:
+                write_json(passphrases_path(path), kept)
+            else:
+                passphrases_path(path).unlink(missing_ok=True)
+    except (lock.Busy, OSError) as exc:
+        warn(f"The stored passphrase for {group} was not removed ({exc}); try again.")
 
 
 def export_recovery(file: Path | str, group: str = "", path: Path | str | None = None) -> Membership:
