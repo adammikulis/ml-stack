@@ -85,9 +85,13 @@ def test_a_message_that_lands_between_the_check_and_the_sleep_is_not_missed(tmp_
     assert [m["body"] for m in got] == ["late"] and time.monotonic() - start < 1.0
 
 
-def test_two_hundred_waits_each_racing_one_send_never_miss(tmp_path):
+@pytest.mark.parametrize("rounds", [40, pytest.param(200, marks=pytest.mark.slow)])
+def test_waits_each_racing_one_send_never_miss(tmp_path, rounds):
+    """Every round opens the log in a second handle (as another process would) and races its send
+    against the wait by 0 to 4 ms. Forty rounds are the default tier; the two hundred that gave the
+    race its odds run in the slow tier. Each round reopens the store several times (about 0.3 s)."""
     bus = Bus(tmp_path)
-    for i in range(200):
+    for i in range(rounds):
         me = f"agent{i % 7}"
         cursor = bus.cursor(me)
         sender = after(0.001 * (i % 5), lambda me=me, i=i: Bus(tmp_path).append(msg(me, f"m{i}")))

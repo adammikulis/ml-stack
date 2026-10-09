@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import difflib
 import functools
+import importlib.util
 import json
 import os
 import re
@@ -50,13 +51,22 @@ CONTEXT_KEYS = ("operators", "brackets", "adjacent", "keywords", "products", "he
 DEFAULT_FIXTURES = "tests/known-fixtures.txt"
 FLOOR = 0.6
 SHOWN = 25
+LEFT_OFF = ("parser", "tagger", "attribute_ruler", "lemmatizer")
+# the recogniser only reads text with a capitalised word beside another word
+PROSE = re.compile(r"\b[A-Z][A-Za-z'\u2019-]*\s+[A-Za-z][A-Za-z'\u2019-]*|[a-z][A-Za-z'\u2019-]*\s+[A-Z][a-z]")
 
 EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)*\.[A-Za-z]{2,}")
-PHONE = re.compile(r"\+?\d[\d ().-]{8,}\d")
-DATEISH = re.compile(r"^\d{4}[-/]\d{1,2}[-/]\d{1,2}$")
-TIMESTAMP = re.compile(r"\d{4}[-/]\d{1,2}[-/]\d{1,2}"
-                       r"|(?:19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])-[0-2]\d[0-5]\d[0-5]\d")
-FRACTION = re.compile(r"\.\d{4,}")
+# a strict phone grammar: a leading plus and country code, or (ddd) ddd-dddd, or exactly
+# ddd-ddd-dddd / ddd.ddd.dddd with one separator. A candidate glued to a dash, an underscore, a
+# letter or a digit on either side is part of a longer token (a date, a model-id tail, a grouped
+# identifier, a drawing path), never a phone number
+PHONE = re.compile(
+    r"(?<![\w+-])(?:"
+    r"\+\d{1,3}[ .-]?(?:\(\d{1,4}\)[ .-]?)?\d{1,4}(?:[ .-]\d{2,4}){1,3}"
+    r"|\(\d{3}\) ?\d{3}-\d{4}"
+    r"|\d{3}-\d{3}-\d{4}"
+    r"|\d{3}\.\d{3}\.\d{4}"
+    r")(?![\w-]|\.\d)")
 # shapes that are code rather than a person
 IDENTIFIER = re.compile(r"[_\[\](){}\"\n@/=]|^[a-z]+$")
 # `label.lower`, and not an initial between a forename and a surname, and not `St. Cloud`:
@@ -377,12 +387,8 @@ def contacts(line: str, allowed: set[str], rules: Shapes | None = None,
     uuids = [m.group(0) for m in rules.uuid.finditer(line)]
     for found in PHONE.finditer(line):
         text = found.group(0)
-        if not (text.startswith("+") or "(" in text or "-" in text):
-            continue
         if any(text in u for u in uuids):
             cleared(f"{text!r} cleared by patterns: uuid")
-            continue
-        if text.count(".") > 1 or DATEISH.match(text) or FRACTION.search(text) or TIMESTAMP.search(text):
             continue
         if code := phone_is_code(line, found.start(), found.end()):
             cleared(f"{text!r} cleared by benign: {code}")
@@ -403,7 +409,27 @@ def recogniser() -> Any:
     provider = NlpEngineProvider(nlp_configuration={
         "nlp_engine_name": "spacy",
         "models": [{"lang_code": "en", "model_name": "en_core_web_sm"}]})
-    return AnalyzerEngine(nlp_engine=provider.create_engine(), supported_languages=["en"])
+    nlp_engine = provider.create_engine()
+    # only the entity recogniser reads the text for a PERSON: the parser, tagger, attribute
+    # ruler and lemmatizer are about half of every analyze() call and decide nothing here
+    nlp = nlp_engine.nlp["en"]
+    nlp.select_pipes(disable=[p for p in LEFT_OFF if p in nlp.pipe_names])
+    return AnalyzerEngine(nlp_engine=nlp_engine, supported_languages=["en"])
+
+
+class LazyRecogniser:
+    """Stands in for the engine until a file's added lines hold something it must read: loading
+    spaCy costs seconds, and most commits add no capitalised prose. ``analyze`` builds the
+    shared engine on first use."""
+
+    def analyze(self, **kwargs: Any) -> Any:
+        engine = recogniser()
+        return engine.analyze(**kwargs) if engine is not None else []
+
+
+def installed() -> bool:
+    """Whether presidio can be imported, without importing it."""
+    return importlib.util.find_spec("presidio_analyzer") is not None
 
 
 def _git(root: str | None, *args: str) -> str:
@@ -426,13 +452,25 @@ def _staged(root: str | None, rules: Shapes, against: str | None = None) -> list
     return [f for f in listed if f and not f.endswith(rules.skip_suffixes)]
 
 
+@dataclass(frozen=True)
+class Reading:
+    """What the recogniser is asked of a file: the entity types to report (``kinds``), the
+    score under which a hit is ignored (``floor``), and ``only``, the line numbers it reads
+    -- the lines a commit adds -- or None for the whole file. A bounded reading also skips the
+    recogniser when those lines hold no prose."""
+
+    kinds: frozenset[str] = frozenset({"PERSON"})
+    floor: float = FLOOR
+    only: frozenset[int] | None = None
+
+
 def _findings(path: str, blob: str, known: set[str], allowed: set[str], engine: Any,
-              rules: Shapes, why: list[tuple[str, int, str]] | None = None, *,
-              kinds: frozenset[str] = frozenset({"PERSON"}), floor: float = FLOOR,
-              ) -> Iterator[tuple[str, int, str]]:
+              rules: Shapes, why: list[tuple[str, int, str]] | None = None,
+              reading: Reading | None = None) -> Iterator[tuple[str, int, str]]:
     """Every refusal in one file as ``(path, line, why)``. What a rule cleared goes to
-    ``why`` in the same shape, when a list is given. ``kinds`` are the recogniser's entity
-    types to report and ``floor`` the score under which a hit is ignored."""
+    ``why`` in the same shape, when a list is given."""
+    reading = reading or Reading()
+    kinds, floor, only = reading.kinds, reading.floor, reading.only
     lines = blob.split("\n")
     for i, line in enumerate(lines, 1):
         for name in known:
@@ -463,23 +501,29 @@ def _findings(path: str, blob: str, known: set[str], allowed: set[str], engine: 
                 why.append((path, i, f"{body!r} cleared by {fired}"))
     if engine is None:
         return
-    for hit in engine.analyze(text=blob, language="en"):
+    text = blob
+    if only is not None:
+        # offsets and line numbers stay put: a line the commit did not add is read as empty
+        text = "\n".join(ln if i in only else "" for i, ln in enumerate(lines, 1))
+        if not PROSE.search(text):
+            return
+    for hit in engine.analyze(text=text, language="en"):
         if hit.entity_type not in kinds or hit.score < floor:
             continue
-        body = blob[hit.start:hit.end].strip().strip("’‘'\"`,.:; ")
+        body = text[hit.start:hit.end].strip().strip("’‘'\"`,.:; ")
         if hit.entity_type != "PERSON":
             if not body or body.casefold() in allowed or IDENTIFIER.search(body):
                 continue
             kind = hit.entity_type.lower().replace("_", " ")
-            yield path, blob.count("\n", 0, hit.start) + 1, f"{body!r} reads as {kind}"
+            yield path, text.count("\n", 0, hit.start) + 1, f"{body!r} reads as {kind}"
             continue
         # one CamelCase token is a class, not a person
         if not body or " " not in body or body.casefold() in allowed or IDENTIFIER.search(body):
             continue
-        at = blob.count("\n", 0, hit.start) + 1
-        opened = blob.rfind("\n", 0, hit.start) + 1
-        closed = blob.find("\n", hit.end)
-        line = blob[opened:closed if closed != -1 else len(blob)]
+        at = text.count("\n", 0, hit.start) + 1
+        opened = text.rfind("\n", 0, hit.start) + 1
+        closed = text.find("\n", hit.end)
+        line = text[opened:closed if closed != -1 else len(text)]
         # the recogniser is left as strict as it was about people; what stands a hit down is
         # only ever a shape that is code -- a table cell of digits, an expression, a product
         fired = rules.in_context(body, line, (hit.start - opened, hit.end - opened)) or not_a_name(body)
@@ -528,7 +572,7 @@ def main(argv: list[str] | None = None, *, env: Mapping[str, str] | None = None,
     allowed = permitted(where, fixtures, f"{account}/.config/pii-allow.txt")
     known = {n for n in from_database(env.get("NAMES_GRAPH", ""), env.get("NAMES_SCRAPE", ""))
              if n.casefold() not in allowed}
-    engine = recogniser()
+    engine = LazyRecogniser() if installed() else None
     explain = "--why" in argv or bool(env.get("NAMES_WHY"))
 
     bad: list[tuple[str, int, str]] = []
@@ -539,7 +583,8 @@ def main(argv: list[str] | None = None, *, env: Mapping[str, str] | None = None,
         if not blob or "\0" in blob[:2048]:
             continue
         wrote = added_lines(where, path, against)
-        bad.extend(f for f in _findings(path, blob, known, allowed, engine, rules, cleared)
+        bad.extend(f for f in _findings(path, blob, known, allowed, engine, rules, cleared,
+                         Reading(only=None if explain else frozenset(wrote)))
                    if (f[1] == 0 or f[1] in wrote) and not documented(where, quoted(f[2])))
 
     if cleared:

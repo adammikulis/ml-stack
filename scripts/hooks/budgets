@@ -66,6 +66,11 @@ def main() -> int:
         return 0
     if not BUDGETS.exists():
         return 0
+    if _git("rev-parse", "-q", "--verify", "MERGE_HEAD").strip():
+        # a merge brings in commits that passed this hook already, and `scripts/test gate`
+        # (the landing gate) counts every metric over the whole tree; re-counting the
+        # whole merge here took 65 s for a 675-file merge (docs/test-time.md)
+        return 0
     names = staged()
     if not names:
         return 0

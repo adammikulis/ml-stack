@@ -25,7 +25,14 @@ from typing import Any, TextIO
 
 from ml_stack import home
 from ml_stack.redact import hook
-from ml_stack.redact.hook import DEFAULT_FIXTURES, FLOOR, from_database, permitted, recogniser
+from ml_stack.redact.hook import (
+    DEFAULT_FIXTURES,
+    FLOOR,
+    Reading,
+    from_database,
+    permitted,
+    recogniser,
+)
 
 __all__ = ["NOISY", "SIGNAL", "Finding", "audit", "main", "tracked"]
 
@@ -74,7 +81,7 @@ def audit(root: str, *, env: Mapping[str, str] | None = None, kinds: frozenset[s
         if not blob or "\0" in blob[:2048]:
             continue
         for _, line, what in hook._findings(path, blob, known, allowed, engine, rules,
-                                            kinds=kinds, floor=floor):
+                                            None, Reading(kinds, floor)):
             found.append(Finding(path, line, what))
     return list(dict.fromkeys(found))
 

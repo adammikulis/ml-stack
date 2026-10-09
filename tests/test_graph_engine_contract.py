@@ -15,6 +15,7 @@ import textwrap
 from pathlib import Path
 
 import ladybug as lb
+from artifact_cache import cached, expand
 
 REPO = Path(__file__).resolve().parents[1]
 import pytest
@@ -126,12 +127,16 @@ def _seeded(path: str, nodes: int = 2060, edges: int = 2100) -> None:
     db.close()
 
 
+def _build_seed(into: Path) -> None:
+    _seeded(str(into / "seed.lbug"))
+
+
 @pytest.fixture(scope="module")
-def seeded_store(tmp_path_factory) -> Path:
-    """The seeded store, written once; each test copies it before changing anything."""
-    path = tmp_path_factory.mktemp("seed") / "seed.lbug"
-    _seeded(str(path))
-    return path
+def seeded_store() -> Path:
+    """The seeded store, written once for every worker and run with these sources (see
+    ``artifact_cache``); each test copies it before changing anything."""
+    sources = [Path(__file__), REPO / "src" / "ml_stack" / "graph"]
+    return cached("seeded-store", expand(*sources), _build_seed) / "seed.lbug"
 
 
 def _copy_of(seed: Path, destination: Path) -> str:

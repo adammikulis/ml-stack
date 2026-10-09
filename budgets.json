@@ -23,7 +23,7 @@
   "subprocess-spawns": 4,
   "unversioned-records": 0,
   "urlopen-calls": 1,
-  "wide-signatures": 30,
+  "wide-signatures": 29,
   "floors-only-rise": {
     "tests-collected": 6587
   },

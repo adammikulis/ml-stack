@@ -200,10 +200,10 @@ def test_findings_take_the_kinds_and_the_floor(tmp_path):
     engine = FakeEngine(Marla_Quinn=("PERSON", 0.9), **{"GB33 0000": ("IBAN_CODE", 0.7)})
     rules = hook.shapes()
     found = list(hook._findings("a.md", "Marla Quinn GB33 0000\n", set(), set(), engine, rules,
-                                kinds=frozenset({"IBAN_CODE"}), floor=0.6))
+                                None, hook.Reading(frozenset({"IBAN_CODE"}), 0.6)))
     assert [w for _, _, w in found] == ["'GB33 0000' reads as iban code"]
     assert list(hook._findings("a.md", "GB33 0000\n", set(), set(), engine, rules,
-                               kinds=frozenset({"IBAN_CODE"}), floor=0.8)) == []
+                               None, hook.Reading(frozenset({"IBAN_CODE"}), 0.8))) == []
 
 
 @pytest.mark.slow

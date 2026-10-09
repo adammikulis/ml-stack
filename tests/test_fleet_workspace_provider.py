@@ -1,10 +1,9 @@
 """Installed project-host composition for the direct device daemon."""
 
 import importlib.metadata
-import subprocess
-import sys
 import zipfile
-from pathlib import Path
+
+import wheel_cache
 
 from ml_stack.fleet import daemon
 
@@ -19,11 +18,7 @@ def test_injected_workspace_factory_bypasses_installed_provider(monkeypatch):
 
 
 def test_direct_daemon_loads_workspace_provider_from_built_wheel(tmp_path, monkeypatch):
-    repository = Path(__file__).resolve().parents[1]
-    built = subprocess.run([sys.executable, "-m", "build", "--wheel", "--no-isolation",
-                            "--outdir", str(tmp_path), str(repository)], capture_output=True, text=True)
-    assert built.returncode == 0, built.stderr
-    wheels = list(tmp_path.glob("*.whl"))
+    wheels = list(wheel_cache.built().glob("*.whl"))
     assert len(wheels) == 1
     installed = tmp_path / "installed"
     with zipfile.ZipFile(wheels[0]) as archive:
