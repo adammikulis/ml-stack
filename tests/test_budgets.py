@@ -147,6 +147,46 @@ def test_the_hook_counts_what_a_commit_deletes(tmp_path):
     assert done.returncode == 0, done.stderr
 
 
+def test_the_hook_leaves_a_merge_to_the_landing_gate_and_counts_an_ordinary_commit(tmp_path):
+    """A merge adds sites its parents already counted; the gate counts the whole tree. A plain
+    commit that adds a site is still refused."""
+    import subprocess
+
+    def run(*a):
+        return subprocess.run(["git", *a], cwd=tmp_path, capture_output=True, text=True)
+
+    hook = REPO / "scripts" / "hooks" / "budgets"
+    run("init", "-q", "-b", "main")
+    run("config", "user.email", "nobody@example.invalid")
+    run("config", "user.name", "A Tester")
+    src = tmp_path / "src" / "ml_stack"
+    src.mkdir(parents=True)
+    (src / "base.py").write_text("def b():\n    return 1\n")
+    (tmp_path / "budgets.json").write_text('{"print-calls": 0}\n')
+    (tmp_path / "pyproject.toml").write_text(
+        (REPO / "pyproject.toml").read_text(encoding="utf-8"), encoding="utf-8")
+    run("add", "src/ml_stack/base.py", "budgets.json", "pyproject.toml")
+    run("commit", "-qm", "base", "--no-verify")
+    run("checkout", "-q", "-b", "side")
+    (src / "noisy.py").write_text('def n():\n    print("x")\n')
+    run("add", "src/ml_stack/noisy.py")
+    run("commit", "-qm", "side", "--no-verify")
+    run("checkout", "-q", "main")
+    (src / "other.py").write_text("def o():\n    return 2\n")
+    run("add", "src/ml_stack/other.py")
+    run("commit", "-qm", "main", "--no-verify")
+    run("merge", "--no-commit", "--no-ff", "side")
+    assert (tmp_path / ".git" / "MERGE_HEAD").exists()
+    merged = subprocess.run([sys.executable, str(hook)], cwd=tmp_path, capture_output=True, text=True)
+    assert merged.returncode == 0, merged.stderr
+
+    run("merge", "--abort")
+    (src / "noisy.py").write_text('def n():\n    print("y")\n')
+    run("add", "src/ml_stack/noisy.py")
+    plain = subprocess.run([sys.executable, str(hook)], cwd=tmp_path, capture_output=True, text=True)
+    assert plain.returncode == 1 and "print-calls" in plain.stderr, plain.stderr
+
+
 def test_the_workflow_installs_the_checkers_the_budgets_were_counted_with() -> None:
     """An unpinned ruff scores the same tree differently on a runner and on a laptop."""
     workflow = (REPO / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
