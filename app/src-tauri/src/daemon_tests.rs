@@ -1,4 +1,4 @@
-use super::{healthy, valid_health};
+use super::{gone_within, healthy, valid_health};
 use crate::identity::{self, SECRET_FILE};
 use std::fs;
 use std::io::{Read, Write};
@@ -104,4 +104,29 @@ fn nothing_is_recognised_without_the_secret_or_a_listener() {
     let silent = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
     assert!(!healthy(silent, &root));
     let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn a_process_that_exits_within_the_grace_is_waited_for_not_killed() {
+    let polls = std::cell::Cell::new(0);
+    let gone = gone_within(
+        || {
+            polls.set(polls.get() + 1);
+            polls.get() < 4
+        },
+        std::time::Duration::from_secs(5),
+        std::time::Duration::from_millis(1),
+    );
+    assert!(gone && polls.get() == 4);
+}
+
+#[test]
+fn a_process_that_outlives_the_grace_is_reported_still_there() {
+    let started = std::time::Instant::now();
+    let gone = gone_within(
+        || true,
+        std::time::Duration::from_millis(60),
+        std::time::Duration::from_millis(5),
+    );
+    assert!(!gone && started.elapsed() >= std::time::Duration::from_millis(60));
 }

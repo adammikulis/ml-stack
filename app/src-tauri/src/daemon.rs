@@ -14,6 +14,7 @@ const SIDECAR: &str = "ml-stack-headless";
 const CONNECT_TIMEOUT: Duration = Duration::from_millis(500);
 const HEALTH_SECONDS: u64 = 60;
 const HEALTH_BYTES: u64 = 1024 * 1024;
+const STOP_GRACE: Duration = Duration::from_secs(30);
 
 #[cfg(test)]
 #[path = "daemon_tests.rs"]
@@ -99,14 +100,42 @@ pub fn start(app: &AppHandle, port: u16, root: &str) -> Result<CommandChild, Str
     Ok(child)
 }
 
+/// Whether a process with this id is still there.
+#[cfg(unix)]
+fn alive(pid: u32) -> bool {
+    std::process::Command::new("/bin/kill")
+        .args(["-0", &pid.to_string()])
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+/// Poll `alive` until it says no or `grace` has passed; true when the process is gone.
+fn gone_within(alive: impl Fn() -> bool, grace: Duration, poll: Duration) -> bool {
+    let deadline = Instant::now() + grace;
+    while alive() {
+        if Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(poll);
+    }
+    true
+}
+
 /// Stop a daemon this app started, and the worker the frozen launcher runs under it.
+///
+/// The daemon closes its stores on SIGTERM; killing it first would leave the graph store's
+/// write-ahead log behind, so it is given `STOP_GRACE` to exit before anything stronger.
 pub fn stop(child: CommandChild) {
-    let pid = child.pid();
     #[cfg(unix)]
-    let _ = std::process::Command::new("/bin/kill")
-        .args(["-TERM", &pid.to_string()])
-        .status();
-    #[cfg(unix)]
-    std::thread::sleep(Duration::from_millis(500));
+    {
+        let pid = child.pid();
+        let _ = std::process::Command::new("/bin/kill")
+            .args(["-TERM", &pid.to_string()])
+            .status();
+        if gone_within(|| alive(pid), STOP_GRACE, Duration::from_millis(100)) {
+            return;
+        }
+    }
     let _ = child.kill();
 }

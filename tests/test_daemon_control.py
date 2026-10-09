@@ -503,3 +503,35 @@ def test_preserving_restart_keeps_unsafe_background_work_running(busy):
         runner=SimpleNamespace(checkpoint_restart=lambda: pytest.fail('froze jobs during unsafe background work')))
     with pytest.raises(ControlError):
         _preserve(runtime)
+
+
+def test_a_preserving_restart_drains_a_long_lived_request_instead_of_refusing_for_ever(device, monkeypatch):
+    from ml_stack.fleet import daemon_control
+    monkeypatch.setattr(daemon_control, 'DRAIN_S', 0.3, raising=False)
+    root, port, control, _busy, stopped, active, release = device
+    thread = threading.Thread(target=lambda: request_json(f'http://127.0.0.1:{port}/jobs', method='POST', payload={}))
+    thread.start()
+    assert active.wait(2)
+    control.restart_safe = lambda: {'queued': 0, 'running': 0}
+    answer = request_replacement(root, port, {'launcher_control': control.instance}, 'new', restart='preserve')
+    assert answer['stopping'] and stopped.wait(2)
+    with pytest.raises(ServerError):
+        request_json(f'http://127.0.0.1:{port}/jobs', method='POST', payload={})
+    release.set()
+    thread.join(3)
+
+
+def test_a_preserving_restart_waits_for_a_request_that_finishes_within_the_drain(device, monkeypatch):
+    from ml_stack.fleet import daemon_control
+    monkeypatch.setattr(daemon_control, 'DRAIN_S', 5.0, raising=False)
+    root, port, control, _busy, stopped, active, release = device
+    done = []
+    thread = threading.Thread(target=lambda: done.append(request_json(f'http://127.0.0.1:{port}/jobs', method='POST', payload={})))
+    thread.start()
+    assert active.wait(2)
+    control.restart_safe = lambda: {'queued': 0, 'running': 0}
+    threading.Timer(0.3, release.set).start()
+    assert request_replacement(root, port, {'launcher_control': control.instance}, 'new', restart='preserve')['stopping']
+    thread.join(3)
+    assert done == [{'accepted': True}]
+    assert stopped.wait(2)

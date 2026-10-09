@@ -34,7 +34,8 @@ Paths relative to the repository root.
 - `agent_display.py`: display names from registry metadata; `session_kind` is `person` for
   role `human`.
 - `authority.py` registry: a `delegated` gate passes a lead agent when `CLAUDECODE` or
-  `ML_STACK_AGENT` is set. That is an environment test, not evidence the owner said
+  `ML_STACK_AGENT` is set. `runtime.deploy` (group `runtime`) is the gate for `ml-stack runtime
+  ensure`, `rollback` and `restart-host`: Dev delegates it, Prod keeps it with the person. That is an environment test, not evidence the owner said
   anything.
 - `sentinel/human.py`: `HumanGrant` (action, subject, 120 s) minted after a terminal
   confirmation; `_FORBIDDEN` keeps agent tool arguments off sentinel, authority and log

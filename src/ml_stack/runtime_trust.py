@@ -7,12 +7,13 @@ import subprocess
 import sys
 from pathlib import Path
 
-from ml_stack import home, person, runtime_store
+from ml_stack import authority, home, person, runtime_store
 from ml_stack.activity import writer
 from ml_stack.runtime_deploy import DeployError, floor_of
 from ml_stack.workspace import tokens
 
 KIND = "runtime.deploy"
+GATE = "runtime.deploy"
 DETAIL_LIMIT = 150
 
 
@@ -110,8 +111,21 @@ def ignore_redirects() -> list[str]:
     return [name for name in names if os.environ.pop(name, None)]
 
 
-def audit(command: str, commit: str, result: str, *, agent: str = "", detail: str = "") -> bool:
+def authorize(command: str) -> str:
+    """Who may run a deploy command here: "person" for a process no agent started, "delegated" for a lead agent
+    while the owner has delegated the `runtime.deploy` gate; HumanRequired for an agent while it is the person's.
+
+    A launcher or login unit carries no agent marker, so it is not gated; the `authority.use` row this writes for a
+    delegated pass names the agent.
+    """
+    if not person.marked():
+        return authority.PERSON
+    return authority.require(GATE, f"runtime {command}")
+
+
+def audit(command: str, commit: str, result: str, *, agent: str = "", detail: str = "", **passed: str) -> bool:
     """Append a sealed activity record for one deploy command; True when it was written."""
     who = agent or os.environ.get(tokens.AGENT_ENV, "")
     return writer.record(KIND, actor=f"agent:{who}" if who else None, subject=commit, outcome=result,
-                         meta={"command": command, "agent": who, "person": is_person(), "detail": detail[:DETAIL_LIMIT]})
+                         meta={"command": command, "agent": who, "person": is_person(), "authority": passed.get("via", ""),
+                               "detail": detail[:DETAIL_LIMIT]})

@@ -9,6 +9,7 @@ import os
 import secrets
 import stat
 import threading
+import time
 from functools import wraps
 from pathlib import Path
 
@@ -22,6 +23,8 @@ from ml_stack.windows_private import restrict, validate
 
 ROUTE = '/launcher/replace'
 MAX_RECORD = 4096
+DRAIN_S = 20.0
+"""How long a job-preserving replacement lets requests in flight finish, with new ones refused, before it stops anyway."""
 
 
 class ControlError(RuntimeError):
@@ -93,7 +96,7 @@ def request_replacement(root: Path, port: int, running: dict, expected: str, *, 
     if restart not in {'idle', 'preserve'}:
         raise ControlError('Unknown daemon restart mode.')
     body = json.dumps({'version': 1, 'instance': instance, 'expected': expected, 'restart': restart}).encode()
-    with open_stream(endpoint, method='POST', data=body, token=capability, timeout=10,
+    with open_stream(endpoint, method='POST', data=body, token=capability, timeout=DRAIN_S + 15,
                      headers={'Content-Type': 'application/json', sealing.HEADER: '2'}, guard=guard) as response:
         if response.headers.get(sealing.HEADER) != '1':
             raise ControlError('Daemon replacement acknowledgment must authenticate with sealing.')
@@ -173,21 +176,7 @@ class Control:
             if not isinstance(request, dict) or request.get('instance') != self.instance:
                 raise ControlError('Daemon replacement instance does not match.')
             restart = _restart_mode(request)
-            preserved = {}
-            with self.lock:
-                if self.stopping or self.active:
-                    raise ControlError('Daemon has requests in progress; retry when it is idle.')
-                with contextlib.ExitStack() as admitted:
-                    admitted.enter_context(self.admission())
-                    if restart == 'idle':
-                        if not self.idle():
-                            raise ControlError('Daemon has active work, downloads or setup; retry when it is idle.')
-                    else:
-                        if self.restart_safe is None:
-                            raise ControlError('Daemon cannot preserve jobs across restart.')
-                        preserved = self.restart_safe()
-                    self.held = admitted.pop_all()
-                    self.stopping = True
+            preserved = self._stop(restart)
         except (ControlError, Busy, ValueError, OSError, sealing.SealError) as exc:
             handler._send(409, {'error': str(exc)})
             return True
@@ -197,6 +186,49 @@ class Control:
         finally:
             threading.Thread(target=self.shutdown, name='launcher-daemon-stop', daemon=True).start()
         return True
+
+    def _stop(self, restart: str) -> dict:
+        """Admit the replacement: an idle one only when nothing runs, a job-preserving one after draining requests."""
+        if restart == 'idle':
+            with self.lock:
+                if self.stopping or self.active:
+                    raise ControlError('Daemon has requests in progress; retry when it is idle.')
+                return self._admit(restart)
+        with self.lock:
+            if self.stopping:
+                raise ControlError('Daemon is already being replaced.')
+            self.stopping = True
+        admitted = False
+        try:
+            deadline = time.monotonic() + DRAIN_S
+            while time.monotonic() < deadline:
+                with self.lock:
+                    if not self.active:
+                        break
+                time.sleep(0.05)
+            with self.lock:
+                preserved = self._admit(restart)
+            admitted = True
+            return preserved
+        finally:
+            if not admitted:
+                with self.lock:
+                    self.stopping = False
+
+    def _admit(self, restart: str) -> dict:
+        preserved: dict = {}
+        with contextlib.ExitStack() as admitted:
+            admitted.enter_context(self.admission())
+            if restart == 'idle':
+                if not self.idle():
+                    raise ControlError('Daemon has active work, downloads or setup; retry when it is idle.')
+            else:
+                if self.restart_safe is None:
+                    raise ControlError('Daemon cannot preserve jobs across restart.')
+                preserved = self.restart_safe()
+            self.held = admitted.pop_all()
+            self.stopping = True
+        return preserved
 
     def close(self) -> None:
         with self.lock:
