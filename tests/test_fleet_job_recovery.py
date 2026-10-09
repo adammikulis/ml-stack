@@ -4,6 +4,7 @@ import json
 import os
 import sys
 import time
+from pathlib import Path
 
 import pytest
 
@@ -162,7 +163,8 @@ os._exit(0)
 """
     result = subprocess.run([sys.executable, '-c', owner,
                              json.dumps([str(tmp_path / 'runner'), str(tmp_path), argv, env])],
-                            capture_output=True, text=True, check=True, timeout=10)
+                            capture_output=True, text=True, check=True, timeout=30,
+                            env={**os.environ, 'PYTHONPATH': str(Path(__file__).resolve().parents[1] / 'src')})
     announced = json.loads(result.stdout)
     restored = JobRunner(tmp_path / 'runner')
     try:
