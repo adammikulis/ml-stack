@@ -16,6 +16,7 @@ from ml_stack import (
     runtime_coalesce,
     runtime_deploy,
     runtime_host,
+    runtime_stale,
     runtime_store,
     runtime_trust,
 )
@@ -212,6 +213,8 @@ def status_lines(plan: runtime_deploy.Plan) -> list[str]:
         lines.append(f"last failure {failure.get('commit', '')[:7]}: {failure.get('detail', '')[-300:]}")
     if _building():
         lines.append(f"building     {_building()}")
+    if row.get("prefix"):
+        lines += runtime_stale.stale_lines(Path(row["prefix"]), runtime_store.verified_at(Path(row["prefix"])))
     foreign = runtime_store.unmanaged(root)
     for tree in foreign:
         lines.append(f"unmanaged    {tree['path']}  {tree['bytes']} bytes  {'process inside' if tree['in_use'] else 'idle'}")
@@ -221,6 +224,13 @@ def status_lines(plan: runtime_deploy.Plan) -> list[str]:
     return lines
 
 
+def _older_pids(row: dict) -> list[int]:
+    if not row.get("prefix"):
+        return []
+    prefix = Path(row["prefix"])
+    return [p.pid for p in runtime_stale.older_than(runtime_stale.running(), prefix, runtime_store.verified_at(prefix))]
+
+
 def status_record(plan: runtime_deploy.Plan) -> dict:
     """The status as data: the selected commit, whether it is current and healthy, and the kept runtimes."""
     row = runtime_store.selection()
@@ -228,7 +238,7 @@ def status_record(plan: runtime_deploy.Plan) -> dict:
             "healthy": runtime_deploy.healthy(plan) is not None, "floor": plan.floor,
             "kept": [{"commit": c.commit, "prefix": str(c.prefix), "verified_at": runtime_store.verified_at(c.prefix)}
                      for c in runtime_store.candidates()],
-            "state": runtime_store.read_state(), "building": _building(),
+            "state": runtime_store.read_state(), "building": _building(), "older_processes": _older_pids(row),
             "unmanaged": runtime_store.unmanaged()}
 
 

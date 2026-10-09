@@ -151,6 +151,10 @@ def table(found: dict[str, list[gates.Finding]], allowed: dict[str, int]) -> int
         print(line if line.startswith(" ") else f"\n{line}")
 
     over = [r for r in rows if r[0] > 0]
+    if absent:
+        print(f"\nFAIL: {len(absent)} metric(s) were not counted, so this run proves nothing about them: "
+              f"{_pins.INSTALL}")
+        fell = 1
     if not over:
         return fell
     print()
