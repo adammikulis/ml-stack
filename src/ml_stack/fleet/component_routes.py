@@ -32,9 +32,7 @@ def route(request) -> bool:
         return True
     try:
         if request.method == "GET":
-            held = ui.models.listed(request.asked("name"))
-            request.send(200, model_components.catalogue(ui.models, held.name if held else "",
-                                                        request.asked("source"),
+            request.send(200, model_components.catalogue(ui.models, request.asked("name"), request.asked("source"),
                                                         load_cluster_key(ui.cluster_key_path)))
         elif request.method == "POST":
             body = request.body()
