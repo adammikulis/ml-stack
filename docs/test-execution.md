@@ -98,6 +98,32 @@ configuration and filters. Tree hashing there uses raw source bytes, tracked del
 executable modes, symlinks and recorded gitlinks; repository `.git/info/exclude` and global
 ignore configuration are not imported, and unsupported split or sparse indexes fail closed.
 
+# The real state root is write-denied
+
+Without `--confine`, `scripts/test` (and `scripts/testslots run`) still keep every test process from
+writing under the real `~/.ml-stack` (`scripts/testwritedeny.py`), so a test that reaches for it gets
+`EPERM` at the line that did it instead of failing the run afterwards ("real state root changed
+during the run", which also names other agents' live writers the suite did not cause). On macOS the
+pytest tree runs under `sandbox-exec` with an allow-default profile that denies `file-write*` under the
+account's state and cache roots and every root the launching environment names (`ML_STACK_HOME`, `ML_STACK_CACHE` and each set `home.OVERRIDES` variable); a root that holds the checkout, the temporary directory or HOME is left out with a printed notice; on Linux under `bwrap` with the root
+bound read-only, but only when a probe on a scratch directory shows both that it denies and that a
+nested `bwrap` still starts. Windows and a host without either tool run unwrapped, and the
+after-the-fact check alone applies, with a notice. `DEV_TEST_WRITE_DENY=0` turns it off for one run. The supervisor sets `DEV_TEST_WRITE_DENY=1` in a child only after it wrapped that child, and a value set by hand is never proof: a run already under a denial is recognised by effect (opening an existing file under the root for writing is refused), and `tests/test_real_state_write_denied.py` checks the same way, without creating or changing anything.
+
+What it does not cover: the denial is a path rule on file writes. The Keychain (securityd, a Mach service), `launchctl`, `open` and `fleet.autostart` act through other processes and are not stopped; a hard link made outside the root to a file inside it lets a write through (measured by `test_a_hard_link_to_a_file_in_the_root_is_written_through_or_blocked_and_this_is_which`); and the listed modules below run undenied. The list is matched by path relative to `tests/`, not by file name.
+
+A process that is already sandboxed cannot apply another `sandbox-exec` profile (measured: the call
+fails with `sandbox_apply: Operation not permitted` unless the two profiles are identical). The test
+modules that start `sandbox-exec` themselves are listed in `tests/seatbelt-modules.txt`, marked
+`seatbelt` by `tests/conftest.py`, and a run that selects them is split in two: everything else under
+the denial, then those modules beside it without, with the JUnit files merged. A module that fails with
+that message under the denial belongs on the list (`tests/test_test_write_deny.py` fails when one that
+names the Seatbelt backend is missing). A full `fast` run measured this way (macOS, 2026-10-09) showed
+no other test writing the real root.
+
+A test that tries the forbidden write leaves a "touched" note in the reuse store, so
+`tests/test_real_state_write_denied.py` is never stored as reusable; it costs two seconds a run.
+
 # Holder channel resources on macOS
 
 Reviewed holder protocol nodes use three offline-prepared immutable fixture prefixes. The

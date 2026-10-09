@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 from workspace_kit import SRC
 
+from ml_stack import node_supervise
 from ml_stack.board import session as board_session
 from ml_stack.workspace import agent_display, board_cli, limits
 
@@ -266,7 +267,7 @@ def test_lead_attention_hook_is_silent_when_nothing_is_owed_or_the_node_cannot_s
     done = hook('claude-lead-attention', event)
     assert done.returncode == 0 and done.stdout == ''
     board.stop()
-    monkeypatch.setenv('ML_STACK_NODE_BIN', '/nonexistent/node')
+    node_supervise.point(board.state, None)
     monkeypatch.setenv('ML_STACK_ATTENTION_EVERY_S', '0')
     failed = hook('claude-lead-attention', event)
     assert failed.returncode == 0 and failed.stdout == ''

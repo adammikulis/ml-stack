@@ -10,7 +10,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from ml_stack import authority, home, keystore
+from ml_stack import authority, home, keystore, lock
 from ml_stack.files import read_json, write_json
 from ml_stack.log import say, warn
 from ml_stack.platform import private_file
@@ -53,12 +53,13 @@ def remember(passphrase: str, group: str = DEFAULT_CLUSTER, path: Path | str | N
     """Store ``passphrase`` for ``group`` under the keystore; ``say`` gets a sentence when it could not."""
     try:
         blob = _store().wrap(PURPOSE, group, passphrase.strip().encode())
-        rows = _held(path)
-        rows[group] = base64.b64encode(blob).decode()
         target = passphrases_path(path)
-        write_json(target, rows)
-        private_file(target)
-    except (keystore.KeystoreError, OSError) as exc:
+        with lock.rewriting(target):
+            rows = _held(path)
+            rows[group] = base64.b64encode(blob).decode()
+            write_json(target, rows)
+            private_file(target)
+    except (keystore.KeystoreError, lock.Busy, OSError) as exc:
         say(f"The passphrase was not saved ({exc}); keep it, or export a recovery file.")
 
 
@@ -74,15 +75,20 @@ def recall(group: str = "", path: Path | str | None = None) -> str | None:
 
 
 def forget(group: str, path: Path | str | None = None) -> None:
-    """Drop the stored passphrase for ``group``."""
-    rows = _held(path)
-    kept = {g: v for g, v in rows.items() if g != group}
-    if kept == rows:
-        return
-    if kept:
-        write_json(passphrases_path(path), kept)
-    else:
-        passphrases_path(path).unlink(missing_ok=True)
+    """Drop the stored passphrase for ``group``; a file another command holds, or one that cannot be
+    locked, is reported and left as it was."""
+    try:
+        with lock.rewriting(passphrases_path(path)):
+            rows = _held(path)
+            kept = {g: v for g, v in rows.items() if g != group}
+            if kept == rows:
+                return
+            if kept:
+                write_json(passphrases_path(path), kept)
+            else:
+                passphrases_path(path).unlink(missing_ok=True)
+    except (lock.Busy, OSError) as exc:
+        warn(f"The stored passphrase for {group} was not removed ({exc}); try again.")
 
 
 def export_recovery(file: Path | str, group: str = "", path: Path | str | None = None) -> Membership:

@@ -13,7 +13,8 @@ from pathlib import Path
 import pytest
 from node_kit import BOARD
 
-from ml_stack.board import client as board_client, credentials, node_start, place, session
+from ml_stack import node_binary, node_supervise
+from ml_stack.board import client as board_client, credentials, place, session
 
 pytest_plugins = ["node_kit"]
 
@@ -73,8 +74,8 @@ def test_no_binary_is_said_plainly_and_a_refusal_carries_the_nodes_code(workspac
     with pytest.raises(board_client.Quota):
         workspace_node.client.call("post", BOARD, "x", blob="x" * (2 * 1024 * 1024))
     workspace_node.stop()
-    monkeypatch.setenv(node_start.BIN_ENV, str(workspace_node.state / "missing"))
-    with pytest.raises(node_start.NodeUnavailable, match="no poolside-node binary"):
+    node_supervise.point(workspace_node.state, None)
+    with pytest.raises(node_binary.NodeBinaryError, match="no node binary"):
         workspace_node.client.call("hello")
 
 

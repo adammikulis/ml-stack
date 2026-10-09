@@ -175,7 +175,8 @@ def unlock(args: argparse.Namespace) -> int:
                   "(never touches the keystore)", options=(JSON,))
 def keystore_status(args: argparse.Namespace) -> int:
     """Print the state files' view of the keystore."""
-    data = keystore.default().status()
+    store = keystore.default()
+    data = {**store.status(), "backend": store.backend()}
     return _out(args, data, lambda: [f"{k}: {v}" for k, v in data.items()])
 
 

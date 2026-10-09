@@ -7,6 +7,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from dataclasses import dataclass
@@ -16,7 +17,9 @@ import testqueue
 import testslots
 import testslots_policy as policy
 import testslots_rpc
+import testwritedeny
 
+ROOT = Path(__file__).resolve().parent.parent
 ARTIFACT_CONTEXT = contextvars.ContextVar("test_artifact_context", default=None)
 
 
@@ -66,6 +69,36 @@ def open_admission(environment: dict[str, str], label: str, want: int, unix: boo
 
 def run_pytest(command: list[str], want: int = 0, label: str = "pytest", env: dict[str, str] | None = None,
                *, container: bool = False) -> int:
+    """Run pytest admitted by the broker; on a host that can, the tests that do not run
+    `sandbox-exec` themselves run under a kernel denial of writes to the real state root
+    (scripts/testwritedeny.py), the rest beside them without it."""
+    environment = environment_for(env)
+    plan = None if container or confining(environment) else testwritedeny.passes(command, environment, ROOT)
+    environment.pop(testwritedeny.ENV, None)
+    if plan is None:
+        return run_once(command, want, label, environment, container=container)
+    given = testwritedeny.junit_path(command)
+    statuses, extra = [], []
+    for index, one in enumerate(plan):
+        shown = list(one.command)
+        if given is not None and index:
+            descriptor, name = tempfile.mkstemp(suffix=".xml")
+            os.close(descriptor)
+            extra.append(Path(name))
+            shown = testwritedeny.with_junit(shown, Path(name))
+        statuses.append(run_once(shown, want, label, {**environment, **({testwritedeny.WRAP_ENV: "1"} if one.denied else {})}))
+    try:
+        for path in extra:
+            if given is not None:
+                testwritedeny.merge_junit(given, path)
+    finally:
+        for path in extra:
+            path.unlink(missing_ok=True)
+    return testwritedeny.combined(statuses)
+
+
+def run_once(command: list[str], want: int = 0, label: str = "pytest", env: dict[str, str] | None = None,
+             *, container: bool = False) -> int:
     environment = environment_for(env)
     testslots._reject_nested()
     launch = None
@@ -185,4 +218,10 @@ def prepare_pytest(command, environment, admission, launch, prepared):
         prepared.confined = confined
         command, environment = confined.wrapped.argv, confined.environment
         confined.recheck_images()
+    if environment.pop(testwritedeny.WRAP_ENV, "") == "1":
+        wrapped = testwritedeny.wrapper(testwritedeny.protected(ROOT), command)
+        if wrapped is None:
+            testwritedeny.say("real-state write denial could not wrap this pass; only the after-the-fact check applies")
+        else:
+            command, environment[testwritedeny.ENV] = wrapped, "1"
     return command, environment

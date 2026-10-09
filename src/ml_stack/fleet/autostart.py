@@ -26,7 +26,7 @@ from typing import Any
 from ml_stack import home, jobs, runtime
 from ml_stack.log import say, warn
 
-from . import autostart_cli, wsl_startup
+from . import autostart_cli, autostart_keystore, wsl_startup
 from .autostart_backends import elevated as _ask_and_run
 from .autostart_models import (
     ADOPTED,
@@ -578,6 +578,8 @@ def status() -> dict[str, object]:
 def _install_system(user: str, home_dir: str, *, only_print: bool = False) -> int:
     """Write and load the boot service; 0 once installed, 2 when it needs root."""
     made = system_service(user, home_dir)
+    if why := autostart_keystore.notice(user, home_dir, made.platform):
+        warn(why)
     if only_print:
         say(made.body)
         return 0

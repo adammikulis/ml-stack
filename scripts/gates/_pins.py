@@ -39,14 +39,17 @@ def tool(name: str) -> tuple[str, ...] | None:
         real = resolved.stdout.strip()
         if resolved.returncode == 0 and real:
             return (real,)
-    found = shutil.which(name)
-    if found:
-        return (found,)
-    probe = subprocess.run([sys.executable, "-m", name, "--version"],
-                           capture_output=True, text=True, check=False)
-    if probe.returncode == 0:
-        return (sys.executable, "-m", name)
+    # a pyenv shim is on PATH for every tool installed in any version, and a shim that has no
+    # version here exits 127 naming the versions that do: only a command that answers counts
+    for candidate in ((found,) if (found := shutil.which(name)) else ()), (sys.executable, "-m", name):
+        if candidate and runs(candidate):
+            return candidate
     return None
+
+
+def runs(command: tuple[str, ...]) -> bool:
+    """Whether ``command --version`` exits cleanly."""
+    return subprocess.run([*command, "--version"], capture_output=True, text=True, check=False).returncode == 0
 
 
 @cache
@@ -56,6 +59,8 @@ def version(name: str) -> str:
     if cmd is None:
         return ""
     done = subprocess.run([*cmd, "--version"], capture_output=True, text=True, check=False)
+    if done.returncode != 0:
+        return ""
     found = re.search(r"\d+\.\d+(\.\d+)?", done.stdout or done.stderr or "")
     return found.group(0) if found else ""
 

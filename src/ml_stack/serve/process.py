@@ -286,6 +286,19 @@ def running_within(path: Path) -> list[int]:
     return found
 
 
+def command_lines() -> list[tuple[int, float, tuple[str, ...]]]:
+    """Every readable process as (pid, start time in epoch seconds, command line), this one excluded."""
+    found = []
+    for proc in psutil.process_iter(["pid", "create_time", "cmdline"]):
+        try:
+            argv = tuple(proc.info.get("cmdline") or ())
+            if argv and proc.info["pid"] != os.getpid():
+                found.append((int(proc.info["pid"]), float(proc.info["create_time"]), argv))
+        except (psutil.Error, OSError, TypeError):
+            continue
+    return found
+
+
 def loaded_twice(servers: list[dict] | None = None) -> dict[str, list[int]]:
     """Each model a live llama-server reports serving on more than one port, with the ports.
 

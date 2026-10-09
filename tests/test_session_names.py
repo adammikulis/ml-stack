@@ -64,7 +64,7 @@ def test_two_real_hook_sessions_show_different_names_in_agents_announcements_and
                    if key not in ('CODEX_THREAD_ID', 'CODEX_SESSION_ID', 'ML_STACK_AGENT', 'CLAUDE_ENV_FILE',
                                   'ML_STACK_WORKSPACE_AGENT', 'ML_STACK_SESSION_ID', 'ML_STACK_NONINTERACTIVE')}
     environment.update(PATH=os.pathsep.join([str(shim), str(Path(sys.executable).parent), str(Path(shutil.which('git')).parent)]),
-                       ML_STACK_HOME=str(tmp_path / 'home'), PYTHONPATH=str(ROOT / 'src'), ML_STACK_RUNTIME_ENSURE='off')
+                       PYTHONPATH=str(ROOT / 'src'), ML_STACK_RUNTIME_ENSURE='off')
     repository = tmp_path / 'project'
     git.run(['init', '-b', 'development', str(repository)])
     git.run(['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',

@@ -10,7 +10,6 @@ from typing import Any
 
 from ml_stack.board import credentials, session
 from ml_stack.board.client import Conflict, NodeError
-from ml_stack.board.node_start import NodeUnavailable
 from ml_stack.board.session import Agent, Entry, Native, Session
 from ml_stack.command import flag
 from ml_stack.log import say, warn
@@ -49,7 +48,7 @@ def exit_code(err: Exception) -> int:
     return 2 if isinstance(err, (ValueError, EOFError)) else 3
 
 
-FAILURES = (NodeError, NodeUnavailable, Denied, Refused, ValueError, EOFError)
+FAILURES = (NodeError, OSError, Denied, Refused, ValueError, EOFError)
 
 
 def guarded(run: Callable[[argparse.Namespace], int | None]) -> Callable[[argparse.Namespace], int]:

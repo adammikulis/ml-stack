@@ -28,7 +28,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, NamedTuple
 
-from ml_stack import home, keystore_guard, person, sentinel
+from ml_stack import home, keystore_guard, person, platform, private_path, sentinel
 from ml_stack.files import read_json, write_json
 from ml_stack.lock import Busy, only_one
 from ml_stack.log import warn
@@ -199,9 +199,15 @@ class Keystore:
         return self.directory / name
 
     def _ensure_dir(self) -> None:
+        if private_path.windows_mount(self.directory):
+            raise KeystoreUnavailable(
+                f"{self.directory} is on a Windows drive mounted into WSL, where file locks and "
+                "permissions do not work. Move ML_STACK_HOME onto the Linux filesystem (under your "
+                "home directory) and run the command again.")
         self.directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-        if os.name == "posix":
-            self.directory.chmod(0o700)
+        if not platform.private_dir(self.directory):
+            logger.warning("could not restrict %s to your account with icacls; it keeps the "
+                           "permissions it inherited", self.directory)
         human.protect(self.directory)
 
     def _doc(self, name: str) -> dict[str, Any]:
@@ -257,6 +263,15 @@ class Keystore:
         except KeystoreUnavailable:
             return False
         return True
+
+    def backend(self) -> str:
+        """The keyring backend this machine would use, by module and class, or why there is none
+        (backends are chosen by import and priority; no item is read or made)."""
+        try:
+            ring = self._ring().get_keyring()
+        except KeystoreUnavailable as exc:
+            return f"none: {exc}"
+        return f"{type(ring).__module__}.{type(ring).__name__}"
 
     def _ring(self) -> Any:
         try:

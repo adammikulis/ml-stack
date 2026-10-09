@@ -225,6 +225,8 @@ def test_frozen_spec_includes_project_modules_without_project_exclusions(monkeyp
         "EXE": lambda *args, **kwargs: None,
     })
     assert set(native_modules) <= set(captured["hiddenimports"])
+    assert {"keyring.backends.macOS", "keyring.backends.Windows",
+            "keyring.backends.SecretService"} <= set(captured["hiddenimports"])
     assert not any(name.startswith("ml_stack") for name in captured["excludes"])
     assert ("openai-agents", True) in metadata_calls
     assert data_calls == ["agents"]

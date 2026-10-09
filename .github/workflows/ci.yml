@@ -217,6 +217,10 @@ jobs:
           python -m pip install pytest pytest-xdist numpy psutil keyring cryptography
           python -m pip install -r scripts/gates/pinned.txt
 
+      # The same check scripts/test runs first: a missing package fails here with its install line.
+      - name: preflight
+        run: python scripts/preflight gate
+
       - name: gate tests
         run: |
           files=()

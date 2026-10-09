@@ -216,6 +216,15 @@ branch.
 
 ## 2. Git, worktrees and landing
 
+### Instructions are carried out as given
+
+Every agent, including Codex, does what the owner or the coordinator said, when it was said, in the
+order and on the branch named. An instruction is never postponed, reordered behind other work, or
+widened. A request to land a branch means merge, gate, push, clean up, and nothing more in that branch or turn. Work
+noticed along the way becomes its own item after the landing. A blocker is reported in one line at once,
+and every part that is not blocked is done. A branch cut or a landing target named by the owner (for
+example "cut the release, then work on the next development branch") is used from that point on.
+
 ### Worktrees
 
 Edit, stage and commit only named files in a claimed checkout. Agents may do so in the primary
@@ -237,8 +246,11 @@ git worktree add -b <branch> ../ml-stack-<branch> "$(git -C ../ml-stack branch -
 A new worktree has no `dist/`, and one test builds a real environment out of it: run
 `python packaging/build.py` there before trusting a full test run.
 
-Never use an editable install. Live runtimes use an immutable built wheel or pinned runtime tree
-with matching distribution metadata. Never point a running worker at a changing checkout.
+The development Python (plain `python3`, tests, scripts) may be an editable install of the primary
+checkout, so it follows what is merged; pip rewrites the `ml-stack*` launchers when it installs, so
+restore them from a backup or with `ml-stack runtime ensure`. Live runtimes use an immutable built wheel
+or pinned runtime tree with matching distribution metadata. Never point a running worker at a changing
+checkout.
 Replace only owned processes at a coordinated safe boundary, preserving their identity and
 setup; do not interrupt another process's active work.
 

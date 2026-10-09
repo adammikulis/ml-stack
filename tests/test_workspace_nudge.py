@@ -9,6 +9,7 @@ import re
 import pytest
 from workspace_kit import cli as old_cli
 
+from ml_stack import node_supervise
 from ml_stack.workspace import board_cli, nudge
 
 pytest_plugins = ["node_kit"]
@@ -110,7 +111,9 @@ def test_stop_hook_allows_a_question_younger_than_two_minutes(kit):
 
 
 def test_hooks_print_nothing_and_exit_zero_when_the_node_cannot_be_reached(kit):
-    gone = {"ML_STACK_NODE_BIN": "/nonexistent", "ML_STACK_NODE_DIR": "/tmp/ml-nowhere-node"}
+    kit.stop()
+    node_supervise.point(kit.state, None)
+    gone = {}
     out = kit.cli("nudge", "--hook", "stop", stdin="{}", env=gone, who=kit.bob)
     assert out.returncode == 0 and out.stdout == "" and out.stderr == ""
     plain = kit.cli("nudge", env=gone, who=kit.bob)

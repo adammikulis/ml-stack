@@ -630,3 +630,17 @@ def test_a_phrase_shaped_like_a_git_option_or_a_pathspec_is_only_searched_for(tm
     for hostile in ("--output=leak.txt Of", "Quartz --open-files-in-pager=sh", "Quartz; touch leak"):
         assert not documented(str(where), hostile)
     assert not (where / "leak.txt").exists() and not (where / "leak").exists()
+
+
+@pytest.mark.parametrize("phrase", ["Land " + "X", "Branch " + "Y", "Step " + "X"])
+def test_a_phrase_that_ends_in_a_variable_letter_is_not_a_name(tmp_path, phrase):
+    where = repo(tmp_path, {"nodes": [], "messages": {}})
+    code, said = check(where, tmp_path, notes=f'a request to {phrase} lands only {phrase}.\n')
+    assert code == 0, said
+
+
+def test_the_other_lone_capitals_keep_their_protection(tmp_path):
+    where = repo(tmp_path, {"nodes": [], "messages": {}})
+    name = "Jane " + "N"
+    code, said = check(where, tmp_path, notes=f'greeted = "{name}"\n')
+    assert code == 1 and name in said

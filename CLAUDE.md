@@ -3,6 +3,14 @@
 [AGENTS.md](AGENTS.md) is the complete repository policy. Read it first; everything here applies
 in addition to it and only covers Claude Code.
 
+## Do what was said, when it was said
+
+An instruction from the owner is carried out as stated, now, in the order and on the branch named. It
+is never postponed, reordered behind other work, or widened. A request to land a branch lands that branch and nothing else: no new
+features, renames or fixes in that branch or turn; anything else found becomes a separate item after it
+lands. If something blocks the instruction, say so in one line at once and do every part that is not
+blocked. Briefs to workers state exactly what to land and forbid additions.
+
 ## Names
 
 The lead is its own session name (for example `claude-6e1a2f`). `claude-code` is the harness, which can also run Qwen. A lead joining

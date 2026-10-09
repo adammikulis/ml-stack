@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+from ml_stack import node_supervise
+
 pytest_plugins = ["node_kit"]
 HOOKS = Path(__file__).resolve().parents[1] / "scripts/hooks"
 
@@ -44,9 +46,10 @@ def test_every_ported_command_prints_json_and_reports_errors_as_json(team):
     team.cli("claim", "port", "9300", who=me)
     clash = team.cli("claim", "port", "9300", "--json", who=bob)
     assert clash.returncode == 5 and json.loads(clash.stdout)["kind"] == "Conflict" and me.name in json.loads(clash.stdout)["error"]
-    elsewhere = team.cli("whoami", "--json", "--token-file", str(team.state / "client" / team.board / f"{me.name}.token"),
-                         env={"ML_STACK_NODE_BIN": "/nonexistent", "ML_STACK_NODE_DIR": "/tmp/ml-nowhere"})
-    assert elsewhere.returncode == 3 and "no poolside-node binary" in json.loads(elsewhere.stdout)["error"]
+    team.stop()
+    node_supervise.point(team.state, None)
+    elsewhere = team.cli("whoami", "--json", who=me)
+    assert elsewhere.returncode == 3 and "no node binary" in json.loads(elsewhere.stdout)["error"]
 
 
 def test_the_token_can_come_from_a_file_and_stdin_can_carry_the_body(team, tmp_path):

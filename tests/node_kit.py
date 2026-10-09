@@ -12,17 +12,16 @@ import fcntl
 import os
 import pwd
 import shutil
-import signal
 import subprocess
 import sys
 import tempfile
-import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
 
-from ml_stack.board import client as board_client, credentials, node_start, session as board_session
+from ml_stack import node_binary as node_binary_module, node_launch, node_supervise
+from ml_stack.board import client as board_client, credentials, session as board_session
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = str(ROOT / "src")
@@ -41,9 +40,6 @@ def _cargo_env() -> tuple[str, dict[str, str]]:
 @pytest.fixture(scope="session")
 def node_binary() -> Path:
     """The node binary, built once for the session (and once across parallel workers)."""
-    named = os.environ.get(node_start.BIN_ENV)
-    if named:
-        return Path(named)
     cargo, env = _cargo_env()
     target = ROOT / "app" / "target"
     target.mkdir(parents=True, exist_ok=True)
@@ -99,8 +95,7 @@ class WorkspaceNode:
     def env(self, who: Member | None = None, extra: dict[str, str] | None = None) -> dict[str, str]:
         """The environment of a command run for ``who``: this node, this board, no marker of another agent."""
         env = {k: v for k, v in os.environ.items() if k not in STRIPPED}
-        env.update({"PYTHONPATH": SRC, "ML_STACK_NODE_DIR": str(self.state), "ML_STACK_NODE_BIN": str(self.binary),
-                    "ML_STACK_BOARD": self.board, **(who.env() if who else {}), **(extra or {})})
+        env.update({"PYTHONPATH": SRC, "ML_STACK_HOME": str(self.state.parent), "ML_STACK_BOARD": self.board, **(who.env() if who else {}), **(extra or {})})
         return env
 
     def cli(self, *argv: str, who: Member | None = None, env: dict[str, str] | None = None, stdin: str | None = None,
@@ -110,35 +105,24 @@ class WorkspaceNode:
                               capture_output=True, text=True, timeout=timeout, check=False, input=stdin, cwd=cwd)
 
     def stop(self) -> None:
-        """Stop the node and wait for it to go."""
-        try:
-            pid = int(self.client.call("status")["pid"])
-        except (OSError, board_client.NodeError):
-            return
-        os.kill(pid, signal.SIGTERM)
-        deadline = time.monotonic() + 10
-        while time.monotonic() < deadline:
-            try:
-                os.kill(pid, 0)
-            except ProcessLookupError:
-                return
-            time.sleep(0.02)
-        os.kill(pid, signal.SIGKILL)
+        """Stop the node and its supervisor and wait for them to go."""
+        node_launch.stop_node(self.state)
 
 
 @pytest.fixture
 def workspace_node(node_binary, monkeypatch):
     """A running node on a short temporary root; in-process clients and child commands find it by the environment."""
     root = Path(tempfile.mkdtemp(prefix="ml", dir="/tmp"))
-    state = root / "n"
-    monkeypatch.setenv("ML_STACK_NODE_DIR", str(state))
-    monkeypatch.setenv(node_start.BIN_ENV, str(node_binary))
+    state = root / "node"
+    state.mkdir(mode=0o700)
+    monkeypatch.setenv("ML_STACK_HOME", str(root))
     monkeypatch.setenv("ML_STACK_BOARD", BOARD)
     for name in STRIPPED:
         if name != "ML_STACK_BOARD":
             monkeypatch.delenv(name, raising=False)
+    node_supervise.point(state, node_binary, node_binary_module.sha256(node_binary))
     node = WorkspaceNode(state, board_client.Client(state), node_binary)
-    node_start.ensure(state)
+    node_launch.ensure_node(state)
     try:
         yield node
     finally:

@@ -3,21 +3,16 @@
 from __future__ import annotations
 
 import json
-import os
 import socket
 import struct
 from pathlib import Path
 from typing import Any
 
-from ml_stack import home
-from ml_stack.board import node_start
+from ml_stack import node_launch
+from ml_stack.node_health import API_VERSION, MAX_FRAME, socket_path
 
-__all__ = ["Client", "Conflict", "Denied", "Invalid", "NodeError", "Quota", "state_dir"]
+__all__ = ["Client", "Conflict", "Denied", "Invalid", "NodeError", "Quota"]
 
-VERSION = 1
-MAX_FRAME = 1024 * 1024
-STATE_ENV = "ML_STACK_NODE_DIR"
-CODES = ("denied", "invalid", "quota", "damaged", "gap", "io")
 
 
 class NodeError(Exception):
@@ -44,12 +39,6 @@ class Conflict(Denied):
     """Another session holds what a claim asked for."""
 
 
-def state_dir() -> Path:
-    """The state directory of this machine's node: $ML_STACK_NODE_DIR, else under the state root."""
-    named = os.environ.get(STATE_ENV)
-    return home.expand(named) if named else home.state("node")
-
-
 def _error(reply: dict[str, Any]) -> NodeError:
     code, message = reply["error"]["code"], str(reply["error"]["message"])
     kind = {"denied": Denied, "invalid": Invalid, "quota": Quota}.get(code, NodeError)
@@ -60,13 +49,13 @@ class Client:
     """One node, reached on its socket; the node is started first when the socket is dead."""
 
     def __init__(self, state: Path | None = None) -> None:
-        self.state = state or state_dir()
+        self.state = state or node_launch.default_state()
         self.requests = 0
 
     def call(self, method: str, board: str = "", token: str = "", **params: Any) -> Any:
         """Send one request and return its result; a refusal raises `NodeError`."""
         self.requests += 1
-        request: dict[str, Any] = {"v": VERSION, "id": self.requests, "method": method, "params": params}
+        request: dict[str, Any] = {"v": API_VERSION, "id": self.requests, "method": method, "params": params}
         if board:
             request["board"] = board
         if token:
@@ -77,13 +66,13 @@ class Client:
         return reply["result"]
 
     def _exchange(self, request: dict[str, Any]) -> dict[str, Any]:
-        node_start.ensure(self.state)
+        node_launch.ensure_node(self.state)
         body = json.dumps(request).encode()
         if len(body) > MAX_FRAME:
             raise Quota("quota", "the request is larger than a frame may be")
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as stream:
             stream.settimeout(660.0)
-            stream.connect(str(node_start.socket_path(self.state)))
+            stream.connect(str(socket_path(self.state)))
             stream.sendall(struct.pack(">I", len(body)) + body)
             size = struct.unpack(">I", _take(stream, 4))[0]
             if size > MAX_FRAME:

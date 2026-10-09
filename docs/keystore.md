@@ -92,6 +92,79 @@ With no usable keystore, `ML_STACK_MEMORY_KEYS=passphrase` and the signing key's
 keep working; their scrypt derivation is `keystore.scrypt_key`. A person chooses it; the keystore
 never falls back to it by itself.
 
+### Passphrases in the environment
+
+`ML_STACK_SIGNING_PASSPHRASE` (unlocks `signing.key.enc`) and `ML_STACK_MEMORY_PASSPHRASE` (with
+`ML_STACK_MEMORY_KEYS=passphrase`) exist for a machine with no keystore, such as a headless box or a
+container. They stay, as an explicit choice, and the exposure is this: an environment variable is
+readable by every process of the same user (`/proc/<pid>/environ` on Linux, `ps eww` or process
+inspection elsewhere), it is inherited by every child the process starts (a hook, a build, an agent's
+tool call), and it lands in whatever dumps an environment (a crash report, `env`, a CI log that echoes
+it). Prefer the terminal prompt where a person is there. Where one is not, set the variable on the
+one service that needs it (a systemd `EnvironmentFile=` with mode 0600, not the login shell), never
+in a profile or an image, and treat the passphrase as exposed to anything running as that user. The
+keystore master is never put in the environment.
+
+## Where the files live, and who may change them at once
+
+- The state root must be on a filesystem with working permissions and locks. A root on a Windows
+  drive mounted into WSL (`ML_STACK_HOME=/mnt/c/...`) has neither, so the keystore refuses it with
+  `KeystoreUnavailable` naming `ML_STACK_HOME` before it creates anything; use a path under the Linux
+  home.
+- On Windows the keystore directory is cut to the owner when it is made: `icacls /inheritance:r
+  /grant:r <user>:(OI)(CI)F`, so SYSTEM, Administrators and Users inherit nothing. If `icacls` fails
+  or `USERNAME` is unset the keystore logs a warning and the directory keeps its inherited access.
+  Only the mocked call is tested; a real ACL is not read back (see the audit, section 5).
+- `credentials.json` and the cluster passphrase file are changed under `<file>.lock` (`lock.rewriting`),
+  so two commands at once both land. A holder that does not let go in 10 seconds makes the next
+  command fail with a plain message (`CredentialError`; the passphrase save says it was not saved).
+
+## macOS: why the single prompt stays
+
+After a host Python upgrade, or a switch of interpreter, macOS asks once whether the new binary may
+read the master, because the item trusts the binary that made it. Creating the item with the
+`security` CLI and `-T` so that a "stable launcher" is trusted was considered and not done:
+
+- A launcher that is a script is not what the Keychain checks: the kernel runs the interpreter named
+  on its first line, and the access list is matched against that process. Trusting a script path
+  trusts nothing useful; trusting a compiled launcher means shipping and signing one.
+- The one stable binary that would work is Apple's `/usr/bin/security`: the master would be read by
+  running it (`security find-generic-password -w`), and a Python upgrade would not matter. That
+  binary is trusted by path and by Apple's signature, and **any process of your user can run it**:
+  a shell script, a `curl | sh`, a browser extension's helper, with no prompt. Today the item trusts
+  one Python binary, which stops code that is not running under that binary. So the change widens who
+  reads the master silently from "processes under this interpreter" to "any process of this user"
+  and gains one fewer prompt after an interpreter change. A replaced launcher is not the risk (a
+  different binary has a different identity and is not trusted); the risk is that the trusted program
+  is a general reader.
+- Writing the master through `security add-generic-password -w` puts it on the command line, readable
+  with `ps` by any local user; `security -i` (stdin) avoids that, as `scripts/encrypted-volume.sh`
+  now does, but the read side stays as above.
+
+One prompt per interpreter change is the smaller exposure, so it stays. If that changes, the
+decision is the owner's (`docs/keystore-platform-audit-2026-10-08.md`, D-1). Not verified against a
+real item: the owner's login keychain was not touched.
+
+## A boot-time service with no unlocked keystore
+
+`python -m ml_stack.fleet.autostart system` (a LaunchDaemon, a systemd unit with `User=`, a Windows task at
+startup) prints a warning and carries on when the service's user has not run
+`ml-stack-security unlock`, and on macOS always notes that the login keychain is locked until that
+user logs in. It does not refuse, because the service does not run unprotected without the key: it is
+a background process, so it never creates the master, every sealed store (memory, the request inbox,
+the activity log, the reputation ledger, wrapped credentials) stays locked and the fleet signing key
+is not unwrapped. Nothing is written in the clear. It comes back by itself after `unlock` and a
+service restart.
+
+## In a frozen app
+
+The PyInstaller spec names `keyring.backends.macOS`, `.Windows` and `.SecretService` as hidden
+imports. A frozen build (`packaging/build.py --bundle --no-window`) bundled them already through the
+PyInstaller contrib hook, and `ml-stack-headless -m ml_stack.net.cli keystore` printed
+`backend: keyring.backends.macOS.Keyring`. Naming them stops a change to that hook from taking the
+keystore out of the app. The Windows and Secret Service backends were bundled but not run (this was
+checked on a Mac).
+
 ## What this does not do
 
 Code running as you can call the keystore like any program of yours can; the master protects

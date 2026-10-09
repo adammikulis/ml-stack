@@ -23,6 +23,7 @@ from pathlib import Path
 
 import pytest
 from packaging.requirements import Requirement
+from wheel_support import fresh_wheel
 
 from ml_stack.fleet.launch import already_running
 from ml_stack.installed import STANDARD, extras
@@ -66,14 +67,8 @@ foreach ($want in 'Show-Sizing', 'Build-Llama', 'Fetch-Models', 'Join-Fleet',
 
 
 def wheel() -> Path:
-    """The wheel in dist/, built first when it is missing or older than src/."""
-    built = sorted((REPO / "dist").glob("ml_stack-*.whl"))
-    source = max((path.stat().st_mtime for path in (REPO / "src").rglob("*.py")), default=0.0)
-    if not built or built[-1].stat().st_mtime < source:
-        subprocess.run([sys.executable, str(REPO / "packaging" / "build.py")],
-                       check=True, stdout=subprocess.DEVNULL, timeout=900)
-        built = sorted((REPO / "dist").glob("ml_stack-*.whl"))
-    return built[-1]
+    """The wheel in dist/, built first unless it was built from the current sources."""
+    return fresh_wheel(REPO)
 
 
 def run_installer(root: Path, *args: str, **extra: str) -> subprocess.CompletedProcess[str]:

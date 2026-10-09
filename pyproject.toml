@@ -46,7 +46,7 @@ privacy = ["presidio-analyzer>=2.2.364", "spacy>=3.8"]
 # presidio over a transformers NER model rather than spaCy's own
 privacy-transformers = ["ml-stack[privacy]", "presidio-analyzer[transformers]>=2.2.364"]
 test = [
-    "ml-stack[agents,memory,store]", "distlib", "pip", "hatchling", "pytest>=9.1.1",
+    "ml-stack[agents,memory,store,arrays]", "distlib", "pip", "hatchling", "pytest>=9.1.1",
     "pytest-xdist>=3.8.0", "pytest-testmon>=2.2", "pyyaml>=6.0", "defusedxml>=0.7",
 ]
 
@@ -255,6 +255,7 @@ markers = [
     "redteam: needs the redteam extra (PyRIT); left out unless --redteam is given",
     "live_api: calls a paid or quota-limited remote API; runs only when ML_STACK_LIVE_API=1",
     "live_net: reaches a public endpoint; runs only when ML_STACK_LIVE_NET=1",
+    "seatbelt: runs sandbox-exec itself, so it cannot run under the real-state write denial; listed in tests/seatbelt-modules.txt",
     "gate: a scan of the whole tracked tree, the same one `scripts/test gate` makes; left out of fast and full unless --gate or --slow is given",
     "heavy: runs in the default tier and costs seconds a test; `scripts/test fast` leaves it out",
 ]

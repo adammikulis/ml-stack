@@ -7,7 +7,7 @@ workspace `app/`; the Tauri app (`app/src-tauri`) is the other member and depend
 
 This is slices A and B1 of the node refactor: the crate (boards, identity, local socket, in-process
 sync) and its network side (peer transport, membership, board sync over it, discovery, pairing),
-built and tested alone. Nothing in Python calls it yet (see "What is left").
+built and tested alone. The shipping section below puts it in every runtime and keeps it running; no Python client calls its board methods yet (see "What is left").
 
 ## Boards, projects, links
 
@@ -295,6 +295,46 @@ listener is the one network port.
 --advertise IP --sync-ms N` starts the network; tests use real sockets on loopback with injected
 addresses and an unused UDP port for the beacon.
 
+## Shipping and keeping it up
+
+The Python side of getting the node onto a device and keeping it there: `ml_stack.node_binary` (build, checksum,
+verify), `node_build` (into a runtime), `node_health` (the socket call), `node_supervise` (the restart loop) and
+`node_launch` (find, start, stop, swap, smoke; also `python -m ml_stack.node_launch ensure|status|stop|swap|supervise`).
+
+- **In the runtime.** `runtime ensure` builds the node from the same commit as the wheel (`cargo build --release
+  --locked -p poolside-node`, target directory shared by all builds in `<runtimes>/cargo-target`), copies it to
+  `<runtime prefix>/node/poolside-node` with `node.json` (`sha256`, `bytes`, `target`, `commit`), starts it once on a
+  scratch state and asks `hello`; a build that does not answer is discarded before it is selected. The checksum is
+  written again into the tree's `verified.json` (`node_sha256`) after the smoke, and `node_binary.verified` refuses a
+  binary that differs from either record (and one built for another platform). The binary is as immutable as the tree.
+  `packaging/build.py --node` writes the same binary to `dist/node/poolside-node-<target>` with a `.sha256` file for a
+  bundle or release asset.
+- **Start on demand.** `node_launch.ensure_node(state)` is what every client calls: it returns the node's `hello`
+  (plus `socket` and `latency_ms`), and when nothing answers it verifies the binary, takes `start.lock` (single-flight:
+  eight clients at once start one node, the rest queue and find it), starts the supervisor if none holds
+  `supervisor.lock`, and waits for health. A binary that fails verification raises `NodeBinaryError` before any process starts.
+- **Supervisor** (`node_supervise.supervise`, detached, one per state directory). It starts the node, waits, and restarts
+  it when it exits: 0.1 s, doubling to 30 s while it keeps dying, reset after it ran 60 s. Every start re-resolves the
+  binary and checks its checksum: `node-binary.json` (a pin written by a failed swap) wins, else the selected runtime's. It
+  writes `node-run.json` (pid, binary, sha256, started_at, supervisor pid, previous binary) and logs to `node.log`. It
+  watches the pin and `selected.json`, so selecting a new runtime moves the node by itself; it gives up after five
+  consecutive starts with no verified binary. It owns no service: the optional always-on form is any unit that runs
+  `python -m ml_stack.node_launch supervise` (not wired into `fleet/autostart` roles yet).
+- **Crash-only.** The node is killed with SIGTERM or SIGKILL at any moment (`stop_node`); the next start reads the logs
+  on disk, cuts a torn tail, and every acknowledged entry and token is back. A real-process test posts, `kill -9`s, and
+  reads everything again after the supervisor's restart.
+- **Upgrade.** One node owns a state directory (`flock`), so there is no second node answering on the same socket while
+  the first runs: the swap is stop-old, start-new on the same path with state on disk. `runtime ensure` calls
+  `node_launch.swap()` after it selects a runtime: `current`, `idle` (no node running), `swapped` (a node of the new
+  checksum answers and is the one in `node-run.json`) or `failed`. On `failed` the previous binary is pinned, waited for,
+  and `runtime status` shows `PINNED to the previous binary` until the next successful swap clears it; `ensure` reports
+  the node outcome in its detail and exits non-zero.
+- **Health.** `node_health.node_health(state)` is one framed `hello` (2 s timeout) returning `node, version, pid,
+  fingerprint, socket, latency_ms`, or `None`; `node_launch.status` adds uptime (from the run record, only when its pid is
+  the answering pid), binary, sha256, `supervised` and `pinned`, and `ml-stack runtime status [--json]` prints the line.
+  `node_health.call(state, method, params, board=, token=)` is the minimal socket call for tests and tools; the
+  Python board client is a separate slice.
+
 ## Run and test
 
 ```
@@ -311,10 +351,12 @@ The workspace Cargo.lock is `app/Cargo.lock`, the build output `app/target/`. Cr
 
 ## What is left
 
-- Windows: a named pipe for the local API (the crate is Unix only; file modes and `flock` are Unix calls).
-- Packaging the binary in the wheel (`packaging/build.py`), starting it on a default port and the
-  multicast group (`NetConfig::standard`), and a default sync interval; today the network starts only
-  with flags.
+- Windows: a named pipe for the local API (the crate is Unix only; file modes and `flock` are Unix calls), and so a
+  Windows node binary, its build in `runtime ensure` (skipped there) and its supervisor (`SIGTERM` handling).
+- Starting the node on a default port and the multicast group (`NetConfig::standard`) and a default sync
+  interval; today the supervisor starts it with `run --state` only (extra flags after `--`), so the network is off.
+- The always-on form: a `fleet/autostart` role for `node_launch supervise` (a person-installed unit); a wheel
+  that carries a prebuilt node instead of a Rust toolchain at `runtime ensure` time.
 - Python lease clients (the serve broker, `gate.py` tickets, `testslots` permits, fleet `JobRunner` slots,
   `lock.only_one` and `claims.py` calling the lease methods, and their own admission code deleted), a local
   holder yielding when the board shows a peer's earlier acquire of a pool-wide claim, leases on a remote
