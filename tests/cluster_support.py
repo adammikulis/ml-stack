@@ -21,7 +21,10 @@ def any_command(argv: Sequence[str]) -> list[str]:
 
 def key_for(words: str, group: str = DEFAULT_CLUSTER) -> bytes:
     """The key a test cluster named ``group`` with passphrase ``words`` has."""
-    raw = hashlib.sha256(f"test-cluster/{group}/{words.strip()}".encode()).digest()
+    # a passphrase goes through a password-hashing function, as in the real join; the cost
+    # is the smallest scrypt takes, because a test makes many of these
+    raw = hashlib.scrypt(words.strip().encode(), salt=f"test-cluster/{group}".encode(),
+                         n=16, r=1, p=1, dklen=32)
     return base64.urlsafe_b64encode(raw).rstrip(b"=")
 
 
