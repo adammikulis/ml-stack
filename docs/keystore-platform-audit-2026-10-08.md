@@ -128,8 +128,8 @@ variable. Env passphrases exist as an explicit choice: `ML_STACK_SIGNING_PASSPHR
 passphrase variable; an env var is readable by the same user (`/proc/<pid>/environ`, process
 inspection on Windows) and inherited by every child, which `docs/keystore.md` should say (D-5).
 `scripts/encrypted-volume.sh` passes the generated passphrase on argv (`security add-generic-password
--w "$PW"`), visible in `ps` to local users for the length of the call (F-9, not fixed: macOS-only
-script that must be run against a real keychain to test).
+-w "$PW"`), visible in `ps` to local users for the length of the call (F-9, fixed 2026-10-09: the script now
+uses `security -i`).
 
 ## 4. Defects
 
@@ -143,8 +143,8 @@ script that must be run against a real keychain to test).
 | F-5 | The keystore directory kept a looser mode if something else created it first | test | fixed |
 | F-6 | A backend call stuck behind a dialog nobody could answer held `flight.lock` and the process forever; no timeout existed | test with a stuck fake: now refused after the wait and latched | fixed |
 | F-7 | macOS background processes could pop a Keychain dialog (for example the first run under a new Python) | code | mitigated: dialogs forbidden for background processes (set-flag verified, effect not) |
-| F-8 | `credentials.json` and the passphrase file are read-modify-write without a lock: two concurrent `credentials set --keychain` can lose one | code | not fixed: rare, a person's own commands; D-6 |
-| F-9 | `encrypted-volume.sh` puts a passphrase on argv | code | not fixed, needs a macOS keychain run; D-7 |
+| F-8 | `credentials.json` and the passphrase file are read-modify-write without a lock: two concurrent `credentials set --keychain` can lose one | code | fixed 2026-10-09 (D-6): `lock.rewriting`, two-process race tests |
+| F-9 | `encrypted-volume.sh` puts a passphrase on argv | code | fixed 2026-10-09 (D-7): `security -i` on stdin, throwaway-keychain test |
 
 Test status at the end: `tests/test_keystore.py`, `test_keystore_platform.py`, `test_keystore_gate.py`,
 `test_redteam_keystore.py` and the memory, credentials, signing, recovery, request, reputation and
@@ -201,18 +201,19 @@ After a deliberate host Python change, run `ml-stack-security keystore` then any
 terminal and note whether a prompt appears; from an agent shell the same command must fail within 20 s
 with a refusal, not hang.
 
-## 6. Owner decisions
+## 6. Owner decisions, settled 2026-10-09
 
-- D-1 macOS: accept one prompt after a host Python change (current), or make the item trust the
-  stable launcher/runtime identity (needs a signed launcher or the `security` CLI creating items with
-  `-T`).
-- D-2 `--system` installs: should the installer refuse, warn, or select the passphrase path when
-  there is no unlocked keystore at boot?
-- D-3 Windows: add an explicit `icacls` tightening of `~/.ml-stack/keystore` at creation?
-- D-4 WSL: refuse `ML_STACK_HOME` on `/mnt/*` or accept the `flock` risk?
-- D-5 Document the env passphrases' exposure, or remove `ML_STACK_SIGNING_PASSPHRASE`.
-- D-6 Lock `credentials.json` and `.passphrases` read-modify-write.
-- D-7 Change `scripts/encrypted-volume.sh` to give `security` the password on stdin
-  (`security -i`), then test on a Mac.
-- D-8 Whether the PyInstaller spec should name `keyring.backends.macOS`, `.Windows` and
-  `.SecretService` as hidden imports; verify with a frozen build first.
+- D-1 macOS single prompt: kept; the `security -T` route was refused because the trusted program
+  would be a general reader any process of the user can run (`docs/keystore.md`, "macOS: why the
+  single prompt stays").
+- D-2 `--system` with no unlocked keystore: warn and continue. The service fails closed (sealed
+  stores locked, signing key not unwrapped, nothing in the clear), so it does not run unprotected
+  (`fleet/autostart_keystore.py`).
+- D-3 Windows: `icacls` tightening of `keystore/` at creation (`platform.private_dir`); tested with a
+  mocked subprocess, a real ACL not read back.
+- D-4 WSL: a state root on a Windows drive is refused (`KeystoreUnavailable`, names `ML_STACK_HOME`).
+- D-5 Env passphrases documented; `ML_STACK_SIGNING_PASSPHRASE` kept.
+- D-6 `credentials.json` and the passphrase file are changed under a lock (F-8 fixed).
+- D-7 `scripts/encrypted-volume.sh` gives `security` the passphrase on stdin (F-9 fixed); tested
+  against a throwaway keychain file on a Mac.
+- D-8 The spec names the three keyring backends; a frozen macOS build bundled and selected them.
