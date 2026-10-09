@@ -279,7 +279,7 @@ def quick(args: argparse.Namespace, rest: list[str]) -> int:
         print(f"quick: nothing differs from {args.base}; running nothing")
         return 0
     picked = affected.select(ROOT, changed, deleted)
-    why = [f"{p}: nothing says which tests it affects" for p in picked.unmapped]
+    why = [f"{p}: {picked.reasons.get(p, 'nothing says which tests it affects')}" for p in picked.unmapped]
     if testmon_missing():
         why = ["pytest-testmon is not installed (pip install -e '.[test]')", *why]
     elif not (ROOT / DATAFILE).exists() and not picked.unmapped:

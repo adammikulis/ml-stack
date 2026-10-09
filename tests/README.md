@@ -66,8 +66,22 @@ takes the union of two selections:
   only a child process runs. `--explain` prints each file and what selected it.
 
 It runs the full tier, and says why, when the change touches `pyproject.toml`,
-`tests/conftest.py`, `budgets.json`, a file that is not source, a test or prose, a deleted
-module, or when pytest-testmon is not installed (`pip install -e '.[test]'`).
+`tests/conftest.py`, a `budgets.json` change that raises a number or changes its shape, a file
+that is not source, a test or prose and that no test names, a deleted module, or when
+pytest-testmon is not installed (`pip install -e '.[test]'`). `--explain` prints the reason for
+each path that forces it.
+
+Three cases are narrower (`scripts/affected_rules.py`; `tests/test_affected_scripts.py` pins them
+and replays recent commits). A changed **script** (`scripts/<name>.py`, an extensionless one such
+as `scripts/test`, or one in `scripts/hooks/`) selects every test file that imports it, names
+`scripts/<name>` in a string or command line, builds its path from the bare name, or reaches it
+through another script or a `tests/` helper that does, plus the tests that enumerate `scripts/`.
+A script that `tests/conftest.py` imports, or a `-p` plugin of `scripts/test` or what the plugin
+imports (`testslots.py` and its modules, `testdurations.py`, `testphases.py`), runs in every test
+session and still means the full tier. A **`budgets.json`** whose integers only fell selects the
+budget tests and the tests of the scripts that read it. A **generated file**
+(`docs/redteam/coverage.json`, `docs/commands.md`) selects the tests that name it or run its
+generator; the gate (`scripts/test gate`) re-checks the file itself.
 
 `quick` adds the cheap tree-wide checks (`test_layers`, `test_wiring`, the conftest and isolation
 guards) to every selection and leaves out the slow ones (`test_budgets`, `test_gates_*`,

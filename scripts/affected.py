@@ -14,6 +14,8 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import affected_rules as rules
+
 PACKAGE_ROOTS = (("src", "ml_stack"), ("scripts", "gates"))
 SCRIPT_TABLE = re.compile(r'''\[["']project["']\]\[["']scripts["']\]''')
 DOTTED = re.compile(r"\b((?:ml_stack|gates|tests)(?:\.\w+)+|ml_stack|gates)\b")
@@ -33,6 +35,12 @@ class Selection:
     why: dict[str, list[str]] = field(default_factory=dict)
     unmapped: list[str] = field(default_factory=list)
     ignored: list[str] = field(default_factory=list)
+    reasons: dict[str, str] = field(default_factory=dict)
+
+    def unmap(self, rel: str, because: str) -> None:
+        """Record a path no rule can place, so the caller runs everything, and say why."""
+        self.unmapped.append(rel)
+        self.reasons[rel] = because
 
     def add(self, test: str, because: str) -> None:
         self.files.add(test)
@@ -184,8 +192,27 @@ def package_dir_modules(rel: str, known: dict[str, str]) -> set[str]:
     return {name for name, path in known.items() if path.startswith(folder)}
 
 
+def add_script_tests(out: Selection, root: Path, rel: str, reverse: dict[str, set[str]],
+                     tests: list[str]) -> None:
+    """Select the tests that import, run or name the script ``rel``, through helpers too."""
+    files = rules.corpus(root)
+    why, modules, shared = rules.script_tests(files, rel)
+    if shared:
+        out.unmap(rel, shared)
+        return
+    direct = {n for n in why if not why[n].endswith("enumerates scripts/")}
+    for test, reason in why.items():
+        out.add(test, f"{rel}: {reason}")
+    names = {m for m in (module_of(x) for x in modules) if m}
+    for dependant in sorted(reach(names, reverse, DEPTH)):
+        if dependant.startswith("tests.") and f"tests/{dependant[6:]}.py" in tests:
+            out.add(f"tests/{dependant[6:]}.py", f"{rel} -> a source module that names it")
+    if not (direct or names or rel.endswith(".py")):
+        out.unmap(rel, "no test imports, runs or names it, so nothing says which tests it affects")
+
+
 def select(root: Path, changed: list[str], deleted: frozenset[str] = frozenset(),
-           depth: int = DEPTH) -> Selection:
+           depth: int = DEPTH, base: str = "0.2dev") -> Selection:
     """The test files within ``depth`` imports of ``changed``; ``unmapped`` non-empty means run all."""
     out = Selection()
     known = index(root)
@@ -194,10 +221,31 @@ def select(root: Path, changed: list[str], deleted: frozenset[str] = frozenset()
     for rel in changed:
         name = Path(rel).name
         module = module_of(rel)
-        if rel in EVERYTHING or (rel in deleted and module):
-            out.unmapped.append(rel)
+        script = rel.startswith("scripts/") and not rel.startswith("scripts/gates/")
+        if rel in deleted and (module or script):
+            out.unmap(rel, "a deleted module: anything may have used it")
+        elif rel == "budgets.json":
+            if rules.budgets_lowered(root, base):
+                for test, why in rules.budget_tests(rules.corpus(root)).items():
+                    out.add(test, f"{rel} only fell: {why}")
+            else:
+                out.unmap(rel, "a budget rose or the file changed in shape: every gate's baseline moved")
+        elif rel in EVERYTHING:
+            out.unmap(rel, "shared by every test")
         elif name in INERT or ((rel.endswith(".md") or rel.startswith(".github/")) and not mentioning(root, rel, tests)):
             out.ignored.append(rel)               # no test names it, so it cannot change a result (CI config, CODEOWNERS ...)
+        elif rel in rules.GENERATED:
+            checks = rules.generated_tests(rules.corpus(root), rel)
+            for test, why in checks.items():
+                out.add(test, f"{rel} is generated: {why}")
+            if not checks:
+                out.ignored.append(rel)           # only the gate (--check) reads it
+        elif script:
+            add_script_tests(out, root, rel, reverse, tests)
+            if module:
+                for dependant in sorted(reach({module}, reverse, depth)):
+                    if dependant.startswith("tests.") and f"tests/{dependant[6:]}.py" in tests:
+                        out.add(f"tests/{dependant[6:]}.py", f"{rel} -> {module}")
         elif module:
             hit = reach({module}, reverse, depth)
             for dependant in sorted(hit):
@@ -213,7 +261,7 @@ def select(root: Path, changed: list[str], deleted: frozenset[str] = frozenset()
             for t in said:
                 out.add(t, f"{rel} named in the test")
             if not said:
-                out.unmapped.append(rel)
+                out.unmap(rel, "not source, a test or prose, and no test names it")
     if any(Path(c).parts[:2] == ("src", "ml_stack") for c in changed):
         for rel in dynamic_tests(root, tests):
             out.add(rel, "imports a module chosen at run time")
