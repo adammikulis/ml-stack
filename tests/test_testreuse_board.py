@@ -137,7 +137,7 @@ def test_a_lease_names_its_agent_and_the_board_checks_the_identity(team, tmp_pat
     (folder / "2.slot").write_text(json.dumps({"label": "free text", "pid": os.getpid(), "want": 1, "granted": 1}))
     seen = slots.testslots(team.ws.registry.role_of)
     named = {item["agent"]["id"]: item for item in seen["running"] + seen["waiting"] if item["agent"]}
-    assert named["alice"]["agent"]["registered"] is True and named["alice"]["label"].startswith("alice/reuse (tests")
+    assert named["alice"]["agent"]["registered"] is True and named["alice"]["label"].startswith("alice (tests")
     assert named["mallory"]["agent"]["registered"] is False
     assert "\x1b" not in named["alice"]["label"]
     assert [i["agent"] for i in seen["running"] if i["label"] == "free text"] == [None]

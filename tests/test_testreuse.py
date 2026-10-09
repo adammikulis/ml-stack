@@ -298,7 +298,9 @@ def test_a_key_in_flight_is_waited_for_and_its_result_reused(project, tmp_path, 
         waiter = threading.Thread(target=lambda: result.update(
             report=attempt(project, store, events=events)[0]))
         waiter.start()
-        time.sleep(0.4)
+        deadline = time.monotonic() + 30
+        while ("waiting", FILE) not in events.seen and time.monotonic() < deadline:
+            time.sleep(0.05)
         assert waiter.is_alive() and ("waiting", FILE) in events.seen
         attempt(project, store, reuse_on=False)
         owner.kill()
