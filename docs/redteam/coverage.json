@@ -1,8 +1,8 @@
 {
  "surfaces": 852,
  "by_status": {
-  "covered": 526,
-  "partial": 198,
+  "covered": 527,
+  "partial": 197,
   "uncovered": 53,
   "n/a": 75,
   "unmapped": 0
@@ -100,8 +100,8 @@
    "unmapped": 0
   },
   "spawn": {
-   "covered": 71,
-   "partial": 61,
+   "covered": 72,
+   "partial": 60,
    "uncovered": 0,
    "n/a": 2,
    "unmapped": 0
@@ -12279,11 +12279,11 @@
    "source": "trees.py:git",
    "trust": "arguments built from model output, peer messages or file names",
    "attacker": "attacker text becomes a command line, environment or working directory",
-   "status": "partial",
+   "status": "covered",
    "tests": [
-    "tests/test_redteam_spawn.py::test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line"
+    "tests/test_trees.py::test_a_tree_named_like_an_option_or_a_command_is_only_a_path_to_git"
    ],
-   "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
+   "note": "a worktree path is the value of git -C, never an option or a shell word; a hostile directory name is one argument and a missing one is a refusal"
   },
   {
    "id": "spawn:workspace/backlog.py:fetch",

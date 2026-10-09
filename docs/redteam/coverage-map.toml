@@ -1091,6 +1091,13 @@ tests = ["tests/test_keystore_hosts.py::test_a_hostile_directory_name_reaches_ic
 note = "icacls and whoami start from fixed argument lists; a directory name with shell punctuation is one argument and output that is not a SID is never passed on"
 
 [[group]]
+match = ["spawn:trees.py:git"]
+status = "covered"
+count = 1
+tests = ["tests/test_trees.py::test_a_tree_named_like_an_option_or_a_command_is_only_a_path_to_git"]
+note = "a worktree path is the value of git -C, never an option or a shell word; a hostile directory name is one argument and a missing one is a refusal"
+
+[[group]]
 match = ["spawn:*"]
 status = "partial"
 tests = ["tests/test_redteam_spawn.py::test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line"]
