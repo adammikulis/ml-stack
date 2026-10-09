@@ -1,7 +1,7 @@
 """First-launch progress and failed-save behavior in Chromium."""
 
 import pytest
-from playwright.sync_api import expect
+from browser_expect import expect
 
 pytest_plugins = ["test_fleet_page"]
 

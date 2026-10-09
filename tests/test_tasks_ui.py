@@ -1,7 +1,7 @@
 """Tasks UI makes verified outcomes and independent evidence distinct from worker progress."""
 
 import pytest
-from playwright.sync_api import expect
+from browser_expect import expect
 from test_fleet_ui import Serving
 
 from ml_stack.workspace import task_summary

@@ -1,7 +1,7 @@
 """Model handoff, task drafts and specialist jobs exercised through the browser."""
 
 import pytest
-from playwright.sync_api import expect
+from browser_expect import expect
 from test_fleet_ui import Serving
 
 pytestmark = pytest.mark.slow
