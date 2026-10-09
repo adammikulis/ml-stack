@@ -197,6 +197,8 @@ ml-stack-world = "ml_stack.world.cli:main"
 ml-stack-ingest = "ml_stack.ingest:main"
 # the long commands this machine has recorded: what is running, waiting on one, stopping it
 ml-stack-jobs = "ml_stack.jobs:main"
+# the other devices of the pool that take tests (scripts/test TIER --on DEVICE): platform, free slots, last result
+ml-stack-test-devices = "ml_stack.testfarm.devices:command"
 # agents coordinating: messages, notes, scratch folders and claims, all data and no authority
 ml-stack-workspace = "ml_stack.workspace.cli:main"
 ml-stack-suite = "ml_stack.train.suite:main"

@@ -51,9 +51,10 @@ python -m ml_stack.device_setup --yes
    name with `ml-stack-workspace digest --agent YOUR_NAME`, send it
    `ml-stack-workspace send MAC_SESSION_NAME status "connected from Windows" --agent YOUR_NAME`, and read the
    reply with `ml-stack-workspace inbox --agent YOUR_NAME`.
-7. **Run tests on this device.** Every command is local to the device you are on: `scripts/test quick
+7. **Run tests on this device.** `scripts/test` on its own runs on the device you are on: `scripts/test quick
    tests/test_x.py` (WSL, Linux, macOS), with the explicit selectors AGENTS.md "Running the tests" asks for. On
-   Windows the suite runs inside WSL (docs/windows-runtime.md); use the WSL checkout.
+   Windows the suite runs inside WSL (docs/windows-runtime.md); use the WSL checkout. Another device's agent can also
+   run tests here with `--on` once you turn it on (the last section).
 
 ## Secure pools
 
@@ -81,7 +82,29 @@ Found by reading `docs/workspace.md`, `ml_stack.jobs` and the node's ops:
   "Explicit shared coordinator across devices").
 - **`ml-stack-jobs`** runs long commands on the device you are on only.
 
-There is no command that runs `scripts/test` (or any process) on another device from the Mac. Nothing was built
-for it here. Testing on the Windows device is done by the agent session on that device, asked over the board;
-running a command on a remote device from another needs a new, authorised remote-execution feature that does not
-exist yet.
+Running tests on another device is `scripts/test TIER --on DEVICE` (docs/test-farm.md). It needs the person to turn
+it on at the device that runs the tests, below.
+
+## Letting the Mac run tests on this device
+
+Only on the owner's order (for example "let the Mac test on this device"), because it lets any member of the pool
+run a checkout's tests here as this user. The Windows and WSL sides are separate pool devices: each needs its own
+node (this document's steps) and its own switch, in its own checkout.
+
+1. Have Python 3.13 on this device (`python --version`; Windows: `py -3.13 --version`; WSL and Linux: `python3.13
+   --version`). If it is missing, install it (Windows: `winget install Python.Python.3.13`; WSL: the distribution's
+   package or pyenv) and give it the test dependencies the way this device already installs ml-stack (`AGENTS.md`).
+2. Turn it on from the repository root, with that Python and `PYTHONPATH=src`:
+   `python -m ml_stack.testfarm.consent on` (Windows: `py -3.13 -m ml_stack.testfarm.consent on`, with
+   `$env:PYTHONPATH="src"`). It prints `test shards: on (python ..., checkout ...)`. If it says Python 3.13 is
+   needed, run it with the 3.13 interpreter, or pass `--python PATH`; if it says the repo has no `shard_exec.py`,
+   this checkout is older than the feature: update it, restart the node (`python -m ml_stack.node_launch swap`) and
+   run it again. The node must be the new build, since it carries the shard ops.
+3. Ask the Mac's agent to run `ml-stack-test-devices` and then `scripts/test all tests/test_x.py --on THIS_DEVICE`;
+   the result comes back to the Mac's session, and a `test-result` message is on the board.
+4. To stop: `python -m ml_stack.testfarm.consent off`. It takes effect on the next upload; a run already going
+   finishes or is cancelled from the Mac. Everything on and off is in the pool board's audit entries.
+
+Failures say what to do: `Python 3.13 is missing` (install it and run step 2), `test shards are off on this
+device` (step 2), `this device's CPU slots are in use` (wait), `no other active device ... is called` (the name
+in `ml-stack-test-devices`).

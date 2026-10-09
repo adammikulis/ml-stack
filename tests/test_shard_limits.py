@@ -53,12 +53,12 @@ def test_a_runner_that_floods_its_output_is_cancelled(tmp_path, monkeypatch):
     log = tmp_path / "output.log"
     flood = [sys.executable, "-c", "import sys\nwhile True:\n    sys.stdout.write('x' * 65536)\n    sys.stdout.flush()"]
     began = time.monotonic()
-    code = shard_run.execute(flood, tmp_path, {}, 60, log)
+    code = shard_run.execute(flood, tmp_path, {}, log, shard_run.Limit(60))
     assert code == 124
     assert time.monotonic() - began < 30
     assert log.stat().st_size < 64 << 20
 
 
 def test_a_runner_within_its_limits_reports_its_own_status(tmp_path):
-    code = shard_run.execute([sys.executable, "-c", "raise SystemExit(3)"], tmp_path, {}, 60, tmp_path / "o.log")
+    code = shard_run.execute([sys.executable, "-c", "raise SystemExit(3)"], tmp_path, {}, tmp_path / "o.log", shard_run.Limit(60))
     assert code == 3

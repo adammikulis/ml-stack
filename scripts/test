@@ -16,7 +16,8 @@
     scripts/test heavy     rewrite tests/heavy-modules.txt from the recorded test durations
     scripts/test submit TIER [PATH...]   start the same run in the background and print its job id
     scripts/test status [JOB] | wait JOB [--timeout S] | result JOB | cancel JOB
-    scripts/test farm --to DEVICE [--split] FILE...   run test files on a paired device (docs/test-farm.md)
+    scripts/test TIER [FILE...] --on DEVICE|all [--split]   the same tier on other devices of the pool (docs/test-farm.md);
+                           `ml-stack-test-devices` lists them
 
 A tier run is a background job that the command follows; Ctrl-C cancels it. A run that names test
 files reuses an earlier pass of an unchanged file unless --no-reuse is given (docs/test-reuse.md).
@@ -79,6 +80,7 @@ FAST = ["-m", "not slow and not heavy", *(f"--ignore=tests/{name}" for name in (
     "test_spec_decode.py", "test_spec_qwen4.py", "test_spec_qwen4_load.py", "test_spec_serve.py"))]
 HEAVY_FILE = ROOT / "tests" / "heavy-modules.txt"
 FULL: list[str] = []
+TIER_FLAGS = {"fast": FAST, "full": FULL, "slow": ["--slow", "-m", "slow"], "all": ["--slow"], "quick": FULL}
 RECORD_WORKERS = 3
 FOREGROUND = ("quick", "fast", "full", "slow", "all", "gate")
 BUSY_EXIT = 6
@@ -580,9 +582,6 @@ def follow(argv: list[str], args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     """Parse the tier and run it."""
     argv = sys.argv[1:] if argv is None else argv
-    if argv[:1] == ["farm"]:
-        import test_farm
-        return test_farm.main(argv[1:], ROOT)
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("tier", choices=[*FOREGROUND, "heavy", "record", "ratchet", *JOB_COMMANDS])
@@ -602,6 +601,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--slow", action="store_true", help="quick: include slow tests")
     parser.add_argument("--full", action="store_true", help="gate: run every check even when the diff reaches none")
     parser.add_argument("--explain", action="store_true", help="quick: say what selected what")
+    parser.add_argument("--on", default="", help="run the tier on this pool device (a name or fingerprint), or `all` of them")
+    parser.add_argument("--split", action="store_true", help="--on: divide the test files between this machine and the devices")
     parser.add_argument("--artifact-output", action="store_true", help="macOS with --confine: keep test output in private inert artifacts")
     parser.add_argument("--confine", action="store_true", help="macOS: run pytest under the Seatbelt confinement kernel")
     args, rest = parser.parse_known_args(argv)
@@ -614,6 +615,9 @@ def main(argv: list[str] | None = None) -> int:
         os.environ["DEV_TEST_AGENT"] = json.dumps({**seat.identity, "job": os.environ.get("DEV_TEST_JOB", "")})
     else:
         os.environ.pop("DEV_TEST_AGENT", None)
+    if args.on:
+        import test_on
+        return test_on.main(args, rest, ROOT, lambda tier, file: pytest_command(1, *TIER_FLAGS[tier], file), REUSE["on"])
     if args.confine:
         os.environ["DEV_TEST_CONFINE"] = "1"
     if args.artifact_output and args.tier not in ("gate", "all"):
@@ -638,13 +642,12 @@ def main(argv: list[str] | None = None) -> int:
             return 4
     if not os.environ.get("DEV_TEST_JOB"):
         return follow(argv, args)
-    tiers = {"fast": FAST, "full": FULL, "slow": ["--slow", "-m", "slow"], "all": ["--slow"]}
-    testprelude.begin(args, rest, ROOT, reused_files(pytest_command(args.workers, *tiers.get(args.tier, []), *rest)))
+    testprelude.begin(args, rest, ROOT, reused_files(pytest_command(args.workers, *TIER_FLAGS.get(args.tier, []), *rest)))
     if args.tier == "quick":
         return quick(args, rest)
     if args.tier == "gate":
         return gate(args, rest)
-    return run(pytest_command(args.workers, *tiers[args.tier], *rest), tier=args.tier, artifact_output=args.artifact_output)
+    return run(pytest_command(args.workers, *TIER_FLAGS[args.tier], *rest), tier=args.tier, artifact_output=args.artifact_output)
 
 
 if __name__ == "__main__":

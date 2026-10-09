@@ -1,49 +1,26 @@
-"""A test-shard request: its framing on the wire and every check made before anything runs."""
+"""A test-shard job: every check made on its header before anything runs.
+
+The node checks the same rules when the request arrives (`app/poolside-node/src/shard/spec.rs`);
+the executor checks them again, because it reads a file and trusts nothing it did not verify.
+"""
 
 from __future__ import annotations
 
-import json
 import re
-import struct
 
-from .shard_tree import MOST_PACKED, TreeError, clean_name
+from .shard_tree import TreeError, clean_name
 
-MOST_HEADER = 64 << 10
 MOST_FILES = 200
 MOST_SECONDS = 3600
-FIELDS = frozenset({"id", "tree_sha256", "files", "timeout_s"})
+TIERS = ("all", "fast", "full", "gate", "slow")
+FIELDS = frozenset({"id", "tree_sha256", "tier", "files", "timeout_s"})
 TEST_FILE = re.compile(r"^tests/[A-Za-z0-9_][A-Za-z0-9_.-]*\.py$")
 SHARD_ID = re.compile(r"^[0-9a-f]{32}$")
 DIGEST = re.compile(r"^[0-9a-f]{64}$")
 
 
 class Refused(ValueError):
-    """A shard request that is refused; the message says which rule it broke."""
-
-
-def frame(header: dict, tree: bytes) -> bytes:
-    """The request body: a length, the JSON header, then the packed tree."""
-    raw = json.dumps(header, sort_keys=True).encode()
-    return struct.pack(">I", len(raw)) + raw + tree
-
-
-def split(body: bytes) -> tuple[dict, bytes]:
-    """The header and the packed tree a request body holds."""
-    if len(body) < 4:
-        raise Refused("the shard request is too short")
-    (size,) = struct.unpack(">I", body[:4])
-    if size > MOST_HEADER or 4 + size > len(body):
-        raise Refused("the shard header is malformed or too large")
-    try:
-        header = json.loads(body[4:4 + size])
-    except ValueError:
-        raise Refused("the shard header is not JSON") from None
-    if not isinstance(header, dict):
-        raise Refused("the shard header is not an object")
-    tree = body[4 + size:]
-    if not tree or len(tree) > MOST_PACKED:
-        raise Refused("the shard carries no tree or too large a one")
-    return header, tree
+    """A shard job that is refused; the message says which rule it broke."""
 
 
 def check_header(header: dict) -> dict:
@@ -55,16 +32,22 @@ def check_header(header: dict) -> dict:
         raise Refused("the shard id is 32 lowercase hex digits")
     if not isinstance(header.get("tree_sha256"), str) or not DIGEST.match(header["tree_sha256"]):
         raise Refused("the tree digest is 64 lowercase hex digits")
+    tier = header.get("tier", "all")
+    if tier not in TIERS:
+        raise Refused(f"the tier is one of {', '.join(TIERS)}")
     seconds = header.get("timeout_s", MOST_SECONDS)
     if type(seconds) is not int or not 1 <= seconds <= MOST_SECONDS:
         raise Refused(f"the time limit is a whole number of seconds from 1 to {MOST_SECONDS}")
-    return {**header, "timeout_s": seconds, "files": check_files(header.get("files"))}
+    files = check_files(header.get("files", []))
+    if tier == "gate" and files:
+        raise Refused("the gate takes no files")
+    return {**header, "tier": tier, "timeout_s": seconds, "files": files}
 
 
 def check_files(files: object) -> list[str]:
-    """The test files, each one a plain ``tests/NAME.py`` path with no repeats."""
-    if not isinstance(files, list) or not 1 <= len(files) <= MOST_FILES:
-        raise Refused(f"a shard names from 1 to {MOST_FILES} test files")
+    """The test files, each one a plain ``tests/NAME.py`` path with no repeats; none means the whole tier."""
+    if not isinstance(files, list) or len(files) > MOST_FILES:
+        raise Refused(f"a shard names at most {MOST_FILES} test files")
     for name in files:
         if not isinstance(name, str) or not TEST_FILE.match(name):
             raise Refused(f"only tests/NAME.py files run in a shard, not {str(name)[:80]!r}")

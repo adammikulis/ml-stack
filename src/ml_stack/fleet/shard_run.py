@@ -1,4 +1,4 @@
-"""Running one accepted shard: a scratch checkout, `scripts/test all` on the named files, a result."""
+"""Running one accepted shard: a scratch checkout, the test runner on the named tier, a result."""
 
 from __future__ import annotations
 
@@ -12,27 +12,35 @@ import tempfile
 import threading
 import time
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from ml_stack.credentials import child_environment
-from ml_stack.platform import start_process, terminate_process_group
+from ml_stack.platform import start_grouped, terminate_process_group
 
 from . import shard_result, shard_tree
 
 GRACE_S = 30.0
+CUT_S = 2.0
+"""How long a cancelled run's output is waited for: a child it left behind may hold the pipe open, and the node ends it."""
 POLL_S = 1.0
 MOST_LOG = 64 << 20
 """The output a runner may write before it is cancelled: a runaway test must not fill the disk."""
-COMMIT = ["git", "-c", "user.name=shard", "-c", "user.email=shard@localhost", "commit", "-q", "-m", "shard"]
+RESULT = "result.json"
+COMMIT = ["git", "-c", "user.name=shard", "-c", "user.email=shard@localhost", "-c", "core.autocrlf=false",
+          "-c", "core.safecrlf=false", "commit", "-q", "-m", "shard"]
 DROPPED = ("DEV_TEST_JOB", "DEV_TEST_AGENT", "DEV_TEST_PYTEST_ENDPOINT", "DEV_TEST_PYTEST_TOKEN",
-           "DEV_TEST_REMOTE_BROKER", "CLAUDECODE", "ML_STACK_HOME", "ML_STACK_NONINTERACTIVE",
-           "PYTEST_ADDOPTS", "PYTEST_PLUGINS", "PYTEST_CURRENT_TEST", "PYTEST_XDIST_WORKER")
+           "DEV_TEST_REMOTE_BROKER", "CLAUDECODE", "AI_AGENT", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SESSION_ATTENDED",
+           "CODEX_THREAD_ID", "CODEX_SESSION_ID", "ML_STACK_AGENT", "ML_STACK_BOARD", "ML_STACK_HOME",
+           "ML_STACK_NONINTERACTIVE", "ML_STACK_SESSION_HARNESS", "ML_STACK_SESSION_ID", "ML_STACK_WORKSPACE_AGENT",
+           "ML_STACK_WORKSPACE_DENYLIST", "ML_STACK_WORKSPACE_TOKEN", "PYTEST_ADDOPTS", "PYTEST_PLUGINS",
+           "PYTEST_CURRENT_TEST", "PYTEST_XDIST_WORKER")
+"""What a run never inherits: the sender's say, an agent's markers (the runner behaves differently for an agent)."""
 
 
-def shard_command(tree: Path, files: list[str], junit: Path) -> list[str]:
-    """The only command a shard runs: this device's test runner on the named files."""
-    return [sys.executable, str(tree / "scripts" / "test"), "all", "--no-reuse",
-            f"--junitxml={junit}", *files]
+def shard_command(tree: Path, tier: str, files: list[str], junit: Path) -> list[str]:
+    """The only command a shard runs: this device's test runner, on this device's Python, for the tier."""
+    return [sys.executable, str(tree / "scripts" / "test"), tier, "--no-reuse", f"--junitxml={junit}", *files]
 
 
 def environment(base: Path) -> dict[str, str]:
@@ -48,7 +56,8 @@ def environment(base: Path) -> dict[str, str]:
 def checkout(data: bytes, digest: str, tree: Path) -> None:
     """Unpack the verified tree and give it a git history of one commit, as the runner expects."""
     shard_tree.unpack(data, digest, tree)
-    for step in (["git", "init", "-q"], ["git", "add", "--all"], COMMIT):
+    quiet = ["git", "-c", "core.autocrlf=false", "-c", "core.safecrlf=false"]
+    for step in ([*quiet, "init", "-q"], [*quiet, "add", "--all"], COMMIT):
         subprocess.run(step, cwd=tree, check=True, capture_output=True, env=child_environment())
 
 
@@ -59,7 +68,10 @@ def cpu_seconds() -> float:
 
 
 def stop(proc: subprocess.Popen) -> None:
-    """Cancel a runner that overran: an interrupt first, so it cancels its job, then the group."""
+    """Cancel a runner that overran: an interrupt first, so it cancels its job, then all of it.
+
+    The runner shares this process's group, which the node leads, so the node's own kill of that
+    group ends whatever this leaves behind."""
     if sys.platform != "win32":
         proc.send_signal(signal.SIGINT)
         try:
@@ -85,37 +97,49 @@ def keep_output(pipe, out, flooded: threading.Event) -> None:
             flooded.set()
 
 
-def execute(argv: list[str], tree: Path, env: dict[str, str], seconds: int, log: Path) -> int:
-    """Run ``argv``; its exit status, or 124 when the time limit or the output limit cancelled it."""
+@dataclass
+class Limit:
+    """How long a run may take, and the event that cancels it from outside."""
+
+    seconds: int
+    cancel: threading.Event = field(default_factory=threading.Event)
+
+
+def execute(argv: list[str], tree: Path, env: dict[str, str], log: Path, limit: Limit) -> int:
+    """Run ``argv``; its exit status, or 124 when the time limit or the output limit cancelled it, 130 when ``limit.cancel`` was set."""
     flooded = threading.Event()
     with log.open("wb") as out:
-        proc = start_process(argv, cwd=tree, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        proc = start_grouped(argv, cwd=tree, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                              stdin=subprocess.DEVNULL)
         reader = threading.Thread(target=keep_output, args=(proc.stdout, out, flooded), daemon=True)
         reader.start()
-        deadline = time.monotonic() + seconds
+        deadline = time.monotonic() + limit.seconds
         code = None
         while code is None:
             try:
                 code = proc.wait(max(0.0, min(POLL_S, deadline - time.monotonic())))
             except subprocess.TimeoutExpired:
-                if time.monotonic() >= deadline or flooded.is_set():
+                if limit.cancel.is_set():
+                    stop(proc)
+                    code = 130
+                elif time.monotonic() >= deadline or flooded.is_set():
                     stop(proc)
                     code = 124
-        reader.join(GRACE_S)
+        reader.join(CUT_S if code in (124, 130) else GRACE_S)
         return 124 if flooded.is_set() else code
 
 
 def run_shard(shard: dict, data: bytes, folder: Path,
-              command: Callable[[Path, list[str], Path], list[str]] = shard_command) -> dict:
+              command: Callable[[Path, str, list[str], Path], list[str]] = shard_command,
+              cancel: threading.Event | None = None) -> dict:
     """Run ``shard`` in a scratch checkout under ``folder`` and write ``result.json`` there."""
     scratch = Path(tempfile.mkdtemp(prefix="shard-", dir=folder))
     began, cpu = time.monotonic(), cpu_seconds()
     tree, junit, log = scratch / "tree", scratch / "junit.xml", scratch / "output.log"
     try:
         checkout(data, shard["tree_sha256"], tree)
-        code = execute(command(tree, shard["files"], junit), tree, environment(scratch),
-                       shard["timeout_s"], log)
+        code = execute(command(tree, shard["tier"], shard["files"], junit), tree, environment(scratch), log,
+                       Limit(shard["timeout_s"], cancel or threading.Event()))
         tail = log.read_text(errors="replace")[-shard_result.MOST_TAIL:] if log.is_file() else ""
         result = shard_result.build(shard, junit, code, (time.monotonic() - began, cpu_seconds() - cpu), tail)
     except (OSError, ValueError, subprocess.SubprocessError) as exc:
@@ -123,5 +147,5 @@ def run_shard(shard: dict, data: bytes, folder: Path,
                   "state": "failed"}
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
-    (folder / f"{shard['id']}.json").write_text(json.dumps(result))
+    (folder / RESULT).write_text(json.dumps(result))
     return result

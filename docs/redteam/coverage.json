@@ -1,10 +1,10 @@
 {
- "surfaces": 864,
+ "surfaces": 865,
  "by_status": {
   "covered": 538,
   "partial": 196,
   "uncovered": 53,
-  "n/a": 77,
+  "n/a": 78,
   "unmapped": 0
  },
  "by_kind": {
@@ -19,7 +19,7 @@
    "covered": 7,
    "partial": 5,
    "uncovered": 0,
-   "n/a": 28,
+   "n/a": 29,
    "unmapped": 0
   },
   "context": {
@@ -37,7 +37,7 @@
    "unmapped": 0
   },
   "egress": {
-   "covered": 49,
+   "covered": 48,
    "partial": 48,
    "uncovered": 0,
    "n/a": 0,
@@ -100,7 +100,7 @@
    "unmapped": 0
   },
   "spawn": {
-   "covered": 81,
+   "covered": 82,
    "partial": 59,
    "uncovered": 0,
    "n/a": 2,
@@ -875,6 +875,16 @@
    "id": "cli:ml-stack-surface",
    "kind": "cli",
    "source": "ml_stack.surface.cli:main",
+   "trust": "the person at a terminal; arguments may carry text from outside",
+   "attacker": "hostile argument text or path reaches the command",
+   "status": "n/a",
+   "tests": [],
+   "note": "run by the person with the person's own arguments; an agent reaches these commands only through an mcp-tool or chat-tool row, which carry the hostile-argument tests"
+  },
+  {
+   "id": "cli:ml-stack-test-devices",
+   "kind": "cli",
+   "source": "ml_stack.testfarm.devices:command",
    "trust": "the person at a terminal; arguments may carry text from outside",
    "attacker": "hostile argument text or path reaches the command",
    "status": "n/a",
@@ -2147,20 +2157,6 @@
     "tests/test_net_no_bypass.py"
    ],
    "note": "loopback and LAN calls to servers the person configured; the net-no-bypass scan keeps public hosts out, answers from a hostile server (oversized, slow, malformed JSON) are not sent"
-  },
-  {
-   "id": "egress:fleet/shard_client.py:device_peer",
-   "kind": "egress",
-   "source": "fleet/shard_client.py:device_peer",
-   "trust": "addresses and redirects named by pages, repositories and peers",
-   "attacker": "a redirect or address sends the request somewhere the person did not choose",
-   "status": "covered",
-   "tests": [
-    "tests/test_redteam_test_shards.py::test_a_peer_that_is_not_paired_is_refused_before_anything_is_read",
-    "tests/test_redteam_test_shards.py::test_the_cluster_secret_is_not_a_paired_device",
-    "tests/test_fleet_test_shards.py::test_unpaired_name_is_not_found"
-   ],
-   "note": "connects only to an active paired device's pinned certificate; an unpaired name or an unknown secret reaches nothing"
   },
   {
    "id": "egress:fleet/ui.py:_scraped",
@@ -11340,13 +11336,16 @@
    "attacker": "attacker text becomes a command line, environment or working directory",
    "status": "covered",
    "tests": [
-    "tests/test_redteam_test_shards.py::test_a_path_outside_the_plain_test_files_is_refused",
-    "tests/test_redteam_test_shards.py::test_extra_fields_are_refused_whatever_they_say",
-    "tests/test_redteam_test_shards.py::test_a_tree_with_anything_but_plain_shipped_files_is_refused",
-    "tests/test_redteam_test_shards.py::test_a_device_with_shards_off_runs_nothing_and_says_so",
-    "tests/test_fleet_test_shards.py::test_the_host_runs_only_the_test_runner_on_the_named_files"
+    "tests/test_testfarm.py::test_a_job_that_breaks_a_rule_is_refused_and_nothing_runs",
+    "tests/test_testfarm.py::test_a_tree_with_anything_but_plain_shipped_files_is_refused",
+    "tests/test_testfarm.py::test_an_archive_that_inflates_past_the_limit_is_refused_before_it_is_read",
+    "tests/test_testfarm.py::test_no_agent_marker_and_no_credential_reaches_the_runner",
+    "tests/test_testfarm_nodes.py::test_a_tree_that_escapes_its_folder_is_refused_by_the_executor_on_the_device",
+    "tests/test_testfarm_nodes.py::test_cancel_ends_the_runner_and_the_child_it_started",
+    "tests/test_testfarm_nodes.py::test_at_most_two_run_at_once_and_a_third_is_told_to_wait",
+    "tests/test_shard_limits.py::test_a_runner_that_floods_its_output_is_cancelled"
    ],
-   "note": "the argv is built by the host from the test runner and validated file names; the sender supplies no argv, environment or working directory, and a refused shard starts nothing"
+   "note": "the argv is built by the receiving executor from the test runner, the tier and validated file names; the sender supplies no argv, environment or working directory, a refused job starts nothing, and the node (app/poolside-node/tests/shard.rs) refuses a sender that is not a pool member, a device with shards off, and every malformed request before the executor exists"
   },
   {
    "id": "spawn:fleet/shard_tree.py:tracked_paths",
@@ -11356,8 +11355,8 @@
    "attacker": "attacker text becomes a command line, environment or working directory",
    "status": "covered",
    "tests": [
-    "tests/test_redteam_test_shards.py::test_a_tree_with_anything_but_plain_shipped_files_is_refused",
-    "tests/test_redteam_test_shards.py::test_a_tree_that_inflates_past_the_limit_is_refused"
+    "tests/test_testfarm.py::test_a_tree_with_anything_but_plain_shipped_files_is_refused",
+    "tests/test_testfarm_nodes.py::test_a_pack_larger_than_a_request_may_carry_is_refused_before_anything_is_sent"
    ],
    "note": "lists the sender's own checkout with a fixed argv; the receiving side never runs it"
   },
@@ -11927,6 +11926,25 @@
     "tests/test_redteam_spawn.py::test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line"
    ],
    "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
+  },
+  {
+   "id": "spawn:platform.py:start_grouped",
+   "kind": "spawn",
+   "source": "platform.py:start_grouped",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_testfarm.py::test_a_job_that_breaks_a_rule_is_refused_and_nothing_runs",
+    "tests/test_testfarm.py::test_a_tree_with_anything_but_plain_shipped_files_is_refused",
+    "tests/test_testfarm.py::test_an_archive_that_inflates_past_the_limit_is_refused_before_it_is_read",
+    "tests/test_testfarm.py::test_no_agent_marker_and_no_credential_reaches_the_runner",
+    "tests/test_testfarm_nodes.py::test_a_tree_that_escapes_its_folder_is_refused_by_the_executor_on_the_device",
+    "tests/test_testfarm_nodes.py::test_cancel_ends_the_runner_and_the_child_it_started",
+    "tests/test_testfarm_nodes.py::test_at_most_two_run_at_once_and_a_third_is_told_to_wait",
+    "tests/test_shard_limits.py::test_a_runner_that_floods_its_output_is_cancelled"
+   ],
+   "note": "the argv is built by the receiving executor from the test runner, the tier and validated file names; the sender supplies no argv, environment or working directory, a refused job starts nothing, and the node (app/poolside-node/tests/shard.rs) refuses a sender that is not a pool member, a device with shards off, and every malformed request before the executor exists"
   },
   {
    "id": "spawn:platform.py:start_process",

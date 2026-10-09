@@ -1,97 +1,111 @@
 # Test farm
 
-`scripts/test farm --to DEVICE FILE...` runs test files on a paired device and prints the result in
-the shape of a local run. `--split` divides the list between this machine and the device. `--check`
-asks whether the device takes shards. The exit status is the worst of the runs; 70 means the shard
-never ran (not paired, shards off, unreachable, refused).
+`scripts/test TIER [FILE...] --on DEVICE` runs the tests on another device of the pool, so an agent on the Mac
+tests Windows, WSL, Linux or another Mac without anyone at that device. It is the entry point the local tiers
+use: same tier names, same printed lines, same content-keyed reuse, and `--on all` runs it on every other device.
 
-## How a pool device receives work today
+```
+scripts/test all tests/test_x.py --on "Windows PC"     those files on one device (name or fingerprint)
+scripts/test quick --on all                            the files the change reaches, on every other device
+scripts/test gate --on wsl-box                         the structural checks there
+scripts/test full --on all --split                     divide the list between this machine and the devices
+ml-stack-test-devices                                  the devices: platform, free slots out of two, last result
+```
 
-- `POST /jobs` runs one of a fixed list of commands (`fleet/commands.py`) for a holder of the cluster
-  secret. It carries no tree and runs nothing from the sender.
-- Paired devices sign and seal requests under their own device secret on `/workspace/v1/*`
-  (`fleet/device_auth.py`, `fleet/api.py` `_guard`), over TLS pinned to the certificate the pairing
-  exchanged (`workspace/coordinator_client.py` `_device_peer`). The cluster secret also passes that
-  guard, but identifies no device, which is how a route tells a paired device from a cluster member.
-- `scripts/test-on-linux` and `workspace/remote_workers.py` do not move a tree between pool devices.
+The exit status is the worst of the runs; 70 means a device never ran its part (not in the pool, shards off,
+unreachable, refused, Python 3.13 missing). A refused or unreachable device is named on stderr with its reason.
+
+## How the owner turns it on
+
+Nothing runs on a device until its person says so, per device, and the default is off. At the device (its agent
+does it on the person's order; see `docs/windows-wsl.md`), from this repository's checkout, with the Python 3.13
+the tests should use:
+
+```
+python -m ml_stack.testfarm.consent on        # status | off
+```
+
+`on` is `shard_consent` on the device's own node: it saves `<state>/shards.json` (on, the interpreter, the
+checkout), refuses a Python that is not 3.13 and writes an `audit` entry to the pool board naming the session
+that did it. `off` stops the next upload at once (the file is read at every request). Turning it on lets any
+other device of the pool run a tree's tests here as this user, so do it only on a device whose pool you trust;
+revoking a pool member (`member_revoke`) refuses it at its next request.
+
+## What runs where
+
+| step | where | what |
+| --- | --- | --- |
+| pick the devices | the Mac | the pool's other active members, from the local node; `all` or a name or a fingerprint |
+| ask what they take | the Mac's node to each device | `shard_caps`: accepts or why not, platform (a WSL Linux says `wsl`), free slots |
+| reuse | the Mac | a file that passed on that device with this content, platform and tier is not sent |
+| pack and upload | the Mac to the device | the working tree as a gzip tar (uncommitted edits travel), 256 KiB at a time, over the node's TLS |
+| run | the device | its node checks the digest, takes CPU slots from its lease service, starts the executor on the device's own Python 3.13 and checkout, which unpacks the tree into a scratch checkout and runs `scripts/test TIER --no-reuse` there |
+| result | the device to the Mac | per-file counts, failing node ids with messages, platform, wall and CPU seconds, an output tail |
+| record | the Mac | the printed lines, the per-device ledger, and a `test-result device=NAME ...` message on the project board |
 
 ## Mechanism
 
-- Route: `GET /workspace/v1/test-shards` (capability), `POST` the same path (one shard),
-  `GET /workspace/v1/test-shards/ID` (state, then result). Modules: `fleet/shard_routes.py`,
-  `shard_host.py` (consent, who, caps), `shard_spec.py` (framing and every check), `shard_tree.py`
-  (pack and unpack), `shard_run.py` (the scratch checkout and the run), `shard_result.py`,
-  `shard_client.py`, `shard_split.py`, `scripts/test_farm.py`.
-- The tree: a gzip tar of tracked and untracked-not-ignored files under `src tests scripts contracts
-  patches packaging docs app` and top-level files, taken from the working tree, so uncommitted edits
-  travel. No push, no shared base. The request carries its sha256; the receiver verifies it before
-  reading any member. Limits: 24 MiB packed (one request), 256 MiB unpacked, 20000 members; plain
-  files only, no links, no `..`, no absolute or hidden paths. The archive is also refused, before any member is
-  read, when its single gzip stream inflates past the unpacked limit (a small archive cannot cost unbounded CPU). Today's tree is 2298 files, 6.9 MB.
-- The job kind: header fields are exactly `id` (32 hex, used once), `tree_sha256`, `files`
-  (1 to 200 names, each `tests/NAME.py`, each present in the tree) and `timeout_s` (1 to 3600). Any
-  other field (argv, env, cwd) is refused. The host builds the only command it runs:
-  `python scripts/test all --no-reuse --junitxml=OWN_PATH FILE...`, in a fresh scratch checkout
-  (`git init` and one commit, since the runner hashes the tree), with this device's own
-  environment less secrets, `ML_STACK_HOME` pointing into the scratch folder, and the device's own
-  test queue. A time limit interrupts the runner, then kills it, as does a runner that writes more than 64 MiB of
-  output. At most two shards run at once.
-- Consent: `Settings.test_shards`, off by default, read from `settings.json` at each request.
-  The person at the device turns it on with `python -m ml_stack.fleet.shard_consent on` (or the
-  settings page's `test_shards` preference). The sender sees it in the capability answer
-  (`accepts`). A shard is also refused unless the sender is a paired device the owner marked as
-  their own (`Device.mine`). Enabling shards means a test in the shipped tree runs as the daemon's
-  user on that device; enable it only for devices you own.
-- The result: per-file passed, failed, error, skipped and wall seconds; failing node ids with
-  messages; every test's wall seconds; exit code; the shard's wall and CPU seconds; an output tail;
-  and `platform` (`sys.platform`, Python version, machine, CPU count). The sender prints the platform
-  first because a Linux pass is not a macOS pass. Per-test CPU is not available (junit has wall
-  time only); CPU is per shard.
-- Splitting: `shard_split.split` gives each file, longest first, to the target that would finish
-  it soonest, weighting by workers and charging the device a fixed setup cost. Durations come from
-  a per-project history that every farm run updates from local and remote junit. Files that name
-  darwin, Seatbelt, launchctl or osascript stay on this machine.
+The node (`app/poolside-node/src/shard/`) is the transport, so a shard rides the pool's own membership: a
+request is a peer op on a TLS 1.3 connection pinned to the certificate the pool record holds for the device, and
+the sender is that certificate, never a field of the request. Revoked or unknown devices are refused at every
+op. The local API has two methods: `shard_call` (a registered session asks one op of a pool device; the node adds
+`op` and `by`, the session behind the token, as a label for the audit trail) and `shard_consent`.
 
-## Measured on loopback
+- Peer ops, members only: `shard_caps`, `shard_put` (one chunk, in order, from offset 0, 256 KiB at most, hex),
+  `shard_start`, `shard_status`, `shard_cancel`. A shard belongs to the certificate that created it: another
+  member gets "no such shard" for its status and its cancel.
+- The job: `id` (32 hex), `tree_sha256`, `size`, `tier` (`all fast full gate slow`), `files` (0 to 200 names, each
+  `tests/NAME.py`, none for the gate) and `timeout_s` (1 to 3600). Any other field (argv, env, cwd) is refused.
+  The executor builds the only command it runs: `python scripts/test TIER --no-reuse --junitxml=OWN FILE...`.
+- The tree: tracked and untracked-not-ignored files under `src tests scripts contracts patches packaging docs app`
+  and top-level files. Limits: 24 MiB packed, 256 MiB unpacked, 20000 members; plain files only, no links, no `..`,
+  no absolute, hidden, backslash or drive paths; a gzip stream that inflates past the limit is refused before a
+  member is read. The node checks the sha256 of the upload before anything starts; the executor checks everything
+  else again (`fleet/shard_spec.py`, `shard_tree.py`) because it trusts nothing it did not verify.
+- Concurrency and the lease: two shards run at once; six are open at once (uploading or running), two uploading
+  per sender; an upload idle for ten minutes is dropped. Each running shard holds the device's CPU slots (half
+  its cores, at least one, class background) in the node's lease table until it ends, so it queues behind and
+  yields to the device's own work like any other holder. `shard_start` and `shard_done` are `audit` entries on
+  the pool board.
+- Cancel and time: the executor enforces `timeout_s` on the runner (an interrupt, then a kill). Cancelling, a
+  node stop or `timeout_s` plus 120 s makes the node send SIGTERM to the executor, which interrupts the runner;
+  after 45 s it kills the executor's whole process group, and it always kills the group when the executor has
+  gone, so no child outlives a shard. The runner shares the executor's group (the node leads it). Windows:
+  `taskkill /T /F` on the tree.
+- Output and results: a runner that writes more than 64 MiB is cancelled (exit 124); a result is at most 900 KiB
+  (3000 slowest tests, 200 failures); the executor's own output tail is 8000 characters.
+- Environment: the executor starts without `PYTHONPATH`, `PYTHONHOME` and the variables that mark an agent's
+  shell (`CLAUDECODE`, `AI_AGENT`, `ML_STACK_WORKSPACE_*`, `ML_STACK_SESSION_*`, ...); the runner also loses
+  anything that looks like a credential, and gets its own `ML_STACK_HOME` inside the scratch folder.
+- Per-device results: the reuse key holds the device's fingerprint, its platform (`wsl` included), Python and the
+  tier besides the file's content key, so a pass on Windows never satisfies macOS or WSL. Only a run that ended
+  with pytest's exit 0 or 1 records passes, and only for files with passes and no failures. The ledger is
+  `remote-results.json` in the project's reuse folder; `ml-stack-test-devices` reads the last result from it.
+- Retired: the paired-device HTTP route (`/workspace/v1/test-shards`), `Settings.test_shards` and
+  `fleet/shard_consent.py`. There is one remote path.
 
-`shard_support.py` runs a second daemon with its own state root and a pinned certificate on this
-machine. The machine was at load average 20 to 33 from other agents during every run, and its
-loopback stalled for about a minute once, so whole-suite wall times below are not clean.
+## Windows, WSL, Linux
 
-| Step | Result |
-| --- | --- |
-| Pack the tree | 2298 files, 6.9 MB, 0.8 s |
-| Send it over sealed TLS | 8.5 s including packing (loaded host) |
-| Unpack, git init and commit, no-op run, result | 2.9 s |
-| 6 files local, as one shard, split | not obtained: under that load pytest under xdist died with INTERNALERROR (exit 3) in local and remote runs alike |
+Each of those is its own pool device with its own node, certificate and consent; WSL is not the Windows around
+it. The Python used is the one recorded when the person turned shards on (`--python`, default the interpreter
+running the command) and it must be 3.13: otherwise the node says "Python 3.13 is needed and PATH is X" and the
+sender sees it as a refusal. Files are written byte for byte and the scratch checkout is made with
+`core.autocrlf=false`, so line endings are the sender's. Paths in the tree are POSIX relative names; the device
+joins them with its own separators, and a name with a backslash or a drive is refused.
 
-A same-machine stand-in shares the CPUs and the test broker, so it can show overhead, never a
-speedup. A real second machine changes: transfer time (6.9 MB over the LAN instead of loopback, so
-mostly sealing cost), WSL start-up when its daemon is not running, its own CPU count and broker
-capacity, and its Python and installed dependencies (shards use the daemon's interpreter).
+## Tests
 
-## Bringing a real device in
+`app/poolside-node/tests/shard.rs` (two real devices, TLS on loopback, a shell stub for the interpreter): consent
+off by default, membership and revocation, a forged requester, every malformed request, ordering and size of an
+upload, the lease, two at once, cancel killing a grandchild. `tests/test_testfarm.py` (the executor as the node
+starts it, over a real git tree whose `scripts/test` is a stub: hostile trees and jobs, the environment, the
+ledger keys, the report, the command line) and `tests/test_testfarm_nodes.py` (two node processes on loopback
+ports, no beacon, no multicast, with a real executor: consent, a run, reuse, a failure, the gate, an escaping
+tree, cancel, the two-at-once cap, devices by name and fingerprint) cover the Python side.
 
-For the Windows-side session, acting for the owner on that machine. Consent for step 3 is the
-owner's own instruction; a board message alone is not consent. Run these in the WSL checkout of
-this repository.
+## Not verified
 
-1. Note the current state for rollback: `git rev-parse HEAD` (expect 1e68c7f) and
-   `python -m ml_stack.fleet.shard_consent status`.
-2. Update: `git fetch origin` then `git checkout --detach origin/0.2dev` (or this branch's ready
-   SHA: `git fetch origin BRANCH`, then `git checkout --detach FETCH_HEAD`). Check
-   `git status` is clean first. Reinstall the way this device already installs ml-stack (the same
-   command that produced its current install), so `ml-stack-traind` runs the new code.
-3. Restart the daemon on the new code (stop the running `ml-stack-traind`, start it again with the
-   same `--root` and port 8770). Then, as the person, turn shards on:
-   `python -m ml_stack.fleet.shard_consent on`. The daemon reads it at the next request.
-4. Confirm the capability from this Mac: `scripts/test farm --to "RTX 3090 Ti" --check` prints
-   `takes test shards: True (linux, python X, N cpus ...)`. If the device's address in the peer book
-   is not its daemon address, add `--host ADDRESS`.
-5. Run one shard: `scripts/test farm --to "RTX 3090 Ti" tests/test_fleet_framing.py`. Read the
-   platform line and the exit status.
-6. Rollback: `python -m ml_stack.fleet.shard_consent off`, then
-   `git checkout --detach 1e68c7f`, reinstall as in step 2 and restart the daemon.
-
-Not verified: Windows and WSL behaviour (daemon start-up, firewall for port 8770 from WSL, the
-pairing address), the real network, and whether that device's Python has pytest and xdist.
+Native Windows has not run it: the Rust side compiles for it (the process helpers use `taskkill`) and the
+executor avoids POSIX-only calls, but `scripts/test` itself has only run on macOS and Linux, and WSL start-up,
+the firewall and the real network are the device setup's (`docs/windows-wsl.md`). Neither has a speedup been
+measured on real machines.

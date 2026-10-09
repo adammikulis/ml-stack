@@ -62,6 +62,11 @@ def start_process(argv, **kwargs):
     return subprocess.Popen(argv, **process_group_kwargs(), **kwargs)
 
 
+def start_grouped(argv, **kwargs):
+    """Start a child in this process's own group, so whoever leads that group ends the child with it."""
+    return subprocess.Popen(argv, **kwargs)
+
+
 def terminate_process_group(proc, *, force=False):
     """Terminate a child and its process group."""
     if is_windows():

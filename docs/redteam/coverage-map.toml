@@ -15,32 +15,26 @@ uncovered = 53
 partial = 196
 
 [[group]]
-match = ["spawn:fleet/shard_run.py:checkout"]
+match = ["spawn:fleet/shard_run.py:checkout", "spawn:platform.py:start_grouped"]
 status = "covered"
-count = 1
-tests = ["tests/test_redteam_test_shards.py::test_a_path_outside_the_plain_test_files_is_refused",
-         "tests/test_redteam_test_shards.py::test_extra_fields_are_refused_whatever_they_say",
-         "tests/test_redteam_test_shards.py::test_a_tree_with_anything_but_plain_shipped_files_is_refused",
-         "tests/test_redteam_test_shards.py::test_a_device_with_shards_off_runs_nothing_and_says_so",
-         "tests/test_fleet_test_shards.py::test_the_host_runs_only_the_test_runner_on_the_named_files"]
-note = "the argv is built by the host from the test runner and validated file names; the sender supplies no argv, environment or working directory, and a refused shard starts nothing"
+count = 2
+tests = ["tests/test_testfarm.py::test_a_job_that_breaks_a_rule_is_refused_and_nothing_runs",
+         "tests/test_testfarm.py::test_a_tree_with_anything_but_plain_shipped_files_is_refused",
+         "tests/test_testfarm.py::test_an_archive_that_inflates_past_the_limit_is_refused_before_it_is_read",
+         "tests/test_testfarm.py::test_no_agent_marker_and_no_credential_reaches_the_runner",
+         "tests/test_testfarm_nodes.py::test_a_tree_that_escapes_its_folder_is_refused_by_the_executor_on_the_device",
+         "tests/test_testfarm_nodes.py::test_cancel_ends_the_runner_and_the_child_it_started",
+         "tests/test_testfarm_nodes.py::test_at_most_two_run_at_once_and_a_third_is_told_to_wait",
+         "tests/test_shard_limits.py::test_a_runner_that_floods_its_output_is_cancelled"]
+note = "the argv is built by the receiving executor from the test runner, the tier and validated file names; the sender supplies no argv, environment or working directory, a refused job starts nothing, and the node (app/poolside-node/tests/shard.rs) refuses a sender that is not a pool member, a device with shards off, and every malformed request before the executor exists"
 
 [[group]]
 match = ["spawn:fleet/shard_tree.py:tracked_paths"]
 status = "covered"
 count = 1
-tests = ["tests/test_redteam_test_shards.py::test_a_tree_with_anything_but_plain_shipped_files_is_refused",
-         "tests/test_redteam_test_shards.py::test_a_tree_that_inflates_past_the_limit_is_refused"]
+tests = ["tests/test_testfarm.py::test_a_tree_with_anything_but_plain_shipped_files_is_refused",
+         "tests/test_testfarm_nodes.py::test_a_pack_larger_than_a_request_may_carry_is_refused_before_anything_is_sent"]
 note = "lists the sender's own checkout with a fixed argv; the receiving side never runs it"
-
-[[group]]
-match = ["egress:fleet/shard_client.py:device_peer"]
-status = "covered"
-count = 1
-tests = ["tests/test_redteam_test_shards.py::test_a_peer_that_is_not_paired_is_refused_before_anything_is_read",
-         "tests/test_redteam_test_shards.py::test_the_cluster_secret_is_not_a_paired_device",
-         "tests/test_fleet_test_shards.py::test_unpaired_name_is_not_found"]
-note = "connects only to an active paired device's pinned certificate; an unpaired name or an unknown secret reaches nothing"
 
 [[group]]
 match = ["human:fleet/autostart_apply.py:install", "human:fleet/autostart_apply.py:rollback"]

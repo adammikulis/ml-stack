@@ -12,18 +12,24 @@ MOST_FAILURES = 200
 MOST_MESSAGE = 2000
 MOST_TAIL = 8000
 MOST_JUNIT = 32 << 20
+MOST_TESTS = 3000
 OUTCOMES = ("failure", "error", "skipped")
 
 
 def stamp() -> dict:
-    """Where this result was produced: ``sys.platform``, the Python version and the CPU count."""
+    """Where this result was produced: ``sys.platform``, the Python version, the CPU count and whether it is WSL."""
+    wsl = sys.platform == "linux" and "microsoft" in platform.release().lower()
     return {"system": sys.platform, "python": platform.python_version(),
-            "machine": platform.machine(), "cpus": os.cpu_count() or 1}
+            "machine": platform.machine(), "cpus": os.cpu_count() or 1, "wsl": wsl}
 
 
 def file_of(classname: str, files: list[str]) -> str:
-    """The shard file a junit classname (``tests.test_x.TestY``) belongs to, or ''."""
+    """The shard file a junit classname (``tests.test_x.TestY``) belongs to, or ''.
+
+    With no file list (a whole tier) the file is whatever ``tests/NAME.py`` the class names."""
     parts = classname.split(".")
+    if not files:
+        return f"tests/{parts[1]}.py" if len(parts) > 1 and parts[0] == "tests" else ""
     for end in range(len(parts), 0, -1):
         candidate = "/".join(parts[:end]) + ".py"
         if candidate in files:
@@ -57,13 +63,15 @@ def read_junit(path: Path, files: list[str]) -> dict:
         state, message = outcome(case)
         seconds = round(float(case.get("time") or 0.0), 4)
         if name:
+            counts.setdefault(name, {"passed": 0, "failed": 0, "error": 0, "skipped": 0, "wall_s": 0.0})
             counts[name][state] += 1
             counts[name]["wall_s"] = round(counts[name]["wall_s"] + seconds, 4)
         nodeid = f"{name}::{case.get('classname', '').split('.')[-1]}::{case.get('name', '')}"
         tests.append([nodeid, seconds])
         if state in ("failed", "error") and len(failures) < MOST_FAILURES:
             failures.append({"nodeid": nodeid, "state": state, "message": message})
-    return {"files": counts, "failures": failures, "tests": tests}
+    tests.sort(key=lambda row: -row[1])
+    return {"files": counts, "failures": failures, "tests": tests[:MOST_TESTS]}
 
 
 def build(shard: dict, junit: Path, exit_code: int, took: tuple[float, float], tail: str) -> dict:
