@@ -310,12 +310,14 @@ class TestFirstRunIsNotUpForGrabs:
 
 class TestThePassphraseNeverCrossesPlainHttp:
     def test_another_machine_is_refused_the_interface_when_it_would_be_plain_http(self, tmp_path):
+        """A listener beyond this machine cannot be built without TLS, so no passphrase can reach it."""
         plain = Serving(tmp_path, secure=False)
         try:
             for path, method in (("/ui/setup", "GET"), ("/ui/session", "POST")):
-                status, body, _ = plain.call(path, method=method, body={"passphrase": WORDS}
-                                             if method == "POST" else None, host=primary_ip())
-                assert status == 403 and "TLS only" in body["error"], (path, status, body)
+                with pytest.raises(ValueError, match="TLS or not at all"):
+                    plain.call(path, method=method, body={"passphrase": WORDS}
+                               if method == "POST" else None, host=primary_ip())
+                assert plain.lan_httpd is None
             assert plain.call("/ui/setup")[0] == 200
         finally:
             plain.close()

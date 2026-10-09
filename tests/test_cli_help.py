@@ -143,10 +143,16 @@ def test_the_top_level_help_names_every_subcommand(command, capsys):
     with pytest.raises(SystemExit):
         _main_of(command)(["--help"])
     usage = capsys.readouterr().out.split("\n\n", 1)[0]
-    for path in parsers_of(PARSERS[command]):
-        if path:
-            assert re.search(rf"\b{re.escape(path)}\b", usage), \
-                f"the usage line of {command} --help does not name its subcommand {path!r}"
+    everything = parsers_of(PARSERS[command])
+    for path in everything:
+        if not path:
+            continue
+        # A nested subcommand ('members list') is named on its parent's usage line
+        # ('members --help'); a first-level one is named on the command's own.
+        parent, _, name = path.rpartition(" ")
+        shown = everything[parent].format_usage() if parent else usage
+        assert re.search(rf"\b{re.escape(name)}\b", shown), \
+            f"the usage line of {command} {parent} --help does not name its subcommand {name!r}".replace("  ", " ")
 
 
 # -- the docs ------------------------------------------------------------------------
