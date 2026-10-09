@@ -17,7 +17,7 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
-from ml_stack import home, keystore
+from ml_stack import home, keystore, lock
 from ml_stack.credentials.environment import child_environment
 from ml_stack.credentials.reading import (
     INSECURE_ENV,
@@ -121,12 +121,25 @@ def _wrapped() -> dict[str, str]:
     return table if isinstance(table, dict) else {}
 
 
+@contextlib.contextmanager
+def _rewriting() -> Iterator[None]:
+    """Hold the lock for a read-modify-write of the wrapped file, so two ``--keychain`` commands
+    at once do not lose one value."""
+    wrapped_path().parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    try:
+        with lock.rewriting(wrapped_path()):
+            yield
+    except lock.Busy as exc:
+        raise CredentialError(f"another ml-stack command is changing {wrapped_path().name}; "
+                              "try again in a moment") from exc
+
+
 def _keep(name: str, value: str) -> None:
     ks = keystore.default()
     blob = base64.b64encode(ks.wrap(PURPOSE, name, value.encode())).decode()
-    wrapped_path().parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    write_json(wrapped_path(), {"schema_version": 1, "values": {**_wrapped(), name: blob}})
-    wrapped_path().chmod(0o600)
+    with _rewriting():
+        write_json(wrapped_path(), {"schema_version": 1, "values": {**_wrapped(), name: blob}})
+        wrapped_path().chmod(0o600)
     ks.mark_migrated(KEYRING_SERVICE, name)
 
 
@@ -265,11 +278,12 @@ def unset(name: str, *, keychain: bool = False) -> bool:
     valid_name(name)
     if keychain:
         _migrate(name)
-        table = _wrapped()
-        if name not in table:
-            return False
-        del table[name]
-        write_json(wrapped_path(), {"schema_version": 1, "values": table})
+        with _rewriting():
+            table = _wrapped()
+            if name not in table:
+                return False
+            del table[name]
+            write_json(wrapped_path(), {"schema_version": 1, "values": table})
         return True
     path = file_path()
     entries = _entries(path)
