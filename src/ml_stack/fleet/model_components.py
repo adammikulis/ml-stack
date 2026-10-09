@@ -154,7 +154,7 @@ def inventory(model: Path) -> dict:
 
 
 def catalogue(models, name: str, source: str = "", key: bytes | None = None) -> dict:
-    model = models.find(name)
+    model = models.listed(name)       # a name from a request is compared, never opened
     source = source or (source_for(model.path) if model else "")
     offers, error = [], ""
     repo, _ = _reference(source)
