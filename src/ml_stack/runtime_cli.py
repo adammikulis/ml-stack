@@ -15,11 +15,14 @@ from ml_stack import (
     runtime_board,
     runtime_coalesce,
     runtime_deploy,
+    runtime_host,
     runtime_store,
     runtime_trust,
 )
 from ml_stack.command import Group, flag
 from ml_stack.fleet import runtime_wheel
+from ml_stack.fleet.launch import HTTP_PORT
+from ml_stack.fleet.runtime_paths import default_root
 from ml_stack.home import expand
 from ml_stack.lock import Busy, held_by, only_one
 from ml_stack.log import say, warn
@@ -93,10 +96,12 @@ def _again(args: argparse.Namespace) -> list[str]:
 
 def _audited(args: argparse.Namespace, command: str, plan: runtime_deploy.Plan, result: str, detail: str = "") -> None:
     verb = f"{command} --force-build" if getattr(args, "force_build", False) else command
-    runtime_trust.audit(verb, plan.commit, result, agent=args.agent, detail=detail)
+    runtime_trust.audit(verb, plan.commit, result, agent=args.agent, detail=detail, via=getattr(args, "via", ""))
 
 
 def _ensure(args: argparse.Namespace) -> int:
+    if not args.background:
+        args.via = runtime_trust.authorize("ensure")
     if args.allow_unmerged:
         if args.background:
             raise runtime_deploy.DeployError("--allow-unmerged builds in the foreground, at a terminal")
@@ -140,11 +145,21 @@ def _settled(args: argparse.Namespace) -> int:
 
 
 def _rollback(args: argparse.Namespace) -> int:
+    args.via = runtime_trust.authorize("rollback")
     previous = str(runtime_store.selection().get("commit", ""))
     plan = plan_from(args)
     outcome = runtime_deploy.rollback(plan, args.to)
     _audited(args, "rollback", plan, outcome.action, outcome.detail)
     runtime_board.announce(outcome, previous, verb="rollback to", agent=args.agent)
+    say(f"{outcome.action} {outcome.commit[:7]} {outcome.detail}".strip())
+    return 0 if outcome.ok else 1
+
+
+def _restart_host(args: argparse.Namespace) -> int:
+    args.via = runtime_trust.authorize("restart-host")
+    outcome = runtime_host.restart(args.port, expand(args.root) if args.root else default_root(),
+                                   wait_s=args.within, force=args.force)
+    runtime_trust.audit("restart-host", outcome.commit, outcome.action, agent=args.agent, detail=outcome.detail, via=args.via)
     say(f"{outcome.action} {outcome.commit[:7]} {outcome.detail}".strip())
     return 0 if outcome.ok else 1
 
@@ -238,6 +253,13 @@ GROUP.add("status", _reported(_status), help="show the selected runtime, the fal
           options=[*COMMON, flag("--json", action="store_true")])
 GROUP.add("rollback", _reported(_rollback), help="select the newest earlier verified runtime (needs an agent)",
           options=[*COMMON, flag("--to", default="", help="commit prefix to select")])
+
+GROUP.add("restart-host", _reported(_restart_host), help="restart the running host (the app's daemon) onto the selected runtime, keeping its port and root",
+          options=[flag("--port", type=int, default=HTTP_PORT), flag("--root", default="", help="the host's state root (default: the app's)"),
+                   flag("--within", type=float, default=runtime_host.RESTART_WAIT_S, help="seconds to wait for the host to report the selected commit; 0 returns at once"),
+                   flag("--force", action="store_true", help="restart even when the host already runs the selected commit"),
+                   flag("--agent", default="", help="workspace agent the restart is attributed to (default: the environment's)"),
+                   flag("--label", default="", help="helper label shown beside the agent")])
 
 main = GROUP.run
 

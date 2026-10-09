@@ -247,7 +247,7 @@ if not usable(python):
             try:
                 open(marker, 'w').close()
                 with os.fdopen(os.open(os.path.join(root, 'ensure.log'), os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600), 'ab') as log:
-                    subprocess.Popen([sys.executable, '-P', '-m', 'ml_stack.runtime_cli', 'ensure'], cwd=source,
+                    subprocess.Popen([sys.executable, '-P', '-m', 'ml_stack.runtime_cli', 'ensure', '--background', '--now'], cwd=source,
                                      env={{**env, 'PYTHONPATH': os.path.join(source, 'src')}},
                                      stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True)
             except OSError:

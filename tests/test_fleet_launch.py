@@ -194,3 +194,47 @@ def test_explicit_restart_replaces_same_commit_without_passing_flag_to_daemon(mo
 def test_launcher_refuses_the_removed_force_restart_flag_as_a_daemon_option(monkeypatch):
     known, rest = launch._arguments(['--restart', '--no-browser', '--force-restart'])
     assert known.restart and rest == ['--force-restart']
+
+
+@pytest.fixture
+def silent_port():
+    """A port that accepts connections and never answers, as a daemon too loaded to reply."""
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(8)
+    yield listener.getsockname()[1]
+    listener.close()
+
+
+def test_a_held_port_whose_health_probe_missed_never_starts_a_second_daemon(monkeypatch, silent_port, capsys):
+    monkeypatch.setattr(launch, "already_running", lambda _port: None)
+    monkeypatch.setattr(launch, "SLOW_HEALTH_TIMEOUT_S", 0.2, raising=False)
+    monkeypatch.setattr(launch, "SLOW_HEALTH_TRIES", 2, raising=False)
+    assert launch.main(["--no-browser", "--port", str(silent_port)],
+                       daemon_main=lambda _argv: pytest.fail("started a daemon on a held port")) == 1
+    assert "holds port" in capsys.readouterr().err
+
+
+def test_a_held_port_that_answers_slowly_is_the_running_daemon(monkeypatch, capsys):
+    server = Server(("127.0.0.1", 0), _Health)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        calls = iter([None])
+        monkeypatch.setattr(launch, "already_running", lambda _port: next(calls, None))
+        monkeypatch.setattr(launch, "same_commit", lambda *_args: True)
+        monkeypatch.setattr(launch, "_open_when_ready", lambda *_args: None)
+        assert launch.main(["--no-browser", "--port", str(server.server_address[1])],
+                           daemon_main=lambda _argv: pytest.fail("started a duplicate")) == 0
+        assert "already running" in capsys.readouterr().out
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_a_port_nothing_listens_on_starts_the_daemon(monkeypatch):
+    calls = []
+    monkeypatch.setattr(launch, "already_running", lambda _port: None)
+    monkeypatch.setattr(launch, "_open_when_ready", lambda *_args: None)
+    assert launch.main(["--no-browser", "--port", str(_free_port())],
+                       daemon_main=lambda argv: calls.append(argv) or 0) == 0
+    assert calls

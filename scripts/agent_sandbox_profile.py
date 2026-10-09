@@ -57,6 +57,8 @@ LINUX_DENY_WRITE = (".config/systemd", ".config/autostart", ".local/share/system
 CACHE_ALLOW_WRITE = (".cache/dev-test-slots", ".cache/ml_stack", ".cache/huggingface", ".cache/pip",
                      ".cache/ms-playwright", "Library/Caches/ms-playwright", "Library/Caches/pip")
 SHARED_GIT_DENY = ("config", "hooks", "info", "worktrees/*/config.worktree", "worktrees/*/hooks")
+DEPLOY_COMMANDS = ("ml-stack runtime ensure", "ml-stack runtime rollback", "ml-stack runtime restart-host")
+"""Run outside the sandbox because they write the runtimes root; the `runtime.deploy` authority gate is their guard."""
 CHECKOUT_DENY = ("scripts/hooks", ".claude", ".mcp.json", ".git/config", ".git/hooks", ".githooks")
 
 
@@ -131,6 +133,7 @@ def claude_settings(layout: Layout) -> dict:
             "enabled": True,
             "failIfUnavailable": True,
             "allowUnsandboxedCommands": False,
+            "excludedCommands": list(DEPLOY_COMMANDS),
             "autoAllowBashIfSandboxed": False,
             "filesystem": {
                 "allowWrite": write_roots(layout),

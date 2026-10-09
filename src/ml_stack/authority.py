@@ -36,6 +36,7 @@ GATES: dict[str, str] = {
     "fleet.recovery": "fleet",
     "serve.wired-limit": "serve",
     "chat.policy": "chat",
+    "runtime.deploy": "runtime",
 }
 """Each delegable gate and its group."""
 

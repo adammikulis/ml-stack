@@ -36,6 +36,12 @@ def test_claude_settings_close_the_escape_hatches(layout):
     assert sandbox["autoAllowBashIfSandboxed"] is False
 
 
+def test_only_the_gated_runtime_deploy_commands_run_outside_the_sandbox(layout):
+    sandbox = profile.claude_settings(layout)["sandbox"]
+    assert sandbox["excludedCommands"] == ["ml-stack runtime ensure", "ml-stack runtime rollback", "ml-stack runtime restart-host"]
+    assert str(layout.state / "runtimes") in sandbox["filesystem"]["denyWrite"]
+
+
 def test_every_worktree_is_writable_and_its_git_config_and_hooks_are_not(layout, tmp_path):
     files = profile.claude_settings(layout)["sandbox"]["filesystem"]
     for checkout in (layout.primary, layout.worktrees[0]):
