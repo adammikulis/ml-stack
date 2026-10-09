@@ -34,6 +34,10 @@ pub struct Beacon {
     pub addr: IpAddr,
     pub port: u16,
     pub ts: u64,
+    /// The project key of the sender's pool (`projectid::project_key`), or empty for none.
+    pub project: String,
+    /// Whether the sender is alone in its pool.
+    pub lone: bool,
 }
 
 /// Whether an address may be advertised to other machines.
@@ -51,7 +55,7 @@ fn signed_bytes(b: &Beacon) -> Vec<u8> {
 /// The datagram for ``b``, signed with ``key`` (whose public key must be ``b.public``).
 pub fn encode(b: &Beacon, key: &SigningKey) -> Vec<u8> {
     let sig = key.sign(&signed_bytes(b));
-    json!({"v": 1, "pool": b.pool, "fp": b.fingerprint, "pub": hex(&b.public), "addr": b.addr.to_string(), "port": b.port, "ts": b.ts, "sig": hex(&sig.to_bytes())})
+    json!({"v": 1, "pool": b.pool, "fp": b.fingerprint, "pub": hex(&b.public), "addr": b.addr.to_string(), "port": b.port, "ts": b.ts, "project": b.project, "lone": b.lone, "sig": hex(&sig.to_bytes())})
         .to_string().into_bytes()
 }
 
@@ -73,8 +77,10 @@ pub fn decode(bytes: &[u8], now_ms: u64, allow_loopback: bool) -> Result<Beacon>
     let addr: IpAddr = field(&v, "addr")?.parse().map_err(|_| Error::Invalid("beacon address".into()))?;
     let port = v.get("port").and_then(Value::as_u64).filter(|p| (1..65536).contains(p)).ok_or_else(|| Error::Invalid("beacon port".into()))? as u16;
     let ts = v.get("ts").and_then(Value::as_u64).ok_or_else(|| Error::Invalid("beacon time".into()))?;
-    let b = Beacon { pool: field(&v, "pool")?.into(), fingerprint: field(&v, "fp")?.into(), public, addr, port, ts };
-    if !crate::cert::valid_fingerprint(&b.fingerprint) || b.pool.len() != 16 {
+    let project = v.get("project").and_then(Value::as_str).unwrap_or("").to_string();
+    let lone = v.get("lone").and_then(Value::as_bool).unwrap_or(false);
+    let b = Beacon { pool: field(&v, "pool")?.into(), fingerprint: field(&v, "fp")?.into(), public, addr, port, ts, project, lone };
+    if !crate::cert::valid_fingerprint(&b.fingerprint) || b.pool.len() != 16 || !(b.project.is_empty() || crate::projectid::valid_key(&b.project)) {
         return Err(Error::Invalid("beacon names".into()));
     }
     if !(advertisable(addr) || allow_loopback) {
@@ -135,10 +141,20 @@ pub fn listener(bind: SocketAddr, join: Option<Ipv4Addr>) -> Result<UdpSocket> {
     Ok(socket)
 }
 
-/// What the beacon loops need from the node, asked afresh each time.
+/// What a node says of itself in a beacon, asked afresh each time. An empty ``pool`` says nothing
+/// (a node still listening for a pool to join stays quiet).
+#[derive(Clone, Debug, Default)]
+pub struct Advert {
+    pub pool: String,
+    pub fingerprint: String,
+    pub port: u16,
+    pub project: String,
+    pub lone: bool,
+}
+
+/// What the beacon loops need from the node.
 pub struct Hooks {
-    /// `(pool id, fingerprint, listening port)` now.
-    pub identity: Box<dyn Fn() -> (String, String, u16) + Send + Sync>,
+    pub identity: Box<dyn Fn() -> Advert + Send + Sync>,
     pub on_beacon: Box<dyn Fn(Beacon) + Send + Sync>,
 }
 
@@ -166,10 +182,10 @@ pub fn start(cfg: BeaconConfig, key: SigningKey, hooks: Hooks, stop: Arc<AtomicB
         let Ok(out) = UdpSocket::bind("0.0.0.0:0") else { return };
         let _ = out.set_multicast_loop_v4(true);
         while !stop.load(Ordering::SeqCst) {
-            let (pool, fingerprint, port) = (hooks.identity)();
-            let addr = cfg.advertise.or_else(local_address);
+            let Advert { pool, fingerprint, port, project, lone } = (hooks.identity)();
+            let addr = cfg.advertise.or_else(local_address).filter(|_| !pool.is_empty());
             if let Some(addr) = addr.filter(|a| advertisable(*a) || cfg.allow_loopback) {
-                let datagram = encode(&Beacon { pool, fingerprint, public, addr, port, ts: now() }, &key);
+                let datagram = encode(&Beacon { pool, fingerprint, public, addr, port, ts: now(), project, lone }, &key);
                 for to in &cfg.send_to {
                     let _ = out.send_to(&datagram, to);
                 }

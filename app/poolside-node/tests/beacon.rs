@@ -14,13 +14,13 @@ fn sample(addr: &str) -> (Beacon, ed25519_dalek::SigningKey) {
     let key = kit::key(7);
     let b = Beacon {
         pool: "0123456789abcdef".into(), fingerprint: "a".repeat(64), public: key.verifying_key().to_bytes(),
-        addr: addr.parse().unwrap(), port: 4000, ts: wall_ms(),
+        addr: addr.parse().unwrap(), port: 4000, ts: wall_ms(), project: String::new(), lone: true,
     };
     (b, key)
 }
 
 fn cfg_with(beacon: poolside_node::beacon::BeaconConfig) -> NetConfig {
-    NetConfig { listen: "127.0.0.1:0".parse().unwrap(), beacon: Some(beacon), sync_every: None }
+    NetConfig { listen: "127.0.0.1:0".parse().unwrap(), beacon: Some(beacon), sync_every: None, project: None, settle: Duration::ZERO }
 }
 
 #[test]
@@ -106,7 +106,7 @@ fn forge_beacon(to_port: u16, z: &Dev, claimed: &str) {
     let key = z.node.lock().unwrap().key.clone();
     let b = Beacon {
         pool: claimed.into(), fingerprint: z.fp(), public: key.verifying_key().to_bytes(),
-        addr: "127.0.0.1".parse().unwrap(), port: z.net.port, ts: wall_ms(),
+        addr: "127.0.0.1".parse().unwrap(), port: z.net.port, ts: wall_ms(), project: String::new(), lone: true,
     };
     let out = UdpSocket::bind("127.0.0.1:0").unwrap();
     for _ in 0..3 {
