@@ -141,6 +141,8 @@ Request `{"v":1, "id":…, "method":…, "board":…, "token":…, "params":{…
 | `pair_accept` | token with the grant | `passphrase` (else a six-digit code is made), `ttl_s` | `{code, expires_in_s, port, fingerprint}` |
 | `pair_start` | token with the grant | `host, port, passphrase`; without a passphrase `fingerprint` (join under `open`) | `{pool, peer}` |
 | `sync_now` | token with the grant | | `{reached}` |
+| `shard_call` | token with the grant | `device` (name or fingerprint), `op`, `args` | the device's answer to one test-shard op (docs/test-farm.md); the node adds `op` and the session as `by`, and refuses `op`/`by` in `args` |
+| `shard_consent` | (token with the grant to change) | `enabled`, `python`, `repo` | `{enabled, python, repo, by, at_ms}`; turning it on or off writes an audit entry to the pool board; shards are off until a person turns them on at that device |
 
 | `lease_acquire`, `lease_renew`, `lease_release`, `lease_list`, `lease_wait` | board, token | see "Leases" | a lease |
 
@@ -285,7 +287,9 @@ listener is the one network port.
 - **Join policy**: one pool attribute, `open` or `secure` (default `secure`), newest change wins, set by
   `set_join_policy` and carried by the `members` op.
 - **Peer ops** (`peer.rs`, frames up to 4 MiB): `hello`, `join_open`, `pair_exchange`, `pair_confirm` for
-  a non-member; `members`, `boards`, `vector`, `pull`, `push` for a member. A device syncs only the boards
+  a non-member; `members`, `boards`, `vector`, `pull`, `push` for a member. `shard_caps`, `shard_put`, `shard_start`, `shard_status`, `shard_cancel` (members only)
+  run another device's tests here when its person allowed it (`shard/`, docs/test-farm.md): the sender is the
+  certificate, a shard belongs to the certificate that made it, the run holds CPU slots in the lease table. A device syncs only the boards
   both hold, through `sync::rows_since` and `sync::take`, so a wire row meets the checks an in-process row
   does and the same quotas (400 rows, 2 MiB, 16 origins per request). A relay's copy never marks an origin
   damaged; only the device that owns the origin can, by sending a forged copy of it.

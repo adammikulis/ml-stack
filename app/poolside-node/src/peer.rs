@@ -12,6 +12,7 @@
 //! | `pair_exchange`, `pair_confirm` | anyone, while pairing is open | SPAKE2 (`pairing`) |
 //! | `members` | members | swap pool records |
 //! | `boards`, `vector`, `pull`, `push` | members | board sync (`netsync`) |
+//! | `shard_caps`, `shard_put`, `shard_start`, `shard_status`, `shard_cancel` | members | test shards (`shard`) |
 
 use std::collections::BTreeMap;
 use std::net::{IpAddr, SocketAddr, TcpStream};
@@ -162,6 +163,7 @@ fn answer(net: &Net, node: &mut Node, der: &[u8], ip: IpAddr, req: &Value) -> Re
         ("vector", _) => vector(node, &bfp, req),
         ("pull", _) => pull(node, &bfp, req),
         ("push", _) => push(node, &bfp, req),
+        (op, _) if crate::shard::OPS.contains(&op) => net.shards.handle(node, &fp, op, req),
         _ => Err(Error::Invalid("unknown op".into())),
     }
 }

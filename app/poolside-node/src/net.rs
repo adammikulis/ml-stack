@@ -24,6 +24,7 @@ use crate::pairing::{context_for, new_code, Session, Window};
 use crate::peer::{self, PeerClient};
 use crate::poolapi::{authorize, NETWORK};
 use crate::poolops::wall_ms;
+use crate::shard::{self, Shards};
 use crate::tls::{server_config, StandingFn};
 
 /// How long a device with a project listens for a pool of it before it makes one.
@@ -56,6 +57,7 @@ pub struct Net {
     pub server_config: Arc<ServerConfig>,
     pub port: u16,
     pub stop: Arc<AtomicBool>,
+    pub shards: Arc<Shards>,
     window: Mutex<Option<Window>>,
     joining: Mutex<BTreeSet<String>>,
     beacon_stats: OnceLock<Arc<BeaconStats>>,
@@ -95,17 +97,18 @@ fn join_hint(e: &Error) -> String {
 impl Net {
     /// Start listening (and beaconing and syncing, as configured) for ``node``.
     pub fn start(node: Arc<Mutex<Node>>, cfg: NetConfig) -> Result<Arc<Net>> {
-        let (me, stop) = {
+        let (me, stop, dir) = {
             let n = locked(&node)?;
-            (n.cert.clone(), n.stop.clone())
+            (n.cert.clone(), n.stop.clone(), n.dir.clone())
         };
+        let shards = Shards::new(node.clone(), &dir, stop.clone())?;
         let standing_of = node.clone();
         let standing: StandingFn = Arc::new(move |fp| standing_of.lock().map_or(Standing::Revoked, |n| n.members.standing(fp)));
         let listener = TcpListener::bind(cfg.listen)?;
         listener.set_nonblocking(true)?;
         let port = listener.local_addr()?.port();
         let net = Arc::new(Net {
-            node, server_config: server_config(&me, standing)?, me, port, stop,
+            node, server_config: server_config(&me, standing)?, me, port, stop, shards,
             window: Mutex::new(None), joining: Mutex::new(BTreeSet::new()), settling: AtomicBool::new(false), beacon_stats: OnceLock::new(), last_join: Mutex::new(Value::Null),
         });
         locked(&net.node)?.facts.listen = Some(listener.local_addr()?.to_string());
@@ -471,7 +474,49 @@ impl Net {
         match c.method.as_str() {
             "pair_accept" => self.pair_accept(&text("passphrase"), number("ttl_s", 120)),
             "pair_start" => self.pair_start(addr_of(&text("host"), number("port", 0))?, &text("passphrase"), &text("fingerprint")),
+            "shard_call" => self.shard_call(c),
             _ => Ok(json!({"reached": self.sync_once()?})),
         }
+    }
+
+    // -- test shards --------------------------------------------------------
+    /// Pass one shard op to the pool member named by ``device`` (a name or a fingerprint). The
+    /// node adds `op` and `by` (the session behind the token); the peer decides from the
+    /// certificate this device shows, so neither the session nor an argument can claim another.
+    fn shard_call(&self, c: &Call) -> Result<Value> {
+        let name = c.params.get("device").and_then(Value::as_str).unwrap_or("");
+        let op = c.params.get("op").and_then(Value::as_str).unwrap_or("");
+        let mut request = match c.params.get("args") {
+            None => serde_json::Map::new(),
+            Some(Value::Object(a)) => a.clone(),
+            Some(_) => return Err(Error::Invalid("args is an object".into())),
+        };
+        if !shard::OPS.contains(&op) {
+            return Err(Error::Invalid(format!("op is one of {}", shard::OPS.join(", "))));
+        }
+        shard::host::passable(&request)?;
+        let (fp, addr, by) = {
+            let node = locked(&self.node)?;
+            let who = authorize(&node, &c.token, "shard_call")?;
+            let (fp, addr) = self.device_named(&node, name)?;
+            (fp, addr, format!("{}/{}", who.board, who.name))
+        };
+        request.insert("op".into(), json!(op));
+        request.insert("by".into(), json!(by));
+        PeerClient::connect(&self.me, addr, Some(&fp))?.call(&Value::Object(request))
+    }
+
+    /// The active member other than this device that ``name`` names, and where it was last reached.
+    fn device_named(&self, node: &Node, name: &str) -> Result<(String, SocketAddr)> {
+        let me = self.me.fingerprint();
+        let found: Vec<Device> = node.members.active().into_iter().filter(|d| d.fingerprint != me && (d.fingerprint == name || d.name == name)).collect();
+        let device = match found.as_slice() {
+            [one] => one,
+            [] => return Err(Error::Invalid(format!("no other active device of this pool is called {}", name.chars().take(60).collect::<String>()))),
+            _ => return Err(Error::Invalid("two devices have that name: name one by its fingerprint".into())),
+        };
+        let addr = node.facts.peers.get(&device.fingerprint).and_then(|f| f.addr.clone())
+            .ok_or_else(|| Error::Invalid(format!("{} has not been reached yet: no address is known", device.name)))?;
+        Ok((device.fingerprint.clone(), addr.parse().map_err(|_| Error::Invalid("the address on record is not usable".into()))?))
     }
 }

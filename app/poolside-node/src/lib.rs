@@ -36,6 +36,7 @@ pub mod row;
 pub mod rules;
 pub mod sessions;
 pub mod server;
+pub mod shard;
 pub mod state;
 pub mod sync;
 pub mod sys;

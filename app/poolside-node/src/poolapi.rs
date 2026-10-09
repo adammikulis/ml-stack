@@ -13,7 +13,7 @@ use crate::membership::Policy;
 use crate::node::Node;
 
 /// The methods that act on the network and so run without the node lock held.
-pub const NETWORK: [&str; 3] = ["pair_accept", "pair_start", "sync_now"];
+pub const NETWORK: [&str; 4] = ["pair_accept", "pair_start", "sync_now", "shard_call"];
 
 /// The params each pool method accepts; None for any other method.
 pub fn params(method: &str) -> Option<&'static [&'static str]> {
@@ -23,6 +23,8 @@ pub fn params(method: &str) -> Option<&'static [&'static str]> {
         "set_join_policy" => &["policy"],
         "pair_accept" => &["passphrase", "ttl_s"],
         "pair_start" => &["host", "port", "passphrase", "fingerprint"],
+        "shard_call" => &["device", "op", "args"],
+        "shard_consent" => &["enabled", "python", "repo"],
         _ => return None,
     })
 }
@@ -69,6 +71,7 @@ pub fn dispatch(node: &mut Node, method: &str, token: &str, p: &Map<String, Valu
             let changed = node.change_policy(policy, &format!("{}/{}", who.board, who.name))?;
             Ok(json!({"policy": policy.name(), "changed": changed}))
         }
+        "shard_consent" => crate::shard::consent_call(node, token, p),
         _ => Err(Error::Invalid("this node's network is not running".into())),
     }
 }
