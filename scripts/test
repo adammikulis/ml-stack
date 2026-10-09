@@ -46,6 +46,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 import affected
+import gatescope
 import testhistory
 import testjobs
 import testprelude
@@ -389,6 +390,10 @@ STALE_HINTS = {"command reference": "docs/commands.md is stale: run `scripts/ref
 def gate(args: argparse.Namespace, rest: list[str]) -> int:
     """The structural checks a merge is gated on, in this order, all of them reported."""
     failed = []
+    reason = "" if args.full else gatescope.unreached(ROOT, args.base)
+    if reason:
+        print(f"gate: skipped: {reason}; `--full` runs it anyway")
+        return 0
     for name, command in gate_steps(args.workers, rest):
         began = time.monotonic()
         print(f"gate: {name}", flush=True)
@@ -547,6 +552,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--key", default="", help="subscribe: follow the run of this reuse key prefix")
     parser.add_argument("--base", default=BASE, help="branch quick diffs against")
     parser.add_argument("--slow", action="store_true", help="quick: include slow tests")
+    parser.add_argument("--full", action="store_true", help="gate: run every check even when the diff reaches none")
     parser.add_argument("--explain", action="store_true", help="quick: say what selected what")
     parser.add_argument("--artifact-output", action="store_true", help="macOS with --confine: keep test output in private inert artifacts")
     parser.add_argument("--confine", action="store_true", help="macOS: run pytest under the Seatbelt confinement kernel")
