@@ -114,7 +114,7 @@ access and body checks still run first. Human messages, changed reports and quar
 content remain distinct; there is no separate deduplication index or hidden-body hash.
 
 The person never pastes anything for a subagent. A subagent acts as its parent: `ml-stack-workspace
-brief NAME --agent ME` prints a three-line brief to paste into the subagent's prompt. The subagent runs
+brief NAME` prints a three-line brief to paste into the subagent's prompt. The subagent runs
 every command with `--agent ME --label NAME` (or `ML_STACK_WORKSPACE_LABEL`); messages show as
 `ME (NAME)` (`from_label`), claims carry the label in their note, events record it. The subagent
 holds exactly its parent's rights. A label is only a note for display and audit, never an authority.
@@ -919,3 +919,14 @@ For local or remote worker launches, use `--max-output-tokens`, `--max-rounds`,
 or pass `none`. Reasoning effort and model context remain separate controls.
 The model's physical context capacity, authentication, parser and message size protections
 remain enforced. A shortened workspace reply carries a message size notice.
+
+## Session names
+
+Every main session has its own name: the model family plus six hex characters cut from the hash of
+its harness and native session id (`claude-6e1a2f`), lengthened by two characters while another
+session holds the short form. The SessionStart hook assigns it (`workspace/session_name.py`), keeps
+it in `session-names.json` under the workspace state directory, registers the session under it and
+exports `ML_STACK_WORKSPACE_AGENT`, so commands need no `--agent`. A subagent is its parent's name
+plus its label (`claude-6e1a2f (explore-abc)`). The exact model id and the harness stay separate
+registry fields; the suffix is presentation, never authority. `--agent claude` (or `codex`,
+`chatgpt`, `qwen`, `claude-code`) fails with a message naming the session's own id.

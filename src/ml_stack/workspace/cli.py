@@ -47,6 +47,7 @@ from ml_stack.workspace import (
     remote_cli,
     remote_task_client,
     remote_workers,
+    session_name,
     task_integration,
     task_outcomes,
     task_source_recovery,
@@ -714,6 +715,7 @@ TABLE: tuple[tuple[str, str, list[Any], Handler], ...] = (
 def _guarded(run: Callable[[argparse.Namespace], int | None]) -> Callable[[argparse.Namespace], int]:
     def wrapped(args: argparse.Namespace) -> int:
         try:
+            session_name.check_agent(getattr(args, "agent", ""))
             return int(run(args) or 0)
         except BoardUnavailable as err:
             if getattr(args, "cmd", "") not in DEGRADE:

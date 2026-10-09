@@ -1,4 +1,8 @@
 """Readable agent presentation, independent of capability and routing identity."""
+import hashlib
+import re
+
+from ml_stack.workspace import session_name
 from ml_stack.workspace.identity import AGENT, CAPS
 from ml_stack.workspace.model_tiers import LOWEST, tier_of
 
@@ -6,16 +10,22 @@ SPAWN_NOTICE = ("no main session is eligible to coordinate and only lowest-tier 
                 "spawn a subagent at a suitable level (Sonnet 5.5 is acceptable) to coordinate")
 
 
-def family(model: str) -> str:
-    """Return a readable family from a recorded exact model identifier."""
-    model = model.lower().rsplit("/", 1)[-1]
-    if model.startswith("claude-"):
-        return "Claude"
-    if model.startswith(("gpt-", "chatgpt-", "o1", "o3", "o4")):
-        return "ChatGPT"
-    if model == "thinkingcap-qwen3.8-27b" or model.startswith("qwen"):
-        return "Qwen"
-    return "Model unknown"
+SESSION = re.compile(r"(claude|chatgpt|qwen|agent)-[0-9a-f]{6,64}")
+
+
+def readable_name(registry, name: str, model: str) -> str:
+    """The one name a human reads for ``name``: model family plus a suffix of its whole identity.
+
+    A session id from `session_name` is already that name. Any other id gets the same shape, its
+    suffix cut from the hash of the id and lengthened while another id shares it."""
+    if SESSION.fullmatch(name):
+        return name
+    full = hashlib.sha256(name.encode()).hexdigest()
+    others = [hashlib.sha256(other.encode()).hexdigest() for other in registry.ids() if other != name]
+    width = session_name.SHORT
+    while width < len(full) and any(other[:width] == full[:width] for other in others):
+        width += 2
+    return f"{session_name.family_word(model)}-{full[:width]}"
 
 
 def metadata(registry, name, label=''):
@@ -29,18 +39,11 @@ def metadata(registry, name, label=''):
         info = registry.info(name)
     parent = info['parent']
     if parent:
-        parent_name = metadata(registry, parent)['display_name']
-        display = f"Subagent · {name.rpartition('/')[2]} (parent {parent_name})"
+        display = f"{metadata(registry, parent)['display_name']} ({name.rpartition('/')[2]})"
         kind = 'subagent'
     else:
-        presentation = info.get('presentation', {})
-        model_family = family(info.get('model', ''))
-        device = info.get('device', {})
-        system = {'macOS': 'Mac', 'Darwin': 'Mac'}.get(device.get('os'), device.get('os'))
-        ordinal = presentation.get('ordinal')
-        suffix = f"session {ordinal}" if ordinal else 'unregistered session'
-        display = f"{model_family} · {system or device.get('hostname') or 'device unknown'} · {suffix}"
-        kind = presentation.get('kind', 'unknown')
+        display = readable_name(registry, name, info.get('model', ''))
+        kind = info.get('presentation', {}).get('kind', 'unknown')
     if parent or kind != 'main':
         reason = 'not a main session'
     elif registry.role_of(name) != AGENT or not set(CAPS) <= set(info['can']):

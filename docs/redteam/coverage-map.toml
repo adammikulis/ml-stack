@@ -992,6 +992,12 @@ tests = ["tests/test_redteam_runtime_deploy.py::test_a_checkout_path_with_shell_
 note = "Checkout paths, refs, state roots, launcher directories and forwarded arguments are single argv items with no shell; a ref starting with a dash names no commit; module and function names in launchers are matched against a pattern"
 
 [[group]]
+match = ["spawn:redact/added.py:added_lines"]
+status = "covered"
+tests = ["tests/test_no_real_names.py::test_a_revision_that_is_an_option_is_refused_and_a_hostile_path_reaches_git_as_one_argument"]
+note = "a hostile path stays one literal git argument and a revision that is an option is refused before git runs"
+
+[[group]]
 match = ["spawn:*"]
 status = "partial"
 tests = ["tests/test_redteam_spawn.py::test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line"]

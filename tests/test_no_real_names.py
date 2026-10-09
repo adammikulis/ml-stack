@@ -542,3 +542,27 @@ def test_only_the_lines_a_commit_adds_are_judged_not_what_the_file_already_said(
     code, said = check(where, tmp_path, **{"notes.txt": "Ask Wren Halloway about the kiln.\nA clean new line.\n"
                                                          "And Wren Halloway again.\n"})
     assert code == 1 and "notes.txt:3" in said and "notes.txt:1" not in said
+
+
+def test_a_revision_that_is_an_option_is_refused_and_a_hostile_path_reaches_git_as_one_argument(tmp_path):
+    import subprocess
+
+    from ml_stack.redact.added import added_lines
+
+    def git(*args):
+        subprocess.run(["git", "-C", str(tmp_path), *args], check=True, capture_output=True)
+
+    git("init", "-q")
+    git("config", "user.email", "t@example.invalid")
+    git("config", "user.name", "t")
+    hostile = tmp_path / "a b;$(touch pwned)`x`.txt"
+    hostile.write_text("one\n")
+    git("add", "--all")
+    git("commit", "-q", "-m", "base")
+    hostile.write_text("one\ntwo\n")
+    git("add", "--all")
+    assert added_lines(str(tmp_path), hostile.name) == {2}
+    assert not (tmp_path / "pwned").exists()
+    with pytest.raises(ValueError):
+        added_lines(str(tmp_path), hostile.name, against="--output=" + str(tmp_path / "out"))
+    assert not (tmp_path / "out").exists()

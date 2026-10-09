@@ -1,7 +1,7 @@
 {
- "surfaces": 827,
+ "surfaces": 829,
  "by_status": {
-  "covered": 503,
+  "covered": 505,
   "partial": 197,
   "uncovered": 53,
   "n/a": 74,
@@ -79,7 +79,7 @@
    "unmapped": 0
   },
   "parser": {
-   "covered": 80,
+   "covered": 81,
    "partial": 0,
    "uncovered": 49,
    "n/a": 0,
@@ -100,7 +100,7 @@
    "unmapped": 0
   },
   "spawn": {
-   "covered": 60,
+   "covered": 61,
    "partial": 60,
    "uncovered": 0,
    "n/a": 2,
@@ -7972,6 +7972,19 @@
    "note": ""
   },
   {
+   "id": "parser:workspace/session_name.py",
+   "kind": "parser",
+   "source": "workspace/session_name.py",
+   "trust": "files, pages and archives from outside",
+   "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
+   "status": "covered",
+   "tests": [
+    "tests/test_workspace_bus.py",
+    "tests/test_workspace_rules.py"
+   ],
+   "note": ""
+  },
+  {
    "id": "parser:workspace/slots.py",
    "kind": "parser",
    "source": "workspace/slots.py",
@@ -11430,6 +11443,18 @@
     "tests/test_redteam_gym_worker.py::test_worker_spawn_keeps_hostile_configuration_inside_json"
    ],
    "note": "actual worker launch through the process wrapper receives hostile configuration as one JSON argument without a shell"
+  },
+  {
+   "id": "spawn:redact/added.py:added_lines",
+   "kind": "spawn",
+   "source": "redact/added.py:added_lines",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_no_real_names.py::test_a_revision_that_is_an_option_is_refused_and_a_hostile_path_reaches_git_as_one_argument"
+   ],
+   "note": "a hostile path stays one literal git argument and a revision that is an option is refused before git runs"
   },
   {
    "id": "spawn:redact/hook.py:_git",

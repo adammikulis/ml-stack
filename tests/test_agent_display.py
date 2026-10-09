@@ -1,4 +1,6 @@
 """Real registry presentation never grants authority or erases parentage."""
+import re
+
 import pytest
 from workspace_kit import Kit, clean_env
 
@@ -44,7 +46,7 @@ def test_authenticated_child_cannot_promote_and_labels_do_not_grant_main_status(
     with pytest.raises(Denied, match='top-level'):
         registry.register_session(child)
     shown = metadata(registry, 'codex-main/task')
-    assert shown['display_name'].startswith('Subagent · task (parent Model unknown')
+    assert re.fullmatch(r'agent-[0-9a-f]{6} \(task\)', shown['display_name'])
     assert not shown['coordinator_eligible']
     activity = metadata(registry, 'codex-main', 'integration')
     assert activity['session_kind'] == 'main'
@@ -53,7 +55,7 @@ def test_authenticated_child_cannot_promote_and_labels_do_not_grant_main_status(
     kit.ws.claim_model(token, 'gpt-6', label='helper')
     helper = metadata(registry, 'codex-main', 'helper')
     assert helper['session_kind'] == 'helper'
-    assert helper['display_name'].startswith('Model unknown · ') and helper['display_name'].endswith(' (helper)')
+    assert re.fullmatch(r'agent-[0-9a-f]{6} \(helper\)', helper['display_name'])
 
 
 def test_revoked_main_is_ineligible(kit):
@@ -95,7 +97,7 @@ def test_registration_preserves_model_and_rights_and_refuses_child(host):
     code, shown = call(host, first, 'register_session', device={'os': 'macOS', 'hostname': 'test'})
     assert code == 200
     shown = shown['result']
-    assert shown['display_name'] == 'Model unknown · Mac · session 1'
+    assert re.fullmatch(r'agent-[0-9a-f]{6}', shown['display_name'])
     assert not shown['coordinator_eligible']
     assert shown['coordinator_reason'] == 'model not in the tier table'
     after = call(host, first, 'whoami')[1]['result']
@@ -172,17 +174,17 @@ def test_cli_main_session_uses_mutation_rpc(host, monkeypatch, capsys):
 
 
 @pytest.mark.parametrize("model,harness,expected", [
-    ("gpt-6", "codex", "ChatGPT"),
-    ("claude-sonnet-4-6", "claude-code", "Claude"),
-    ("Qwen3.8-Flash-Next-GSQ-RCO-Coder", "codex", "Qwen"),
-    ("thinkingcap-qwen3.8-27b", "codex", "Qwen"),
-    ("unknown-provider-model", "claude-code", "Model unknown"),
+    ("gpt-6", "codex", "chatgpt"),
+    ("claude-sonnet-4-6", "claude-code", "claude"),
+    ("Qwen3.8-Flash-Next-GSQ-RCO-Coder", "codex", "qwen"),
+    ("thinkingcap-qwen3.8-27b", "codex", "qwen"),
+    ("unknown-provider-model", "claude-code", "agent"),
 ])
 def test_readable_family_uses_recorded_model_not_harness_or_auth_id(kit, model, harness, expected):
     token = kit.agent('codex-opaque-session')
     kit.ws.claim_model(token, model, harness)
     shown = metadata(kit.ws.registry, 'codex-opaque-session')
-    assert shown['display_name'].startswith(expected + ' · ')
+    assert re.fullmatch(expected + r'-[0-9a-f]{6}', shown['display_name'])
     assert 'codex-opaque-session' not in shown['display_name']
     assert not shown['coordinator_eligible']
     before = kit.ws.registry.info('codex-opaque-session')
@@ -204,7 +206,7 @@ def test_same_family_native_sessions_get_distinct_stable_ordinals(kit):
     assert metadata(registry, names[0])['display_name'] != metadata(registry, names[1])['display_name']
     kit.ws.claim_model(second, 'Qwen3.8-Flash', 'codex')
     assert [registry.info(name)['presentation'] for name in names] == before
-    assert metadata(registry, names[1])['display_name'].startswith('Qwen · ')
+    assert re.fullmatch(r'qwen-[0-9a-f]{6}', metadata(registry, names[1])['display_name'])
 
 
 def test_registration_records_unknown_model_harness_without_rewriting_model_history(host):

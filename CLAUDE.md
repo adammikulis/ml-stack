@@ -5,7 +5,7 @@ in addition to it and only covers Claude Code.
 
 ## Names
 
-The lead agent is `claude`. `claude-code` is the harness, which can also run Qwen. A lead joining
+The lead is its own session name (for example `claude-6e1a2f`). `claude-code` is the harness, which can also run Qwen. A lead joining
 passes its own model id (`--model <id>`; `claude-sonnet-5-5` unless it knows otherwise).
 
 ## Subagent model order
@@ -40,7 +40,7 @@ rules in AGENTS.md, "The main session and its agents".
 The Agent tool's worktree isolation provides the worktree half of a subagent brief; the brief
 still names the branch. The `SubagentStart` and `SubagentStop` hooks join and release a
 subagent's workspace access under the lead's identity, so a subagent prompt carries the
-`--agent <lead name> --label LABEL` line from AGENTS.md and needs no invite or token. The
+workspace line from AGENTS.md and needs no invite or token. The
 `.claude/agents/branch-worker.md` agent is the one-branch worker: it reads AGENTS.md and this
 file, announces, works in its worktree, commits named files and reports. The harness confines it
 to that fresh tree, so `.claude/agents/branch-finisher.md` (no isolation) is the one for a branch
@@ -54,8 +54,9 @@ repeat report as new work. The branch and worktree stay; only the agent ends.
 
 The `SessionStart` hook registers the lead, announces it and puts the inbox in its context. The
 lead's first action each session is to read that inbox and answer what is in it; when the hook
-output is absent, it runs `ml-stack-workspace inbox --agent claude` before any other work.
-Between tasks it runs `ml-stack-workspace inbox` again (it is joined as `claude`).
+output is absent, it runs `ml-stack-workspace inbox` before any other work.
+Between tasks it runs `ml-stack-workspace inbox` again. The lead is its own session name
+(for example `claude-6e1a2f`), run with no `--agent`.
 
 ## Hooks and settings
 
