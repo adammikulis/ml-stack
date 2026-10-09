@@ -396,6 +396,13 @@ problem and no ledger solves it, and a token adds securities, money-transmission
 trust the Merkle log does not already give. Option 5 (a payout choice at phase 3) remains tied to the
 payment-rail question (question 2) and counsel.
 
+**Constraint (2026-10-08): nothing on the plan depends on a paid Apple developer account until the
+product takes off.** Hardware attestation on Apple silicon (app attest, a signed helper, notarized builds)
+and anything that needs APNs or an iOS app are **blocked until the product takes off**. Consequence for the
+phases: guests get Level 1 tenancy only (`docs/pool-encryption.md`, section 8.1), so every phase that
+mentions confidentiality from a provider rests on the isolation and review of 4.1 and 4.2, not on Apple
+attestation, and Level 2 on Apple silicon is not attempted now (decision of the same date).
+
 ## 10. Ledger options
 
 The owner asked for the strongest honest case for a blockchain ledger under the compute economy,

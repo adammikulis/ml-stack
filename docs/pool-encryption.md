@@ -136,7 +136,7 @@ tests against real sockets and real files, not mocks (`AGENTS.md`).
 | 5 | **Per-pair sealing keys.** Replace "cluster key derives everything" with an X25519 key agreement between device certificates' keys (ephemeral on each connection), sealing stays AES-256-GCM, MAC key from the same agreement | forward secrecy and compartmentalisation for the sealed layer | M | 2b | With mutual TLS 1.3 this is partly redundant; do it only for traffic that crosses a relay or the board host |
 | 6 | **Journal replica at rest and mesh transport** (when the mesh lands): per-device journals signed with the device Ed25519 key (integrity), replica encrypted at rest with a keystore subkey (`mesh-board.md:450`), transport mTLS from slice 2b, entries addressed to a device encrypted as in slice 4, entries all members read stay signed-only | the mesh nonexistent today; stolen disk | L, part of the mesh work | 2, 2b, 3 | Do not build the mesh transport before slices 2, 2b and 3 |
 | 7 | **Rotation and revocation.** Revoking a device: signed record, peers refuse its certificate at the next handshake, per-board keys and the cluster beacon key rotated on the next membership change, device certs rotate on the existing 30 day renewal and the beacon carries the new one signed by the old. Key compromise runbook | stolen paired device | M | 2, 2b, 4 | Beacon key rotation breaks discovery for offline devices until they rejoin: accept, document |
-| 8 | **Hardware-backed keys where attended**: Secure Enclave (macOS), TPM 2.0 (Windows/Linux) for the device identity key, so the key cannot be copied off the disk. Windows uses CNG, macOS `kSecAttrTokenIDSecureEnclave` through `keyring` extension or `cryptography`'s lack of support is the dependency question | key copied by a same-user process (partially) | L | 2 | No vetted Python wrapper is already a dependency; may need a native helper. Not for the first release |
+| 8 | **Hardware-backed keys where attended**: Secure Enclave (macOS), TPM 2.0 (Windows/Linux) for the device identity key, so the key cannot be copied off the disk. Windows uses CNG, macOS `kSecAttrTokenIDSecureEnclave` through `keyring` extension or `cryptography`'s lack of support is the dependency question | key copied by a same-user process (partially) | L | 2 | No vetted Python wrapper is already a dependency; may need a native helper. Not for the first release. **Secure Enclave half: blocked until the product takes off** (a signed app with the keychain entitlement needs a paid Apple developer account, section 8.1); unblocked alternative on macOS: the keystore-wrapped key or the passphrase-wrapped key file. The TPM half (Windows/Linux) is not affected |
 
 What stays **signed-only**, and why encryption would add nothing: beacons' public half and presence
 announcements (the point is to be discovered; the seal under the cluster key is for passive observers,
@@ -254,7 +254,7 @@ the guest can verify. What exists and what does not:
   implementation has no known side-channel. **What it would not**: traffic analysis and metadata,
   denial of service by the owner, side channels, a malicious guest job against the owner (the sandbox is
   still required), or the quality of the attestation vendor chain (you trust Intel/AMD/NVIDIA).
-- **Therefore:** Level 2 is not buildable in this pool today. The honest guarantee to a guest is Level 1
+- **Therefore:** Level 2 is not buildable in this pool today, and on Apple silicon it is not attempted (decision 8.1). The honest guarantee to a guest is Level 1
   plus "bring your own device for secrets".
 
 ### 7.5 The owner's data against the guest
@@ -275,7 +275,7 @@ ends the guest immediately at the next handshake and kills running jobs, discard
 | G2 | Per-tenant sandbox user and encrypted ephemeral scratch, key only in the job process, crypto-erase at the end | L | G1, 3 |
 | G3 | Encrypted submission and results (HPKE to sandbox key / guest key) | M | G1, 4 |
 | G4 | Per-tenant keyed result and prompt caches; cache off for guest model requests unless a per-tenant server instance | M | G1 |
-| G5 | Attestation spike: enumerate the pool's hardware, TPM quote verification for the device key | S then decide | 8 |
+| G5 | Attestation spike: enumerate the pool's hardware, TPM quote verification for the device key (Windows/Linux only; the Apple half, app attest, is blocked until the product takes off, section 8.1) | S then decide | 8 |
 
 ## 8. Owner-only decisions
 
@@ -321,6 +321,23 @@ a passphrase-wrapped key file, unlocked at start and held in memory afterwards; 
 waits for the person before it joins the pool. Rejected: TPM-sealed with a 0600 fallback, and plain 0600,
 because the file fallback protects nothing at rest. Consequence: slice 3 has no "headless: weaker" row, and a
 device that cannot be unlocked by a person at boot is not an unattended pool member.
+
+**Level 2 on Apple silicon is not attempted now; Level 1 only.** Decided: no attestation spike and no
+hardened-helper work on Apple silicon; revisit if the owner buys confidential-computing hardware or a real
+guest needs it. Rejected: an attest-only spike now, because it needs a paid Apple developer account and the
+in-process inference engine is the decisive gap anyway (`docs/darkbloom-comparison.md`, section 9); the
+full path, because it is months of work and the project would become a trust root.
+
+**If Level 2 is ever built, the release authority a guest pins is the owner, with a published code-hash
+allowlist.** Decided as a future direction only. Rejected: an offline separate release identity, and
+reproducible builds, as more machinery than the owner wants to run for a path not being built.
+
+**Constraint (2026-10-08): nothing on the plan depends on a paid Apple developer account until the product
+takes off.** The owner has no such account and will not get one before then. Everything that needs one is
+marked "blocked until the product takes off" in this note, `docs/home-pool.md`, `docs/service.md`,
+`docs/darkbloom-comparison.md` and `HANDOFF.md`, with the unblocked alternative: Level 1 guest tenancy only,
+keystore-wrapped or passphrase-wrapped keys on macOS instead of a Secure Enclave app, unsigned local Mac
+builds on the owner's own devices, the phone as a PWA over HTTPS over Tailscale, the Android app sideloaded.
 
 ## 9. Verification this audit did not do
 

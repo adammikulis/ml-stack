@@ -211,9 +211,9 @@ Missing, ranked:
      service worker (neither exists: no `webmanifest` or `serviceWorker` in `src` [V]), and the UI components
      are written for the desktop owner page (`fleet/web/components/*.html` [V]); only a narrow phone view
      is needed.
-   - Native app: the Android code exists; extending the protocol is the work. iOS is a new app.
+   - Native app: the Android code exists; extending the protocol is the work. iOS is a new app, **blocked until the product takes off** (app store or TestFlight distribution and signing need a paid Apple developer account, section 5.1); the unblocked alternative is the PWA over HTTPS over Tailscale, with the Android app sideloaded.
 4. **Push notifications.** Neither route has push. A PWA gets Web Push only over HTTPS with a service worker,
-   and on iOS only when installed to the home screen. A native Android app needs FCM or a local poll; this
+   and on iOS only when installed to the home screen (no APNs and no native iPhone app: **blocked until the product takes off**, section 5.1). A native Android app needs FCM or a local poll; this
    introduces a third-party service and is an owner question (section 5).
 5. **QR pairing UI for a web client.** QR drawing exists on the host (`fleet/invite_routes.py` uses the
    `qrcode` package [V]); the scanning end in a browser needs the camera, which needs a secure context
@@ -343,7 +343,7 @@ Each open question is one question, options with costs. Decisions already taken 
    - PWA: one code base for every phone including iPhone, no store; needs HTTPS trust (the Tailscale decision, section 5.1), a manifest,
      a service worker, and a phone view. Cost M-L plus the HTTPS setup.
    - Native Android first: the code exists with QR, pinning and biometric; the work is protocol capabilities
-     (slices 4 and 8). No iPhone. Physical-device checks outstanding.
+     (slices 4 and 8). No iPhone: a native iPhone app is blocked until the product takes off (section 5.1); iPhones use the PWA. Physical-device checks outstanding.
    - Both: the capability protocol (slice 4) is shared, the clients are separate. Cost is the sum.
    Prior question to you: which phone does the household use, Android, iPhone or both?
 2. **Remote access off the home network at all?** No: the pool stays at home, tailnet slices are optional.
@@ -377,3 +377,11 @@ naming and renewal for a benefit (no third party) the household does not need fi
 it leaves no PWA install, push or camera and makes the native Android app the only polished client. Both stay
 supported transports (section 4). Consequence for the order: slices 1 (tailnet IPv4 admitted) and 10 come
 before the PWA (slice 11), whose HTTPS is the tailnet certificate.
+
+**Constraint (2026-10-08): nothing on this plan depends on a paid Apple developer account until the product
+takes off.** The owner has none. Blocked until the product takes off: a native iPhone app, TestFlight,
+APNs push, notarized or signed macOS and iOS builds distributed to others, app attest or a signed helper.
+Unblocked alternatives: the phone is a PWA over HTTPS over Tailscale (iPhones included, installed to the home
+screen), the Android app is sideloaded, Mac builds are unsigned local builds on the owner's own devices, and
+guest tenancy is Level 1 only (`docs/pool-encryption.md`, section 8.1). slice 11 (PWA) is therefore the
+iPhone path, not a stopgap.

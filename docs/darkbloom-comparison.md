@@ -331,19 +331,19 @@ hypervisor isolation, and any guarantee against physical or kernel-level attack.
 
 ## 10. Decisions for the owner
 
-1. Do we attempt Level 2 on Apple silicon at all? Ranked: (a) a one-Mac attestation spike (step A, M)
-   with no guest-facing claim until section 6 items are checked; (b) finish Level 1 slices G1 to G4
-   first, spike afterwards; (c) decline Level 2 and keep "bring your own device for secrets".
-2. Who is the release authority a guest pins? Ranked: (a) the project, with its own Developer ID team,
-   notarized helper and a hash allowlist (step C); (b) each owner signs their own, accepting that the
-   attestation then proves only "a genuine Mac with SIP on", not what code ran; (c) no signing, so
-   no attestation.
-3. What runs the guest's model? Ranked: (a) keep `llama-server` for Level 1 and make no Level 2 claim
-   for inference, offering Level 2 only for small jobs inside the helper; (b) build the hardened
-   in-process engine (step D, L or more) and give up the patched-llama.cpp leases for guests; (c) skip
-   guest inference and offer Level 2 for tests and files only.
-4. What may we tell a guest? Ranked: (a) Level 1 wording plus "Level 2 is experimental, assumptions
-   listed, unaudited"; (b) no Level 2 wording until an independent review of the helper; (c) copy
-   Darkbloom-style wording ("owner cannot see prompts"), which this analysis does not support.
-5. Do we ever add an operator (MDM, push, coordinator)? Ranked: (a) no, the mesh stays host-free; (b)
-   only for a separate commercial service, as the service note's operator split contemplates; (c) now.
+Decided 2026-10-08:
+
+- **Level 2 on Apple silicon is not attempted now; Level 1 only.** Revisit if the owner buys
+  confidential-computing hardware or a real guest needs it. Rejected: an attest-only spike now (step A),
+  because it needs a paid Apple developer account and the in-process engine (step D) is the decisive gap
+  anyway; the full path (A to D), because it is months of work and the project becomes a trust root.
+- **If Level 2 is ever built, the release authority a guest pins is the owner, with a published code-hash
+  allowlist.** Rejected: an offline separate release identity; reproducible builds.
+- **Constraint:** the owner has no Apple developer account and will not get one unless the product takes
+  off. Steps A and C (Developer Program membership, Developer ID-signed and notarized helper, app attest,
+  APNs) are **blocked until the product takes off**; the unblocked alternative is Level 1 only.
+
+Deferred until Level 2 is revisited (all three depend on it): what runs the guest's model (keep
+`llama-server` for Level 1 and make no Level 2 claim for inference; the in-process engine, step D, is the
+Level 2 option); what we may tell a guest (Level 1 wording only, no "owner cannot see prompts" claim); whether
+we ever add an operator (MDM, push, coordinator; the mesh stays host-free meanwhile).
