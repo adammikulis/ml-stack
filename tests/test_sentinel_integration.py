@@ -116,9 +116,11 @@ def test_ordinary_pages_through_the_real_rails_are_not_held_even_in_enforce_mode
     run = g.start(g.default(), task="read the docs")
     node = Sentinel(tmp_path / "s", mode=Mode.ENFORCE, roots=[tmp_path])
     docs = Path(__file__).resolve().parent.parent / "docs"
-    about_attacks = {"guardrails.md", "redteam.md", "sentinel.md", "security.md"}
+    # Pages about the trust boundary (chat tools, the memory vault) read as the attacks they describe.
+    about_attacks = {"guardrails.md", "redteam.md", "sentinel.md", "security.md", "chat.md", "memory.md"}
     paragraphs = [p for d in sorted(docs.glob("*.md")) if d.name not in about_attacks
-                  for p in d.read_text().split("\n\n") if len(p.split()) >= 8]
+                  for p in d.read_text().split("\n\n")
+                  if len(p.split()) >= 8 and not p.lstrip().startswith("```")]  # prose, not shell blocks
     held = [p[:70] for p in paragraphs
             if node.screen(p, "tool:web_fetch", session="s1", verdict=screening(run)).withheld]
     print(f"{len(paragraphs)} paragraphs of docs through the real rails, {len(held)} held: {held}")

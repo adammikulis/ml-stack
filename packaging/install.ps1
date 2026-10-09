@@ -13,7 +13,7 @@
 #
 #   (default)   the app: the release zip for this machine, a window, updates from releases
 #   -Headless   a venv under %LOCALAPPDATA%\ml-stack, console scripts on PATH, no window
-#   -Dev        a git checkout with an immutable install, following 0.2dev
+#   -Dev        a git checkout with an immutable install, following 0.3dev
 #   -System     -Headless, per machine: a Scheduled Task at startup, as the user who ran it
 #   -Uninstall  takes it off, and leaves the model cache alone
 #
@@ -249,7 +249,7 @@ function Install-Headless {
 # -- dev: a checkout that follows development ----------------------------------------
 function Install-Dev {
     Step "developer"
-    $script:track = if ($env:ML_STACK_TRACK) { $env:ML_STACK_TRACK } else { "0.2dev" }
+    $script:track = if ($env:ML_STACK_TRACK) { $env:ML_STACK_TRACK } else { "0.3dev" }
     if (-not (Get-Command git -ErrorAction SilentlyContinue)) { throw "this needs git" }
     $src = if ($env:ML_STACK_SRC) { $env:ML_STACK_SRC } else { Join-Path $env:LOCALAPPDATA "ml-stack\src" }
     if (Test-Path (Join-Path $src ".git")) {

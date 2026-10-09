@@ -1,8 +1,8 @@
 {
- "surfaces": 848,
+ "surfaces": 856,
  "by_status": {
-  "covered": 523,
-  "partial": 197,
+  "covered": 532,
+  "partial": 196,
   "uncovered": 53,
   "n/a": 75,
   "unmapped": 0
@@ -51,7 +51,7 @@
    "unmapped": 0
   },
   "human": {
-   "covered": 119,
+   "covered": 120,
    "partial": 0,
    "uncovered": 0,
    "n/a": 0,
@@ -79,7 +79,7 @@
    "unmapped": 0
   },
   "parser": {
-   "covered": 82,
+   "covered": 83,
    "partial": 0,
    "uncovered": 49,
    "n/a": 0,
@@ -100,8 +100,8 @@
    "unmapped": 0
   },
   "spawn": {
-   "covered": 69,
-   "partial": 60,
+   "covered": 76,
+   "partial": 59,
    "uncovered": 0,
    "n/a": 2,
    "unmapped": 0
@@ -3963,6 +3963,26 @@
    "id": "human:serve/wired_apply.py:_authorise",
    "kind": "human",
    "source": "serve/wired_apply.py:_authorise",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item",
+    "tests/test_requests_floor.py::test_the_request_commands_refuse_a_process_an_agent_started",
+    "tests/test_redteam_requests.py::test_a_model_cannot_answer_its_own_request_by_any_tool_name_or_command_text",
+    "tests/test_workspace_model.py::test_only_a_person_or_launcher_process_records_a_verified_model",
+    "tests/test_workspace_model.py::test_an_agent_cannot_verify_itself_or_overwrite_a_verified_model_or_set_anothers",
+    "tests/test_workspace_model.py::test_a_claimed_model_changes_no_right"
+   ],
+   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+  },
+  {
+   "id": "human:serve/wired_cli.py:_change",
+   "kind": "human",
+   "source": "serve/wired_cli.py:_change",
    "trust": "an agent process or a peer",
    "attacker": "an agent or a forged grant takes an action only a person may take",
    "status": "covered",
@@ -7880,6 +7900,19 @@
    "note": ""
   },
   {
+   "id": "parser:workspace/landing.py",
+   "kind": "parser",
+   "source": "workspace/landing.py",
+   "trust": "files, pages and archives from outside",
+   "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
+   "status": "covered",
+   "tests": [
+    "tests/test_workspace_bus.py",
+    "tests/test_workspace_rules.py"
+   ],
+   "note": ""
+  },
+  {
    "id": "parser:workspace/localroute.py",
    "kind": "parser",
    "source": "workspace/localroute.py",
@@ -10493,34 +10526,12 @@
    "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
    "status": "covered",
    "tests": [
-    "tests/test_fleet_board_routes.py::test_local_person_posts_dm_and_thread_without_exposing_credentials",
-    "tests/test_fleet_board_routes.py::test_joined_session_is_required_before_owner_identity_is_used",
     "tests/test_fleet_board_routes.py::test_foreign_browser_cannot_send_as_person",
     "tests/test_fleet_board_routes.py::test_malformed_or_impersonating_post_does_not_deliver",
-    "tests/test_fleet_board_routes.py::test_page_cannot_post_announcements_or_use_agent_owner_file",
     "tests/test_fleet_board_routes.py::test_oversized_post_and_unsupported_methods_do_not_mutate",
-    "tests/test_fleet_board_routes.py::test_ack_marks_only_an_existing_visible_message_in_its_scope",
-    "tests/test_project_board_ui.py::test_selected_project_messages_and_person_post",
-    "tests/test_project_board_ui.py::test_person_board_rejects_foreign_requests",
-    "tests/test_project_board_ui.py::test_missing_remote_or_unconfigured_project_never_falls_back",
-    "tests/test_project_board_ui.py::test_person_identity_is_required_and_never_created",
-    "tests/test_project_board_ui.py::test_person_board_refuses_unsupported_methods",
-    "tests/test_project_board_ui.py::test_person_threads_direct_messages_and_ack",
-    "tests/test_project_board_ui.py::test_person_post_accepts_exact_browser_origin",
-    "tests/test_project_board_ui.py::test_person_post_rejects_different_browser_origin",
-    "tests/test_redteam_board.py::test_the_route_never_writes_and_refuses_other_hosts_sites_and_traversal",
-    "tests/test_redteam_board.py::test_an_agent_cannot_read_another_board_or_pair_through_any_command",
-    "tests/test_redteam_board.py::test_boards_and_subscriptions_cannot_be_made_without_limit",
-    "tests/test_workspace_board.py::test_the_route_reads_only_and_checks_host_origin_and_fetch_site",
-    "tests/test_redteam_board.py::test_the_one_write_route_refuses_every_way_a_hostile_page_could_reach_it",
-    "tests/test_redteam_board.py::test_a_post_cannot_borrow_another_identity_or_smuggle_options",
-    "tests/test_workspace_quiet.py::test_a_new_agent_has_no_subscriptions_and_its_inbox_holds_no_board_traffic",
-    "tests/test_workspace_quiet.py::test_the_lead_and_the_person_cannot_leave_announcements_and_an_agent_can_only_mute",
-    "tests/test_workspace_quiet.py::test_message_text_never_changes_a_subscription",
-    "tests/test_workspace_model.py::test_a_hostile_model_or_harness_is_refused_everywhere",
-    "tests/test_redteam_board.py::test_following_and_the_live_route_give_an_agent_nothing_it_could_not_already_read"
+    "tests/test_fleet_board_routes.py::test_joined_session_is_required_before_owner_identity_is_used"
    ],
-   "note": "Fleet and exact registered local projects delegate to the maintained person-only Board parser; HTTP and HTTPS exact browser origins, membership, visible acknowledgements, malformed and oversized bodies, missing UI authority, foreign projects and agent owner credentials are exercised without identity creation"
+   "note": "A foreign origin, a forged identity, a malformed or oversized body and an unjoined session never post as the person"
   },
   {
    "id": "route:workspace/work_reputation.py:/ui/work-reputation/standings",
@@ -10756,6 +10767,18 @@
    "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
   },
   {
+   "id": "spawn:board/place.py:_git",
+   "kind": "spawn",
+   "source": "board/place.py:_git",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_board_client.py::test_a_directory_named_like_an_option_or_a_command_is_only_a_path_to_git"
+   ],
+   "note": "the repository path is a value of git -C, never an option or a shell word; a hostile directory name resolves to no board"
+  },
+  {
    "id": "spawn:checks.py:ask",
    "kind": "spawn",
    "source": "checks.py:ask",
@@ -10824,6 +10847,70 @@
     "tests/test_redteam_spawn.py::test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line"
    ],
    "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
+  },
+  {
+   "id": "spawn:devbranch.py:development_branch",
+   "kind": "spawn",
+   "source": "devbranch.py:development_branch",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_devbranch.py"
+   ],
+   "note": "the argv is fixed and the checkout path is one argument; the environment value is returned as text, never run, and a protected branch name is refused"
+  },
+  {
+   "id": "spawn:device_host.py:_powershell",
+   "kind": "spawn",
+   "source": "device_host.py:_powershell",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_device_setup.py::test_a_hostile_windows_profile_path_reaches_wslpath_as_one_argument_and_no_command_goes_through_a_shell",
+    "tests/test_device_setup.py::test_every_command_the_host_runs_is_a_fixed_argv_with_no_input_from_outside"
+   ],
+   "note": "every argv is fixed (PowerShell script text is built from constants and travels encoded); the one outside string, the Windows profile path, is a single wslpath argument"
+  },
+  {
+   "id": "spawn:device_host.py:install_rust",
+   "kind": "spawn",
+   "source": "device_host.py:install_rust",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_device_setup.py::test_a_hostile_windows_profile_path_reaches_wslpath_as_one_argument_and_no_command_goes_through_a_shell",
+    "tests/test_device_setup.py::test_every_command_the_host_runs_is_a_fixed_argv_with_no_input_from_outside"
+   ],
+   "note": "every argv is fixed (PowerShell script text is built from constants and travels encoded); the one outside string, the Windows profile path, is a single wslpath argument"
+  },
+  {
+   "id": "spawn:device_host.py:restart_wsl",
+   "kind": "spawn",
+   "source": "device_host.py:restart_wsl",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_device_setup.py::test_a_hostile_windows_profile_path_reaches_wslpath_as_one_argument_and_no_command_goes_through_a_shell",
+    "tests/test_device_setup.py::test_every_command_the_host_runs_is_a_fixed_argv_with_no_input_from_outside"
+   ],
+   "note": "every argv is fixed (PowerShell script text is built from constants and travels encoded); the one outside string, the Windows profile path, is a single wslpath argument"
+  },
+  {
+   "id": "spawn:device_host.py:wslconfig_path",
+   "kind": "spawn",
+   "source": "device_host.py:wslconfig_path",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_device_setup.py::test_a_hostile_windows_profile_path_reaches_wslpath_as_one_argument_and_no_command_goes_through_a_shell",
+    "tests/test_device_setup.py::test_every_command_the_host_runs_is_a_fixed_argv_with_no_input_from_outside"
+   ],
+   "note": "every argv is fixed (PowerShell script text is built from constants and travels encoded); the one outside string, the Windows profile path, is a single wslpath argument"
   },
   {
    "id": "spawn:doctor.py:_answers_help",
@@ -11916,20 +12003,6 @@
    "note": "actual executable paths containing shell syntax remain literal, control characters cannot execute, probes are single-flight and invalidate on binary changes, stalled probes are killed"
   },
   {
-   "id": "spawn:sandbox/run.py:run",
-   "kind": "spawn",
-   "source": "sandbox/run.py:run",
-   "trust": "arguments built from model output, peer messages or file names",
-   "attacker": "attacker text becomes a command line, environment or working directory",
-   "status": "covered",
-   "tests": [
-    "tests/test_sandbox_redteam.py",
-    "tests/test_pdf_engine.py",
-    "tests/test_net_scan.py"
-   ],
-   "note": ""
-  },
-  {
    "id": "spawn:sandbox/seatbelt.py:Seatbelt.denials",
    "kind": "spawn",
    "source": "sandbox/seatbelt.py:Seatbelt.denials",
@@ -12069,18 +12142,6 @@
    "id": "spawn:serve/build_verify.py:relink",
    "kind": "spawn",
    "source": "serve/build_verify.py:relink",
-   "trust": "arguments built from model output, peer messages or file names",
-   "attacker": "attacker text becomes a command line, environment or working directory",
-   "status": "partial",
-   "tests": [
-    "tests/test_redteam_spawn.py::test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line"
-   ],
-   "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
-  },
-  {
-   "id": "spawn:serve/exit_guard.py:_watch",
-   "kind": "spawn",
-   "source": "serve/exit_guard.py:_watch",
    "trust": "arguments built from model output, peer messages or file names",
    "attacker": "attacker text becomes a command line, environment or working directory",
    "status": "partial",
@@ -12242,6 +12303,18 @@
    "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
   },
   {
+   "id": "spawn:trees.py:git",
+   "kind": "spawn",
+   "source": "trees.py:git",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_trees.py::test_a_tree_named_like_an_option_or_a_command_is_only_a_path_to_git"
+   ],
+   "note": "a worktree path is the value of git -C, never an option or a shell word; a hostile directory name is one argument and a missing one is a refusal"
+  },
+  {
    "id": "spawn:workspace/backlog.py:fetch",
    "kind": "spawn",
    "source": "workspace/backlog.py:fetch",
@@ -12334,6 +12407,20 @@
     "tests/test_redteam_spawn.py::test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line"
    ],
    "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
+  },
+  {
+   "id": "spawn:workspace/notes_cli.py:verify",
+   "kind": "spawn",
+   "source": "workspace/notes_cli.py:verify",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_board_client.py::test_a_notes_command_is_never_run_through_a_shell",
+    "tests/test_redteam_board_client.py::test_a_command_off_the_allow_list_is_refused_whatever_the_note_says",
+    "tests/test_redteam_board_client.py::test_a_peers_note_cannot_choose_the_command_a_verification_records"
+   ],
+   "note": "a note's command runs as an argument vector the owner allow-listed, with no shell; shell syntax and off-list commands do not run, and the recorded command is the note's own"
   },
   {
    "id": "spawn:workspace/person_targets.py:_run",

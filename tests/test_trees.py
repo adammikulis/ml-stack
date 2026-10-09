@@ -275,3 +275,14 @@ def test_the_report_exits_one_on_an_orphan_and_close_runs_through_the_script(mai
     assert report.returncode == 1 and "ORPHAN stale" in report.stdout
     assert run("close", str(path), "--landed").returncode == 2 and path.exists()
     assert run("close", str(path), "--abandon", "test").returncode == 0 and not path.exists()
+
+
+@pytest.mark.parametrize("name", ["-evil", "--git-dir=x", "a b", "line\nfeed", "quote'\"", "$(touch x)"])
+def test_a_tree_named_like_an_option_or_a_command_is_only_a_path_to_git(tmp_path, name):
+    hostile = tmp_path / name
+    hostile.mkdir()
+    git(hostile, "init", "-q")
+    assert Path(trees.git(hostile, "rev-parse", "--show-toplevel")).name == hostile.resolve().name
+    with pytest.raises(RuntimeError):
+        trees.git(tmp_path / ("missing " + name), "status")
+    assert not (tmp_path / "x").exists()

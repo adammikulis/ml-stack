@@ -167,6 +167,12 @@ class Models:
                 seen[path.name] = Model(path.name, path, stat.st_size, stat.st_mtime)
         return sorted(seen.values(), key=lambda m: m.name.lower())
 
+    def listed(self, name: str) -> Model | None:
+        """The model :meth:`all` lists under exactly that name, or ``None``. A name from a
+        request is only ever compared with the listing, never opened as a path."""
+        wanted = name.strip()
+        return next((row for row in self.all() if row.name == wanted), None)
+
     def find(self, name: str) -> Model | None:
         """The model file this machine holds under that name, or ``None``."""
         found = hub.located(name.strip(), roots=self.roots, loose=True, min_size=MIN_SIZE)

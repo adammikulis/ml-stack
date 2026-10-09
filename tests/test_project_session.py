@@ -13,6 +13,7 @@ from ml_stack.workspace import (
     cli,
     project_connection,
     project_session,
+    render,
     tokens,
 )
 from ml_stack.workspace.identity import Denied
@@ -194,9 +195,9 @@ def test_session_identifier_precedence_and_manual_names(monkeypatch):
 def test_claim_owner_is_readable_and_json_is_unchanged(capsys):
     owner = "board:" + "a" * 32 + ":codex-fixture"
     row = {"kind": "file", "key": "source.py", "owner": owner}
-    cli._show(SimpleNamespace(json=False), row)
+    render.show(SimpleNamespace(json=False), row)
     assert "codex-fixture on shared project Board" in capsys.readouterr().out
-    cli._show(SimpleNamespace(json=True), row)
+    render.show(SimpleNamespace(json=True), row)
     assert json.loads(capsys.readouterr().out)["owner"] == owner
 
 

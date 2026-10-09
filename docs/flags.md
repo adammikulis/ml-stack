@@ -86,7 +86,7 @@ ml-stack-workspace flag-clear FLAG_ID --reason TEXT
   `docs/sentinel.md`]
 - `flag-clear` needs the person or the coordinator and a reason; the reason is stored.
 - `digest --status` gains lines: "2 open flags: claude-6e1a2f restricted (forged_sender), device ab12... noted".
-  [V `attention_cli.STATUS` is the flag for `digest`; the lines are the addition]
+  [V `board_cli.digest` takes `--status`; the lines are the addition]
 - One panel on the Fleet page: a list of open flags with the same fields, buttons Restrict, Suspend,
   Clear (each one confirmation; the same grant check). The panel is a component, not a page. [D
   `components-not-pages` memory; analysis]

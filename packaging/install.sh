@@ -8,7 +8,7 @@
 #
 #   (default)   the app: the release zip for this machine, a window, updates from releases
 #   --headless  a venv under ~/.ml-stack, console scripts on PATH, no window
-#   --dev       a git checkout with an immutable install, following 0.2dev
+#   --dev       a git checkout with an immutable install, following 0.3dev
 #   --system    --headless, per machine: starts at boot, no login, as the user who ran it
 #   --uninstall takes it off, and leaves the model cache alone
 #
@@ -259,7 +259,7 @@ link_scripts() {
 install_dev() {
   step "developer"
   have git || die "this needs git"
-  TRACK="${ML_STACK_TRACK:-0.2dev}"
+  TRACK="${ML_STACK_TRACK:-0.3dev}"
   SRC="${ML_STACK_SRC:-$HOME/.local/share/ml-stack/src}"
   if [ -d "$SRC/.git" ]; then
     [ "$(git -C "$SRC" branch --show-current)" = "$TRACK" ] \

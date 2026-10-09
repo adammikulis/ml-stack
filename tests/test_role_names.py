@@ -59,7 +59,7 @@ def test_a_rule_saved_under_an_old_role_name_applies_to_the_new_one_and_is_rewri
     assert rules.covers("serve_up", args, new, False).verdict == "always"
     rules.add("serve_up", {"model": "other.gguf"}, "never", new)
     data = json.loads(path.read_text())
-    assert data["schema_version"] == saved.SCHEMA_VERSION
+    assert data["version"] == saved.SCHEMA_VERSION
     assert [r["role"] for r in data["rules"]] == [new, new]
 
 

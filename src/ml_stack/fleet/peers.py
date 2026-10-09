@@ -10,12 +10,13 @@ import sys
 import webbrowser
 from typing import Any
 
+from ml_stack import node_pool
 from ml_stack.log import say, warn
 from ml_stack.person import HumanRequired, require_person
 
 from . import launch_open, members_cli, recovery
 from .discovery import (
-    MIN_PASSPHRASE,
+    MIN_JOIN_LENGTH,
     DiscoveryError,
     cluster_group,
     create_cluster_key,
@@ -41,8 +42,8 @@ def _prompt_passphrase(confirm: bool) -> str:
     """Read a passphrase, with confirmation when creating a cluster."""
     while True:
         first = getpass.getpass("  Passphrase: ")
-        if len(first.strip()) < MIN_PASSPHRASE:
-            say(f"  The passphrase needs at least {MIN_PASSPHRASE} characters.")
+        if len(first.strip()) < MIN_JOIN_LENGTH:
+            say(f"  The passphrase needs at least {MIN_JOIN_LENGTH} characters.")
             continue
         if not confirm:
             return first
@@ -141,6 +142,9 @@ def cmd_token(args: argparse.Namespace) -> int:
 
 
 def cmd_ls(args: argparse.Namespace) -> int:
+    if load_cluster_key(args.cluster_key) is None and (pool := node_pool.status()) is not None:
+        say(node_pool.render(pool, as_json=args.json))     # joined through the node's pool: no key file
+        return 0
     peers = discover(_require_key(args.cluster_key), timeout_s=args.timeout)
     if args.json:
         say(json.dumps([{**p.public(), "host": p.host,

@@ -1,4 +1,4 @@
-"""The `enforcement` and `whoami` commands of `ml-stack-workspace`."""
+"""The `enforcement` command of `ml-stack-workspace`."""
 
 from __future__ import annotations
 
@@ -7,7 +7,6 @@ from typing import Any
 
 from ml_stack.command import flag
 from ml_stack.workspace import enforcement, enforcement_check, project
-from ml_stack.workspace.identity import Denied
 from ml_stack.workspace.service import Workspace
 
 ACTIONS = ('show', 'check', 'set', 'promote', 'demote')
@@ -17,8 +16,6 @@ OPTIONS = [
     flag('value', nargs='?', default='', help='open or strict, for set'),
     flag('--project', default='', help='the project key (default: this checkout\'s project)'),
 ]
-WHOAMI = [flag('--model', default='', help='your own model id, recorded as claimed'),
-          flag('--harness', default='', help='your harness, e.g. claude-code or codex')]
 
 
 def run(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
@@ -32,23 +29,3 @@ def run(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
     if args.action == 'check':
         return enforcement_check.check(ws, key)
     return enforcement.current(ws, key)
-
-
-def whoami(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
-    """Who the token says you are, with the enforcement mode of your project."""
-    who = ws.auth(token)
-    if args.model:
-        ws.claim_model(token, args.model, args.harness)
-    model, state = ws.model_of(who.id)
-    info = ws.registry.info(who.id)
-    return {'id': who.id, 'role': who.role, 'project': info['project'],
-            'enforcement': _mode_or_unavailable(ws, info['project']),
-            'model': model or 'unknown', 'model_state': state, 'harness': info['harness']}
-
-
-def _mode_or_unavailable(ws: Workspace, project: dict[str, str] | None) -> str:
-    """The project's enforcement mode, or `unavailable` when the board exposes no mode to this client."""
-    try:
-        return enforcement.mode(ws, project)
-    except Denied:
-        return 'unavailable'

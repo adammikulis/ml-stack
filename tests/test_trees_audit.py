@@ -73,6 +73,7 @@ def test_a_slow_git_is_cut_off_by_the_hook_budget(main, monkeypatch):
 def test_parallel_processes_writing_the_registry_lose_nothing_and_leave_valid_json(main):
     paths = [tree(main, f"w{i}") for i in range(8)]
     code = ("import sys, time; from pathlib import Path; from ml_stack import trees\n"
+            "trees.LOCK_TIMEOUT = 120  # the hooks' short wait is not under test\n"
             "root, mine = Path(sys.argv[1]), sys.argv[2:]\n"
             "for n in range(6):\n"
             "    for p in mine:\n"

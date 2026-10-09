@@ -14,6 +14,30 @@ from ml_stack.fleet import frozen_dispatch
 ROOT = Path(__file__).resolve().parents[1]
 
 
+@pytest.fixture
+def owned_files(monkeypatch):
+    """The installed distribution lists the modules under test, as a built wheel does.
+
+    An editable install (what CI uses) lists no source files, so ownership is stated here
+    rather than read from whichever install runs the suite.
+    """
+    listed = ["ml_stack/workspace/localcoding.py", "ml_stack/workspace/remote_workers.py",
+              "ml_stack/workspace/issuepump.py", "ml_stack/serve/mlx_tree_server.py",
+              "ml_stack/serve/_watchdog.py", "ml_stack/serve/socket_relay.py",
+              "ml_stack/harnesshook.py"]
+    monkeypatch.setattr(frozen_dispatch, "distribution",
+                        lambda name: SimpleNamespace(files=listed, entry_points=[]))
+
+
+def _installed_lists(module):
+    from importlib.metadata import PackageNotFoundError, distribution
+    try:
+        files = {str(file) for file in distribution("ml-stack").files or ()}
+    except PackageNotFoundError:
+        return False
+    return module.replace(".", "/") + ".py" in files or module.replace(".", "/") + "/__main__.py" in files
+
+
 def test_registered_command_uses_its_owned_distribution_entrypoint_and_literal_arguments(monkeypatch):
     calls = []
     point = EntryPoint("ml-stack-serve", "ml_stack.serve.cli:main", "console_scripts")
@@ -69,7 +93,7 @@ def test_identical_aliases_load_the_single_owned_console_target(monkeypatch):
 
 @pytest.mark.parametrize("module", ["ml_stack.workspace.localcoding", "ml_stack.workspace.remote_workers",
                                      "ml_stack.workspace.issuepump", "ml_stack.serve.mlx_tree_server"])
-def test_worker_modules_use_their_maintained_main_entrypoint(monkeypatch, module):
+def test_worker_modules_use_their_maintained_main_entrypoint(monkeypatch, owned_files, module):
     calls = []
     monkeypatch.setattr(sys, "argv", ["frozen-app"])
     monkeypatch.setattr(frozen_dispatch, "_target", lambda module: None)
@@ -80,7 +104,7 @@ def test_worker_modules_use_their_maintained_main_entrypoint(monkeypatch, module
 
 
 @pytest.mark.parametrize("script", ["_watchdog", "socket_relay"])
-def test_owned_helper_script_paths_dispatch_packaged_modules(monkeypatch, script):
+def test_owned_helper_script_paths_dispatch_packaged_modules(monkeypatch, owned_files, script):
     calls = []
     root = Path(frozen_dispatch.__file__).resolve().parents[1]
     path = root / "serve" / (script + ".py")
@@ -91,7 +115,7 @@ def test_owned_helper_script_paths_dispatch_packaged_modules(monkeypatch, script
     assert calls == ["ml_stack.serve." + script]
 
 
-def test_harness_hook_keeps_its_module_failure_handler_and_event_arguments(monkeypatch):
+def test_harness_hook_keeps_its_module_failure_handler_and_event_arguments(monkeypatch, owned_files):
     calls = []
     monkeypatch.setattr(sys, "argv", ["frozen-app"])
     monkeypatch.setattr(frozen_dispatch, "_target", lambda module: pytest.fail("hook loaded CLI registry"))
@@ -132,6 +156,9 @@ def test_normal_interface_arguments_still_launch_the_daemon(monkeypatch):
     ("ml_stack.mcp", ["--help"], "ml-stack-mcp"),
 ])
 def test_packaged_launcher_dispatches_actual_command_parsers(module, args, expected):
+    if not _installed_lists(module):
+        pytest.skip("the installed ml-stack lists no source files (an editable install or none); "
+                    "the packaged launcher dispatches only modules its distribution owns")
     done = subprocess.run([sys.executable, str(ROOT / "packaging/launcher-headless.py"), "-m", module, *args],
                           capture_output=True, text=True, timeout=20,
                           env={**os.environ, "PYTHONPATH": str(ROOT / "src")})

@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from land_support import Project, git
+from land_support import DEV, Project, git
 from workspace_kit import Kit, clean_env, cli
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
@@ -24,6 +24,7 @@ class World:
     """A board with a lead runner, a requester, a reviewer and a repository with a bare origin."""
 
     def __init__(self, monkeypatch, tmp_path: Path) -> None:
+        monkeypatch.setenv("ML_STACK_DEV_BRANCH", DEV)
         self.kit = Kit(clean_env(monkeypatch, tmp_path))
         self.ws = self.kit.ws
         (tmp_path / "git").mkdir()
@@ -31,7 +32,7 @@ class World:
         self.origin = tmp_path / "origin.git"
         git(tmp_path, "init", "-q", "--bare", str(self.origin))
         git(self.proj.root, "remote", "add", "origin", str(self.origin))
-        git(self.proj.root, "push", "-q", "origin", "0.2dev")
+        git(self.proj.root, "push", "-q", "origin", DEV)
         self.tokens = {name: self.kit.agent(name) for name in ("alice", "bob", "carol", "haiku")}
         for name, model in (("alice", "claude-sonnet-5-5"), ("bob", "claude-sonnet-5-5"),
                             ("carol", "claude-opus-5-5"), ("haiku", "claude-haiku-5-5")):
@@ -61,10 +62,10 @@ class World:
         return landing.fold(self.ws).requests[rid]["status"]
 
     def origin_head(self) -> str:
-        return git(self.origin, "rev-parse", "0.2dev")
+        return git(self.origin, "rev-parse", DEV)
 
     def local_head(self) -> str:
-        return git(self.proj.root, "rev-parse", "0.2dev")
+        return git(self.proj.root, "rev-parse", DEV)
 
 
 @pytest.fixture
@@ -84,7 +85,7 @@ def test_two_requests_land_in_queue_order_as_one_batch_and_push_only_origin_deve
     assert result["status"] == "landed" and sorted(result["merged"]) == ["a", "b"]
     assert world.status(first) == world.status(second) == "landed"
     assert world.origin_head() == world.local_head() != before
-    assert git(world.origin, "branch", "--list").split() == ["0.2dev"]
+    assert git(world.origin, "branch", "--list").split() == [DEV]
     assert [c for c in world.proj.calls() if c.startswith("gate")] == ["gate"]
     assert not (world.proj.base / "a").exists() and not (world.proj.base / "b").exists()
     inbox = world.ws.inbox(world.tokens["alice"])
@@ -111,7 +112,7 @@ def test_red_gate_does_not_push_and_names_the_failing_test(world):
     assert result["status"] != "landed"
     assert world.status(rid) == "failed"
     detail = landing.fold(world.ws).requests[rid]["detail"]
-    assert "tests/test_m3.py" in detail and "clean 0.2dev" in detail
+    assert "tests/test_m3.py" in detail and f"clean {DEV}" in detail
     assert world.origin_head() == before_origin and world.local_head() == before_local
 
 
@@ -204,8 +205,8 @@ def test_runner_never_pushes_main_or_a_missing_remote(world):
     with pytest.raises(ValueError, match="never touches main"):
         world.make_runner(target="main").push()
     git(world.proj.root, "checkout", "-q", "-b", "side")
-    assert "not 0.2dev" in world.runner.push()
-    git(world.proj.root, "checkout", "-q", "0.2dev")
+    assert f"not {DEV}" in world.runner.push()
+    git(world.proj.root, "checkout", "-q", DEV)
     code, out, _ = world.proj.land("serve", "--once", "--target", "main")
     assert code == 4 and "never touches main" in out
 
@@ -220,7 +221,7 @@ def test_second_runner_is_refused_while_the_claim_is_held(world):
 def test_stuck_gate_is_aborted_reported_and_not_pushed(world):
     Project.write(world.proj.root, "scripts/test", SLOW_TEST)
     Project.commit(world.proj.root, "chore: slow gate")
-    git(world.proj.root, "push", "-q", "origin", "0.2dev")
+    git(world.proj.root, "push", "-q", "origin", DEV)
     rid, _ = world.ready("slow", mod(11))
     before = world.origin_head()
     runner = world.make_runner(stall_s=1.0)
@@ -243,3 +244,15 @@ def test_cli_request_and_queue(world):
     assert "cli@" in shown.stdout and "needs-review" in shown.stdout
     refused = cli(world.kit.base, world.tokens["haiku"], "land-request", "cli", sha, "--test", "t")
     assert refused.returncode != 0
+
+
+def test_unset_development_branch_is_the_branch_the_primary_checkout_is_on(world, monkeypatch):
+    monkeypatch.delenv("ML_STACK_DEV_BRANCH")
+    git(world.proj.root, "checkout", "-q", "-b", "9.9dev")
+    runner = land_board.Runner(world.ws, world.lead, world.proj.root, env=world.proj.env)
+    assert runner.target == "9.9dev"
+    assert landing.runner_claim(world.ws, runner.target) == ("branch", "9.9dev")
+    sha = world.branch("onnine", mod(40))
+    monkeypatch.chdir(world.proj.root)
+    rid = landing.request(world.ws, world.tokens["alice"], {"branch": "onnine", "sha": sha, "selectors": ["t"]})["id"]
+    assert landing.fold(world.ws).requests[rid]["target"] == "9.9dev"

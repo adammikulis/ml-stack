@@ -63,7 +63,7 @@ fn lines(l: &Lease) -> Vec<String> {
 }
 
 /// Write what happened to the boards of the holders it concerns.
-fn mirror(node: &mut Node, events: &[Event]) -> Result<()> {
+pub fn mirror(node: &mut Node, events: &[Event]) -> Result<()> {
     for event in events {
         let (l, kind, body) = match event {
             Event::Granted(l) => (l, Kind::Lease, json!({"lease": l.id, "action": "acquire", "resources": lines(l)})),
@@ -80,7 +80,7 @@ fn mirror(node: &mut Node, events: &[Event]) -> Result<()> {
 }
 
 /// Sweep, grant what is now free, tell the boards.
-fn tick(node: &mut Node, also: &[&str]) -> Result<()> {
+pub fn tick(node: &mut Node, also: &[&str]) -> Result<()> {
     let foreign = foreign(node, also)?;
     let events = node.leases.tick(&foreign)?;
     mirror(node, &events)

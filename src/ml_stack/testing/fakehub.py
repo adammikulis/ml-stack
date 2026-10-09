@@ -19,6 +19,7 @@ from http.server import BaseHTTPRequestHandler
 from typing import Any
 
 from ml_stack.http import Server
+from ml_stack.testing.fakes import http_handler
 
 __all__ = ["FakeHub", "fake_hub"]
 
@@ -75,7 +76,7 @@ class FakeHub:
         return rows
 
     def search(self, query: str) -> list[dict[str, Any]]:
-        return [{"id": name, "downloads": 1000 - 100 * n, "likes": n,
+        return [{"id": name, "downloads": 1000 - n * 100, "likes": n,
                  "gated": name in self.gated}
                 for n, name in enumerate(sorted(self.repos)) if query.lower() in name.lower()]
 
@@ -86,8 +87,14 @@ class FakeHub:
     def _handler(self, *, cdn: bool) -> type[BaseHTTPRequestHandler]:
         hub = self
 
-        class _H(BaseHTTPRequestHandler):
-            protocol_version = "HTTP/1.1"
+        class _Routes:
+            """One request's routing; the request's own members are read through to it."""
+
+            def __init__(self, request: BaseHTTPRequestHandler) -> None:
+                self.request = request
+
+            def __getattr__(self, name: str) -> Any:
+                return getattr(self.request, name)
 
             def _send(self, status: int, body: bytes = b"", kind: str = "application/json",
                       extra: dict[str, str] | None = None) -> None:
@@ -160,16 +167,11 @@ class FakeHub:
                     self.end_headers()
                     self.wfile.write(body[:cut])
                     self.wfile.flush()
-                    self.close_connection = True
+                    self.request.close_connection = True
                     return
                 self._send(status, body, "application/octet-stream", extra)
 
-            do_GET = do_HEAD = _route
-
-            def log_message(self, *args: object) -> None:
-                pass
-
-        return _H
+        return http_handler(lambda request: _Routes(request)._route())
 
 
 @contextmanager

@@ -1,7 +1,6 @@
 """Windows read handles that permit atomic file replacement."""
 
 import ctypes
-import msvcrt
 import os
 from ctypes import wintypes
 from pathlib import Path
@@ -15,6 +14,10 @@ _create.restype = wintypes.HANDLE
 _close = _kernel.CloseHandle
 _close.argtypes = [wintypes.HANDLE]
 _close.restype = wintypes.BOOL
+_crt = ctypes.CDLL("ucrtbase", use_errno=True)
+_wrap = _crt._open_osfhandle
+_wrap.argtypes = [ctypes.c_ssize_t, ctypes.c_int]
+_wrap.restype = ctypes.c_int
 _set = _kernel.SetFileInformationByHandle
 _set.argtypes = [wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID, wintypes.DWORD]
 _set.restype = wintypes.BOOL
@@ -46,11 +49,11 @@ def open_read(path: str, flags: int) -> int:
                      OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, None)
     if handle == INVALID_HANDLE_VALUE:
         raise ctypes.WinError(ctypes.get_last_error())
-    try:
-        return msvcrt.open_osfhandle(handle, flags | os.O_BINARY)
-    except OSError:
+    fd = _wrap(handle, flags | os.O_BINARY)
+    if fd == -1:
         _close(handle)
-        raise
+        raise OSError(ctypes.get_errno(), "could not wrap the file handle in a descriptor")
+    return fd
 
 
 def replace(source: Path, target: Path) -> None:

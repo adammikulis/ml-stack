@@ -1107,7 +1107,7 @@ ServerManager._load = slow_read
 manager = ServerManager(state_file=state)
 while time.time() < start_at:
     time.sleep(0.01)
-with grant.broker_grant():  # a Lease exists only inside the broker's grant
+with grant.broker_grant():  # a Lease, which `_pending` hands back, exists only inside the broker's grant
     manager._pending(ServerSpec(model="/models/quince-2b.gguf", port=port))
 time.sleep(2.0)
 """

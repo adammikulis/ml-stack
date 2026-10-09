@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import threading
 import time
 
@@ -70,8 +71,9 @@ def test_a_joined_child_is_listed_with_its_parent_and_its_sends_count_against_th
     name = join(kit, make(kit), "peer")
     shown = {r["id"]: r for r in kit.ws.registered()}
     assert shown[name]["parent"] == "lead-a" and shown["lead-a"]["parent"] == ""
-    out = cli(kit.base, kit.token, "agents").stdout
-    assert f"Subagent · {name} (parent " in out
+    from ml_stack.workspace import agent_display
+    shown_name = agent_display.spoken(agent_display.metadata(kit.ws.registry, name))
+    assert shown_name.endswith(" (spawned by lead-a)")
     kit.limits(sends_per_window=3, announce_per_window=1000, child_sends_per_window=2)
     child = tokens.load(kit.base, name)
     sent = 0
@@ -86,7 +88,6 @@ def test_the_paste_block_has_a_code_and_never_a_token_and_the_code_is_a_hash_at_
     done = cli(kit.base, kit.token, "invite", "--name", "codex", "--ttl", "5m", "--uses", "2",
                env_extra={TAINT_ENV: ""})
     assert done.returncode == 0, done.stderr
-    import re
     code = re.search(rf"join ({CODE_SHAPE})", done.stdout).group(1)
     assert "mlws1" not in done.stdout and "works for 2 agents" in done.stdout
     assert "only to the process you are starting" in done.stdout
@@ -362,10 +363,20 @@ def test_a_childs_held_message_is_a_strike_against_the_issuer_until_it_cannot_in
 
 def test_outputs_are_byte_stable_for_the_same_state(kit):
     join(kit, make(kit), "peer")
-    first = cli(kit.base, kit.token, "agents").stdout
-    assert first == cli(kit.base, kit.token, "agents").stdout
-    one, two = (cli(kit.base, kit.token, "status", "--json").stdout for _ in range(2))
+    first = cli(kit.base, kit.token, "outbox").stdout
+    assert first == cli(kit.base, kit.token, "outbox").stdout
+    one, two = (json.dumps(without_observation_time(json.loads(cli(kit.base, kit.token, "status", "--json").stdout)),
+                           sort_keys=True) for _ in range(2))
     assert one == two
+
+
+def without_observation_time(value):
+    """Every command re-stamps the acting device's wall-clock observed_at; nothing else may differ."""
+    if isinstance(value, dict):
+        return {k: without_observation_time(v) for k, v in value.items() if k != "observed_at"}
+    if isinstance(value, list):
+        return [without_observation_time(v) for v in value]
+    return value
 
 
 def test_rights_taken_from_the_issuer_after_the_invite_was_made_are_not_given_to_the_joiner(kit):

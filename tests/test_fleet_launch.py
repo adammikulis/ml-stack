@@ -174,6 +174,7 @@ def test_launcher_waits_for_tcp_close_when_health_is_unavailable(monkeypatch):
     monkeypatch.setattr(launch.time, "sleep", lambda _seconds: None)
     monkeypatch.setattr(launch.socket, "create_connection", connect)
     monkeypatch.setattr(launch, "already_running", lambda _port: None)
+    monkeypatch.setattr(launch, "_can_bind", lambda _port: len(connections) > 2)
     assert launch._wait_for_exit(8770)
     assert len(connections) == 3
 

@@ -23,6 +23,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
+from cryptography.hazmat.primitives import serialization  # noqa: E402
+
 from ml_stack import credentials, person  # noqa: E402
 
 REPO_NAME = "RELEASE_SIGNING_KEY"
@@ -51,16 +53,15 @@ def _stored() -> bytes | None:
 
 
 def _public(private: bytes) -> str:
-    """The ``ssh-ed25519 AAAA...`` line of a private key."""
-    work = Path(tempfile.mkdtemp(prefix="release-key-"))
+    """The ``ssh-ed25519 AAAA...`` line of a private key, derived in memory: the key is never
+    written to a file to be read back."""
     try:
-        work.chmod(0o700)
-        key = work / "key"
-        key.write_bytes(private)
-        key.chmod(0o600)
-        return " ".join(_run(["ssh-keygen", "-y", "-f", str(key)]).decode().split()[:2])
-    finally:
-        _wipe(work)
+        held = serialization.load_ssh_private_key(private, password=None)
+    except ValueError as bad:
+        raise Failed(f"the stored key is not an OpenSSH private key: {bad}") from None
+    line = held.public_key().public_bytes(serialization.Encoding.OpenSSH,
+                                          serialization.PublicFormat.OpenSSH)
+    return " ".join(line.decode().split()[:2])
 
 
 def _wipe(work: Path) -> None:

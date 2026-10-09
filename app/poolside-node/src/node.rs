@@ -16,9 +16,9 @@ use crate::grants::{Grants, StubGrants};
 use crate::membership::Pool;
 use crate::device::{fingerprint, load_or_create};
 use crate::error::{Error, Result};
-use crate::fold::{self, check_local, holders, Context, Entry};
+use crate::fold::{self, check_local, Context, Entry};
 use crate::fsutil::private_dir;
-use crate::identity::{Holder, Registry, Tokens};
+use crate::identity::{Holder, Ident, ModelState, Registry, Tokens};
 use crate::lease::Leases;
 use crate::links::Links;
 use crate::registry::Projects;
@@ -139,13 +139,15 @@ impl Node {
                 _ => return Err(Error::Denied("a parent must be a session of this board".into())),
             },
         };
+        let inherited = model.trim().is_empty().then(|| self.boards.get(board).and_then(|h| h.names.get(&parent)).map(|p| p.model.clone())).flatten().unwrap_or_default();
+        let (model, state) = if inherited.is_empty() { (model, ModelState::Claimed) } else { (inherited.as_str(), ModelState::Inherited) };
         let hosted = self.host(board)?;
-        let (name, created) = hosted.names.assign(model, harness, session, &parent)?;
+        let now = hosted.board.now_ms();
+        let (name, created) = hosted.names.assign(model, state, harness, session, &parent, now)?;
         if created {
-            let family = hosted.names.get(&name).map(|i| i.family.clone()).unwrap_or_default();
-            hosted.board.append(Kind::Identity, &name, json!({"name": name, "parent": parent, "family": family}), "identity")?;
+            self.write_identity(board, &name)?;
         }
-        let origin = hosted.board.origin().to_string();
+        let origin = self.host(board)?.board.origin().to_string();
         let token = self.tokens.issue(board, &name)?;
         Ok(json!({"name": name, "token": token, "created": created, "parent": parent, "board": board, "origin": origin}))
     }
@@ -178,6 +180,11 @@ impl Node {
         if access.channels.as_ref().is_some_and(|c| !c.contains(&channel)) {
             return Err(Error::Denied("that channel is not shared with this session".into()));
         }
+        if let Some(to) = fields.get("to").and_then(Value::as_str).filter(|t| kind == Kind::Message && t.starts_with(|c: char| c != '#')) {
+            if !self.can_receive(board, to)? {
+                return Err(Error::Denied(format!("{to} is not a session of this board")));
+            }
+        }
         let mut body = fields.clone();
         body.insert(if kind == Kind::Note { "author" } else { "from" }.into(), Value::String(access.actor.clone()));
         let body = Value::Object(body);
@@ -187,24 +194,30 @@ impl Node {
         Ok(json!({"id": row.id(), "seq": row.seq, "sender": access.actor, "status": hosted.board.status(row.seq, &[])}))
     }
 
-    /// Claim (or release) ``target`` for the session behind ``token``.
-    pub fn claim(&mut self, token: &str, board: &str, target: &str, note: &str, release: bool) -> Result<Value> {
-        let access = self.access(token, board, true)?;
-        if access.channels.as_ref().is_some_and(|c| !c.iter().any(|x| x == "#claims")) {
-            return Err(Error::Denied("claims are not shared with this session".into()));
-        }
-        let held = holders(&self.view(board)?).get(target).cloned();
-        let mine = held.as_deref() == Some(access.actor.as_str());
-        match (release, held) {
-            (false, None) | (true, Some(_)) if release == mine || !release => {}
-            (false, Some(_)) if mine => return Ok(json!({"target": target, "holder": access.actor, "changed": false})),
-            (false, Some(who)) => return Err(Error::Denied(format!("held by {who}"))),
-            _ => return Err(Error::Denied("only the holder can release".into())),
-        }
-        let action = if release { "release" } else { "claim" };
-        let body = json!({"target": target, "action": action, "note": note});
-        check_local(Kind::Claim, &access.actor, &body, "")?;
-        self.hosted(board)?.board.append(Kind::Claim, &access.actor, body, "")?;
-        Ok(json!({"target": target, "holder": if release { Value::Null } else { json!(access.actor) }, "changed": true}))
+    /// Write the current state of the session ``name`` to its board as an identity entry.
+    pub fn write_identity(&mut self, board: &str, name: &str) -> Result<()> {
+        let hosted = self.hosted(board)?;
+        let ident = hosted.names.get(name).cloned().ok_or_else(|| Error::Denied("no such session".into()))?;
+        hosted.board.append(Kind::Identity, name, identity_body(name, &ident)?, "")?;
+        Ok(())
     }
+
+    /// Whether ``name`` is a session of ``board`` that can be written to: a live local one, or
+    /// one another device announced with an identity entry that no later entry retired.
+    pub fn can_receive(&mut self, board: &str, name: &str) -> Result<bool> {
+        if let Some(i) = self.hosted(board)?.names.get(name) {
+            return Ok(!i.retired);
+        }
+        let mut live = false;
+        for e in self.view(board)?.iter().filter(|e| e.kind == Kind::Identity && e.fields.get("name").and_then(Value::as_str) == Some(name)) {
+            live = e.fields.get("retired") != Some(&Value::Bool(true));
+        }
+        Ok(live)
+    }
+}
+
+/// The body of an identity entry.
+pub fn identity_body(name: &str, i: &Ident) -> Result<Value> {
+    Ok(json!({"name": name, "parent": i.parent, "family": i.family, "model": i.model, "model_state": serde_json::to_value(i.model_state)?,
+              "harness": i.harness, "retired": i.retired}))
 }

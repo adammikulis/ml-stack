@@ -21,7 +21,8 @@ def main() -> int:
     model = event.get("model") or os.environ.get("ANTHROPIC_MODEL", "")
     if isinstance(model, dict):
         model = model.get("id", "")
-    if not event.get("agent_id") and not workspace_hook.name_session(environment, model if isinstance(model, str) else ""):
+    if not event.get("agent_id") and not workspace_hook.name_session(
+            environment, model if isinstance(model, str) else "", event):
         return 0
     workspace_hook.persist_session(environment)
     if not event.get("agent_id"):
@@ -35,8 +36,6 @@ def main() -> int:
     registered = workspace_hook.run(command, "SessionStart", environment=environment)
     parts = []
     if registered and not event.get("agent_id"):
-        workspace_hook.run(["ml-stack-workspace", "main-session", "--harness", "claude-code"],
-                           "SessionStart", environment=environment)
         parts.append(print_board(environment))
         parts.append(tree_watch.check("SessionStart", str(event.get("cwd") or ""), environment,
                                       lead=environment.get("ML_STACK_WORKSPACE_AGENT", "")))

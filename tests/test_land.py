@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.land_support import ROOT, Project, git
+from tests.land_support import DEV, ROOT, Project, git
 
 
 @pytest.fixture
@@ -26,9 +26,9 @@ def test_plan_covers_stacked_and_rebased_branches_by_patch_id(proj):
     git(proj.root, "checkout", "-q", "-b", "newer")
     Project.write(proj.root, "docs/other.md", "x\n")
     proj.commit(proj.root, "chore: moves target")
-    git(proj.root, "checkout", "-q", "0.2dev")
+    git(proj.root, "checkout", "-q", DEV)
     git(proj.root, "merge", "-q", "--ff-only", "newer")
-    proj.branch("r", {}, start="0.2dev")
+    proj.branch("r", {}, start=DEV)
     git(proj.base / "r", "cherry-pick", git(a, "rev-parse", "a"))
     code, out, summary = proj.land("plan", "a", "b", "r")
     assert code == 0
@@ -166,11 +166,11 @@ def test_finish_refuses_a_dirty_primary_and_prints_the_lead_command(proj):
     proj.branch("a", mod(1))
     proj.land("run", "a")
     (proj.root / "stray.txt").write_text("x")
-    before = git(proj.root, "rev-parse", "0.2dev")
+    before = git(proj.root, "rev-parse", DEV)
     code, out, summary = proj.land("finish", "--apply")
     assert code == 3 and summary["status"] == "blocked"
     assert "git -C" in out and "merge --ff-only land/" in out
-    assert git(proj.root, "rev-parse", "0.2dev") == before
+    assert git(proj.root, "rev-parse", DEV) == before
 
 
 def test_finish_is_a_dry_run_unless_applied_then_fast_forwards_and_cleans_up(proj):
@@ -178,13 +178,13 @@ def test_finish_is_a_dry_run_unless_applied_then_fast_forwards_and_cleans_up(pro
     kept = proj.branch("k", mod(2))
     (kept / "wip.txt").write_text("wip")
     proj.land("run", "a", "k")
-    before = git(proj.root, "rev-parse", "0.2dev")
+    before = git(proj.root, "rev-parse", DEV)
     code, _, summary = proj.land("finish")
     assert code == 0 and summary["status"] == "dry-run"
-    assert git(proj.root, "rev-parse", "0.2dev") == before and a.exists()
+    assert git(proj.root, "rev-parse", DEV) == before and a.exists()
     code, _, summary = proj.land("finish", "--apply")
     assert code == 0 and summary["status"] == "landed"
-    assert git(proj.root, "rev-parse", "0.2dev") != before
+    assert git(proj.root, "rev-parse", DEV) != before
     assert not a.exists() and kept.exists()
     assert "a" in summary["removed"]
     assert [r["branch"] for r in summary["kept"]] == ["k"] and "dirty" in summary["kept"][0]["reason"]

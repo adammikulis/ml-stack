@@ -79,7 +79,14 @@ def store(base: Path, name: str, token: str) -> Path:
             restrict(tmp)
         else:
             tmp.chmod(0o600)
-        tmp.write_text(token + "\n", encoding="utf-8")
+        # the temporary file is already this user's alone: written through its descriptor
+        fd = os.open(tmp, os.O_WRONLY | os.O_TRUNC)
+        try:
+            pending = memoryview((token + "\n").encode("utf-8"))
+            while pending:
+                pending = pending[os.write(fd, pending):]
+        finally:
+            os.close(fd)
     return target
 
 

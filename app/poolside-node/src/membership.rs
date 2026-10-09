@@ -123,6 +123,7 @@ struct File {
     policy: Policy,
     policy_at: u64,
     policy_by: String,
+    project: String,
     devices: Vec<Device>,
 }
 
@@ -133,6 +134,8 @@ pub struct Pool {
     pub policy: Policy,
     pub policy_at: u64,
     pub policy_by: String,
+    /// The project this pool belongs to (`project::project_key`), or empty for none.
+    pub project: String,
     devices: BTreeMap<String, Device>,
 }
 
@@ -149,10 +152,10 @@ impl Pool {
                         devices.insert(kept.fingerprint.clone(), kept);
                     }
                 }
-                Ok(Pool { path: path.into(), id: f.pool, policy: f.policy, policy_at: f.policy_at, policy_by: f.policy_by, devices })
+                Ok(Pool { path: path.into(), id: f.pool, policy: f.policy, policy_at: f.policy_at, policy_by: f.policy_by, project: f.project, devices })
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                let pool = Pool { path: path.into(), id: random_hex(8)?, policy: Policy::Secure, policy_at: 0, policy_by: String::new(), devices: BTreeMap::new() };
+                let pool = Pool { path: path.into(), id: random_hex(8)?, policy: Policy::Secure, policy_at: 0, policy_by: String::new(), project: String::new(), devices: BTreeMap::new() };
                 pool.save()?;
                 Ok(pool)
             }
@@ -162,7 +165,7 @@ impl Pool {
 
     fn save(&self) -> Result<()> {
         let file = File {
-            v: VERSION, pool: self.id.clone(), policy: self.policy, policy_at: self.policy_at, policy_by: self.policy_by.clone(),
+            v: VERSION, pool: self.id.clone(), policy: self.policy, policy_at: self.policy_at, policy_by: self.policy_by.clone(), project: self.project.clone(),
             devices: self.devices.values().cloned().collect(),
         };
         write_atomic(&self.path, &serde_json::to_vec(&file)?)
@@ -278,6 +281,19 @@ impl Pool {
         (self.policy, self.policy_at, self.policy_by) = (policy, at, by.chars().take(80).collect());
         self.save()?;
         Ok(changed)
+    }
+
+    /// Make this pool one for ``project`` (the node does this at start, before it has heard of
+    /// another pool of that project). Only a device alone in its pool may.
+    pub fn claim_project(&mut self, project: &str) -> Result<()> {
+        if self.project == project {
+            return Ok(());
+        }
+        if !self.alone() {
+            return Err(Error::Denied("a pool that has members does not change project".into()));
+        }
+        self.project = project.into();
+        self.save()
     }
 
     /// Take the id of the pool this device joins; only a device alone in its pool may.

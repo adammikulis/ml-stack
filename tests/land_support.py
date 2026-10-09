@@ -10,6 +10,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 LAND = ROOT / "scripts" / "land"
+DEV = "devline"
 
 FAKE_TEST = '''\
 import os, pathlib, sys
@@ -17,8 +18,13 @@ log = os.environ.get("LAND_FAKE_LOG")
 if log:
     with open(log, "a") as f:
         f.write(" ".join(sys.argv[1:]) + "\\n")
+here = pathlib.Path(".")
+if list(here.glob("HANG_GATE*")):
+    import time
+    time.sleep(120)
 if sys.argv[1] == "gate":
-    sys.exit(1 if list(pathlib.Path(".").glob("BAD_GATE*")) else 0)
+    both = (here / "COMBO_A").exists() and (here / "COMBO_B").exists()
+    sys.exit(1 if list(here.glob("BAD_GATE*")) or both else 0)
 bad = 0
 for a in sys.argv[2:]:
     p = pathlib.Path(a)
@@ -42,7 +48,7 @@ class Project:
         self.base = base
         self.root = base / "proj"
         self.root.mkdir()
-        git(self.root, "init", "-q", "-b", "0.2dev")
+        git(self.root, "init", "-q", "-b", DEV)
         git(self.root, "config", "user.name", "Test Agent")
         git(self.root, "config", "user.email", "agent@example.invalid")
         git(self.root, "config", "commit.gpgsign", "false")
@@ -54,10 +60,17 @@ class Project:
         self.commit(self.root, "chore: seed")
         self.log = base / "calls.log"
         self.env = {**os.environ, "ML_STACK_HOME": str(base / "home"), "DEV_TEST_SLOTS_DIR": str(base / "slots"),
-                    "LAND_FAKE_LOG": str(self.log), "ML_STACK_NO_REAL_KEYSTORE": "1",
+                    "LAND_FAKE_LOG": str(self.log), "ML_STACK_DEV_BRANCH": DEV, "ML_STACK_NO_REAL_KEYSTORE": "1",
                     "PYTHON_KEYRING_BACKEND": "onboard_support.FileKeyring",
                     "ML_STACK_TEST_KEYRING": str(base / "keyring.json"),
                     "PYTHONPATH": os.pathsep.join((str(ROOT / "tests"), os.environ.get("PYTHONPATH", "")))}
+
+        # The runner records its passes in the activity log, which a background process may write
+        # only once a person has provisioned the keystore; a headless runner has no person to ask.
+        subprocess.run([sys.executable, "-c",
+                        "from ml_stack import keystore\nkeystore.interactive = lambda: True\n"
+                        "keystore.default().provision()\n"],
+                       env=self.env, check=True, capture_output=True)
 
     @staticmethod
     def write(where: Path, rel: str, text: str) -> None:
@@ -73,7 +86,7 @@ class Project:
         git(where, "commit", "-q", "-m", message)
         return git(where, "rev-parse", "HEAD")
 
-    def branch(self, name: str, files: dict[str, str], start: str = "0.2dev") -> Path:
+    def branch(self, name: str, files: dict[str, str], start: str = DEV) -> Path:
         """A worktree on a new branch cut from ``start`` holding one commit of ``files``."""
         where = self.base / name.replace("/", "-")
         git(self.root, "worktree", "add", "-q", "-b", name, str(where), start)

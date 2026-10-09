@@ -82,16 +82,9 @@ def test_the_runner_passes_pytest_arguments_through():
     assert 'ML_STACK_LINUX_SINGLE="$SINGLE"' in text
 
 
-def test_one_matrix_entry_runs_the_suite_in_a_single_process():
-    single = [e for e in entries() if e.get("pytest") == "-n 0"]
-    assert single, "every job passes -n, so no run sees an order-dependent test"
-    assert single[0]["os"] == "ubuntu-latest"
-
-
-def test_the_other_entries_still_run_the_slow_tests():
-    slow = [e for e in entries() if e.get("pytest") == "--slow"]
-    assert len(slow) == len(entries()) - 1
-    assert {e["os"] for e in slow} == {"ubuntu-latest"}
+def test_every_matrix_entry_runs_the_slow_tests_on_ubuntu():
+    assert {e.get("pytest") for e in entries()} == {"--slow"}
+    assert {e["os"] for e in entries()} == {"ubuntu-latest"}
 
 
 def test_no_push_waits_on_macos():

@@ -11,6 +11,7 @@ broadcast) or `MemoryHub` for tests; an mDNS transport fits the same two methods
 from __future__ import annotations
 
 import contextlib
+import ipaddress
 import json
 import re
 import socket
@@ -226,7 +227,7 @@ class UdpTransport:
     and the broadcast address; a test names loopback addresses instead. With ``group`` the
     socket joins that multicast group to hear it. TTL is 1: it stays on the link."""
 
-    def __init__(self, *, bind: str = "", port: int = DEFAULT_PORT,
+    def __init__(self, *, bind: str | None = None, port: int = DEFAULT_PORT,
                  destinations: list[tuple[str, int]] | None = None,
                  group: str | None = None) -> None:
         self.destinations = destinations if destinations is not None else [
@@ -238,7 +239,9 @@ class UdpTransport:
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 1)
-        sock.bind((bind, port))
+        # hearing a broadcast or a multicast group takes every interface, so no address given
+        # means the unspecified IPv4 address, written as the address it is
+        sock.bind((str(ipaddress.IPv4Address(bind or 0)), port))
         if group is not None:
             with contextlib.suppress(OSError):
                 sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP,

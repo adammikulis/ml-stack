@@ -3,7 +3,24 @@
 import pytest
 from browser_expect import expect
 
-pytest_plugins = ["test_fleet_page"]
+try:
+    import playwright.sync_api  # noqa: F401
+except ModuleNotFoundError:
+    pytest_plugins = []
+
+    @pytest.fixture
+    def daemon():
+        raise pytest.skip.Exception("needs playwright: ml-stack[scrape]", allow_module_level=False)
+
+    @pytest.fixture
+    def joined():
+        raise pytest.skip.Exception("needs playwright: ml-stack[scrape]", allow_module_level=False)
+
+    @pytest.fixture
+    def open_page(daemon):
+        return None
+else:
+    pytest_plugins = ["test_fleet_page"]
 
 pytestmark = pytest.mark.slow
 

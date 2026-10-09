@@ -111,7 +111,7 @@ def test_srt_settings_carry_the_same_filesystem_lists(layout):
     srt = profile.srt_settings(layout)
     claude = profile.claude_settings(layout)["sandbox"]["filesystem"]
     assert srt["filesystem"]["denyWrite"] == claude["denyWrite"]
-    assert "api.anthropic.com" in set(srt["network"]["allowedDomains"])
+    assert {"api.anthropic.com"} <= set(srt["network"]["allowedDomains"])
 
 
 def test_prepare_stages_files_with_matching_digests(layout):

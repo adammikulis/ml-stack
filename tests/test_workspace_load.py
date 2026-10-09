@@ -30,7 +30,7 @@ def run_script(*args: str) -> tuple[int, dict]:
 
 def test_a_small_run_delivers_everything_in_one_verifiable_chain_with_one_master_create():
     code, out = run_script("--agents", "6", "--messages", "4", "--drain", "30")
-    assert code == 0 and out["pass"] is True and out["missed"] == []
+    assert code == 0 and out["pass"] is True and out["missed"] == [], (out["missed"], out["budgets"], out["send_s"], out["delivery_s"], out["cpu_s_per_agent_per_message"])
     assert out["sent"] == out["received"] == 24 and out["failures"] == {}
     assert out["log"]["chain_ok"] is True and out["log"]["bus_rows"] == 24
     assert out["keystore_backend_calls"]["set"] == 1 and out["keystore_backend_calls"]["get"] <= 7
@@ -40,8 +40,13 @@ def test_a_small_run_delivers_everything_in_one_verifiable_chain_with_one_master
 
 def test_the_shipped_rate_limit_shows_up_as_counted_failures_not_a_failed_run():
     code, out = run_script("--agents", "3", "--messages", "34", "--drain", "10", "--default-limits")
-    assert out["failures"] == {"rate-limited": 3 * 6}
-    assert out["sent"] == 3 * 28 and code == 0 and out["pass"] is True
+    # The limit is 28 sends in a 60 second window: a host so slow that the run outlasts half a
+    # window sends under it, so only the count of sends and refusals together is fixed there.
+    limited = out["failures"].get("rate-limited", 0)
+    assert out["sent"] + limited == 3 * 34 and code == 0 and out["pass"] is True, (
+        out["missed"], out["delivery_s"], out["cpu_s_per_agent_per_message"])
+    if out["wall_s"] < 30:
+        assert out["failures"] == {"rate-limited": 3 * 6} and out["sent"] == 3 * 28
 
 
 @pytest.fixture

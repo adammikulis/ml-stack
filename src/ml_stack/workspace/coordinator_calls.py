@@ -9,11 +9,8 @@ from ml_stack.workspace.chain import held
 from ml_stack.workspace.identity import HUMAN, Denied
 from ml_stack.workspace.taskboard import TaskBoard
 
-READS = frozenset({'whoami', 'agents', 'inbox', 'thread', 'outbox', 'claims', 'who',
-                   'status', 'tasks', 'task', 'notes-search', 'notes-get',
-                   'audit-verify', 'audit-head'})
-WRITES = frozenset({'main-session', 'send', 'announce', 'ack', 'notes-add', 'claim',
-                    'release', 'heartbeat', 'task-create', 'task-claim', 'task-credit', 'task-review', 'task-heartbeat', 'task-checkpoint', 'task-submit'})
+READS = frozenset({'thread', 'outbox', 'status', 'tasks', 'task', 'audit-verify', 'audit-head'})
+WRITES = frozenset({'ack', 'task-create', 'task-claim', 'task-credit', 'task-review', 'task-heartbeat', 'task-checkpoint', 'task-submit'})
 REQUEST_ID = re.compile(r'[a-f0-9]{32}')
 MAX_OUTCOME = 256 * 1024
 MAX_CACHED = 10000
@@ -27,8 +24,7 @@ def prepare(ws, token, argv, parser, handlers):
     if not argv or argv[0] not in READS | WRITES:
         raise Denied('this command is not a remote coordination operation')
     ws._may(who, 'read')
-    ws._may(who, 'claim' if argv[0] in ('claim', 'release', 'heartbeat') else
-            'send' if argv[0] in WRITES else 'read')
+    ws._may(who, 'send' if argv[0] in WRITES else 'read')
     try:
         args = parser.parse_args(argv)
     except SystemExit as error:
