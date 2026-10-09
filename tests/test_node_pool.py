@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import os
 
 import pytest
 
@@ -54,6 +55,7 @@ def test_status_is_none_when_no_node_answers(tmp_path):
 def test_the_devices_own_node_starts_on_the_lan_and_a_scratch_node_stays_local(tmp_path, monkeypatch, own, extra, started):
     own_state, scratch = tmp_path / "own", tmp_path / "scratch"
     seen: list[list[str]] = []
+    monkeypatch.delenv(node_launch.LAN_ENV)  # the suite sets it off for itself; this test is about the default
     monkeypatch.setattr(node_launch, "default_state", lambda: own_state)
     monkeypatch.setattr(node_launch, "node_health", lambda state: {"ok": True} if seen else None)
     monkeypatch.setattr(node_launch.node_supervise, "resolve", lambda state: None)
@@ -61,3 +63,16 @@ def test_the_devices_own_node_starts_on_the_lan_and_a_scratch_node_stays_local(t
     monkeypatch.setattr(node_launch, "_start_supervisor", lambda state, words: seen.append(words))
     node_launch.ensure_node(None if own else scratch, extra=extra, wait_s=1)
     assert seen == [started]
+
+
+def test_under_the_test_suite_the_devices_own_node_starts_local_and_never_on_the_lan(tmp_path, monkeypatch):
+    assert os.environ[node_launch.LAN_ENV] == "off", "the suite sets it for itself and every process it starts"
+    own_state = tmp_path / "own"
+    seen: list[list[str]] = []
+    monkeypatch.setattr(node_launch, "default_state", lambda: own_state)
+    monkeypatch.setattr(node_launch, "node_health", lambda state: {"ok": True} if seen else None)
+    monkeypatch.setattr(node_launch.node_supervise, "resolve", lambda state: None)
+    monkeypatch.setattr(node_launch, "supervised", lambda state: False)
+    monkeypatch.setattr(node_launch, "_start_supervisor", lambda state, words: seen.append(words))
+    node_launch.ensure_node(None, wait_s=1)
+    assert seen == [[]], "no --lan: a node a test starts is reachable from this machine only"

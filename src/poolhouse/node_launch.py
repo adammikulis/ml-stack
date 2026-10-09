@@ -32,6 +32,11 @@ SWAP_WAIT_S = 20.0
 POLL_S = 0.05
 
 
+LAN_ENV = "POOLHOUSE_NODE_LAN"
+"""``off`` keeps the device's own node local. The test suite sets it for itself and every process it starts, so a
+test under a temporary home never opens a node on the network; nothing decides this by looking at a path."""
+
+
 class NodeUnavailable(OSError):
     """The node could not be started or did not answer in time."""
 
@@ -62,13 +67,13 @@ def _start_supervisor(state: Path, extra: list[str]) -> None:
 def ensure_node(state: Path | None = None, *, extra: list[str] | None = None, wait_s: float = START_WAIT_S) -> dict:
     """The node's health, after starting it under a supervisor when it was not answering.
 
-    The device's own node (the default state directory) starts on the LAN, so it joins its project's open pool or makes one
+    The device's own node (the default state directory) starts on the LAN unless ``POOLHOUSE_NODE_LAN=off``, so it joins its project's open pool or makes one
     (`node_pool.network_args`); a node in any other state directory stays local unless ``extra`` says otherwise.
     Raises `NodeUnavailable` when it still does not answer after ``wait_s``, and `node_binary.NodeBinaryError` before starting
     anything when the binary is missing or does not match its recorded checksum.
     """
     state = state or default_state()
-    if extra is None and state == default_state():
+    if extra is None and state == default_state() and os.environ.get(LAN_ENV) != "off":
         extra = node_pool.network_args()
     if (said := node_health(state)) is not None:
         return said

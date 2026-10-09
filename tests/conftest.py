@@ -1107,6 +1107,7 @@ def _real_home(tmp_path_factory):
         mp.setenv("HOME", str(away))
         mp.setenv("POOLHOUSE_HOME", str(away / ".poolhouse"))
         mp.setenv("POOLHOUSE_CACHE", str(away / ".cache" / "poolhouse"))
+        mp.setenv("POOLHOUSE_NODE_LAN", "off")  # a node a test starts never listens on the network
         yield real
     if failure := watch.settle():
         pytest.fail(failure, pytrace=False)
@@ -1268,3 +1269,20 @@ def pytest_collection_modifyitems(config, items) -> None:
     if dropped:
         config.hook.pytest_deselected(items=dropped)
         items[:] = kept
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _no_supervisor_left(tmp_path_factory):
+    """Fails the run when a node supervisor that a test started under this session's temporary directory is
+    still alive at the end, and stops it so the machine is left as it was."""
+    yield
+    from poolhouse.serve import process
+
+    base = str(tmp_path_factory.getbasetemp())
+    left = [(pid, argv) for pid, _t, argv in process.command_lines()
+            if "poolhouse.node_launch" in argv and "supervise" in argv
+            and any(word.startswith("--state") and base in " ".join(argv[i:i + 2]) for i, word in enumerate(argv))]
+    for pid, _argv in left:
+        process.kill_process_tree(pid)
+    if left:
+        pytest.fail("node supervisors left running by tests: " + ", ".join(str(pid) for pid, _ in left), pytrace=False)
