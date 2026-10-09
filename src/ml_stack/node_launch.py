@@ -17,7 +17,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from ml_stack import jobs, node_binary, node_supervise, runtime, win32
+from ml_stack import jobs, node_binary, node_pool, node_supervise, runtime, win32
 from ml_stack.command import Group, flag
 from ml_stack.features import windows_node
 from ml_stack.home import state as state_root
@@ -63,10 +63,14 @@ def _start_supervisor(state: Path, extra: list[str]) -> None:
 def ensure_node(state: Path | None = None, *, extra: list[str] | None = None, wait_s: float = START_WAIT_S) -> dict:
     """The node's health, after starting it under a supervisor when it was not answering.
 
+    The device's own node (the default state directory) starts on the LAN, so it joins its project's open pool or makes one
+    (`node_pool.network_args`); a node in any other state directory stays local unless ``extra`` says otherwise.
     Raises `NodeUnavailable` when it still does not answer after ``wait_s``, and `node_binary.NodeBinaryError` before starting
     anything when the binary is missing or does not match its recorded checksum.
     """
     state = state or default_state()
+    if extra is None and state == default_state():
+        extra = node_pool.network_args()
     if (said := node_health(state)) is not None:
         return said
     state.mkdir(mode=0o700, parents=True, exist_ok=True)
