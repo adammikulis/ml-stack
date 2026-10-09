@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import io
 import sys
+import threading
+import time
 
 import keyring
 import pytest
@@ -91,6 +93,65 @@ def test_macos_can_be_told_to_fail_rather_than_show_a_dialog():
 @pytest.mark.skipif(sys.platform == "darwin", reason="macOS is where it acts")
 def test_elsewhere_forbidding_prompts_does_nothing():
     assert keystore_guard.forbid_prompts() is False
+
+
+def test_a_background_call_forbids_prompts_and_a_person_s_does_not(tmp_path, counting, monkeypatch):
+    asked: list[str] = []
+    monkeypatch.setattr(keystore_guard, "forbid_prompts", lambda: asked.append("forbid") or True)
+    make(tmp_path).subkey("memory", "a")
+    assert asked == []
+    make(tmp_path, person=False).subkey("memory", "a")
+    assert asked == ["forbid"]
+
+
+# -- nothing hangs ---------------------------------------------------------------------------------------
+
+
+class StuckRing(KeyringBackend):
+    """A backend whose read waits on a dialog nobody can answer."""
+
+    priority = 1  # type: ignore[assignment]
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.release = threading.Event()
+        self.reads = 0
+
+    def get_password(self, service, username):
+        self.reads += 1
+        self.release.wait(30)
+
+    def set_password(self, service, username, password):
+        raise AssertionError("nothing may be stored behind a stuck read")
+
+    def delete_password(self, service, username):
+        raise AssertionError("nothing may be deleted behind a stuck read")
+
+
+@pytest.fixture
+def stuck():
+    before, ring = keyring.get_keyring(), StuckRing()
+    keyring.set_keyring(ring)
+    yield ring
+    ring.release.set()
+    keyring.set_keyring(before)
+
+
+@pytest.mark.parametrize("person_here", [True, False])
+def test_a_backend_that_never_answers_is_refused_for_good_not_waited_on(tmp_path, stuck, monkeypatch, person_here):
+    monkeypatch.setattr(keystore_guard, "PERSON_WAIT_S", 0.3)
+    monkeypatch.setattr(keystore_guard, "BACKGROUND_WAIT_S", 0.3)
+    ks = make(tmp_path, person=person_here)
+    if not person_here:
+        ks._put_doc("provisioned.json", {"at": 1.0})
+    began = time.monotonic()
+    with pytest.raises(keystore.KeystoreDenied):
+        ks.subkey("memory", "a")
+    assert time.monotonic() - began < 5
+    with pytest.raises(keystore.KeystoreDenied):
+        ks.subkey("memory", "a")
+    assert stuck.reads == 1, "a refusal is remembered; the stuck call is not repeated"
+    assert (tmp_path / "ks" / "denied.json").exists()
 
 
 def test_bounded_returns_the_value_and_carries_the_exception():

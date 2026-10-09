@@ -349,12 +349,16 @@ class Keystore:
         ring = self._ring()
         self._spend(kind, purpose)
         self._tell()
+        person_here = self._is_interactive()
+        if not person_here:
+            keystore_guard.forbid_prompts()
         try:
-            out = work(ring)
+            out = keystore_guard.bounded(lambda: work(ring), keystore_guard.PERSON_WAIT_S if person_here
+                                         else keystore_guard.BACKGROUND_WAIT_S)
         except ring.errors.PasswordDeleteError:
             self._event(kind, purpose, "absent")
             return None
-        except (ring.errors.KeyringError, OSError) as exc:
+        except (ring.errors.KeyringError, OSError, TimeoutError) as exc:
             raise self._latch(purpose, exc) from exc
         self._event(kind, purpose, "absent" if kind == "read" and out is None else "ok")
         if kind == "read":
