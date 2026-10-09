@@ -42,7 +42,7 @@ def test_owner_creates_copies_revokes_and_expires_scoped_invitation(joined, open
     page.evaluate("document.querySelector('cluster-view').draw()")
     expect(field).to_have_value("ml-stack://enroll?data=opaque-fixture")
     panel.get_by_role("button", name="Copy invite", exact=True).click()
-    page.wait_for_function("window.copiedInvite === 'ml-stack://enroll?data=opaque-fixture'")
+    page.wait_for_function("() => window.copiedInvite === 'ml-stack://enroll?data=opaque-fixture'")
     panel.get_by_role("button", name="Revoke invite", exact=True).click()
     expect(panel).to_contain_text("Invite revoked.")
     assert calls[-1] == ("DELETE", {"id": "fixture"})

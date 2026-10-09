@@ -512,8 +512,8 @@ class TestSignIn:
             browser=driver.chromium.launch(headless=True)
             page=browser.new_page()
             page.goto(f'http://127.0.0.1:{joined.port}/ui/?launch_ticket={body["ticket"]}#tasks')
-            page.wait_for_function("!location.search.includes('launch_ticket')")
-            page.wait_for_function("document.cookie !== undefined && window.fleetModel !== undefined")
+            page.wait_for_function("() => !location.search.includes('launch_ticket')")
+            page.wait_for_function("() => document.cookie !== undefined && window.fleetModel !== undefined")
             status=page.evaluate("async () => (await fetch('/ui/session',{headers:{'X-ML-Stack-UI':'1'}})).json()")
             assert status['signed_in']
             assert page.url.endswith('#tasks')

@@ -9,6 +9,7 @@ import "./table.js";
 import "./toast.js";
 import "./controls.js";
 import "./slider.js";
+import "./composer.js";
 import "./board.js";
 import "./agents.js";
 

@@ -7,6 +7,10 @@ import sys
 from importlib.metadata import distribution
 from pathlib import Path
 
+from ml_stack import agent_dependency
+
+from . import launch
+
 
 def _module(argument):
     if argument.endswith(".py"):
@@ -30,11 +34,9 @@ def _owned(module):
 
 
 def _target(module):
-    cli = importlib.import_module("ml_stack.cli")
-    for target in cli.commands().values():
-        if target.partition(":")[0] == module:
-            return cli.load(target)
-    return None
+    targets = {point.value: point for point in distribution("ml-stack").entry_points
+               if point.group == "console_scripts" and point.module == module}
+    return next(iter(targets.values())).load() if len(targets) == 1 else None
 
 
 def _runnable(module):
@@ -51,6 +53,8 @@ def _runnable(module):
 def main(argv=None):
     """Dispatch owned module/script arguments or launch the device interface."""
     args = list(sys.argv[1:] if argv is None else argv)
+    if args == ["--check-agent-runtime"]:
+        return agent_dependency.report()
     if args[:1] == ["-m"]:
         module = _module(args[1]) if len(args) > 1 else ""
         rest = args[2:]
@@ -60,7 +64,7 @@ def main(argv=None):
         sys.stderr.write("Unsupported frozen Python invocation\n")
         return 2
     else:
-        return importlib.import_module("ml_stack.fleet.launch").main(args)
+        return launch.main(args)
     if not _owned(module):
         sys.stderr.write("Unsupported frozen module or script\n")
         return 2

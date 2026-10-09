@@ -2,6 +2,7 @@
 
 import pytest
 import test_fleet_page as fleet_page
+from rail import reach
 
 browser = fleet_page.browser
 daemon = fleet_page.daemon
@@ -15,7 +16,7 @@ pytestmark = pytest.mark.slow
 @pytest.fixture
 def scene_page(joined, open_page):
     page, errors = open_page(joined, cookie=joined.cookie, path='/ui/#gym')
-    page.wait_for_function("document.querySelector('gym-scene')?.renderer !== undefined")
+    page.wait_for_function("() => document.querySelector('gym-scene')?.renderer !== undefined")
     page.evaluate("""() => {
         const scene = document.querySelector('gym-scene');
         scene.hidden = false;
@@ -67,7 +68,7 @@ def test_follow_orbit_sensor_toggle_and_whole_map_controls(scene_page):
     scene.get_by_role('button',name='Whole map',exact=True).click()
     assert not scene.get_by_label('Follow car',exact=True).is_checked()
     scene.get_by_label('Follow car',exact=True).check()
-    page.wait_for_function("document.querySelector('gym-scene').follow")
+    page.wait_for_function("() => document.querySelector('gym-scene').follow")
     assert not errors
 
 
@@ -132,7 +133,7 @@ def test_controls_help_shortcuts_and_input_route_boundaries(scene_page):
     assert not scene.get_by_label('Follow car',exact=True).is_checked()
     page.keyboard.press('f')
     assert scene.get_by_label('Follow car',exact=True).is_checked()
-    page.locator('fleet-nav nav a[href="#chat"]').click()
+    reach(page, 'chat')
     page.keyboard.press('d')
     assert not page.evaluate("document.querySelector('gym-scene').debugRays")
     assert not errors
@@ -155,7 +156,7 @@ def test_driver_camera_button_and_shortcut_use_selected_car(scene_page):
     }""")
     page.locator('gym-scene canvas').focus()
     page.keyboard.press('c')
-    page.wait_for_function("document.querySelector('gym-scene').cameraMode==='driver'")
+    page.wait_for_function("() => document.querySelector('gym-scene').cameraMode==='driver'")
     assert not errors
 
 

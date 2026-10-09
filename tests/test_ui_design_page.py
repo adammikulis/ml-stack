@@ -140,7 +140,7 @@ def test_projects_keep_source_checkout_separate_from_explicit_agent_access(app):
     page.get_by_text("Board not connected/configured", exact=True).wait_for()
     assert page.get_by_role("button", name="Create agent access code", exact=True).is_disabled()
     page.get_by_label("Host this project's board on this device").check()
-    page.wait_for_function("!document.querySelector('#project-invite').disabled")
+    page.wait_for_function("() => !document.querySelector('#project-invite').disabled")
     state["project_board"] = {"state": "connection_required", "board_host": "https://mac.test:8770", "agents": []}
     page.evaluate("document.querySelector('projects-view').draw()")
     page.get_by_text("Connect to the existing board on https://mac.test:8770. Create agent access on the authority device.").wait_for()
@@ -171,7 +171,7 @@ def test_network_filter_uses_authenticated_inventory_without_hub_calls(app):
     assert page.locator("#browser-results .model-row").count() == 1
     assert "/ui/models/popular" not in state["requests"]
     page.get_by_role("button", name="Copy here", exact=True).click()
-    page.wait_for_function("document.querySelector('models-view').loading === false")
+    page.wait_for_function("() => document.querySelector('models-view').loading === false")
     assert ("/ui/models", {"name": "marrow-9B.gguf", "source": "", "draft": ""}) in state["posts"]
     assert not errors
 
@@ -183,13 +183,13 @@ def test_inventory_poll_preserves_hub_query_focus_filters_and_results(app):
     page.get_by_text("Hub Qwen", exact=True).wait_for()
     hunt = page.get_by_role("searchbox", name="Search models", exact=True)
     hunt.fill("qwen")
-    page.wait_for_function("document.querySelector('model-browser').hubKey.includes('qwen')")
+    page.wait_for_function("() => document.querySelector('model-browser').hubKey.includes('qwen')")
     hunt.focus()
     before = state["requests"].count("/ui/models/popular")
     page.evaluate("window.savedSearch = document.getElementById('hunt'); window.savedProgress = document.querySelector('#download-rows ml-progress')")
     state["done"] = 60
     page.evaluate("document.querySelector('models-view').draw()")
-    page.wait_for_function("document.querySelector('#download-rows ml-progress').done === 60")
+    page.wait_for_function("() => document.querySelector('#download-rows ml-progress').done === 60")
     assert hunt.input_value() == "qwen"
     assert hunt.evaluate("e => e === window.savedSearch && e === document.activeElement")
     assert page.locator("#download-rows ml-progress").evaluate("e => e === window.savedProgress")
@@ -245,7 +245,7 @@ def test_benchmark_has_labelled_selection_and_preserves_form_across_poll(app):
     page.get_by_label("Question limit", exact=True).fill("12")
     page.get_by_label("Run name", exact=False).fill("evening comparison")
     page.evaluate("window.savedRunName = document.getElementById('label'); document.querySelector('cluster-view').draw()")
-    page.wait_for_function("document.getElementById('label') === window.savedRunName")
+    page.wait_for_function("() => document.getElementById('label') === window.savedRunName")
     assert page.get_by_label("Run name", exact=False).input_value() == "evening comparison"
     assert "ml-stack-bench" not in page.locator("#cluster-sweep").inner_text()
     page.get_by_role("button", name="Start benchmark", exact=True).click()
@@ -344,7 +344,7 @@ def test_chat_enter_shift_enter_ime_and_pending_prevent_duplicate_send(app):
     assert page.evaluate("window.chatRequests[0].stream") is True
     event(page, {"choices": [{"delta": {"content": "Reply"}}]})
     page.evaluate("window.streamController.close()")
-    page.wait_for_function("!document.getElementById('chat-send').disabled")
+    page.wait_for_function("() => !document.getElementById('chat-send').disabled")
     assert not errors
 
 
@@ -353,7 +353,7 @@ def test_streamed_reasoning_is_collapsed_separate_and_keeps_user_expansion(app):
     streaming_chat(page, state)
     page.get_by_role("textbox", name="Message", exact=True).fill("A question")
     page.get_by_role("button", name="Send", exact=True).click()
-    page.wait_for_function("window.streamController !== undefined")
+    page.wait_for_function("() => window.streamController !== undefined")
     event(page, {"ml_stack": {"state": "rebuilding", "conversation": "chat-test"}})
     page.locator(".reply-activity").get_by_text("Restoring conversation…", exact=True).wait_for()
     event(page, {"choices": [{"delta": {"reasoning_content": "First thought."}}]})
@@ -368,7 +368,7 @@ def test_streamed_reasoning_is_collapsed_separate_and_keeps_user_expansion(app):
     page.locator(".answer-text").get_by_text("The answer.", exact=True).wait_for()
     assert "thought" not in page.locator(".answer-text").inner_text()
     page.evaluate("window.streamController.close()")
-    page.wait_for_function("!document.getElementById('chat-send').disabled")
+    page.wait_for_function("() => !document.getElementById('chat-send').disabled")
     assert details.evaluate("e => e.open")
     assert not errors
 
@@ -379,7 +379,7 @@ def test_stream_cancel_error_and_empty_response_restore_send(app, end):
     streaming_chat(page, state)
     page.get_by_role("textbox", name="Message", exact=True).fill("A question")
     page.get_by_role("button", name="Send", exact=True).click()
-    page.wait_for_function("window.streamController !== undefined")
+    page.wait_for_function("() => window.streamController !== undefined")
     if end == "cancel":
         page.get_by_role("button", name="Stop generating", exact=True).click()
         text = "Generation cancelled."

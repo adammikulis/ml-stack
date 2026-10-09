@@ -233,7 +233,7 @@ def download_release(release: Release, asset: dict[str, Any], into: Path | str, 
     return target
 
 
-def install(archive: Path | str, *, app_path: Path | str | None = None) -> Path:
+def install(archive: Path | str, *, app_path: Path | str | None = None, keep_backup: bool = False) -> Path:
     """Unpack a downloaded release over the running one. Returns what it replaced.
 
     The replacement is atomic per item: the new copy is unpacked beside the old, and only
@@ -256,16 +256,41 @@ def install(archive: Path | str, *, app_path: Path | str | None = None) -> Path:
         _restore_modes(found)
 
         backup = target.with_name(target.name + ".old")
+        if keep_backup and (backup.exists() or backup.is_symlink()):
+            raise UpdateError("An earlier runtime backup requires recovery before another installation.")
         shutil.rmtree(backup, ignore_errors=True)
         backup.unlink(missing_ok=True)
         if target.exists():
             promote(target, backup)
         promote(found, target)
-        shutil.rmtree(backup, ignore_errors=True)
+        if not keep_backup:
+            shutil.rmtree(backup, ignore_errors=True)
         _replace_companions(staging, target)
         return target
     finally:
         shutil.rmtree(staging, ignore_errors=True)
+
+
+def complete_install(target: Path) -> None:
+    """Remove the retained runtime backup after replacement readiness is verified."""
+    backup = target.with_name(target.name + ".old")
+    if backup.is_symlink():
+        raise UpdateError("Runtime backup cannot be a symbolic link.")
+    shutil.rmtree(backup)
+
+
+def restore_install(target: Path) -> Path | None:
+    """Restore the retained runtime and preserve the failed replacement beside it."""
+    backup = target.with_name(target.name + ".old")
+    if backup.is_symlink():
+        raise UpdateError("Runtime backup cannot be a symbolic link.")
+    if not backup.exists():
+        return None
+    retained = Path(tempfile.mkdtemp(prefix="ml-stack-failed-runtime-", dir=target.parent))
+    if target.exists():
+        promote(target, retained / target.name)
+    promote(backup, target)
+    return retained
 
 
 def _replace_companions(staging: Path, target: Path) -> list[Path]:

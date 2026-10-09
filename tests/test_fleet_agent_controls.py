@@ -95,7 +95,7 @@ def test_person_board_controls_reuse_saved_settings_and_enroll_through_maintaine
         page.locator('#board-agents > summary').click()
         controls = page.locator('ml-agents')
         controls.locator('input#name').wait_for()
-        page.wait_for_function("document.querySelector('ml-agents')?.shadowRoot?.querySelector('#name')?.value === 'local-worker'")
+        page.wait_for_function("() => document.querySelector('ml-agents')?.shadowRoot?.querySelector('#name')?.value === 'local-worker'")
         assert controls.locator('input#model').input_value() == PICK.ref
         assert controls.locator('input#project').input_value() == str(server.ui.settings_path.parent)
         assert controls.get_by_text('Selected model:',exact=False).count() == 1
@@ -110,7 +110,7 @@ def test_person_board_controls_reuse_saved_settings_and_enroll_through_maintaine
         controls.locator('input#output-tokens').fill('32000')
         assert controls.get_by_text('Tasks could run indefinitely', exact=False).count() == 0
         controls.get_by_role('button',name='Start a local agent',exact=True).click()
-        page.wait_for_function("document.querySelector('ml-agents')?.shadowRoot?.querySelector('.note[role=status]')?.textContent.includes('started.')")
+        page.wait_for_function("() => document.querySelector('ml-agents')?.shadowRoot?.querySelector('.note[role=status]')?.textContent.includes('started.')")
         assert len(children) == 1
         assert localagent.load(kit.ws,'local-worker').identity == worker
         assert account_for(kit.ws,worker) is not None
@@ -141,7 +141,7 @@ def test_auto_context_stays_automatic_when_work_profile_changes(served, browser)
         page.locator("#board-agents > summary").click()
         controls = page.locator("ml-agents")
         controls.locator("input#context").wait_for(state="attached")
-        page.wait_for_function("document.querySelector('ml-agents')?.shadowRoot?.querySelector('#name')?.value === 'local-worker'")
+        page.wait_for_function("() => document.querySelector('ml-agents')?.shadowRoot?.querySelector('#name')?.value === 'local-worker'")
         assert controls.locator("input#context").input_value() == ""
         assert controls.locator("input#context").get_attribute("placeholder") == "Auto"
         page.evaluate("document.querySelector('ml-agents').profile.dispatchEvent(new CustomEvent('change', {detail:{value:'chat'}}))")

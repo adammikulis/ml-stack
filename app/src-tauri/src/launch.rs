@@ -16,7 +16,7 @@ mod tests;
 /// The window's address: carrying a ticket the daemon on this port issued against the secret
 /// recorded under `root`, or the bare page when none is issued.
 pub fn page_url(root: &Path, port: u16) -> String {
-    let bare = format!("http://127.0.0.1:{port}/ui/");
+    let bare = crate::origin::address(port);
     match ticket(root, port) {
         Some(ticket) => format!("{bare}?launch_ticket={ticket}"),
         None => bare,

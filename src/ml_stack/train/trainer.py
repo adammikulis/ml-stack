@@ -148,6 +148,9 @@ class Trainer:
         if latest is None:
             return None
         state = load_state(latest)
+        validator = getattr(self.step, 'validate_checkpoint', None)
+        if validator is not None:
+            validator(state.config)
         read = tensor_reader(self.framework)
         tensors = load_tensors(latest, read_tensors=read)
         wants_opt = (latest / "optimizer.safetensors").exists()

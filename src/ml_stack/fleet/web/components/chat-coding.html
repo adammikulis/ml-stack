@@ -21,7 +21,6 @@
       for (const field of [this.project, this.harness, this.role, this.context, this.draft]) {
         field.onchange = () => { this.readiness(); chat.saveSettings(); };
       }
-      chat.stop.onclick = () => this.stop();
     }
     get active() { return this.mode.value === "coding"; }
     settings() {

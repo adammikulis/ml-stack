@@ -77,7 +77,7 @@ def test_library_chat_action_selects_server_identity(joined, open_page, model_pa
 
 def test_decision_tools_handoff_opens_recipe_step(joined, open_page):
     page, errors = open_page(joined, cookie=joined.cookie, path='/ui/#tools')
-    page.wait_for_function("window.fleetModel.route === 'tools'")
+    page.wait_for_function("() => window.fleetModel.route === 'tools'")
     page.evaluate("document.querySelector('training-view').openRun({workflow:'decider',dataset:'datasets/decisions.jsonl'})")
     expect(page.get_by_label('Workflow', exact=True)).to_have_value('decider')
     expect(page.get_by_label('Recipe', exact=True)).to_be_visible()
@@ -135,7 +135,7 @@ def test_fresh_rl_workflow_requires_no_dataset(joined, open_page):
 ])
 def test_running_model_badge_preserves_theme_contrast(joined, open_page, theme):
     page, errors = open_page(joined, cookie=joined.cookie, path='/ui/#models')
-    page.wait_for_function("window.fleetModel.route === 'models'")
+    page.wait_for_function("() => window.fleetModel.route === 'models'")
     page.evaluate("""theme => {
       for (const [key,value] of Object.entries(theme)) document.documentElement.style.setProperty(key,value);
       const library=document.querySelector('models-library');
@@ -190,4 +190,58 @@ def test_review_response_does_not_restore_command_after_options_change(joined, o
     deferred[0].fulfill(json={'command': 'obsolete preview'})
     expect(page.locator('training-view #config > .status')).to_contain_text('Options changed')
     assert not page.locator('training-view').get_by_text('obsolete preview', exact=True).count()
+    assert not errors
+
+
+def test_mlx_backend_choice_survives_recipe_rebuild_and_sets_payload(joined, open_page):
+    page, errors = open_page(joined, cookie=joined.cookie, path='/ui/#training')
+    page.get_by_label('Dataset path (relative to files root)').fill('datasets/demo.jsonl')
+    page.get_by_role('button', name='Continue to model & recipe').click()
+    page.get_by_label('Recipe', exact=True).select_option('tool-calls')
+    page.get_by_label('Model size', exact=True).select_option('qwen27b')
+    expect(page.get_by_label('Training backend')).to_have_value('mlx')
+    page.get_by_label('Training backend').select_option('torch')
+    page.get_by_label('Model size', exact=True).select_option('e4b')
+    page.get_by_label('Model size', exact=True).select_option('qwen27b')
+    expect(page.get_by_label('Training backend')).to_have_value('torch')
+    page.get_by_label('Training backend').select_option('mlx')
+    page.get_by_role('button', name='Review this run').click()
+    spec = page.evaluate("document.querySelector('training-view').spec()")
+    assert 'framework=mlx' in spec['args'] and 'lora=true' in spec['args']
+    assert 'steps=20' in spec['args'] and 'context=512' in spec['args']
+    assert not errors
+
+
+def test_missing_mlx_training_library_explains_disabled_start(joined, open_page):
+    page, errors = open_page(joined, cookie=joined.cookie, path='/ui/#training')
+    page.route('**/ui/libraries', lambda route: route.fulfill(json={
+        'libraries': [{'name': 'train-mlx', 'title': 'MLX language model fine-tuning', 'installed': False}]}))
+    page.evaluate("document.querySelector('training-view').load()")
+    page.get_by_label('Dataset path (relative to files root)').fill('datasets/demo.jsonl')
+    page.get_by_role('button', name='Continue to model & recipe').click()
+    page.get_by_label('Recipe', exact=True).select_option('tool-calls')
+    page.get_by_label('Model size', exact=True).select_option('qwen27b')
+    page.get_by_role('button', name='Review this run').click()
+    expect(page.locator('training-view #training-runtime')).to_contain_text('Install MLX language model fine-tuning in Settings')
+    expect(page.get_by_role('button', name='Queue 20-step training smoke', exact=True)).to_be_disabled()
+    expect(page.get_by_role('button', name='Review command', exact=True)).to_be_enabled()
+    assert not errors
+
+
+@pytest.mark.parametrize('inventory', ['absent', 'failed'])
+def test_unavailable_mlx_inventory_blocks_queue_and_retains_review(joined, open_page, inventory):
+    page, errors = open_page(joined, cookie=joined.cookie, path='/ui/#training')
+    page.route('**/ui/libraries', lambda route: route.fulfill(
+        status=503 if inventory == 'failed' else 200,
+        json={'error': 'inventory unavailable'} if inventory == 'failed' else {'libraries': []}))
+    page.evaluate("document.querySelector('training-view').load()")
+    page.get_by_label('Dataset path (relative to files root)').fill('datasets/demo.jsonl')
+    page.get_by_role('button', name='Continue to model & recipe').click()
+    page.get_by_label('Recipe', exact=True).select_option('tool-calls')
+    page.get_by_label('Model size', exact=True).select_option('qwen27b')
+    page.get_by_role('button', name='Review this run').click()
+    expect(page.get_by_role('button', name='Queue 20-step training smoke', exact=True)).to_be_disabled()
+    expect(page.get_by_role('button', name='Review command', exact=True)).to_be_enabled()
+    expect(page.locator('training-view #training-runtime')).to_contain_text(
+        'Could not verify' if inventory == 'failed' else 'not available on this device')
     assert not errors

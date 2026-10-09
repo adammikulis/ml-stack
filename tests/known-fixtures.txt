@@ -281,3 +281,12 @@ keys ml-stack
 
 # not a person: code phrases the recogniser reads as people
 worktree pointer
+Open Models
+Explore Poolside
+Remove Poolside
+Install MetaDrive
+color .2s
+config pre
+Poolside Light
+Install Vision
+Hub Qwen

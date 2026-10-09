@@ -13,7 +13,7 @@ pytestmark = pytest.mark.slow
 
 def test_scenario_cards_drive_setup_and_preserve_live_control_access(joined, open_page):
     page, errors = open_page(joined, cookie=joined.cookie, path='/ui/#gym')
-    page.wait_for_function("document.querySelector('gym-view')?.catalogue.length > 0")
+    page.wait_for_function("() => document.querySelector('gym-view')?.catalogue.length > 0")
     page.locator('gym-view .gym-scenario[data-environment="warehouse"] button').first.click()
     assert page.get_by_label('Environment', exact=True).input_value() == 'warehouse'
     assert page.get_by_label('Controller', exact=True).input_value() == 'manual'
@@ -47,7 +47,7 @@ def test_scenario_cards_drive_setup_and_preserve_live_control_access(joined, ope
 @pytest.mark.parametrize('theme', ['dark', 'light', 'custom'])
 def test_rl_text_and_brand_surfaces_remain_readable_across_themes(joined, open_page, theme):
     page, errors = open_page(joined, cookie=joined.cookie, path='/ui/#gym')
-    page.wait_for_function("document.querySelector('gym-view')?.catalogue.length > 0")
+    page.wait_for_function("() => document.querySelector('gym-view')?.catalogue.length > 0")
     page.locator('gym-view .gym-scenario[data-environment="car"] button').first.click()
     result = page.evaluate(r"""theme => {
       const root=document.documentElement;

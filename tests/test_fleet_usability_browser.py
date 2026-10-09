@@ -32,14 +32,16 @@ def test_training_environment_catalogue_drafts_and_pending_submission(usability_
                           'library': 'MetaDrive', 'missing': ['metadrive']}]}))
     page.goto(f'http://127.0.0.1:{served.port}/ui/#training')
     workflow = page.get_by_label('Workflow', exact=True)
-    expect(page.get_by_role('button', name='Queue configuration check', exact=True)).to_be_enabled()
+    expect(page.get_by_role('button', name='Continue to model & recipe →', exact=True)).to_be_enabled()
     workflow.select_option('rl')
     environment = page.locator('training-view').get_by_label('Environment', exact=True)
     expect(environment).to_have_value('drone')
     page.get_by_label('Training timesteps', exact=True).fill('123')
     environment.select_option('car')
+    page.get_by_role('button', name='Review this run →', exact=True).click()
     expect(page.get_by_role('button', name='Start training', exact=True)).to_be_disabled()
-    expect(page.locator('training-view .training-form .intro')).to_contain_text('Install MetaDrive')
+    expect(page.locator('training-view #training-runtime')).to_contain_text('Install MetaDrive')
+    page.get_by_role('button', name='Back', exact=True).click()
     environment.select_option('drone')
     expect(page.get_by_label('Training timesteps', exact=True)).to_have_value('123')
     assert not page.get_by_label('Environment configuration (JSON)', exact=True).is_visible()
@@ -53,6 +55,7 @@ def test_training_environment_catalogue_drafts_and_pending_submission(usability_
       window.fleetModel.api = (path, options) => path === '/ui/workspace/jobs' && options?.method === 'POST'
         ? new Promise(resolve => { window.finishTrainingRequest = resolve; }) : original(path, options);
     }""")
+    page.get_by_role('button', name='Review this run →', exact=True).click()
     page.get_by_role('button', name='Start training', exact=True).click()
     expect(page.get_by_role('button', name='Working…', exact=True)).to_be_disabled()
     expect(page.get_by_role('button', name='Review command', exact=True)).to_be_disabled()
@@ -205,4 +208,41 @@ def test_settings_queued_install_keeps_navigation_usable_until_ready(usability_p
     job.update(state='done', result={'changed': {'core': {'ok': True}}})
     expect(page.locator('#lib-core')).to_be_checked(timeout=5000)
     expect(page.locator('#settings-libs')).to_contain_text('Library changes applied')
+    assert not errors
+
+
+def test_named_workspace_tools_stay_with_main_navigation_at_all_sizes(usability_page):
+    from playwright.sync_api import expect
+
+    served, page, errors = usability_page
+    page.route('**/ui/workspace/jobs', lambda route: route.fulfill(status=503, json={'error': 'Job status unavailable'}))
+    page.goto(f'http://127.0.0.1:{served.port}/ui/')
+    for width, height in [(1440, 900), (1280, 768), (1280, 640), (1024, 420), (390, 844)]:
+        page.set_viewport_size({'width': width, 'height': height})
+        tools = page.get_by_role('group', name='Workspace tools', exact=True)
+        explore = tools.get_by_role('button', name='Explore Poolside', exact=True)
+        training = tools.get_by_role('button', name='Training jobs:', exact=False)
+        expect(explore).to_be_visible()
+        expect(training).to_be_visible()
+        expect(explore.locator('span')).to_have_text('Explore')
+        expect(training.locator('span').first).to_have_text('Training')
+        assert page.locator('.connection-dot').count() == 0
+        reference = page.locator('#nav-tabs a').first.bounding_box()
+        for button in (explore, training, page.get_by_role('link', name='Settings', exact=True), page.get_by_role('button', name='Sign out', exact=True)):
+            bounds = button.bounding_box()
+            assert (bounds['width'], bounds['height']) == pytest.approx((reference['width'], reference['height']), abs=0.001)
+            assert button.locator('svg').bounding_box()['width'] == page.locator('#nav-tabs a svg').first.bounding_box()['width']
+        assert tools.bounding_box()['y'] > page.locator('#nav-tabs').bounding_box()['y']
+        assert page.locator('.rail-utilities').bounding_box()['y'] >= tools.bounding_box()['y'] + tools.bounding_box()['height']
+        expect(page.get_by_role('button', name='Sign out', exact=True)).to_be_in_viewport()
+        expect(page.get_by_role('link', name='Settings', exact=True)).to_be_in_viewport()
+        assert page.locator('.workspace-rail').evaluate('node => node.scrollHeight <= node.clientHeight')
+        explore.click()
+        expect(page.locator('.demo-slice')).to_have_count(10)
+        page.locator('.demo-slice').filter(has_text='Find the right model').click()
+        expect(page.locator('#models')).to_be_visible()
+        training.click()
+        expect(page.locator('training-view > section.workspace')).to_be_visible()
+        expect(page.get_by_role('button', name='Sign out', exact=True)).to_be_in_viewport()
+        page.screenshot(path=f'/private/tmp/poolside-nav-controls-{width}-{height}.png')
     assert not errors

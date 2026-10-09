@@ -27,8 +27,9 @@ from ml_stack.log import say, warn
 from ml_stack.train import lora
 from ml_stack.train.metrics import MetricsLog
 from ml_stack.train.probes import probe_hook
-from ml_stack.train.recipes import Built, build, known, spec, tool_calls, validate
+from ml_stack.train.recipes import Built, build, known, spec, tool_calls, tool_calls_mlx, validate
 from ml_stack.train.recipes.base import resolve_base
+from ml_stack.train.recipes.conversations import read_conversations
 from ml_stack.train.recipes.models import parameter_count
 from ml_stack.train.schedule import constant, warmup_cosine
 from ml_stack.train.trainer import Trainer, TrainReport
@@ -124,10 +125,13 @@ def plan_for(recipe_id: str, config: dict[str, Any], data: Path, *,
 
     base, entry = _base_of(recipe_id, config, data)
     try:
-        train, holdout, _ = tool_calls.read_conversations(data)
+        train, holdout, _ = read_conversations(data)
         examples = len(train) + len(holdout)
     except (OSError, ValueError):
         examples = 0
+    if config.get("framework") == "mlx":
+        return tool_calls_mlx.plan(config, base, examples, ceiling_min=ceiling_min,
+                                   seconds_per_step=seconds_per_step)
     return lora.plan(config, base=base, device=str(tool_calls.device_for()), examples=examples,
                 size_spec=entry, ceiling_min=ceiling_min,
                 seconds_per_step=seconds_per_step)
@@ -140,6 +144,8 @@ def run(recipe_id: str, config: dict[str, Any], data: Path, out: Path,
         should_stop: Callable[[], bool] | None = None) -> dict[str, Any]:
     """Train ``recipe_id`` into ``out``, then its phases and its export; returns the result."""
     config = validate(recipe_id, config)
+    if config["framework"] == "mlx" and recipe_id == "tool-calls" and (merge or export):
+        raise ValueError("MLX adapters export separately; merge and GGUF export require the Torch backend")
     if dry:
         config = {**config, "steps": min(int(config.get("steps") or 20), 20)}
     talk = say or print
@@ -180,7 +186,7 @@ def run(recipe_id: str, config: dict[str, Any], data: Path, out: Path,
         "final_loss": report.final_loss,
         "best_metric": rounds.best,
         "checkpoint": str(report.last_checkpoint or ""),
-        "parameters": parameter_count(built.model),
+        "parameters": built.config.get("total_parameters") or parameter_count(built.model),
         "seconds": round(time.monotonic() - rounds.started, 1),
         "dry_run": dry,
         "stop_reason": report.stop_reason,
@@ -232,7 +238,7 @@ class Rounds:
             max_seconds=self.left(), **self.common,
             config={**built.config, "recipe": self.recipe_id,
                     "framework": trainer.framework,
-                    "parameters": parameter_count(built.model)})
+                    "parameters": built.config.get("total_parameters") or parameter_count(built.model)})
         if report.best_metric is not None:
             self.best = min(report.best_metric, self.best if self.best is not None
                             else report.best_metric)
@@ -263,6 +269,9 @@ def _finish_lora(built: Any, config: dict[str, Any], data: Path, out: Path, *, r
                  fit: Any, dry: bool, export: bool, merge: bool, quant: str,
                  talk: Any) -> dict[str, Any]:
     """Adapter, merge, GGUF, preflight, manifest -- everything after the last step."""
+    if built.config.get("framework") == "mlx":
+        return tool_calls_mlx.finish(built, config, tool_calls_mlx.Outcome(
+            report, fit, data, out, dry, MANIFEST_VERSION), talk)
     base = str(built.config.get("base") or "")
     measured = report.seconds / report.steps if report.steps else 0.0
     said = fit

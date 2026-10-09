@@ -2,8 +2,10 @@
 
 use std::io::{Read, Write};
 use std::net::{Shutdown, TcpStream};
+use std::path::Path;
 use std::time::{Duration, Instant};
 
+use crate::identity;
 use tauri::AppHandle;
 use tauri_plugin_shell::process::CommandChild;
 use tauri_plugin_shell::ShellExt;
@@ -17,25 +19,38 @@ const HEALTH_BYTES: u64 = 1024 * 1024;
 #[path = "daemon_tests.rs"]
 mod tests;
 
-/// Whether a daemon answers `/health` on this port.
-pub fn healthy(port: u16) -> bool {
+/// Whether our daemon answers `/health` on this port: one that proves, from the secret kept
+/// in `root`, that it is the daemon of this installation and not another process on the port.
+pub fn healthy(port: u16, root: &Path) -> bool {
     let addr = format!("127.0.0.1:{port}").parse();
     let Ok(addr) = addr else { return false };
+    let Some(challenge) = identity::challenge() else {
+        return false;
+    };
     let Ok(mut sock) = TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT) else {
         return false;
     };
     let _ = sock.set_read_timeout(Some(CONNECT_TIMEOUT));
-    let request = format!("GET /health HTTP/1.0\r\nHost: 127.0.0.1:{port}\r\n\r\n");
+    let request = format!(
+        "GET /health HTTP/1.0\r\nHost: 127.0.0.1:{port}\r\n{}: {challenge}\r\n\r\n",
+        identity::HEADER
+    );
     if sock.write_all(request.as_bytes()).is_err() {
         return false;
     }
     let mut response = Vec::new();
     let read = Read::by_ref(&mut sock).take(HEALTH_BYTES + 1).read_to_end(&mut response);
     let _ = sock.shutdown(Shutdown::Both);
-    read.is_ok() && response.len() <= HEALTH_BYTES as usize && valid_health(&response)
+    // the secret is read after the answer: the daemon makes it while handling the challenge
+    let Some(secret) = identity::secret(root) else {
+        return false;
+    };
+    read.is_ok()
+        && response.len() <= HEALTH_BYTES as usize
+        && valid_health(&response, &identity::expected(&secret, &challenge))
 }
 
-fn valid_health(response: &[u8]) -> bool {
+fn valid_health(response: &[u8], proof: &str) -> bool {
     let Some(split) = response.windows(4).position(|part| part == b"\r\n\r\n") else {
         return false;
     };
@@ -52,13 +67,14 @@ fn valid_health(response: &[u8]) -> bool {
         && body["slots"].as_u64().is_some()
         && body["free"].as_u64().is_some()
         && body["busy"].as_bool().is_some()
+        && body["proof"].as_str().is_some_and(|said| identity::same(said, proof))
 }
 
 /// Block until the daemon answers, or give up.
-pub fn wait_for_health(port: u16) -> bool {
+pub fn wait_for_health(port: u16, root: &Path) -> bool {
     let deadline = Instant::now() + Duration::from_secs(HEALTH_SECONDS);
     while Instant::now() < deadline {
-        if healthy(port) {
+        if healthy(port, root) {
             return true;
         }
         std::thread::sleep(Duration::from_millis(150));
@@ -76,7 +92,7 @@ pub fn start(app: &AppHandle, port: u16, root: &str) -> Result<CommandChild, Str
     let (_events, child) = command
         .spawn()
         .map_err(|e| format!("could not start {SIDECAR}: {e}"))?;
-    if !wait_for_health(port) {
+    if !wait_for_health(port, Path::new(root)) {
         stop(child);
         return Err(format!("the daemon did not start on port {port}"));
     }

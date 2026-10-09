@@ -33,6 +33,7 @@ from ml_stack.speech.protocols import ProviderError
 from ml_stack.speech.service import as_json, transcribe
 
 from . import (
+    app_identity,
     commands,
     companion_routes,
     device_auth,
@@ -432,7 +433,9 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
                 if sched is not None and not sched["available"]:
                     status = {**status, "free": 0}
                 joined = memberships(cluster_key_path)
-                self._send(200, {"ok": True, "name": self._name(),
+                root = getattr(daemon.ui, "root", None)
+                proof = app_identity.prove(root, self.headers.get(app_identity.HEADER, "")) if root else ""
+                self._send(200, {"ok": True, "name": self._name(), **({"proof": proof} if proof else {}),
                                  "cluster_mode": daemon.cluster_mode or (joined[0].mode if joined else "dev"), **status, **report(),
                                  **({"availability": sched} if sched else {}),
                                  **({"serving": serving.public()} if serving is not None
