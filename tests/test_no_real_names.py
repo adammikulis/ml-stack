@@ -603,3 +603,12 @@ def test_a_phrase_the_documents_already_carry_is_the_repositorys_vocabulary(tmp_
     assert documented(str(where), "Quartz" + " Lantern")
     assert not documented(str(where), "Bea Marlow")
     assert not documented(str(where), "quartz lantern")
+
+
+def test_a_phrase_shaped_like_a_git_option_or_a_pathspec_is_only_searched_for(tmp_path):
+    from ml_stack.redact.benign import documented
+    where = repo(tmp_path, graph={"nodes": []})
+    commit(where, {"glossary.md": "Quartz" + " Lantern is a term.\n"}, "chore: glossary")
+    for hostile in ("--output=leak.txt Of", "Quartz --open-files-in-pager=sh", "Quartz; touch leak"):
+        assert not documented(str(where), hostile)
+    assert not (where / "leak.txt").exists() and not (where / "leak").exists()

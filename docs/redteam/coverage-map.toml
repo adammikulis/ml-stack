@@ -37,6 +37,13 @@ tests = ["tests/test_redteam_human_floor.py::test_every_human_only_command_refus
 note = "install and rollback refuse any agent marker or missing terminal before reading the manifest; an expired, replayed, other-device, tampered or redirected manifest writes nothing"
 
 [[group]]
+match = ["spawn:redact/benign.py:documented"]
+status = "covered"
+count = 1
+tests = ["tests/test_no_real_names.py::test_a_phrase_shaped_like_a_git_option_or_a_pathspec_is_only_searched_for"]
+note = "the phrase is one fixed-string argv element after -e with no shell; option-shaped or shell-shaped text only fails to match and writes nothing"
+
+[[group]]
 match = ["spawn:fleet/autostart_backends.py:run"]
 status = "covered"
 count = 1
@@ -633,7 +640,7 @@ tests = ["tests/test_fleet_android.py::test_real_tls_dispatcher_refuses_phone_cr
 note = "TLS daemon requests attack missing phone authority, wrong methods, unknown routes, malformed/oversized bodies and computer-route escalation; direct route attacks cover plaintext/public sources, revoked sessions, model and role injection, redaction and stream revocation"
 
 [[group]]
-match = ["route:fleet/api.py:/workspace/v1/*"]
+match = ["route:fleet/callers.py:/workspace/v1/*"]
 status = "covered"
 count = 1
 tests = ["tests/test_redteam_device_transport.py::test_daemon_project_dispatch_refuses_invalid_device_requests",
