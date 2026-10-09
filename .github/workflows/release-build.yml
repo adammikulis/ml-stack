@@ -94,6 +94,7 @@ jobs:
           python -m pip install playwright
           python -m playwright install --with-deps chromium
       - name: it starts and serves the interface
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           BIN=$(find dist/bundle -maxdepth 3 -name 'ml-stack-headless*' -type f | head -1)
@@ -107,12 +108,28 @@ jobs:
           done
           curl -sf http://127.0.0.1:8899/health
       - name: a person sets it up and opens every screen
+        if: runner.os != 'Windows'
         run: >-
           python packaging/smoke.py http://127.0.0.1:8899
           --passphrase "correct horse battery staple" --group ci
           --screenshot dist/smoke.png
+      # The Windows application runs its daemon inside an Ubuntu WSL distribution (docs/windows-runtime.md)
+      # and a hosted runner has none, so there is no page to drive. What a runner can show is that the
+      # frozen launcher starts, reaches the WSL check and refuses in its own words.
+      - name: it starts and says what Windows needs
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          BIN=$(find dist/bundle -maxdepth 3 -name 'ml-stack-headless*' -type f | head -1)
+          echo "starting $BIN"
+          if "$BIN" --port 8899 --no-browser > "$RUNNER_TEMP/launch.txt" 2>&1; then
+            cat "$RUNNER_TEMP/launch.txt"; echo "the launcher started a daemon without WSL"; exit 1
+          fi
+          cat "$RUNNER_TEMP/launch.txt"
+          grep -qi "WSL" "$RUNNER_TEMP/launch.txt" \
+            || { echo "the launcher failed for a reason other than the missing WSL distribution"; exit 1; }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        if: always()
+        if: always() && runner.os != 'Windows'
         with:
           name: ${{ matrix.asset }}-smoke
           path: dist/smoke.png
@@ -123,6 +140,7 @@ jobs:
       # import, so nothing static points at it and only a running bundle says whether
       # PyInstaller carried it.
       - name: the screens answer
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           U='X-ML-Stack-UI: 1'; J='Content-Type: application/json'
