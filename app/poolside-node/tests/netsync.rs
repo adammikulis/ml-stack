@@ -65,7 +65,7 @@ fn a_forged_copy_from_a_relay_is_refused_and_does_not_mark_the_origin_damaged() 
     rows[last] = forged;
     let c_origin = origin_of(&c);
     let mut relay = reach(&b, &c);
-    let reply = relay.call(&json!({"op": "push", "board": "demo", "origin": origin_of(&b), "journals": {origin.clone(): rows}, "trusted_vector": {}})).unwrap();
+    let reply = relay.call(&json!({"op": "push", "board": "demo", "origin": origin_of(&b), "logs": {origin.clone(): rows}, "trusted_vector": {}})).unwrap();
     assert_eq!(reply["refused"][&origin], "damaged", "{reply}");
     let damaged = c.node.lock().unwrap().boards["demo"].board.damaged().clone();
     assert!(damaged.is_empty(), "a relay's bad copy never marks the origin: {damaged:?}");
@@ -88,7 +88,7 @@ fn the_owner_of_a_log_that_sends_a_forged_copy_of_it_is_marked_damaged() {
     let last = rows.len() - 1;
     rows[last]["hash"] = json!("0".repeat(64));
     let mut owner = reach(&a, &c);
-    let reply = owner.call(&json!({"op": "push", "board": "demo", "origin": origin, "journals": {origin.clone(): rows}, "trusted_vector": {}})).unwrap();
+    let reply = owner.call(&json!({"op": "push", "board": "demo", "origin": origin, "logs": {origin.clone(): rows}, "trusted_vector": {}})).unwrap();
     assert_eq!(reply["refused"][&origin], "damaged");
     assert!(c.node.lock().unwrap().boards["demo"].board.damaged().contains_key(&origin));
 }
@@ -101,7 +101,7 @@ fn a_pull_carries_at_most_the_rows_and_bytes_of_a_batch() {
     }
     let mut c = reach(&b, &a);
     let reply = c.call(&json!({"op": "pull", "board": "demo", "origin": origin_of(&b), "vector": {}})).unwrap();
-    let rows: usize = reply["journals"].as_object().unwrap().values().map(|v| v.as_array().unwrap().len()).sum();
+    let rows: usize = reply["logs"].as_object().unwrap().values().map(|v| v.as_array().unwrap().len()).sum();
     assert!(rows <= MAX_ROWS && rows > 0, "{rows} rows in one reply");
     sync(&b, &a);
     assert_eq!(b.texts("demo", &bt).iter().filter(|t| t.starts_with("row ")).count(), MAX_ROWS + 20, "many rounds finish what one batch could not");
@@ -114,7 +114,7 @@ fn a_pull_carries_at_most_the_rows_and_bytes_of_a_batch() {
     let mut c = reach(&b, &a);
     let vector = b.node.lock().unwrap().boards["demo"].board.vector();
     let reply = c.call(&json!({"op": "pull", "board": "demo", "origin": origin_of(&b), "vector": vector})).unwrap();
-    let bytes = serde_json::to_vec(&reply["journals"]).unwrap().len();
+    let bytes = serde_json::to_vec(&reply["logs"]).unwrap().len();
     assert!(bytes < MAX_BATCH_BYTES + 130 * 1024, "{bytes} bytes in one reply");
     sync(&b, &a);
     assert_eq!(b.texts("demo", &bt).len(), before + 40);
@@ -125,7 +125,7 @@ fn a_push_past_the_request_bound_is_refused_whole() {
     let [(a, _), (b, _), _] = trio();
     let many: serde_json::Map<String, Value> = (0..20).map(|i| (format!("{i:032x}"), json!([]))).collect();
     let mut c = reach(&b, &a);
-    let r = c.call(&json!({"op": "push", "board": "demo", "origin": origin_of(&b), "journals": many, "trusted_vector": {}}));
+    let r = c.call(&json!({"op": "push", "board": "demo", "origin": origin_of(&b), "logs": many, "trusted_vector": {}}));
     assert!(matches!(r, Err(Error::Invalid(_))), "{r:?}");
 }
 

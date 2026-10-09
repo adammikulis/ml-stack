@@ -69,8 +69,8 @@ pub fn sync_board(node: &Mutex<Node>, c: &mut PeerClient, id: &str) -> Result<Re
                 return Err(Error::Denied("this device writes a different log than the one it presented before".into()));
             }
             h.board.acknowledge(&c.board_fingerprint, &tips(&reply, "trusted_vector")?)?;
-            let journals: BTreeMap<String, Vec<Row>> = serde_json::from_value(reply["journals"].clone()).map_err(|_| Error::Invalid("journals map origins to rows".into()))?;
-            take(&mut h.board, &journals, &c.board_fingerprint, &mut report)
+            let logs: BTreeMap<String, Vec<Row>> = serde_json::from_value(reply["logs"].clone()).map_err(|_| Error::Invalid("logs map origins to rows".into()))?;
+            take(&mut h.board, &logs, &c.board_fingerprint, &mut report)
         })?;
         report.pulled += pulled;
         let pushed = push_once(node, c, id, &origin, &mut report)?;
@@ -84,14 +84,14 @@ pub fn sync_board(node: &Mutex<Node>, c: &mut PeerClient, id: &str) -> Result<Re
 fn push_once(node: &Mutex<Node>, c: &mut PeerClient, id: &str, origin: &str, report: &mut Report) -> Result<usize> {
     let reply = c.call(&json!({"op": "vector", "board": id, "origin": origin}))?;
     let remote = tips(&reply, "vector")?;
-    let (journals, trusted) = with_board(node, id, |h| {
+    let (logs, trusted) = with_board(node, id, |h| {
         h.board.acknowledge(&c.board_fingerprint, &remote)?;
         Ok((rows_since(&h.board, &seqs(&remote)), h.board.trusted_vector()))
     })?;
-    if journals.is_empty() {
+    if logs.is_empty() {
         return Ok(0);
     }
-    let reply = c.call(&json!({"op": "push", "board": id, "origin": origin, "journals": journals, "trusted_vector": trusted}))?;
+    let reply = c.call(&json!({"op": "push", "board": id, "origin": origin, "logs": logs, "trusted_vector": trusted}))?;
     let stored = reply["stored"].as_u64().unwrap_or(0) as usize;
     if let Some(refused) = reply["refused"].as_object() {
         report.refused.extend(refused.iter().map(|(k, v)| (k.clone(), v.as_str().unwrap_or("").to_string())));

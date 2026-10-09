@@ -107,8 +107,8 @@ fn pull(node: &mut Node, bfp: &str, req: &Value) -> Result<Value> {
     let h = hosted(node, req, bfp)?;
     h.board.acknowledge(bfp, &vector)?;
     h.board.seal()?;
-    let journals = rows_since(&h.board, &seqs(&vector));
-    Ok(json!({"origin": h.board.origin(), "trusted_vector": h.board.trusted_vector(), "journals": journals}))
+    let logs = rows_since(&h.board, &seqs(&vector));
+    Ok(json!({"origin": h.board.origin(), "trusted_vector": h.board.trusted_vector(), "logs": logs}))
 }
 
 fn vector(node: &mut Node, bfp: &str, req: &Value) -> Result<Value> {
@@ -117,11 +117,11 @@ fn vector(node: &mut Node, bfp: &str, req: &Value) -> Result<Value> {
 }
 
 fn push(node: &mut Node, bfp: &str, req: &Value) -> Result<Value> {
-    let journals: BTreeMap<String, Vec<Row>> = serde_json::from_value(req.get("journals").cloned().unwrap_or(json!({}))).map_err(|_| Error::Invalid("journals map origins to rows".into()))?;
+    let logs: BTreeMap<String, Vec<Row>> = serde_json::from_value(req.get("logs").cloned().unwrap_or(json!({}))).map_err(|_| Error::Invalid("logs map origins to rows".into()))?;
     let trusted = vector_of(req, "trusted_vector")?;
     let h = hosted(node, req, bfp)?;
     let mut report = Report::default();
-    let stored = take(&mut h.board, &journals, bfp, &mut report)?;
+    let stored = take(&mut h.board, &logs, bfp, &mut report)?;
     h.board.acknowledge(bfp, &trusted)?;
     Ok(json!({"stored": stored, "refused": report.refused}))
 }
