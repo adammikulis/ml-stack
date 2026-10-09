@@ -20,7 +20,6 @@ CHANGES_THE_TREE = frozenset({"add", "commit", "checkout", "switch", "reset", "r
 
 RUN = r"^[\s({!]*((\w+=\S*|exec|then|do|time|sudo)\s+)*"
 GIT = RUN + r"git\s+((-C\s+\S+|-c\s+\S+|--no-pager)\s+)*(?P<verb>[a-z-]+)"
-INSTALL = RUN + r"(uv\s+)?(python3?\s+-m\s+)?pip3?\s+install\b"
 
 USE_A_WORKTREE = (
     "Resolve destructive changes and conflicts in your own "
@@ -172,20 +171,17 @@ def _reads_only(segment: str) -> bool:
     return re.match(GIT + r"\s+(list|show)\b", segment) is not None and "stash" in segment.split()
 
 
-def _installs(segment: str, here: Path) -> list[Path]:
-    if not re.match(INSTALL, segment):
-        return []
-    words, found = segment.split(), []
-    for i, word in enumerate(words):
-        if word in ("-e", "--editable") and i + 1 < len(words):
-            raw = words[i + 1]
-        elif word.startswith("--editable="):
-            raw = word.split("=", 1)[1]
-        else:
-            continue
-        found.append((here / re.sub(r"\[[^\]]*\]$", "", _unquote(raw))).resolve())
-    return found
-
+def _switches_to_a_branch(segment: str) -> bool:
+    """Whether a git command is `git switch <branch>`: one plain branch name, not main, and no option
+    that creates, detaches or discards."""
+    try:
+        words = shlex.split(segment, posix=os.name != "nt")
+    except ValueError:
+        return False
+    if "switch" not in words:
+        return False
+    rest = words[words.index("switch") + 1:]
+    return len(rest) == 1 and not rest[0].startswith("-") and rest[0] not in {"main", "master"}
 
 
 def _worktree_target(segment: str) -> str | None:
@@ -237,16 +233,13 @@ def bash_refusal(command: str, cwd: str) -> str:
                 if _branch(found[0]) == "main":
                     return "An agent may not stage or commit on main."
                 continue
+            if primary and git["verb"] == "switch" and _switches_to_a_branch(segment):
+                continue
             if primary and not (git["verb"] == "merge" and _landing(segment)):
                 what = ("`git merge` in the primary checkout lands one branch: "
                         "`git merge --ff-only <branch>`" if git["verb"] == "merge"
                         else f"`git {git['verb']}` changes the primary checkout")
                 return f"{what}. " + USE_A_WORKTREE.format(primary=primary)
-        for target in _installs(segment, here):
-            found = checkouts(target)
-            if found and _enforced(found[1]):
-                return (f"`pip install -e {target}` is forbidden; use an immutable built wheel "
-                        "for runtimes or `PYTHONPATH=src` for development checks.")
     return ""
 
 
