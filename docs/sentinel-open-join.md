@@ -171,7 +171,7 @@ Each emits a `Finding` through the existing path (`Sentinel.handle` -> policy ->
 | lone adopter | a device that was alone adopting a pool | reliable as an event; always notified |
 
 The node counts and rate-limits; it does not decide. It exposes these as counters and an event stream
-on the socket (3.8) so the sentinel needs no packet access. [analysis]
+on the socket (section 4) so the sentinel needs no packet access. [analysis]
 
 ### 3.4 Graded responses
 
