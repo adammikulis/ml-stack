@@ -18,7 +18,6 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
-from typing import Any
 
 import pytest
 
