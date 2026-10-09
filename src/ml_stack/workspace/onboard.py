@@ -11,7 +11,7 @@ from typing import Any
 from ml_stack import agent_hooks, authority, private_path
 from ml_stack.briefing import REQUIRED_BRIEFING
 from ml_stack.workspace import agent_invites, device_metadata, tokens
-from ml_stack.workspace.identity import AGENT, HUMAN, LEAD, Denied, Identity, valid_name
+from ml_stack.workspace.identity import AGENT, HUMAN, LEAD, Denied, Identity, valid_id, valid_name
 from ml_stack.workspace.modelid import CLAIMED, clean_harness, clean_model
 from ml_stack.workspace.service import GREETER, Workspace
 
@@ -170,7 +170,8 @@ def _mint(ws: Workspace, name: str, ttl_s: float, role: str = "") -> None:
 
 def brief(name: str, me: str, registered: bool = False) -> str:
     """The brief of the subagent ``name`` that ``me`` spawned, pasted into its prompt or given by its hooks."""
-    check_names([name, me])
+    if not (valid_id(name) and valid_id(me)):
+        raise ValueError("a brief names agent ids (a-z, 0-9, . _ -; up to 48, or parent/child)")
     device = device_metadata.current()
     start = (BRIEF_REGISTERED if registered else BRIEF_START).format(me=me, name=name)
     return REQUIRED_BRIEFING.format(owner=me) + BRIEF.format(me=me, name=name, start=start) + f"Local runtime device: {device['label']} ({device['verification']}); provenance grants no permissions.\n"

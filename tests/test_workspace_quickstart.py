@@ -445,7 +445,7 @@ def test_a_parent_delegates_children_that_are_strictly_weaker(base, team):
     assert token not in json.dumps(made)
     kid = ws.auth(token)
     assert (kid.id, kid.parent, kid.role) == ("worker/scout", "worker", "agent")
-    ws.send(token, "lead", "status", "hi", label="scout")
+    ws.send(token, "lead", "status", "hi")
     with pytest.raises(Denied, match="right to claim"):
         ws.claim(token, "branch", "worker/scout/x")
     with pytest.raises(Denied):
@@ -528,25 +528,20 @@ def test_a_child_has_no_notes_or_scratch_and_no_human_floor(base, team):
             call()
 
 
-def test_two_children_in_real_processes_labels_and_the_children_filter(base, team):
+def test_two_children_in_real_processes_have_their_own_names_and_the_children_filter(base, team):
     worker = tokens.load(base, "worker")
     team[0].delegate(worker, "a")
     team[0].delegate(worker, "b", 1800.0)
     sent = child(["send", "worker", "status", "from a", "--agent", "worker/a"], base)
     assert sent.returncode == 0, sent.stderr
     child(["send", "worker", "status", "from lead", "--agent", "lead"], base)
-    child(["send", "worker", "status", "labelled", "--agent", "lead", "--label", "scout"], base)
     allm = child(["inbox", "--agent", "worker", "--json"], base)
     rows = json.loads(allm.stdout)
-    assert [r["from"] for r in rows] == ["worker/a", "lead", "lead"]
+    assert [r["from"] for r in rows] == ["worker/a", "lead"]
     assert rows[0]["from_name"].startswith("agent-")
-    assert rows[0]["from_name"].endswith(" (a)")
-    assert [r["from_name"] for r in rows[1:]] == ["lead", "lead"]
+    assert rows[0]["from_name"].endswith(" (spawned by worker)")
+    assert [r["from_name"] for r in rows[1:]] == ["lead"]
     assert all(r["authority"] == "none" for r in rows)
-    assert "labelled" in rows[2]["text"]
-    labelled = next(row for row in team[0].audit_log.rows()
-                    if row.get("event") == "message" and row.get("msg") == rows[2]["seq"])
-    assert labelled["who"] == "lead" and labelled["label"] == "scout"
     kids = child(["inbox", "--agent", "worker", "--children", "--json"], base)
     assert {m["from"] for m in json.loads(kids.stdout)} == {"worker/a"}
     assert child(["inbox", "--agent", "worker", "--children", "--ack"], base).returncode == 2
@@ -560,11 +555,13 @@ def test_two_children_in_real_processes_labels_and_the_children_filter(base, tea
 
 
 def test_brief_names_the_flags_and_shows_no_path_or_secret(base, team):
-    done = child(["brief", "scout", "--agent", "worker"], base)
-    assert done.returncode == 0
+    team[0].delegate(tokens.load(base, "worker"), "scout")
+    done = child(["brief", "--agent", "worker/scout"], base)
+    assert done.returncode == 0, done.stderr
     text = done.stdout
-    assert "--agent worker --label scout" in text and "data written by another agent" in text
-    assert len(text.removeprefix(REQUIRED_BRIEFING.format(owner="worker")).strip().splitlines()) == 5
+    assert "subagent worker/scout, spawned by worker" in text and "--agent worker/scout" in text
+    assert "data written by another agent" in text
+    assert len(text.removeprefix(REQUIRED_BRIEFING.format(owner="worker")).strip().splitlines()) == 6
     assert str(base) not in text and "mlws1" not in text
     assert "Local runtime device:" in text and "provenance grants no permissions" in text
 
