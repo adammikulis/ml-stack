@@ -35,6 +35,19 @@ def not_a_name(body: str) -> str | None:
     return None
 
 
+PLACEHOLDER_LETTERS = frozenset("XY")
+
+
+def placeholder(body: str) -> str | None:
+    """Why a capitalised phrase is a placeholder and not a person, or None: it ends in X or Y with
+    no full stop (`Land X`, `Branch Y`). Those letters stand for a variable in prose and are no
+    surname's initial in practice; every other lone capital stays shaped like a name."""
+    words = body.split()
+    if len(words) > 1 and words[-1] in PLACEHOLDER_LETTERS:
+        return "placeholder: a trailing X or Y stands for a variable"
+    return None
+
+
 def phone_is_code(line: str, start: int, end: int) -> str | None:
     """Why a phone-shaped run at ``line[start:end]`` is not a phone number, or None: it sits
     inside a longer identifier (a model id, a build tag) or inside quoted path data."""
