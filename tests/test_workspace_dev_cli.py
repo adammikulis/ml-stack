@@ -303,7 +303,8 @@ def test_two_device_states_share_board_over_real_udp_and_tls_without_codes(dev_p
 @pytest.mark.parametrize("mode", ["dev", "prod"])
 def test_default_profile_catalogue_and_automatic_board_use_real_udp_and_tls(repository, tmp_path, monkeypatch, mode):
     from ml_stack import http
-    from ml_stack.fleet import automatic_clusters, discovery
+    from ml_stack.fleet import automatic_clusters, discovery, tls
+    from ml_stack.fleet.pool_roster import Pool
     from ml_stack.fleet.projects import identity
     from ml_stack.fleet.remote import Peer
     original_destinations = discovery._destinations
@@ -323,7 +324,11 @@ def test_default_profile_catalogue_and_automatic_board_use_real_udp_and_tls(repo
     monkeypatch.setattr(automatic_clusters, "offers", lambda port=None: original_offers(udp))
     device = _dev_device(state, 0, repository, udp, default_profile=True)
     if mode == "prod":
-        device.advertiser.key = discovery.mint_cluster("development", mode="prod").key
+        minted = discovery.mint_cluster("development", mode="prod")
+        device.advertiser.key = minted.key
+        pool = Pool(device.keyfile)    # a new cluster key is a new roster: enrol the node and this machine in it
+        for one in (tls.identity(device.state / "tls", "node-0"), tls.local()):
+            pool.enrol(minted.group, one.beacon, "node-0", "test")
     http._PINNED.clear()
     try:
         assert device.daemon.cluster_key_path is None
