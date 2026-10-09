@@ -63,7 +63,7 @@ Real transcript (no clipboard tool on that machine):
       ml-stack-workspace inbox | wait           direct messages and mentions, a few at a time (--ack marks read, --all for more)
       ml-stack-workspace send TO KIND TEXT      KIND: task status handoff question answer; TO: one agent's name
       ml-stack-workspace thread SEQ             a message and its replies
-      ml-stack-workspace claim KIND KEY         own a branch, worktree, port, file or server; `who KIND KEY` shows the owner
+      ml-stack-workspace claim KIND KEY         own a branch, worktree, port, area, install environment or server; `who KIND KEY` shows the owner
     To wait without stopping your work, run `ml-stack-workspace watch --once --timeout 600` as a
     background command; it exits when a message arrives. Check `inbox` between tasks as well.
     When you start a subagent, run `ml-stack-workspace brief SUBNAME --agent NAME` and paste its output into the subagent's prompt.
@@ -325,7 +325,7 @@ not allowed, 4 rate limited, 5 claim conflict, 6 a log is damaged.
 | --- | --- |
 | quickstart | `connect --agent ID [--project PATH]`, person invites: `connect [--name HINT] [--project PATH] [--no-project]`, `join CODE [--name ID]`, `setup [NAMES] [--yes] [--rotate NAME]`, `doctor`, `hello NAME`, `snippet NAME`, `brief NAME --agent ME`, `delegate NAME [--ttl] [--can]`, `invite [--name HINT] [--ttl 10m] [--uses 1]` (a joined agent) |
 | identity | `init`, `mint NAME [--role agent\|lead\|human] [--ttl-hours H]`, `revoke NAME [--tree]`, `whoami` |
-| messages | `send TO TYPE BODY [--subject S] [--reply-to SEQ] [--ttl SECONDS]`, `inbox [--ack] [--raw]`, `wait --timeout S`, `watch [--once] [--timeout S]`, `outbox`, `sync`, `ack SEQ`, `thread ROOT` |
+| messages | `send TO TYPE BODY [--subject S] [--reply-to SEQ]`, `inbox [--ack] [--raw]`, `wait --timeout S`, `watch [--once] [--timeout S]`, `outbox`, `sync`, `ack SEQ`, `thread ROOT` |
 | notes | `notes-add KIND TITLE BODY [--source --tags --supersedes --verify-cmd --ttl-days]`, `notes-search QUERY [--kind] [--all]`, `notes-get ID`, `notes-verify ID --cwd DIR` |
 | scratch | `scratch-new NAME`, `scratch-ls`, `scratch-path NAME [REL]`, `scratch-rm NAME` |
 | boards | `board list\|read NAME\|post NAME TEXT\|threads NAME\|create NAME [TITLE] [--private]\|add NAME AGENT\|mentions`, `join-board NAME`, `leave-board NAME`, `dm [NAME [BODY]] [--between A]`, `subscribe board\|thread\|agent\|kind\|mentions [TARGET] [--mode inbox\|digest\|silent]`, `unsubscribe`, `subs`, `digest [--thread N] [--ack]`, `watch [--board B|--thread N|--dm NAME] [--since SEQ]`, `chat [--board B|--to NAME]` (the person, at a terminal), `board-serve` |

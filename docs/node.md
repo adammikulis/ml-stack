@@ -333,7 +333,22 @@ verify), `node_build` (into a runtime), `node_health` (the socket call), `node_s
   fingerprint, socket, latency_ms`, or `None`; `node_launch.status` adds uptime (from the run record, only when its pid is
   the answering pid), binary, sha256, `supervised` and `pinned`, and `ml-stack runtime status [--json]` prints the line.
   `node_health.call(state, method, params, board=, token=)` is the minimal socket call for tests and tools; the
-  Python board client is a separate slice.
+  Python board client is `ml_stack.board` (below).
+
+## The Python client
+
+`ml_stack.board` is the client. `client.Client` speaks the socket (starting the node through
+`node_launch.ensure_node` when it is dead) and raises `NodeError` (`Denied`, `Invalid`, `Quota`) with the node's code;
+`place.resolve` maps the working directory to a board (`ML_STACK_BOARD`, else the project registry; a git repository
+the node does not know is added as a project, named by its folder and a few hex of its git common directory);
+`credentials` keeps a private token file per board and name under `<state>/client/` and the read cursors of each
+question (inbox, announcements); `session.Session` is one token's typed API (`post`, `read`, `notes`, `claim`,
+`agents`, `retire` ...) returning small dataclasses, with an injectable `clock`. `session.register` /
+`session.find` are what the hooks call. The workspace commands `whoami`, `announce`, `send`, `inbox`, `attention`,
+`digest`, `brief`, `nudge`, `notes-*`, `claim`, `release`, `claims`, `heartbeat`, `who`, `spawn`, `retire` and `agents`
+are in `workspace/board_cli.py`, `claims_cli.py` and `notes_cli.py` and go to the node only. Text from other
+sessions is fenced as untrusted data on the way out and a credential in outgoing text is refused on the way in
+(`screen`, still Python). Tests use `tests/node_kit.py`: a real node on a short `/tmp` root.
 
 ## Run and test
 

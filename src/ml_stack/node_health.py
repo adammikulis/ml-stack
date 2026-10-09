@@ -19,7 +19,8 @@ def socket_path(state: Path) -> Path:
     return state / SOCKET
 
 
-def _read(stream: socket.socket, count: int) -> bytes:
+def read_exactly(stream: socket.socket, count: int) -> bytes:
+    """Exactly ``count`` bytes from ``stream``; ConnectionError when the node closes first."""
     data = b""
     while len(data) < count:
         block = stream.recv(count - len(data))
@@ -38,10 +39,10 @@ def call(state: Path, method: str, params: dict | None = None, *, board: str = "
         stream.settimeout(TIMEOUT_S)
         stream.connect(str(socket_path(state)))
         stream.sendall(struct.pack(">I", len(body)) + body)
-        (size,) = struct.unpack(">I", _read(stream, 4))
+        (size,) = struct.unpack(">I", read_exactly(stream, 4))
         if size > MAX_FRAME:
             raise ValueError("the node sent an oversized frame")
-        reply = json.loads(_read(stream, size))
+        reply = json.loads(read_exactly(stream, size))
     if reply.get("ok") is not True:
         raise ValueError(str((reply.get("error") or {}).get("message", "refused")))
     return reply["result"]

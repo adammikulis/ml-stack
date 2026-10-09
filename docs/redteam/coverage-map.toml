@@ -95,6 +95,22 @@ tests = ["tests/test_project_registration.py::test_windows_registration_in_wsl_u
 note = "WSL drive paths reach a fixed literal argument vector; bounded absolute paths and authenticated local Dev admission are checked before translation, and mismatched Git identities cannot persist"
 
 [[group]]
+match = ["spawn:board/place.py:_git"]
+status = "covered"
+count = 1
+tests = ["tests/test_redteam_board_client.py::test_a_directory_named_like_an_option_or_a_command_is_only_a_path_to_git"]
+note = "the repository path is a value of git -C, never an option or a shell word; a hostile directory name resolves to no board"
+
+[[group]]
+match = ["spawn:workspace/notes_cli.py:verify"]
+status = "covered"
+count = 1
+tests = ["tests/test_redteam_board_client.py::test_a_notes_command_is_never_run_through_a_shell",
+         "tests/test_redteam_board_client.py::test_a_command_off_the_allow_list_is_refused_whatever_the_note_says",
+         "tests/test_redteam_board_client.py::test_a_peers_note_cannot_choose_the_command_a_verification_records"]
+note = "a note's command runs as an argument vector the owner allow-listed, with no shell; shell syntax and off-list commands do not run, and the recorded command is the note's own"
+
+[[group]]
 match = ["spawn:workspace/backlog.py:repository"]
 status = "covered"
 count = 1

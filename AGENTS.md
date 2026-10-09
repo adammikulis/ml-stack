@@ -91,8 +91,8 @@ SessionStart hook.
 Subagents disclose their authenticated parent and task, remain bounded helpers, and hand ready
 work back to the main session; they do not elect themselves coordinator. An authorized handoff
 may nominate an eligible main session. Readable labels never add permissions or alter device
-workspace authority. Register main-session presentation through the authenticated
-`ml-stack-workspace main-session --agent ID` flow; subagent briefs use the actual parent identity.
+workspace authority. The SessionStart hook registers the main session on the node, which names it;
+subagent briefs use the actual parent identity.
 
 **The lowest tier never coordinates.** The lowest model tier a vendor offers (Haiku, Luna and the
 like) is never a coordinator or eligible for promotion to one. A model that is not listed in the

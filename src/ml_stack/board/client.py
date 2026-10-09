@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack import node_launch
-from ml_stack.node_health import API_VERSION, MAX_FRAME, socket_path
+from ml_stack.node_health import API_VERSION, MAX_FRAME, read_exactly, socket_path
 
 __all__ = ["Client", "Conflict", "Denied", "Invalid", "NodeError", "Quota"]
 
@@ -74,17 +74,7 @@ class Client:
             stream.settimeout(660.0)
             stream.connect(str(socket_path(self.state)))
             stream.sendall(struct.pack(">I", len(body)) + body)
-            size = struct.unpack(">I", _take(stream, 4))[0]
+            size = struct.unpack(">I", read_exactly(stream, 4))[0]
             if size > MAX_FRAME:
                 raise NodeError("invalid", "the node sent a frame larger than a frame may be")
-            return json.loads(_take(stream, size))
-
-
-def _take(stream: socket.socket, count: int) -> bytes:
-    out = b""
-    while len(out) < count:
-        chunk = stream.recv(count - len(out))
-        if not chunk:
-            raise OSError("the node closed the connection")
-        out += chunk
-    return out
+            return json.loads(read_exactly(stream, size))
