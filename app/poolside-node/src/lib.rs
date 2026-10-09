@@ -28,6 +28,7 @@ pub mod pairing;
 pub mod peer;
 pub mod poolapi;
 pub mod poolops;
+pub mod probe;
 pub mod project;
 pub mod projectid;
 pub mod registry;

@@ -14,7 +14,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
-from ml_stack import node_binary, runtime, win32
+from ml_stack import node_app, node_binary, runtime, win32
 from ml_stack.files import read_json, write_json
 from ml_stack.lock import Busy, only_one
 from ml_stack.node_health import node_stop_event, state_key
@@ -81,9 +81,15 @@ def running(state: Path) -> dict:
     return row if isinstance(row, dict) else {}
 
 
+def _program(binary: Path, sha: str, extra: list[str]) -> Path:
+    """What to execute for a verified binary: on macOS with the network on, the same binary inside Poolhouse.app, which is the
+    identity the person gave Local Network permission to; otherwise the binary itself."""
+    return node_app.bundled(binary, sha) if node_app.uses_bundle(extra) else binary
+
+
 def _spawn(state: Path, binary: Path, sha: str, extra: list[str]) -> subprocess.Popen:
     with (state / LOG).open("ab") as out:
-        child = start_process([str(binary), "run", "--state", str(state), *extra], stdin=subprocess.DEVNULL, stdout=out,
+        child = start_process([str(_program(binary, sha, extra)), "run", "--state", str(state), *extra], stdin=subprocess.DEVNULL, stdout=out,
                               stderr=subprocess.STDOUT)
     before = running(state)
     previous = before.get("previous") if before.get("sha256") == sha else {"binary": before.get("binary"), "sha256": before.get("sha256")}
@@ -146,6 +152,7 @@ def _loop(state: Path, extra: list[str], stopping: Callable[[], bool]) -> int:
         seen = signature(state)
         try:
             binary, sha = resolve(state)
+            _program(binary, sha, extra)  # builds Poolhouse.app first when this start needs it, so a failure is a refusal here
         except OSError as exc:
             refused += 1
             _note(state, f"cannot start the node: {exc}")

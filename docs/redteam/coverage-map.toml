@@ -1009,6 +1009,12 @@ tests = [
 ]
 
 [[group]]
+match = ["spawn:node_app.py:*", "spawn:node_signing.py:*", "spawn:node_permission.py:*"]
+status = "covered"
+tests = ["tests/test_node_app.py::test_a_hostile_path_is_one_argument_in_every_command_line_the_app_builds"]
+note = "Poolhouse.app is built, signed and launched with argv lists only (codesign, security, openssl, open, the bundle executable); a hostile path or peer address is one argument, and the certificate name, bundle id and requirement are constants"
+
+[[group]]
 match = ["spawn:worktreerules.py:*"]
 status = "covered"
 tests = ["tests/test_worktree_rules.py::test_a_hostile_path_is_one_argv_item_and_never_reaches_a_shell"]

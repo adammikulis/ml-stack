@@ -160,6 +160,8 @@ ml-stack-gym = "ml_stack.gym.cli:main"
 # opens the browser on it (`ml_stack.fleet.launch`).
 ml-stack = "ml_stack.cli:main"
 ml-stack-traind = "ml_stack.cli.daemon:main"
+# the macOS identity of the LAN node: build Poolhouse.app, ask for Local Network permission
+ml-stack-node = "ml_stack.node_permission:main"
 ml-stack-peers = "ml_stack.fleet.peers:main"
 # one command makes this machine a peer: checks, llama-server, passphrase, daemon, announce
 ml-stack-cluster = "ml_stack.fleet.join:main"

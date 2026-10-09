@@ -318,6 +318,31 @@ a firewall, WSL2 NAT). `python -m ml_stack.node_join join --policy open|secure` 
 it does and getting a yes (`--yes` for a script), and `scripts/pool-join-check` walks every step on one device and prints
 the fix for the first that fails.
 
+## Poolhouse.app: the node's identity on macOS
+
+macOS ties Local Network permission to an app's bundle id and code signature, so a bare cargo-built binary asks again for every
+build. On macOS the LAN-enabled node (`--lan`, started by the supervisor) therefore runs as the executable inside
+`~/.ml-stack/apps/Poolhouse.app` (outside every checkout), never as a bare binary: `node_app.bundled` rebuilds the bundle
+when the verified binary's checksum differs from the one inside, so the supervisor still checks the checksum it always did.
+
+- **Fixed id.** The bundle id is `app.poolhouse.node` and is never changed: a new id is a new app to macOS and loses every grant.
+  `CFBundleName` is Poolhouse, `LSUIElement` hides the dock icon, `NSLocalNetworkUsageDescription` is the sentence the prompt
+  shows, and `NSBonjourServices` lists `_poolhouse._tcp`. The node discovers by raw multicast beacon, not mDNS; the keys are
+  there so the prompt reads right.
+- **Stable signature.** `node_signing` makes the self-signed code-signing certificate `Poolhouse Local Signing` once in the login
+  keychain (trusted for code signing in the user domain only; no Apple developer account) and signs the bundle with the designated
+  requirement `identifier "app.poolhouse.node" and certificate leaf = H"<sha1>"`. It names no cdhash, so rebuilding the binary
+  keeps the grant. If the certificate cannot be made, the bundle is signed ad hoc with the identifier-only requirement and a
+  warning says the permission may be asked again after a rebuild. A bundle is built beside its place and moved in only once signed.
+- **Asking once.** `ml-stack node permission` launches the bundle through Launch Services with `poolside-node probe`, which joins
+  the beacon group, sends datagrams of its own (multicast, each network's broadcast address and the router) and listens for
+  itself, up to 30 seconds. It prints GRANTED, DENIED (the sends were refused or never heard) or NOT ASKED (the bundle did not
+  run). This is the only place that touches multicast on a Mac outside a node the person turned the network on for.
+  `ml-stack node build [--binary PATH]` builds and signs the bundle by hand.
+- **What the probe cannot see.** Hearing its own datagram is delivered inside the machine, so a refused send (`No route to host`
+  on the multicast group) is the signal of a denied permission, and a run launched from a terminal borrows that terminal's
+  permission; only the `open` launch the command uses measures the bundle's own.
+
 ## Shipping and keeping it up
 
 The Python side of getting the node onto a device and keeping it there: `ml_stack.node_binary` (build, checksum,

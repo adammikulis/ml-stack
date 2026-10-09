@@ -91,14 +91,30 @@ fn run(state: &Path, args: &[String]) -> Result<(), String> {
     server.serve().map_err(|e| e.to_string())
 }
 
+/// `probe`: the local-network check (`poolside_node::probe`); its JSON line goes to `--out FILE` when given (a bundled app
+/// has no terminal), else to stdout.
+fn probe(args: &[String]) -> Result<String, String> {
+    let seconds = flag(args, "--seconds").map(|n| n.parse::<u64>().map_err(|e| format!("--seconds: {e}"))).transpose()?.unwrap_or(10);
+    let peers = args.windows(2).filter(|w| w[0] == "--peer").map(|w| w[1].parse::<Ipv4Addr>().map_err(|e| format!("--peer {}: {e}", w[1]))).collect::<Result<Vec<_>, _>>()?;
+    let found = poolside_node::probe::run(seconds, &peers).map_err(|e| e.to_string());
+    match (flag(args, "--out"), found) {
+        (Some(file), found) => {
+            let text = found.unwrap_or_else(|e| json!({"error": e})).to_string();
+            std::fs::write(file, text).map(|_| String::new()).map_err(|e| e.to_string())
+        }
+        (None, found) => found.map(|v| v.to_string()),
+    }
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let state = state_dir(&args);
     let result = match args.first().map(String::as_str) {
         Some("run") => run(&state, &args).map(|_| String::new()),
         Some("status") => Client::connect(&state).and_then(|mut c| c.call("status", "", "", json!({}))).map(|v| v.to_string()).map_err(|e| e.to_string()),
+        Some("probe") => probe(&args),
         _ => {
-            eprintln!("usage: poolside-node run|status [--state DIR] [--listen ADDR ...]");
+            eprintln!("usage: poolside-node run|status|probe [--state DIR] [--listen ADDR ...] [--seconds N] [--out FILE]");
             return ExitCode::from(2);
         }
     };
