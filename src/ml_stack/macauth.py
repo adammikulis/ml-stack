@@ -29,7 +29,7 @@ PREFIX = "mlsk1."
 WINDOW_S = 120.0
 MOST_NONCES = 100_000
 INFO = b"ml-stack-request-mac-v1"
-EMPTY = hashlib.sha256(b"").hexdigest()
+BODY_LABEL = b"ml-stack-request-body-v1\x00"
 
 
 def derive(key: bytes) -> str:
@@ -68,9 +68,20 @@ class Stamp:
         return cls(time.time(), secrets.token_hex(12))
 
 
-def _encoded(method: str, url: str, body: bytes | None, stamp: Stamp) -> bytes:
+def _body_mac(secret: str, body: bytes | None) -> str:
+    """A keyed digest (HMAC-SHA256) of a request body. The body can carry a passphrase, and a
+    bare hash of it would let anyone holding the signed string test guesses offline; keyed by
+    the request secret it tells nothing to a party without it."""
+    from cryptography.hazmat.primitives import hashes, hmac as keyed
+
+    mac = keyed.HMAC(secret.encode(), hashes.SHA256())
+    mac.update(BODY_LABEL + (body or b""))
+    return mac.finalize().hex()
+
+
+def _encoded(secret: str, method: str, url: str, body: bytes | None, stamp: Stamp) -> bytes:
     host, target = parts(url)
-    body_hash = hashlib.sha256(body).hexdigest() if body else EMPTY
+    body_hash = _body_mac(secret, body)
     return "\n".join((SCHEME, method.upper(), target, host, body_hash, f"{stamp.at:.0f}",
                       stamp.nonce)).encode()
 
@@ -79,7 +90,7 @@ def sign(secret: str, method: str, url: str, body: bytes | None,
          stamp: Stamp | None = None) -> dict[str, str]:
     """The ``Authorization`` header that signs this request."""
     stamp = stamp or Stamp.now()
-    mac = hmac.new(secret.encode(), _encoded(method, url, body, stamp),
+    mac = hmac.new(secret.encode(), _encoded(secret, method, url, body, stamp),
                    hashlib.sha256).hexdigest()
     return {"Authorization":
             f"{SCHEME} k={key_id(secret)},t={stamp.at:.0f},n={stamp.nonce},s={mac}"}
@@ -177,11 +188,11 @@ class Authenticator:
         if abs(self.clock() - int(stamp)) > self.window_s:
             return Verdict(False, "request time is outside the window; check the clocks")
         _, target = parts(url)
-        wanted = _encoded(method, f"//{headers.get('Host', '')}{target}", body,
-                            Stamp(float(stamp), nonce))
         match = ""
         for secret in self.secrets():
             if secret and hmac.compare_digest(kid, key_id(secret)):
+                wanted = _encoded(secret, method, f"//{headers.get('Host', '')}{target}", body,
+                                  Stamp(float(stamp), nonce))
                 good = hmac.new(secret.encode(), wanted, hashlib.sha256).hexdigest()
                 if hmac.compare_digest(mac, good):
                     match = secret
