@@ -63,7 +63,7 @@ def test_changed_checkpoint_preserves_bound_owner_and_label(monkeypatch, tmp_pat
     monkeypatch.setattr(reader.repo, 'git', lambda *args: 'changed')
     monkeypatch.setattr(reader.worktree_lifecycle, 'remember', lambda *args: seen.append(args))
     reader.checkpoint(tmp_path, 'bound-worker')
-    assert seen == [(tmp_path, 'bound-worker', 'child', str(tmp_path))]
+    assert seen == [(tmp_path, 'bound-worker', str(tmp_path))]
 
 
 def test_urgent_action_survives_host_context_limit():
