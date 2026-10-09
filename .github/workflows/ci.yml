@@ -64,7 +64,24 @@ jobs:
           python-version: ${{ matrix.python }}
           allow-prereleases: ${{ matrix.experimental || false }}
 
+      # A pre-release Python is ahead of the wheels some dependencies publish (ladybug had
+      # none for 3.15). The experimental job then says so and stops; every other job must install.
+      - name: every dependency has a build for this Python
+        id: ready
+        run: |
+          if python -m pip install --upgrade pip && python -m pip install --dry-run -e ".[test,store,hub,web,plot,privacy,guardrails,mcp,memory,fleet-onboard,pdf,fleet-update]" > "$RUNNER_TEMP/dry.txt" 2>&1; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          elif [ "${{ matrix.experimental }}" = "true" ]; then
+            tail -5 "$RUNNER_TEMP/dry.txt"
+            echo "::notice::ml-stack cannot be installed on Python ${{ matrix.python }} yet; the experimental run stops here"
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            cat "$RUNNER_TEMP/dry.txt"
+            exit 1
+          fi
+
       - name: install test dependencies
+        if: steps.ready.outputs.ok == 'true'
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y bubblewrap rustc cargo
@@ -81,15 +98,17 @@ jobs:
       # ml-stack's own packages are on no index. Without them the environment test
       # can build a venv, install torch, and still not import ml_stack.
       - name: build the wheels the environment test installs
+        if: steps.ready.outputs.ok == 'true'
         run: python packaging/build.py
 
       - name: tests
+        if: steps.ready.outputs.ok == 'true'
         run: python -m pytest tests/ -q -rfE --tb=short --durations=25 ${{ matrix.pytest }}
 
       # docs/FEATURES.md points at this as the proof each feature holds, and nothing else
       # runs it. --offline leaves out the three checks that reach a host off this machine.
       - name: every claim in FEATURES.md
-        if: matrix.pytest == '--slow'
+        if: matrix.pytest == '--slow' && steps.ready.outputs.ok == 'true'
         run: python docs/verify_release.py --offline
 
   # Nightly, on demand, and on the release branch that ships the macOS app. A run takes
