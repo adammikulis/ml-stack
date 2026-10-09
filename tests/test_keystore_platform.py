@@ -14,7 +14,7 @@ from keyring.backend import KeyringBackend
 from ml_stack import keystore, keystore_guard, person
 from ml_stack.keystore import Keystore, Wires
 from tests import keystore_support
-from tests.test_keystore import Said
+from tests.test_keystore import Said, make
 
 counting = keystore_support.counting
 REAL_INTERACTIVE = keystore.interactive
@@ -99,6 +99,9 @@ def test_bounded_returns_the_value_and_carries_the_exception():
         keystore_guard.bounded(lambda: 1 / 0, 5)
 
 
+# -- which backend may hold the key -----------------------------------------------------------------------
+
+
 class PlaintextRing(KeyringBackend):
     """Stands in for `keyrings.alt.file.PlaintextKeyring`: a usable backend that writes the key to a file."""
 
@@ -127,6 +130,29 @@ def plaintext():
     keyring.set_keyring(before)
 
 
+def test_a_plaintext_file_keyring_never_holds_the_master(tmp_path, plaintext):
+    ks = make(tmp_path)
+    assert ks.available() is False
+    with pytest.raises(keystore.KeystoreUnavailable, match="plain file"):
+        ks.subkey("memory", "a")
+    assert plaintext.calls == []
+    assert not (tmp_path / "ks" / "provisioned.json").exists()
+
+
 def test_a_chainer_holding_a_plaintext_backend_is_refused_too(tmp_path, plaintext):
     from types import SimpleNamespace
     assert keystore_guard.unsafe_backend(SimpleNamespace(backends=[PlaintextRing()]))
+
+
+def test_the_libsecret_backend_counts_as_the_machines_own_keystore():
+    class Libsecret(KeyringBackend):
+        __module__ = "keyring.backends.libsecret"
+        priority = 1  # type: ignore[assignment]
+
+        def get_password(self, service, username):
+            return None
+
+        def set_password(self, service, username, password):
+            return None
+
+    assert keystore.is_real(Libsecret())

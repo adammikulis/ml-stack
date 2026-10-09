@@ -45,7 +45,7 @@ ENV_NONINTERACTIVE = "ML_STACK_NONINTERACTIVE"
 ENV_NO_REAL = "ML_STACK_NO_REAL_KEYSTORE"
 """Set by the test suite for itself and every process it starts: the machine's own keystore is
 treated as absent, so a test child can never store or prompt for a Keychain item."""
-REAL_BACKENDS = ("keyring.backends.macOS", "keyring.backends.SecretService",
+REAL_BACKENDS = ("keyring.backends.macOS", "keyring.backends.SecretService", "keyring.backends.libsecret",
                  "keyring.backends.Windows", "keyring.backends.kwallet")
 UNLOCK_COMMAND = "ml-stack-security unlock"
 READ_CEILING = 600
@@ -266,6 +266,9 @@ class Keystore:
             usable = float(getattr(keyring.get_keyring(), "priority", 0)) > 0
         except (keyring.errors.KeyringError, AttributeError, TypeError, ValueError, OSError):
             usable = False
+        why = keystore_guard.unsafe_backend(keyring.get_keyring()) if usable else ""
+        if why:
+            raise KeystoreUnavailable(f"ml-stack will not keep its key in this keyring backend: {why}")
         if usable and os.environ.get(ENV_NO_REAL) and is_real(keyring.get_keyring()):
             raise KeystoreUnavailable(f"the machine's own keystore is switched off ({ENV_NO_REAL})")
         if not usable:
