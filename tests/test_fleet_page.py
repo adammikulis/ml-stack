@@ -19,6 +19,10 @@ pytestmark = pytest.mark.slow
 
 from test_fleet_ui import WORDS, Serving  # noqa: E402
 
+#: where each screen is reached from the workspace rail
+RAIL = {"Chat": "#nav-tabs a[data-workspace='conversations']", "Models": "#nav-tabs a[data-workspace='studio']",
+        "Settings": "#nav-settings", "Cluster": "#nav-tabs a[data-workspace='pool']"}
+
 GIB = 1024 ** 3
 ROOM = 96 * GIB
 
@@ -122,6 +126,7 @@ def open_page(browser):
 
     def _open(served, *, path="/ui/", cookie=""):
         base = f"http://127.0.0.1:{served.port}"
+        path = "/ui/#cluster" if cookie and path == "/ui/" else path  # a signed-in session lands on Chats
         ctx = browser.new_context(viewport={"width": 1400, "height": 950})
         contexts.append(ctx)
         if cookie:
@@ -141,8 +146,15 @@ def open_page(browser):
         ctx.close()
 
 
+def connections(page):
+    """Open the pool screen's connections and pairing section, which starts closed."""
+    page.click("cluster-view summary:has-text('Pool connections')")
+    page.wait_for_selector("#cluster-joined .row")
+
+
 def open_capacity(page):
-    page.click('nav.tabs a[href="#fit"]')
+    page.click(RAIL["Cluster"])
+    page.click('#nav-context a[href="#fit"]')
     page.locator("#fit").scroll_into_view_if_needed()
 
 
@@ -172,9 +184,9 @@ class TestFirstRun:
         page.wait_for_selector("#setup-cluster-passphrase")
         page.fill("#setup-cluster-name", "default")
         page.fill("#setup-cluster-passphrase", "abc")
-        assert page.locator("#first-run button:has-text('Join existing cluster')").is_disabled()
+        assert page.locator("#first-run button:has-text('Join existing pool')").is_disabled()
         page.fill("#setup-cluster-passphrase", "correct horse battery")
-        assert page.locator("#first-run button:has-text('Join existing cluster')").is_enabled()
+        assert page.locator("#first-run button:has-text('Join existing pool')").is_enabled()
         assert not errors
 
     def test_the_reason_sits_beside_the_job_the_machine_was_given(self, daemon,
@@ -207,11 +219,11 @@ class TestFirstRun:
         page.select_option("#setup-cluster-action", "create")
         page.fill("#setup-cluster-name", "private-lab")
         page.fill("#setup-cluster-passphrase", WORDS)
-        page.click("#first-run button:has-text('Create new cluster')")
+        page.click("#first-run button:has-text('Create new pool')")
         page.wait_for_selector("#first-run .ok:has-text('Created')")
         assert memberships(daemon.keyfile)[0].selection == "manual"
         page.click("#first-run button:has-text('Connect automatically')")
-        page.wait_for_function("document.querySelector('first-run').setup.selection === 'automatic'")
+        page.wait_for_function("() => document.querySelector('first-run').setup.selection === 'automatic'")
         assert memberships(daemon.keyfile)[0].selection == "automatic"
         assert not errors
 
@@ -243,7 +255,8 @@ class TestFirstRun:
         page.wait_for_selector("#first-run h1:has-text('Clusters')")
         daemon.ui.setup_finished()
         page.reload()
-        page.wait_for_selector("#cluster-joined .row")
+        page.click(RAIL["Cluster"])
+        connections(page)
         page.click("#cluster-joined button:has-text('Leave')")
         page.wait_for_selector("#cluster-joined button:has-text('Connect automatically')")
         assert not memberships(daemon.keyfile)
@@ -321,8 +334,10 @@ class TestSigningIn:
 
         page.fill("#p", WORDS)
         page.click("#signin-go")
+        page.wait_for_selector("#chat:not([hidden])")
+        page.click(RAIL["Cluster"])
         page.wait_for_selector("#cluster:not([hidden])")
-        assert page.locator("#cluster h1").inner_text() == "Cluster"
+        assert page.locator("#cluster h1").inner_text() == "Devices"
         assert not errors
 
 
@@ -331,8 +346,8 @@ class TestTheClusterView:
     def test_a_machine_on_its_own_says_how_to_add_another(self, joined, open_page):
         page, errors = open_page(joined, cookie=joined.cookie)
         page.wait_for_selector("#cluster-cards .empty")
-        assert "Just this machine so far" in page.locator("#cluster-cards").inner_text()
-        assert "MACHINES" in page.locator("#cluster-stat").inner_text().upper()
+        assert "Your pool starts here" in page.locator("#cluster-cards").inner_text()
+        assert "DEVICES" in page.locator("#cluster-stat").inner_text().upper()
         assert not errors
 
     def test_a_machines_card_says_what_it_is_and_what_it_is_doing(self, with_peers,
@@ -357,7 +372,8 @@ class TestTheClusterView:
 
     def test_the_cluster_it_is_in_is_listed_with_a_way_out(self, joined, open_page):
         page, errors = open_page(joined, cookie=joined.cookie)
-        page.wait_for_selector("#cluster-joined:has-text('home')")
+        connections(page)
+        assert "home" in page.locator("#cluster-joined").inner_text()
         assert page.locator("#cluster-joined button:has-text('Leave')").count() == 1
         assert not errors
 
@@ -377,7 +393,7 @@ class TestTheChatView:
     def test_with_nothing_serving_it_says_where_to_start_one(self, joined, open_page):
         page, errors = open_page(joined, cookie=joined.cookie)
         page.wait_for_selector("#cluster:not([hidden])")
-        page.click("nav.tabs a:has-text('Chat')")
+        page.click(RAIL["Chat"])
         page.wait_for_selector("#chat-none:not([hidden])")
         assert "No model is running" in page.locator("#chat-none").inner_text()
         assert page.locator("#chat-askrow").is_hidden()
@@ -387,7 +403,7 @@ class TestTheChatView:
         joined.call("/ui/conversations", method="POST", cookie=joined.cookie,
                     body={"model": "thornfield-8B", "title": "about the roof"})
         page, errors = open_page(joined, cookie=joined.cookie)
-        page.click("nav.tabs a:has-text('Chat')")
+        page.click(RAIL["Chat"])
         page.wait_for_selector("#chat-list .chatrow")
         assert "about the roof" in page.locator("#chat-list").inner_text()
         page.click("#chat-list .chatrow a")
@@ -398,7 +414,7 @@ class TestTheChatView:
         joined.call("/ui/conversations", method="POST", cookie=joined.cookie,
                     body={"model": "thornfield-8B", "title": "about the roof"})
         page, errors = open_page(joined, cookie=joined.cookie)
-        page.click("nav.tabs a:has-text('Chat')")
+        page.click(RAIL["Chat"])
         page.wait_for_selector("#chat-list .chatrow")
         page.get_by_label("Options for about the roof").click()
         page.click("#chat-list .chatrow button:has-text('Delete')")
@@ -412,20 +428,21 @@ class TestTheModelsView:
     def test_a_model_on_this_machine_is_listed_with_its_size(self, joined, open_page):
         (joined.files / "thornfield-8B-Q4_K_M.gguf").write_bytes(b"x" * (2 << 20))
         page, errors = open_page(joined, cookie=joined.cookie)
-        page.click("nav.tabs a:has-text('Models')")
-        page.wait_for_selector("#browser-results")
-        here = page.locator("#browser-results")
-        pw.expect(here).to_contain_text("thornfield-8B-Q4_K_M.gguf")
-        assert "GiB free storage on this machine" in page.locator("#models-free").inner_text()
+        page.click(RAIL["Models"])
+        installed = page.locator("models-view")
+        pw.expect(installed).to_contain_text("thornfield-8B (Q4_K_M)")
+        pw.expect(installed).to_contain_text("2 MB")
+        assert "GiB" in installed.inner_text() and "Free storage on this device" in installed.inner_text()
         assert not errors
 
     def test_with_no_hub_the_search_box_still_takes_a_query(self, joined, open_page):
         page, errors = open_page(joined, cookie=joined.cookie)
-        page.click("nav.tabs a:has-text('Models')")
+        page.click(RAIL["Models"])
+        page.get_by_text("Add from your Pool or Hugging Face").click()
         page.get_by_role("button", name="Hugging Face", exact=True).click()
         page.wait_for_selector("#browser-source")
         page.fill("#hunt", "thornfield")
-        page.wait_for_function("document.querySelector('model-browser').search.typed === 'thornfield'")
+        page.wait_for_function("() => document.querySelector('model-browser').search.typed === 'thornfield'")
         assert page.locator("#hunt").input_value() == "thornfield"
         assert not errors
 
@@ -434,14 +451,14 @@ class TestTheModelsView:
 class TestTheSettingsView:
     def test_it_says_what_this_machine_is_called(self, joined, open_page):
         page, errors = open_page(joined, cookie=joined.cookie)
-        page.click("nav.tabs a:has-text('Settings')")
+        page.click(RAIL["Settings"])
         page.wait_for_selector("#settings-sub:not(:empty)")
         assert "studio" in page.locator("#settings-sub").inner_text()
         assert not errors
 
     def test_choosing_a_job_and_saving_says_it_saved(self, joined, open_page):
         page, errors = open_page(joined, cookie=joined.cookie)
-        page.click("nav.tabs a:has-text('Settings')")
+        page.click(RAIL["Settings"])
         page.get_by_role("tab", name="Compute & device").click()
         page.wait_for_selector("#settings-left .group")
         page.locator("#settings-left").get_by_label("Both", exact=True).check()
@@ -457,12 +474,12 @@ class TestTheSettingsView:
     def test_no_screen_shows_the_word_null(self, joined, open_page):
         """`replaceChildren` writes the word "null" for a gap the way `el` never does."""
         page, errors = open_page(joined, cookie=joined.cookie)
-        page.wait_for_selector("#cluster-joined .row")
+        page.wait_for_selector("#cluster-cards")
         for tab, ready in (("Chat", "#chat-none, #chat-askrow"),
-                           ("Models", "#browser-results"),
+                           ("Models", "models-view h1"),
                            ("Settings", "#settings-save"),
-                           ("Cluster", "#cluster-joined .row")):
-            page.click(f"nav.tabs a:has-text('{tab}')")
+                           ("Cluster", "#cluster-cards")):
+            page.click(RAIL[tab])
             page.wait_for_selector(ready)
             shown = page.locator("#root").inner_text()
             assert "\nnull" not in shown and not shown.startswith("null"), tab
@@ -470,7 +487,7 @@ class TestTheSettingsView:
 
     def test_the_remove_section_lists_what_would_go(self, joined, open_page):
         page, errors = open_page(joined, cookie=joined.cookie)
-        page.click("nav.tabs a:has-text('Settings')")
+        page.click(RAIL["Settings"])
         page.get_by_role("tab", name="Maintenance", exact=True).click()
         page.wait_for_selector("#settings-removal label.opt")
         assert "cannot be undone" not in page.locator("#settings-removal").inner_text()
@@ -625,23 +642,23 @@ class TestClosingTheWindow:
                                                                      open_page):
         daemon.call("/ui/setup/done", method="POST")
         page, errors = open_page(daemon)
-        page.wait_for_selector("#cluster:not([hidden])")
+        page.wait_for_function("() => typeof window.mlStackAskOnClose === 'function'")
 
         page.evaluate("window.mlStackAskOnClose()")
         page.wait_for_selector("#close-sheet[open] #close-why")
 
-        assert "part of your cluster" not in page.locator("#close-why").inner_text()
+        assert "part of your pool" not in page.locator("#close-why").inner_text()
         assert "Stays reachable" in page.locator("#close-background-d").inner_text()
         assert not errors
 
     def test_a_machine_in_a_cluster_is_told_what_the_others_lose(self, joined,
                                                                  open_page):
         page, errors = open_page(joined, cookie=joined.cookie)
-        page.wait_for_selector("#cluster:not([hidden])")
+        page.wait_for_function("() => typeof window.mlStackAskOnClose === 'function'")
 
         page.evaluate("window.mlStackAskOnClose()")
         page.wait_for_selector("#close-sheet[open] #close-why")
 
-        assert "part of your cluster" in page.locator("#close-why").inner_text()
-        assert "Leaves the cluster" in page.locator("#close-quit-d").inner_text()
+        assert "part of your pool" in page.locator("#close-why").inner_text()
+        assert "Leaves the pool" in page.locator("#close-quit-d").inner_text()
         assert not errors

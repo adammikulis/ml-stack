@@ -129,7 +129,7 @@ def test_failed_previous_project_does_not_replace_current_project_status(tmp_pat
             page.goto(f'http://127.0.0.1:{server.port}/ui/#tasks')
             viewer = page.locator('tasks-view')
             expect(viewer.locator('.status')).to_have_text('Updating task overview…')
-            page.wait_for_function("document.querySelector('tasks-view').loading")
+            page.wait_for_function("() => document.querySelector('tasks-view').loading")
             viewer.get_by_label('Task project workspace').select_option(second)
             page.wait_for_timeout(50)
             assert len(pending) == 1
@@ -235,7 +235,7 @@ def test_task_join_completion_does_not_reload_another_selected_project(tmp_path,
             expect(viewer.locator('.status')).to_contain_text('Updated ')
             assert len(pending) == len(current_reads) == 1
             pending[0].fulfill(json={'me': 'person', 'project_id': first})
-            page.wait_for_function('window.taskJoinButton.disabled === false')
+            page.wait_for_function('() => window.taskJoinButton.disabled === false')
             assert len(current_reads) == 1
             expect(viewer.get_by_label('Task project workspace')).to_have_value(second)
             expect(viewer.locator('.status')).to_contain_text('Updated ')

@@ -16,7 +16,7 @@ pytestmark = pytest.mark.slow
 @pytest.fixture
 def gym_page(joined, open_page):
     page, errors = open_page(joined, cookie=joined.cookie, path='/ui/#gym')
-    page.wait_for_function("document.querySelector('gym-view')?.catalogue.length > 0")
+    page.wait_for_function("() => document.querySelector('gym-view')?.catalogue.length > 0")
     page.get_by_label('Environment', exact=True).select_option('car')
     page.locator('gym-view .gym-world-settings > summary').click()
     page.get_by_label('Simulation mode', exact=True).select_option('world')

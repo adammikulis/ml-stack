@@ -77,7 +77,7 @@ def test_library_chat_action_selects_server_identity(joined, open_page, model_pa
 
 def test_decision_tools_handoff_opens_recipe_step(joined, open_page):
     page, errors = open_page(joined, cookie=joined.cookie, path='/ui/#tools')
-    page.wait_for_function("window.fleetModel.route === 'tools'")
+    page.wait_for_function("() => window.fleetModel.route === 'tools'")
     page.evaluate("document.querySelector('training-view').openRun({workflow:'decider',dataset:'datasets/decisions.jsonl'})")
     expect(page.get_by_label('Workflow', exact=True)).to_have_value('decider')
     expect(page.get_by_label('Recipe', exact=True)).to_be_visible()
@@ -135,7 +135,7 @@ def test_fresh_rl_workflow_requires_no_dataset(joined, open_page):
 ])
 def test_running_model_badge_preserves_theme_contrast(joined, open_page, theme):
     page, errors = open_page(joined, cookie=joined.cookie, path='/ui/#models')
-    page.wait_for_function("window.fleetModel.route === 'models'")
+    page.wait_for_function("() => window.fleetModel.route === 'models'")
     page.evaluate("""theme => {
       for (const [key,value] of Object.entries(theme)) document.documentElement.style.setProperty(key,value);
       const library=document.querySelector('models-library');

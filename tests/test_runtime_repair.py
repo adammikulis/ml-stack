@@ -9,6 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from rail import reach
 
 from ml_stack.fleet import daemon, runtime_repair
 from ml_stack.fleet.initial_setup_routes import InitialSetupRoutes
@@ -260,7 +261,7 @@ def test_missing_runtime_install_runs_in_background_and_readiness_enables_chat(t
         expect(page.locator("chat-view #chat-note")).to_contain_text("Waiting to install")
         row = served.ui.setup_jobs.all()[0]
         assert row["state"] == "waiting" and not served.ui.setup_jobs.active()
-        page.locator("fleet-nav a[href='#settings']").click()
+        reach(page, 'settings')
         expect(page.locator("settings-view")).to_be_visible()
         served.ui.setup_jobs._update(row, state="done", note="Agent runtime ready")
         ready["value"] = True

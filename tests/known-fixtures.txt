@@ -278,3 +278,8 @@ Explore Poolside
 Remove Poolside
 Install MetaDrive
 color .2s
+config pre
+Poolside Light
+Install Vision
+Open Projects
+Hub Qwen

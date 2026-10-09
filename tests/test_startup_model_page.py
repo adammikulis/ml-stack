@@ -101,7 +101,7 @@ def test_first_run_model_choice_requires_opt_in(action):
         if action in {"install", "failed", "smaller", "done"}:
             progress = page.locator("#startup-model-status ml-progress")
             progress.wait_for()
-            page.wait_for_function("document.querySelector('#startup-model-status ml-progress').total === 100")
+            page.wait_for_function("() => document.querySelector('#startup-model-status ml-progress').total === 100")
             assert progress.evaluate("e => e.state") == (
                 action if action in {"failed", "done"} else "running")
             if action == "failed":

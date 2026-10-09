@@ -51,7 +51,7 @@ def test_delayed_local_session_orders_eager_requests_and_expiry_still_signs_in(d
     try:
         page.add_init_script(DELAY_SESSION)
         page.goto(f"http://127.0.0.1:{device.port}/ui/#cluster")
-        page.wait_for_function("window.bootstrapPending === true")
+        page.wait_for_function("() => window.bootstrapPending === true")
         cancelled = page.evaluate("""async () => {
           const control = new AbortController();
           const pending = fleetModel.api('/ui/peers', {signal:control.signal});
@@ -61,8 +61,8 @@ def test_delayed_local_session_orders_eager_requests_and_expiry_still_signs_in(d
         }""")
         assert cancelled
         assert page.evaluate("bootstrapRequests.length") == 0
-        page.wait_for_function("fleetModel.route === 'cluster'")
-        page.wait_for_function("bootstrapRequests.some(r => r.path === '/ui/room') && bootstrapRequests.some(r => r.path === '/ui/workspace/jobs')")
+        page.wait_for_function("() => fleetModel.route === 'cluster'")
+        page.wait_for_function("() => bootstrapRequests.some(r => r.path === '/ui/room') && bootstrapRequests.some(r => r.path === '/ui/workspace/jobs')")
         assert page.evaluate("bootstrapRequests.every(r => r.negotiated)")
         with device.ui.sessions._lock:
             for session in device.ui.sessions._sessions.values():
@@ -73,8 +73,10 @@ def test_delayed_local_session_orders_eager_requests_and_expiry_still_signs_in(d
           return result.status;
         }""")
         assert status == 401
-        page.wait_for_function("fleetModel.route === 'sign-in'")
-        assert page.get_by_role("button", name="Sign in", exact=True).is_visible()
+        page.wait_for_function("() => fleetModel.route === 'sign-in'")
+        # a development pool on this computer is signed in to by choosing it; otherwise by passphrase
+        assert page.get_by_role("heading", name="Sign in", exact=True).is_visible()
+        assert page.locator("#signin-pools button").count() or page.get_by_role("button", name="Sign in", exact=True).is_visible()
     finally:
         page.close()
 
@@ -88,7 +90,7 @@ def test_bootstrap_preserves_setup_and_password_routes(device, browser, mode, ex
     page = browser.new_page()
     try:
         page.goto(f"http://127.0.0.1:{device.port}/ui/#cluster")
-        page.wait_for_function(f"fleetModel.route === '{expected}'")
+        page.wait_for_function(f"() => fleetModel.route === '{expected}'")
         assert page.evaluate("fleetModel.requestedRoute") == "cluster"
     finally:
         page.close()

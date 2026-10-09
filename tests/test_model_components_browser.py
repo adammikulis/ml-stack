@@ -43,7 +43,7 @@ def test_download_component_choices_and_installed_component_action(joined, open_
     mtp.uncheck()
     vision.check()
     page.get_by_role("button", name="Start download", exact=True).click()
-    page.wait_for_function("document.querySelector('#models-note').textContent === ''")
+    page.wait_for_function("() => document.querySelector('#models-note').textContent === ''")
     assert downloads.start.call_args.kwargs["components"] == [offers[1]]
     base = joined.files / pick.file
     base.write_bytes(b"fixture")

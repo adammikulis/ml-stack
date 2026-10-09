@@ -2,6 +2,7 @@
 
 import pytest
 from playwright.sync_api import expect
+from rail import reach
 from test_fleet_ui import Serving
 
 from ml_stack import agent_dependency
@@ -32,10 +33,10 @@ def test_healthy_chat_and_advanced_maintenance_repair_use_saved_preferences(tmp_
                                       "url": f"http://127.0.0.1:{served.port}"}])
             page.goto(f"http://127.0.0.1:{served.port}/ui/#chat", wait_until="domcontentloaded")
             expect(page.locator("chat-view #chat-send")).to_be_enabled()
-            page.wait_for_function("document.querySelector('chat-view').runtimeChecking === false")
+            page.wait_for_function("() => document.querySelector('chat-view').runtimeChecking === false")
             expect(page.locator("chat-view #chat-note")).to_be_empty()
             expect(page.get_by_role("button", name="Repair agent runtime", exact=True)).to_have_count(0)
-            page.locator("fleet-nav a[href='#settings']").first.click()
+            reach(page, 'settings')
             settings = page.locator("settings-view")
             settings.get_by_role("tab", name="Maintenance", exact=True).click()
             advanced = settings.locator("[data-pane=maintenance] details[data-advanced]")
@@ -57,7 +58,7 @@ def test_healthy_chat_and_advanced_maintenance_repair_use_saved_preferences(tmp_
             row = served.ui.setup_jobs.all()[0]
             assert row["request"] == {"repair": True} and row["state"] == "waiting"
             assert row["provenance"]["authentication"] == "setup"
-            page.locator("fleet-nav a[href='#chat']").first.click()
+            reach(page, 'chat')
             expect(page.locator("chat-view #chat-note")).to_contain_text("Waiting to install")
             expect(page.locator("chat-view").get_by_role("button", name="Repair agent runtime", exact=True)).to_be_disabled()
             assert not model.sent_to("/v1/chat/completions")

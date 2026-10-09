@@ -17,8 +17,10 @@ pytestmark = pytest.mark.slow
 def test_navigation_remembers_screen_on_reload_and_browser_back(joined, open_page):
     page, errors = open_page(joined, cookie=joined.cookie, path="/ui/#models")
     page.wait_for_selector("#models:not([hidden])")
-    assert page.locator('[href="#models"][aria-current="page"]').count() == 1
-    page.click('nav a[href="#chat"]')
+    for navigation in ("#nav-tabs", "#nav-context"):
+        assert page.locator(f'{navigation} [href="#models"][aria-current="page"]').count() == 1
+    assert page.locator('[aria-current="page"]').count() == 2
+    page.click('#nav-tabs a[href="#chat"]')
     page.wait_for_selector("#chat:not([hidden])")
     assert page.url.endswith("#chat")
     page.reload()
@@ -49,7 +51,7 @@ def test_conversation_search_finds_saved_message_content(joined, open_page):
     page, errors = open_page(joined, cookie=joined.cookie, path="/ui/#chat")
     page.wait_for_selector("#chat-list .chatrow", state="visible")
     page.fill("#chat-search", "lidar")
-    page.wait_for_function("document.querySelectorAll('#chat-list .chatrow').length === 1")
+    page.wait_for_function("() => document.querySelectorAll('#chat-list .chatrow').length === 1")
     assert page.locator("#chat-list").inner_text().startswith("A morning conversation")
     page.click("#chat-list a")
     page.wait_for_selector(".msg.user")
@@ -65,8 +67,7 @@ def test_phone_navigation_and_chat_do_not_overflow(joined, open_page):
     page.set_viewport_size({"width": 390, "height": 844})
     page.wait_for_selector("#chat:not([hidden])")
     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
-    page.locator('fleet-nav nav a[href="#settings"]').scroll_into_view_if_needed()
-    page.click('fleet-nav nav a[href="#settings"]')
+    page.click("#nav-settings")
     page.wait_for_selector("#settings:not([hidden])")
     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
     assert not errors
@@ -91,7 +92,7 @@ def test_chat_sends_history_and_renders_sanitized_markdown(joined, serving_chat,
 
     page, errors = open_page(joined, cookie=joined.cookie, path="/ui/#chat")
     page.wait_for_selector("#chat-askrow:not([hidden])")
-    page.locator("#chat-options summary").click()
+    page.click("#conversation-details")
     page.get_by_label("Temperature",exact=True).fill("1.2")
     page.fill("#ask", "Hello")
     page.click("#chat-send")
@@ -99,7 +100,7 @@ def test_chat_sends_history_and_renders_sanitized_markdown(joined, serving_chat,
     assert page.locator(".msg.assistant strong").inner_text() == "Hello"
     page.fill("#ask", "Continue")
     page.click("#chat-send")
-    page.wait_for_function("document.querySelectorAll('.msg.assistant').length === 2 && !document.querySelector('#chat-send').hidden")
+    page.wait_for_function("() => document.querySelectorAll('.msg.assistant').length === 2 && !document.querySelector('#chat-send').hidden")
     sent = [json.loads(raw) for method, path, raw in serving_chat.requests
             if method == "POST" and path == "/v1/chat/completions"]
     assert sent[-1]["temperature"] == 1.2
@@ -122,7 +123,7 @@ def test_stop_closes_model_stream_and_releases_chat_controls(joined, serving_cha
     page.wait_for_selector("#chat-askrow:not([hidden])")
     page.fill("#ask", "Tell a long story")
     page.click("#chat-send")
-    page.wait_for_function("document.querySelector('.msg.assistant .message-body')?.textContent.includes('Still writing')")
+    page.wait_for_function("() => document.querySelector('.msg.assistant .message-body')?.textContent.includes('Still writing')")
     page.locator("chat-view").get_by_role("button", name="Stop", exact=True).click()
     page.wait_for_selector("#chat-send:not([hidden])")
     assert "Generation stopped" in page.locator("#chat-note").inner_text()

@@ -79,13 +79,13 @@ def test_hostile_text_is_shown_as_text_and_the_page_runs_nothing_and_holds_no_to
     page.on("request", lambda r: seen.append((r.method, r.url)))
     page.goto(f"http://127.0.0.1:{served}/")
     page.wait_for_selector("ml-board", state="attached")
-    page.wait_for_function("document.querySelector('ml-board')?.shadowRoot?.querySelector('nav button')")
+    page.wait_for_function("() => document.querySelector('ml-board')?.shadowRoot?.querySelector('nav button')")
     page.get_by_role("button", name="#ops").click()
-    page.wait_for_function("document.querySelector('ml-board')?.shadowRoot?.querySelector('.row')")
+    page.wait_for_function("() => document.querySelector('ml-board')?.shadowRoot?.querySelector('.row')")
     row = page.evaluate("document.querySelector('ml-board')?.shadowRoot?.querySelector('.row .subject').textContent")
     assert row == "<b>bold</b>"
     page.evaluate("document.querySelector('ml-board')?.shadowRoot?.querySelector('.row').click()")
-    page.wait_for_function("document.querySelector('ml-board')?.shadowRoot?.querySelector('.msg pre')")
+    page.wait_for_function("() => document.querySelector('ml-board')?.shadowRoot?.querySelector('.msg pre')")
     found = page.evaluate("""() => {
       const root = document.querySelector('ml-board').shadowRoot;
       return { text: root.querySelector('.msg pre').textContent,
@@ -97,7 +97,7 @@ def test_hostile_text_is_shown_as_text_and_the_page_runs_nothing_and_holds_no_to
     assert kit.owner not in found["html"] and all(m == "GET" for m, _ in seen)
     assert all(u.startswith(f"http://127.0.0.1:{served}/") for _, u in seen)
     page.get_by_role("button", name="alice and bob").click()
-    page.wait_for_function("document.querySelector('ml-board')?.shadowRoot?.querySelector('.msg pre')"
+    page.wait_for_function("() => document.querySelector('ml-board')?.shadowRoot?.querySelector('.msg pre')"
                            "?.textContent.includes('a dm')")
     assert "a dm <i>x</i>" in page.evaluate("document.querySelector('ml-board')?.shadowRoot?.querySelector('.msg pre').textContent")
     page.close()
@@ -109,13 +109,13 @@ def test_the_live_feed_picks_up_a_new_message_and_backs_off_when_the_route_fails
     ws.board.create(t["alice"], "#ops")
     page = browser.new_context(bypass_csp=True).new_page()
     page.goto(f"http://127.0.0.1:{served}/")
-    page.wait_for_function("document.querySelector('ml-board')?.shadowRoot?.querySelector('nav button')")
+    page.wait_for_function("() => document.querySelector('ml-board')?.shadowRoot?.querySelector('nav button')")
     page.get_by_role("button", name="#ops").click()
     page.wait_for_timeout(500)
     began = time.monotonic()
     ws.send(t["alice"], "#ops", "note", "later", subject="arrives by push")
     page.wait_for_function(
-        "document.querySelector('ml-board')?.shadowRoot?.querySelector('.row .subject')?.textContent"
+        "() => document.querySelector('ml-board')?.shadowRoot?.querySelector('.row .subject')?.textContent"
         " === 'arrives by push'", timeout=15000)
     assert time.monotonic() - began < 3
     delays = page.evaluate("import('/ui/ml-ui/board.js').then(m => [m.nextDelay(3000, false),"
@@ -135,9 +135,9 @@ def test_the_person_chats_from_the_page_and_an_agent_reads_it_fenced(kit, served
     errors = []
     page.on("pageerror", lambda e: errors.append(str(e)))
     page.goto(f"http://127.0.0.1:{served}/")
-    page.wait_for_function("document.querySelector('ml-board')?.shadowRoot?.querySelector('nav button')")
+    page.wait_for_function("() => document.querySelector('ml-board')?.shadowRoot?.querySelector('nav button')")
     page.get_by_role("button", name="#ops").click()
-    page.wait_for_function("document.querySelector('ml-board')?.shadowRoot?.querySelector('.composer textarea')")
+    page.wait_for_function("() => document.querySelector('ml-board')?.shadowRoot?.querySelector('.composer textarea')")
     page.evaluate("""() => {
       const root = document.querySelector('ml-board').shadowRoot;
       root.querySelector('.composer input').value = 'from the page';
@@ -147,7 +147,7 @@ def test_the_person_chats_from_the_page_and_an_agent_reads_it_fenced(kit, served
       root.querySelector('.composer button').click();
     }""")
     page.wait_for_function(
-        "document.querySelector('ml-board')?.shadowRoot?.querySelector('.row .subject')?.textContent === 'from the page'")
+        "() => document.querySelector('ml-board')?.shadowRoot?.querySelector('.row .subject')?.textContent === 'from the page'")
     mine = [m for m in ws.board.ui_read(kit.owner, "#ops")["messages"] if m["from"] == "owner"]
     assert [m["body"] for m in mine] == ['<img src=x onerror="window.__pwned=1"> hello agents']
     seen = ws.board.read(t["alice"], "#ops")
@@ -155,7 +155,7 @@ def test_the_person_chats_from_the_page_and_an_agent_reads_it_fenced(kit, served
     assert page.evaluate("window.__pwned ?? null") is None and errors == []
     assert [m for m, _ in posts] == ["POST"] and posts[0][1].endswith("/board/post")
     page.evaluate("document.querySelector('ml-board').readonly = true")
-    page.wait_for_function("!document.querySelector('ml-board').shadowRoot.querySelector('.composer')")
+    page.wait_for_function("() => !document.querySelector('ml-board').shadowRoot.querySelector('.composer')")
     page.close()
 
 
@@ -205,7 +205,7 @@ def test_readable_sessions_and_authenticated_child_keep_exact_dm_and_message_ids
     assert page.get_by_role('button', name=first_name, exact=True).get_attribute('title').startswith('codex-first ·')
     page.get_by_role('combobox', name='Message an agent').select_option('codex-second')
     page.get_by_role('button', name='Open', exact=True).click()
-    page.wait_for_function("document.querySelector('ml-board').view.b === 'codex-second'")
+    page.wait_for_function("() => document.querySelector('ml-board').view.b === 'codex-second'")
     page.get_by_role('button', name='#sessions', exact=False).click()
     page.locator('ml-board .row .meta').filter(has_text='Subagent · review (parent Codex · Mac · session 1)').wait_for()
     page.get_by_role('button', name='Readable child', exact=False).click()

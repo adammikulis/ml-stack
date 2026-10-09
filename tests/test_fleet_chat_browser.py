@@ -122,7 +122,7 @@ def test_shared_composer_cancel_and_failed_send_keep_the_next_draft(chat_browser
     expect(composer).to_have_value("Next draft")
     page.evaluate("window.failComposerSend = null")
     composer.press("Enter")
-    page.wait_for_function("typeof window.failComposerSend === 'function' && document.querySelector('chat-view').request !== null")
+    page.wait_for_function("() => typeof window.failComposerSend === 'function' && document.querySelector('chat-view').request !== null")
     composer.fill("Keep this draft")
     page.evaluate("window.failComposerSend()")
     expect(page.locator("chat-view #chat-note")).to_contain_text("Try again")
