@@ -1,7 +1,7 @@
 {
- "surfaces": 835,
+ "surfaces": 836,
  "by_status": {
-  "covered": 511,
+  "covered": 512,
   "partial": 197,
   "uncovered": 53,
   "n/a": 74,
