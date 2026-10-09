@@ -30,15 +30,15 @@ import os
 import re
 import subprocess
 import sys
-import time
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, TextIO
 
 from ml_stack import home
 from ml_stack.contracts import ContractError, load
 from ml_stack.redact.added import added_lines
+from ml_stack.redact.allowlist import allow
+from ml_stack.redact.benign import documented, not_a_name, phone_is_code, quoted
 
 __all__ = ["Shapes", "main", "recogniser", "shapes"]
 
@@ -382,9 +382,10 @@ def contacts(line: str, allowed: set[str], rules: Shapes | None = None,
         if any(text in u for u in uuids):
             cleared(f"{text!r} cleared by patterns: uuid")
             continue
-        if text.count(".") > 1 or DATEISH.match(text) or FRACTION.search(text):
+        if text.count(".") > 1 or DATEISH.match(text) or FRACTION.search(text) or TIMESTAMP.search(text):
             continue
-        if TIMESTAMP.search(text):
+        if code := phone_is_code(line, found.start(), found.end()):
+            cleared(f"{text!r} cleared by benign: {code}")
             continue
         if 7 <= sum(c.isdigit() for c in text) <= 15:
             yield "something shaped like a phone number (not inside a patterns: uuid)", text
@@ -481,7 +482,7 @@ def _findings(path: str, blob: str, known: set[str], allowed: set[str], engine: 
         line = blob[opened:closed if closed != -1 else len(blob)]
         # the recogniser is left as strict as it was about people; what stands a hit down is
         # only ever a shape that is code -- a table cell of digits, an expression, a product
-        fired = rules.in_context(body, line, (hit.start - opened, hit.end - opened))
+        fired = rules.in_context(body, line, (hit.start - opened, hit.end - opened)) or not_a_name(body)
         if fired is not None:
             if why is not None:
                 why.append((path, at, f"{body!r} cleared by {fired}"))
@@ -539,7 +540,7 @@ def main(argv: list[str] | None = None, *, env: Mapping[str, str] | None = None,
             continue
         wrote = added_lines(where, path, against)
         bad.extend(f for f in _findings(path, blob, known, allowed, engine, rules, cleared)
-                   if f[1] == 0 or f[1] in wrote)
+                   if (f[1] == 0 or f[1] in wrote) and not documented(where, quoted(f[2])))
 
     if cleared:
         print(f"pre-commit: what a rule in {CONTRACT} stood down", file=out)
@@ -562,44 +563,6 @@ def main(argv: list[str] | None = None, *, env: Mapping[str, str] | None = None,
               "python -m spacy download en_core_web_sm", file=out)
         return 1
     return 1 if bad else 0
-
-
-def allow(fixtures: str, phrases: list[str], out: TextIO, rules: Shapes | None = None) -> int:
-    """Add ``phrases`` to the allow-list at ``fixtures``, once each, under a dated heading.
-    Refuses an empty list and says so. With ``rules`` (that is, ``--why`` or ``NAMES_WHY``)
-    it first says, for each phrase, which rule already covers it or which rule came nearest
-    -- because a fixture covers one phrase and a rule covers every phrase of that shape."""
-    phrases = [p.strip() for p in phrases if p and p.strip()]
-    if not phrases:
-        print("allow what? e.g.: allow \"Windows Defender Firewall\" \"x1 - x0\"", file=out)
-        return 2
-    if rules is not None:
-        for phrase in phrases:
-            fired = rules.stood_down(phrase) or rules.in_context(phrase)
-            if fired:
-                print(f"why {phrase!r}: already stood down by {fired}; no fixture needed",
-                      file=out)
-                continue
-            print(f"why {phrase!r}: no rule stood it down. The nearest:", file=out)
-            for miss in rules.near_misses(phrase):
-                print(f"           {miss}", file=out)
-            print(f"           a line in {CONTRACT} covers every phrase of that shape; "
-                  "a fixture covers only this one.", file=out)
-    path = Path(fixtures)
-    have = {ln.strip().casefold() for ln in path.read_text(encoding="utf-8").splitlines()} \
-        if path.exists() else set()
-    new = [p for p in phrases if p.casefold() not in have]
-    if not new:
-        print(f"already allowed in {fixtures}: {', '.join(phrases)}", file=out)
-        return 0
-    stamp = time.strftime("%Y-%m-%d")
-    text = path.read_text(encoding="utf-8") if path.exists() else ""
-    if text and not text.endswith("\n"):
-        text += "\n"
-    text += f"\n# allowed with `hook allow` on {stamp}: not people\n" + "".join(f"{p}\n" for p in new)
-    path.write_text(text, encoding="utf-8")
-    print(f"allowed in {fixtures}: {', '.join(new)}", file=out)
-    return 0
 
 
 if __name__ == "__main__":

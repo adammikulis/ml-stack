@@ -84,7 +84,7 @@
       "Hugging", "Face", "Slack", "Teams", "Chrome", "Safari", "AI", "ML", "API", "SDK",
       "GPU", "CPU", "Linux", "macOS", "iOS", "Android", "Docker", "Kubernetes", "Nvidia",
       "PyTorch", "Xcode", "Ollama", "Firefox", "Presidio", "Markdown", "JavaScript",
-      "Python", "TypeScript", "Git metadata", "Cloud Files", "LM Studio"
+      "Python", "TypeScript", "Git metadata", "Cloud Files", "LM Studio", "App Attest", "Secure Enclave", "NaCl Box", "Community Cloud", "Secure Cloud"
     ],
     "headings": [
       "Features", "Bug Fixes", "Performance Improvements", "Reverts", "Documentation",

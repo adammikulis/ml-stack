@@ -566,3 +566,40 @@ def test_a_revision_that_is_an_option_is_refused_and_a_hostile_path_reaches_git_
     with pytest.raises(ValueError):
         added_lines(str(tmp_path), hostile.name, against="--output=" + str(tmp_path / "out"))
     assert not (tmp_path / "out").exists()
+
+
+FRICTION_LINES = (
+    "App Attest keys live in the Secure Enclave.\n"
+    "Seal with NaCl Box before sending.\n"
+    "RunPod offers Community Cloud and Secure Cloud pods.\n"
+    "See 4.3 Disputes for the process.\n"
+    "The Earned tier unlocks after review.\n"
+    "Use the worktree path shown above, and the console metadata.\n"
+    "Serve qwen3-30b-a3b-2507-q4-1234567890-instruct and claude-sonnet-5-5-20260301.\n"
+    '<path d="M12.5 3-4.2 8.1 9.3-7.7 2 1.1-5.5 6.6z"/>\n'
+    '<path d="M1234-5678 9012-3456 L7890-1234"/>\n')
+
+
+def test_technical_phrases_model_ids_and_path_data_are_not_people(tmp_path):
+    """Phrases and numbers an agent writes in ordinary docs and markup. Mutation: drop the
+    `benign` calls in `hook` and each of these is refused again."""
+    where = repo(tmp_path, graph={"nodes": []})
+    code, said = check(where, tmp_path, **{"notes.md": FRICTION_LINES})
+    assert code == 0, said
+
+
+def test_real_contacts_are_still_refused_beside_the_friction_lines(tmp_path):
+    where = repo(tmp_path, graph={"nodes": []})
+    code, said = check(where, tmp_path, **{"notes.md": FRICTION_LINES
+                                           + "Write to bea.marlow@" + "gmail.com or +1 (415) " + "555-0134.\n"})
+    assert code == 1
+    assert "bea.marlow@" + "gmail.com" in said and "555-0134" in said
+
+
+def test_a_phrase_the_documents_already_carry_is_the_repositorys_vocabulary(tmp_path):
+    from ml_stack.redact.benign import documented
+    where = repo(tmp_path, graph={"nodes": []})
+    commit(where, {"glossary.md": "Quartz" + " Lantern is a term.\n"}, "chore: glossary")
+    assert documented(str(where), "Quartz" + " Lantern")
+    assert not documented(str(where), "Bea Marlow")
+    assert not documented(str(where), "quartz lantern")
