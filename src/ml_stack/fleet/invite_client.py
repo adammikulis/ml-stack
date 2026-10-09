@@ -91,6 +91,7 @@ def parse_invite(text: str, now: float | None = None) -> dict[str, Any]:
 def _post(data: dict[str, Any], path: str, fields: dict[str, Any]) -> tuple[dict[str, Any], bytes]:
     parts, addresses = _addresses(data["endpoint"])
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.check_hostname = False
     context.verify_mode = ssl.CERT_NONE
     family, kind, protocol, _, address = addresses[0]

@@ -81,9 +81,9 @@ def test_linux_denies_systemd_user_directories_instead_of_launch_agents(layout):
 def test_network_allows_only_the_listed_hosts(layout):
     network = profile.claude_settings(layout)["sandbox"]["network"]
     assert network["allowedDomains"] == list(profile.HOSTS)
-    assert "127.0.0.1:8770" in network["allowedDomains"]
-    assert "pypi.org" in network["allowedDomains"] and "*.hf.co" in network["allowedDomains"]
-    assert "example.com" not in network["allowedDomains"]
+    assert "127.0.0.1:8770" in set(network["allowedDomains"])
+    assert {"pypi.org", "*.hf.co"} <= set(network["allowedDomains"])
+    assert "example.com" not in set(network["allowedDomains"])
 
 
 def test_scrubbed_environment_names_messaging_and_search_path_variables(layout):
@@ -111,7 +111,7 @@ def test_srt_settings_carry_the_same_filesystem_lists(layout):
     srt = profile.srt_settings(layout)
     claude = profile.claude_settings(layout)["sandbox"]["filesystem"]
     assert srt["filesystem"]["denyWrite"] == claude["denyWrite"]
-    assert "api.anthropic.com" in srt["network"]["allowedDomains"]
+    assert "api.anthropic.com" in set(srt["network"]["allowedDomains"])
 
 
 def test_prepare_stages_files_with_matching_digests(layout):

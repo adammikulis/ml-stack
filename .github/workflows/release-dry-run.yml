@@ -13,6 +13,8 @@ on:
       - "src/ml_stack/fleet/**"
       - "src/ml_stack/ui/**"
       - ".github/workflows/release*.yml"
+  # release-please.yml dispatches this on the release branch, whose pull request starts no run.
+  workflow_dispatch:
 
 concurrency:
   group: release-dry-run-${{ github.ref }}

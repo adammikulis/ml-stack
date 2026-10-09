@@ -275,3 +275,27 @@ def test_the_restart_the_autostart_path_builds_is_accepted_by_the_launcher_and_t
     with pytest.raises(Parsed) as accepted:
         launch.main(argv, daemon_main=daemon.run)
     assert accepted.value.args[0].port == 8770
+
+
+def _timing_out(monkeypatch):
+    def slow(*_args, **_kwargs):
+        raise TimeoutError("timed out")
+
+    monkeypatch.setattr(launch.socket, "create_connection", slow)
+
+
+def test_a_free_port_that_times_out_is_not_held(monkeypatch):
+    """Windows retransmits to a closed loopback port for about two seconds before refusing."""
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    _timing_out(monkeypatch)
+    assert launch.port_held(port) is False
+
+
+def test_a_listening_port_that_times_out_is_held(monkeypatch):
+    with socket.socket() as holder:
+        holder.bind(("127.0.0.1", 0))
+        holder.listen()
+        _timing_out(monkeypatch)
+        assert launch.port_held(holder.getsockname()[1]) is True

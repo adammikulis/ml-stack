@@ -276,7 +276,7 @@ def test_an_advertised_certificate_is_pinned_by_discovery_over_real_sockets(tmp_
     from ml_stack.fleet.discovery import Advertiser, create_cluster_key
 
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
-        probe.bind(("", 0))
+        probe.bind(("127.0.0.1", 0))
         udp = probe.getsockname()[1]
     ident = tls.identity(tmp_path / "tls", "d")
     key = create_cluster_key(tmp_path / "k", group="ml-stack").encode()

@@ -10,9 +10,8 @@ from __future__ import annotations
 
 import os
 import re
-import shlex
 import stat
-import subprocess
+import sys
 from pathlib import Path
 
 import yaml
@@ -47,10 +46,10 @@ def test_the_runner_is_executable():
 
 def test_the_runner_never_lets_the_credential_helper_be_consulted():
     """A pull through the macOS desktop helper can hang until it is killed."""
-    text = RUNNER.read_text(encoding="utf-8")
-    assert '--config "$DCFG"' in text
-    assert '{"auths":{}}' in text
-    assert "credsStore" in text, "--help has to say why the config directory is there"
+    assert "credsStore" in RUNNER.read_text(encoding="utf-8"), "--help has to say why"
+    launch = (REPO / "scripts" / "test_container_launch.py").read_text(encoding="utf-8")
+    assert '{"auths":{}}' in launch, "the config directory holds no credential helper"
+    assert "--config" in launch
 
 
 def test_the_runner_installs_what_ci_installs():
@@ -60,30 +59,27 @@ def test_the_runner_installs_what_ci_installs():
                     "safetensors"):
         assert package in text, f"the container does not install {package}, and CI does"
     extras = re.search(r'-e "(\.\[[^\]]*\])"', install).group(1)
-    assert f"EXTRAS='{extras}'" in text, f"the container does not install {extras}, and CI does"
+    assert f"EXTRAS='{extras[1:]}'" in text, f"the container does not install {extras}, and CI does"
     assert "spacy download en_core_web_sm" in text and "spacy download en_core_web_sm" in install
 
 
-def test_the_runner_says_which_command_told_it_docker_is_missing(tmp_path):
-    fake = tmp_path / "bin"
-    fake.mkdir()
-    (fake / "docker").write_text("#!/bin/sh\nexit 1\n")
-    (fake / "docker").chmod(0o755)
-    marker = tmp_path / "broker-called"
-    (fake / "python3").write_text("#!/bin/sh\nprintf called > " + shlex.quote(str(marker)) + "\nexit 97\n")
-    (fake / "python3").chmod(0o755)
-    done = subprocess.run([str(RUNNER), "-q"], capture_output=True, text=True,
-                          env={"PATH": f"{fake}:{os.defpath}", "DEV_TEST_WORKERS": ""},
-                          timeout=10)
-    assert done.returncode == 2, done.stdout
-    assert not marker.exists(), "Docker preflight must complete before acquiring test workers"
-    assert "`docker info` failed" in done.stderr, done.stderr
+def test_a_machine_without_docker_is_refused_before_anything_starts(monkeypatch):
+    import pytest
+
+    monkeypatch.syspath_prepend(str(REPO / "scripts"))
+    monkeypatch.setenv("PATH", os.defpath)
+    monkeypatch.setattr("shutil.which", lambda name: None)
+    from test_container_launch import ContainerRun
+
+    with pytest.raises(RuntimeError, match="Docker is required"):
+        ContainerRun([sys.executable, "-m", "pytest", "tests/test_layers.py"], {})
 
 
 def test_the_runner_passes_pytest_arguments_through():
     text = RUNNER.read_text(encoding="utf-8")
     assert 'PYTEST_ARGS=("$@")' in text
-    assert 'PYTEST_ARGS+=(-n 0)' in (RUNNER.parent / "test-on-linux-exec").read_text(), "--single has to reach pytest"
+    assert '[ -n "$SINGLE" ] && WANT=1' in text, "--single has to reach the scheduler as one process"
+    assert 'ML_STACK_LINUX_SINGLE="$SINGLE"' in text
 
 
 def test_one_matrix_entry_runs_the_suite_in_a_single_process():
@@ -105,7 +101,7 @@ def test_no_push_waits_on_macos():
     when = workflows()["jobs"]["macos"]["if"]
     assert "github.event_name == 'schedule'" in when
     assert "github.event_name == 'workflow_dispatch'" in when
-    assert "inputs.ref != ''" in when, "the release branch ships the macOS app"
+    assert "inputs.ref" not in when, "a caller's ref never reaches a run that can be dispatched"
 
 
 def test_macos_has_a_nightly_to_run_on():
@@ -118,8 +114,7 @@ def test_macos_runs_the_slow_tests_on_the_wheels_it_built():
     assert any("packaging/build.py" in str(s.get("run", "")) for s in steps)
     tests = [s for s in steps if s.get("name") == "tests"]
     assert tests and "--slow" in str(tests[0]["env"]["MACOS_PYTEST"])
-    for trigger in ("workflow_dispatch", "workflow_call"):
-        assert "--slow" in workflows()["on"][trigger]["inputs"]["macos-pytest"]["default"]
+    assert "--slow" in workflows()["on"]["workflow_dispatch"]["inputs"]["macos-pytest"]["default"]
 
 
 def test_ci_runs_the_release_verifier():

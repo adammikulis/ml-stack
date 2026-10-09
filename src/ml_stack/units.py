@@ -6,7 +6,7 @@ import re
 
 __all__ = ["human_bytes", "parse_duration", "span"]
 
-_DURATION = re.compile(r"(\d+(?:\.\d+)?)\s*(h|hr|hrs|hours?|m|min|mins|minutes?|s|sec|secs|seconds?)\b")
+_DURATION = re.compile(r"(\d{1,12}(?:\.\d{1,12})?)\s*(h|hr|hrs|hours?|m|min|mins|minutes?|s|sec|secs|seconds?)\b")
 
 
 def human_bytes(size: float) -> str:

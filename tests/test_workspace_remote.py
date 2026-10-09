@@ -509,7 +509,7 @@ def test_https_client_discovers_pins_and_authenticates_self_signed_host(host, tm
     server = LimitedServer((ALL_INTERFACES, 0), make_handler(daemon), tls=tls.member_context(ident, pool))
     threading.Thread(target=server.serve_forever, daemon=True).start()
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
-        probe.bind(("", 0))
+        probe.bind(("127.0.0.1", 0))
         udp = probe.getsockname()[1]
     advertiser = Advertiser(Beacon(name="project-host", port=server.server_port, cert=ident.beacon,
                                   machine=home.machine_id()),

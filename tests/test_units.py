@@ -35,3 +35,14 @@ def test_a_size_under_a_gigabyte_is_not_written_as_gigabytes():
 
 def test_a_float_is_taken_as_readily_as_an_int():
     assert human_bytes(1.5 * G) == "1.5G"
+
+
+def test_a_long_run_of_digits_without_a_unit_is_read_quickly():
+    import time
+
+    from ml_stack.units import parse_duration
+
+    start = time.monotonic()
+    parse_duration("0" * 50_000 + "x")
+    assert time.monotonic() - start < 1.0
+    assert parse_duration("2h 15m") == 8100.0

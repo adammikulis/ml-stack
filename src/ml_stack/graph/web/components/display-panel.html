@@ -103,7 +103,7 @@
       row.className = 'row';
       const name = document.createElement('span');
       name.className = 'name';
-      name.innerHTML = `${nameHtml}${count == null ? '' : ` <span class="n">${count}</span>`}`;
+      name.innerHTML = `${nameHtml}${count == null ? '' : ` <span class="n">${esc(count)}</span>`}`;
       row.appendChild(name);
       const box = document.createElement('span');
       box.className = 'three';
@@ -171,7 +171,7 @@
 
     function buildPanel() {
       heading('Nodes');
-      KINDS.forEach(k => stateRow(panel, `${swatch(k.k)}<span>${k.label}</span>`, counted().by_kind[k.k] ?? 0,
+      KINDS.forEach(k => stateRow(panel, `${swatch(k.k)}<span>${esc(k.label)}</span>`, counted().by_kind[k.k] ?? 0,
         () => display.node[k.k], v => { display.node[k.k] = v; }, STATES, k.k));
       bulkRow(panel, v => KINDS.forEach(k => { display.node[k.k] = v; }));
 
@@ -184,7 +184,7 @@
       heading('Links');
       stateRow(panel, '<span>Between two people</span>', p2pCount,
         () => display.between, v => { display.between = v; }, STATES);
-      RELS.forEach(r => stateRow(panel, `<span>${relText(r)}</span>`, relCount.get(r),
+      RELS.forEach(r => stateRow(panel, `<span>${esc(relText(r))}</span>`, relCount.get(r),
         () => display.link[r], v => { display.link[r] = v; }, STATES));
       bulkRow(panel, v => RELS.forEach(r => { display.link[r] = v; }));
 
