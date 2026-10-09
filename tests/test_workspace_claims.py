@@ -12,7 +12,7 @@ import pytest
 from workspace_kit import Kit, clean_env
 
 from ml_stack.windows_private import problem as windows_problem
-from ml_stack.workspace import Conflict, Denied, Workspace, claims
+from ml_stack.workspace import Conflict, Denied, Workspace, agent_filter, claims
 
 
 def directory_link(link: Path, target: Path) -> None:
@@ -123,14 +123,14 @@ def test_one_agent_cannot_reach_anothers_folders_but_a_lead_can(kit):
     lead = kit.agent("lead-1", "lead")
     kit.ws.scratch_new(a, "mine")
     with pytest.raises(Denied):
-        kit.ws.scratch_path(b, "mine", "", owner="alpha")
+        kit.ws.scratch_path(b, "mine", "", for_agent="alpha")
     with pytest.raises(Denied):
         kit.ws.scratch_ls(b, "alpha")
     with pytest.raises(Denied):
-        kit.ws.scratch_rm(b, "mine", owner="alpha")
+        kit.ws.scratch_rm(b, "mine", for_agent="alpha")
     assert kit.ws.scratch_path(b, "mine") != kit.ws.scratch_path(a, "mine")
     assert [f["name"] for f in kit.ws.scratch_ls(lead, "alpha")] == ["mine"]
-    assert kit.ws.scratch_rm(lead, "mine", owner="alpha") is True
+    assert kit.ws.scratch_rm(lead, "mine", for_agent="alpha") is True
 
 
 @pytest.mark.parametrize("name", ["../x", "a/b", ".hidden", "", "x" * 80, "UP", "a b"])
@@ -338,3 +338,23 @@ def test_the_heartbeat_tool_reports_each_renewed_claim(kit, monkeypatch):
     path.write_text(json.dumps(data))
     out = tools.workspace_heartbeat(600)
     assert out["capped"] == ["port:9302"] and out["claims"][0]["capped"] is True
+
+
+def test_for_agent_names_an_agent_by_name_or_unambiguous_prefix():
+    names = ["claude-aaaa11", "claude-aabb22", "qwen-cccc33"]
+    assert agent_filter.resolve(names, "qwen") == "qwen-cccc33"
+    assert agent_filter.resolve(names, "claude-aaaa11") == "claude-aaaa11"
+    with pytest.raises(Denied, match="claude-aaaa11, claude-aabb22"):
+        agent_filter.resolve(names, "claude-aa")
+    with pytest.raises(Denied, match="no agent"):
+        agent_filter.resolve(names, "gpt")
+
+
+def test_for_agent_narrows_public_records_for_anyone_and_never_widens(kit):
+    a, b = kit.agent("alpha"), kit.agent("beta")
+    kit.ws.claim(a, "branch", "agent/x")
+    kit.ws.claim(b, "branch", "agent/y")
+    rows = kit.ws.claims.listing()
+    assert [c["key"] for c in agent_filter.narrow(rows, "alpha")] == ["agent/x"]
+    assert agent_filter.narrow(kit.ws.registered(), "beta")[0]["id"] == "beta"
+    assert agent_filter.narrow(rows, "nobody") == []

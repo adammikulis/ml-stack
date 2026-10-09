@@ -21,6 +21,7 @@ from ml_stack.log import say, warn
 from ml_stack.sentinel import human
 from ml_stack.sentinel.human import HumanRequired
 from ml_stack.workspace import (
+    agent_filter,
     authority_cli,
     automatic_connection,
     autostart_status,
@@ -93,7 +94,10 @@ WIDEN = [flag("--limit", type=int, default=0,
 READ = [*WIDEN, flag("--ack", action="store_true", help="mark what is shown as read"),
         flag("--raw", action="store_true", help="also show the unfenced text of clear messages")]
 CLAIM = [flag("kind", choices=CLAIM_KINDS), flag("key")]
-OWNER = flag("--owner", default="", help="a lead or human may name another agent")
+FOR_AGENT = flag("--for-agent", default="", metavar="NAME",
+                 help="show only this agent's records, by its unique name or an unambiguous start of it; "
+                      "it selects what to read and never sets who is sending (for scratch folders, which "
+                      "are private, only a lead or person may name another agent)")
 
 
 def _label(args: argparse.Namespace) -> str:
@@ -573,7 +577,7 @@ TABLE: tuple[tuple[str, str, list[Any], Handler], ...] = (
      lambda args, ws, token: ws.register_session(token, onboard.device_metadata.current(), args.harness)),
     ("hello-model", "record the model a helper LABEL of yours runs (claimed)", [
         flag("label_name", metavar="LABEL"), flag("model", metavar="MODEL")], _hello_model),
-    ("agents", "every live identity with its role, model and whether the model is verified", [],
+    ("agents", "every live identity with its role, model and whether the model is verified", [FOR_AGENT],
      _agents),
     ("send", "send a message (BODY - reads stdin)", [
         flag("to", help="an agent id, or * for the announcements board (joined, milestone, "
@@ -582,7 +586,7 @@ TABLE: tuple[tuple[str, str, list[Any], Handler], ...] = (
         flag("--ttl", type=float, default=0.0, help="seconds until it expires")], _send),
     ("task-create", "create a project task in your existing project grant", [flag("payload")],
      lambda a, w, t: TaskBoard(w).create(t, json.loads(_body(a.payload)))),
-    ("tasks", "authorized project tasks and progress metrics", [], lambda a, w, t: TaskBoard(w).list(t)),
+    ("tasks", "authorized project tasks and progress metrics", [FOR_AGENT], lambda a, w, t: TaskBoard(w).list(t)),
     ("task", "task lease, checkpoints, proposal and independent review", [flag("id")],
      lambda a, w, t: TaskBoard(w).get(t, a.id)),
     ("task-subscribe", "receive inbox status changes for a task", [flag("id")],
@@ -609,7 +613,7 @@ TABLE: tuple[tuple[str, str, list[Any], Handler], ...] = (
      lambda a, w, t: task_integration.integrate(w, t, a.id)),
     *task_source_recovery.TABLE,
     ("inbox", "unread messages, fenced as data", [
-        *READ,
+        *READ, FOR_AGENT,
         flag("--children", action="store_true", help="only messages from your delegates")],
      _inbox),
     ("board", "boards: list, read NAME, post NAME TEXT, threads NAME, create NAME [TITLE], add NAME AGENT, mentions", [
@@ -619,7 +623,7 @@ TABLE: tuple[tuple[str, str, list[Any], Handler], ...] = (
         flag("--limit", type=int, default=0, help="read: how many (default: a few, cut short)"),
         flag("--after", type=int, default=0),
         flag("--private", action="store_true", help="create: only people you add can join"),
-        flag("--no-mark", action="store_true", help="read: leave the board's unread count")],
+        flag("--no-mark", action="store_true", help="read: leave the board's unread count"), FOR_AGENT],
      _board),
     ("join-board", "join an open board", [flag("name")], lambda a, w, t: w.board.join(t, a.name)),
     ("leave-board", "leave a board", [flag("name")], lambda a, w, t: w.board.leave(t, a.name)),
@@ -644,10 +648,10 @@ TABLE: tuple[tuple[str, str, list[Any], Handler], ...] = (
         flag("--session", default=""), flag("--limit", type=int, default=50)],
      lambda a, w, t: person_view.listing(a.limit, a.session)),
     ("digest", "a bounded summary of digest subscriptions, or of --thread N", [
-        flag("--thread", type=int, default=0), flag("--ack", action="store_true")], _digest),
+        FOR_AGENT, flag("--thread", type=int, default=0), flag("--ack", action="store_true")], _digest),
     ("wait", "block until a message arrives", [
         *READ, flag("--timeout", type=float, default=60.0)], _wait),
-    ("outbox", "messages you sent, each provisional until every paired device holds it", [],
+    ("outbox", "messages you sent, each provisional until every paired device holds it", [FOR_AGENT],
      lambda a, w, t: w.outbox(t)),
     ("sync", "exchange journals with the paired devices (a person or lead)", [],
      lambda a, w, t: mesh_sync.run(w, t)),
@@ -676,13 +680,13 @@ TABLE: tuple[tuple[str, str, list[Any], Handler], ...] = (
     ("scratch-new", "make a scratch folder", [
         flag("name"), flag("--ttl-hours", type=float, default=0.0)],
      lambda a, w, t: {"path": w.scratch_new(t, a.name, a.ttl_hours * 3600)}),
-    ("scratch-ls", "scratch folders with size and expiry", [OWNER],
-     lambda a, w, t: w.scratch_ls(t, a.owner)),
+    ("scratch-ls", "scratch folders with size and expiry", [FOR_AGENT],
+     lambda a, w, t: w.scratch_ls(t, _agent_named(w, a.for_agent))),
     ("scratch-path", "a path inside a folder, refused if it escapes", [
-        flag("name"), flag("relative", nargs="?", default=""), OWNER],
-     lambda a, w, t: {"path": w.scratch_path(t, a.name, a.relative, a.owner)}),
-    ("scratch-rm", "delete a scratch folder", [flag("name"), OWNER],
-     lambda a, w, t: {"removed": w.scratch_rm(t, a.name, a.owner)}),
+        flag("name"), flag("relative", nargs="?", default=""), FOR_AGENT],
+     lambda a, w, t: {"path": w.scratch_path(t, a.name, a.relative, _agent_named(w, a.for_agent))}),
+    ("scratch-rm", "delete a scratch folder", [flag("name"), FOR_AGENT],
+     lambda a, w, t: {"removed": w.scratch_rm(t, a.name, _agent_named(w, a.for_agent))}),
     ("claim", "own a branch, worktree, port, file, area, install environment or server", [
         *CLAIM, flag("--ttl", type=float, default=0.0, help="seconds; renew with heartbeat"),
         flag("--pid", type=int, default=0, help="release when this process is gone"),
@@ -693,8 +697,8 @@ TABLE: tuple[tuple[str, str, list[Any], Handler], ...] = (
     ("heartbeat", "renew every claim you hold", [flag("--ttl", type=float, default=0.0)], _heartbeat),
     ("who", "who owns this?", CLAIM,
      lambda a, w, t: w.who_owns(a.kind, a.key) or {"owner": None}),
-    ("claims", "every live claim", [OWNER, flag("--kind", choices=CLAIM_KINDS, default="")],
-     lambda a, w, t: w.claims.listing(a.owner, a.kind)),
+    ("claims", "every live claim", [FOR_AGENT, flag("--kind", choices=CLAIM_KINDS, default="")],
+     lambda a, w, t: w.claims.listing("", a.kind)),
     ("attach", "post a file to a board, an agent or a thread; the message carries a handle, never the content",
      filecli.ATTACH, filecli.attach),
     ("file", "a file by handle (--meta, --text, --out PATH), or: list, search QUERY, delete HANDLE (a person)",
@@ -733,6 +737,19 @@ def _guarded(run: Callable[[argparse.Namespace], int | None]) -> Callable[[argpa
     return wrapped
 
 
+def _narrowed(args: argparse.Namespace, ws: Any, result: Any) -> Any:
+    """``result`` cut to the records of ``--for-agent``; scratch commands apply it themselves."""
+    name = getattr(args, "for_agent", "")
+    if not name or args.cmd.startswith("scratch"):
+        return result
+    return agent_filter.narrow(result, _agent_named(ws, name))
+
+
+def _agent_named(ws: Any, text: str) -> str:
+    registry = getattr(ws, "registry", None)
+    return agent_filter.resolve(registry.ids(), text) if text and registry else text
+
+
 def _runner(handler: Handler) -> Callable[[argparse.Namespace], int]:
     def run(args: argparse.Namespace) -> int:
         connection = _project_connection()
@@ -760,7 +777,7 @@ def _runner(handler: Handler) -> Callable[[argparse.Namespace], int]:
                 if args.cmd in ('announce', 'send'):
                     result = handler(args, ws, token)
             else:
-                result = handler(args, ws, token)
+                result = _narrowed(args, ws, handler(args, ws, token))
         _show(args, result)
         _held_note(result)
         return 0

@@ -131,14 +131,14 @@ def workspace_who_owns(kind: str, key: str) -> dict[str, Any]:
     return _workspace().who_owns(kind, key) or {"owner": None}
 
 
-def workspace_claims(owner: str = "", kind: str = "") -> list[dict[str, Any]]:
+def workspace_claims(for_agent: str = "", kind: str = "") -> list[dict[str, Any]]:
     """Every live claim."""
-    return _workspace().claims.listing(owner, kind)
+    return _workspace().claims.listing(for_agent, kind)
 
 
-def workspace_scratch_ls(owner: str = "") -> list[dict[str, Any]]:
+def workspace_scratch_ls(for_agent: str = "") -> list[dict[str, Any]]:
     """This agent's scratch folders with size and expiry."""
-    return _workspace().scratch_ls(_token(), owner)
+    return _workspace().scratch_ls(_token(), for_agent)
 
 
 def workspace_scratch_path(name: str, relative: str = "") -> dict[str, str]:

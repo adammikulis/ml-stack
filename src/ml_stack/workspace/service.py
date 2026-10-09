@@ -712,28 +712,28 @@ class Workspace:
         self.audit("scratch.new", who.id, name=name)
         return str(path)
 
-    def scratch_ls(self, token: str, owner: str = "") -> list[dict[str, Any]]:
-        """The caller's scratch folders, or ``owner``'s for a lead or human."""
+    def scratch_ls(self, token: str, for_agent: str = "") -> list[dict[str, Any]]:
+        """The caller's scratch folders, or ``for_agent``'s for a lead or human."""
         who = self.auth(token)
         self._top_level(who, "use scratch folders")
-        return self.scratch.listing(who, owner)
+        return self.scratch.listing(who, for_agent)
 
-    def scratch_path(self, token: str, name: str, relative: str = "", owner: str = "") -> str:
+    def scratch_path(self, token: str, name: str, relative: str = "", for_agent: str = "") -> str:
         """A path inside a scratch folder; refuses one that leaves it."""
         who = self.auth(token)
         self._top_level(who, "use scratch folders")
         try:
-            return str(self.scratch.resolve(who, name, relative, owner))
+            return str(self.scratch.resolve(who, name, relative, for_agent))
         except Denied:
-            self.audit("scratch.refused", who.id, name=name, owner=owner)
+            self.audit("scratch.refused", who.id, name=name, for_agent=for_agent)
             raise
 
-    def scratch_rm(self, token: str, name: str, owner: str = "") -> bool:
+    def scratch_rm(self, token: str, name: str, for_agent: str = "") -> bool:
         """Delete a scratch folder."""
         who = self.auth(token)
         self._top_level(who, "use scratch folders")
-        gone = self.scratch.remove(who, name, owner)
-        self.audit("scratch.rm", who.id, name=name, owner=owner)
+        gone = self.scratch.remove(who, name, for_agent)
+        self.audit("scratch.rm", who.id, name=name, for_agent=for_agent)
         return gone
 
     # -- claims --------------------------------------------------------------------------
