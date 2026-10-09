@@ -13,7 +13,7 @@ from pathlib import Path
 
 def cache_dir(root: Path) -> Path:
     """The directory holding one index shard per source file of this tree."""
-    home = Path(os.environ.get("MLSTACK_GUARD_CACHE") or "~/.ml-stack/guard").expanduser()
+    home = Path(os.environ.get("POOLHOUSE_GUARD_CACHE") or "~/.poolhouse/guard").expanduser()
     return home / hashlib.sha256(str(root).encode()).hexdigest()[:16]
 
 
