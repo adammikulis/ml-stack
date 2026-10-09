@@ -17,8 +17,8 @@ def machine(monkeypatch, tmp_path):
     return tmp_path / "state" / "traind" / "settings.json"
 
 
-HOSTILE = ["../../etc/passwd", "windows-node; rm -rf /", "windows-node\nkeystore", "$(touch pwned)", "x" * 100_000,
-           "", " ", "WINDOWS-NODE", "windows_node", "windows-node ", "\u0000", "__proto__", "constructor"]
+HOSTILE = ["../../etc/passwd", "test-runner-extras; rm -rf /", "test-runner-extras\nkeystore", "$(touch pwned)", "x" * 100_000,
+           "", " ", "TEST-RUNNER-EXTRAS", "test_runner_extras", "test-runner-extras ", "\u0000", "__proto__", "constructor"]
 
 
 @pytest.mark.parametrize("name", HOSTILE)
@@ -37,8 +37,8 @@ def test_a_floor_cannot_be_switched_because_it_cannot_be_registered(machine, cap
 
 
 @pytest.mark.parametrize("held", [
-    '{"features": {"keystore": true, "push-to-main": true, "windows-node": 1}}',
-    '{"features": {"windows-node": "true"}}', '{"features": [true]}', '[]', '"features"', "\x00\x01", "{" * 5000])
+    '{"features": {"keystore": true, "push-to-main": true, "test-runner-extras": 1}}',
+    '{"features": {"test-runner-extras": "true"}}', '{"features": [true]}', '[]', '"features"', "\x00\x01", "{" * 5000])
 def test_a_settings_file_naming_other_things_turns_nothing_on(machine, held):
     machine.parent.mkdir(parents=True)
     machine.write_text(held)
@@ -46,16 +46,16 @@ def test_a_settings_file_naming_other_things_turns_nothing_on(machine, held):
 
 
 def test_enabling_one_feature_leaves_every_other_off(machine):
-    features.switch("windows-node", True)
-    assert json.loads(machine.read_text())["features"] == {"windows-node": True}
-    assert features.enabled("test-runner-extras") is False and features.enabled("guard-change") is False
+    features.switch("test-runner-extras", True)
+    assert json.loads(machine.read_text())["features"] == {"test-runner-extras": True}
+    assert features.enabled("guard-change") is False and features.enabled("remote-tests") is False
 
 
-@pytest.mark.parametrize("path", ["/ui/features/../settings", "/ui/features/x", "/ui/features?name=windows-node&enabled=1",
+@pytest.mark.parametrize("path", ["/ui/features/../settings", "/ui/features/x", "/ui/features?name=test-runner-extras&enabled=1",
                                   "/ui/features%00"])
 def test_the_route_takes_no_name_and_changes_nothing(daemon, path):  # noqa: F811
-    daemon.call(path, method="POST", body={"name": "windows-node", "enabled": True})
-    assert features.enabled("windows-node", str(daemon.ui.settings_path.parent)) is False
+    daemon.call(path, method="POST", body={"name": "test-runner-extras", "enabled": True})
+    assert features.enabled("test-runner-extras", str(daemon.ui.settings_path.parent)) is False
 
 
 def test_the_route_needs_the_page_header(daemon):  # noqa: F811

@@ -37,7 +37,7 @@
                  + RUN + r"(\S*python\S*\s+|(ba)?sh\s+)?(\S*/)?(claude-user-prompt|person-consume(?!\s+propose\b))")
  HERE = Path(__file__).resolve().parent
  
-@@ -54,40 +54,40 @@
+@@ -61,40 +61,40 @@
      (r"until\s*!\s*pgrep|while\s+pgrep|until\s+pgrep",
       "Do not hand-write a waiter. `pgrep -f` matches the waiting shell's own command line, "
       "so the loop never exits -- two of them spun for an afternoon and the work queued "
@@ -96,7 +96,7 @@
       "killing the process leaves the lease behind and the next `up` refuses."),
      (PUSH_FLAGS,
       "An agent pushes one branch by name: `git push origin <branch>`. Every branch at "
-@@ -102,10 +102,10 @@
+@@ -109,10 +109,10 @@
       "word, and push main only after the person selects the approval."),
      (MINT,
       "An agent does not create identities. A person at a terminal mints a token; a joined agent "
@@ -109,7 +109,7 @@
       "attestations` shows what the hooks recorded."),
      (r"(^|[;&|]\s*|\benv\s+)SKIP_NAME_CHECK=1",
       "SKIP_NAME_CHECK is a person's to set, not an agent's. The hook is the last thing "
-@@ -147,12 +147,12 @@
+@@ -154,12 +154,12 @@
  
  
  HARD = (PUSH_FLAGS, PUSH_MAIN, MINT, PERSON_STORE)
@@ -124,7 +124,7 @@
  
  
  def subagent_without_its_name(event: dict, command: str) -> str:
-@@ -189,14 +189,14 @@
+@@ -196,14 +196,14 @@
      rules = None if switched else rules_loader.load()
      why = rules.bash_refusal(command, event.get("cwd") or "") if rules else ""
      if why:
@@ -142,7 +142,7 @@
                file=sys.stderr)
          return 2
      command = MESSAGE.sub(r"\1 ''", without_search_patterns(command))
-@@ -208,8 +208,8 @@
+@@ -215,8 +215,8 @@
                  continue
              tail = ("No switch opens this rule." if pattern in HARD else
                      "If this is genuinely the right command, say so and a person can run it, "

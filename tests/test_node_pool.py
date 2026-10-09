@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from poolhouse import node_pool
+from poolhouse import node_launch, node_pool
 from poolhouse.fleet import peers
 from poolhouse.fleet.discovery import DiscoveryError
 
@@ -47,3 +47,17 @@ def test_ls_without_a_key_file_and_without_a_node_still_says_what_is_missing(tmp
 
 def test_status_is_none_when_no_node_answers(tmp_path):
     assert node_pool.status(tmp_path / "empty") is None
+
+
+@pytest.mark.parametrize(("own", "extra", "started"), [
+    (True, None, ["--lan"]), (False, None, []), (True, ["--listen", "127.0.0.1:0"], ["--listen", "127.0.0.1:0"])])
+def test_the_devices_own_node_starts_on_the_lan_and_a_scratch_node_stays_local(tmp_path, monkeypatch, own, extra, started):
+    own_state, scratch = tmp_path / "own", tmp_path / "scratch"
+    seen: list[list[str]] = []
+    monkeypatch.setattr(node_launch, "default_state", lambda: own_state)
+    monkeypatch.setattr(node_launch, "node_health", lambda state: {"ok": True} if seen else None)
+    monkeypatch.setattr(node_launch.node_supervise, "resolve", lambda state: None)
+    monkeypatch.setattr(node_launch, "supervised", lambda state: False)
+    monkeypatch.setattr(node_launch, "_start_supervisor", lambda state, words: seen.append(words))
+    node_launch.ensure_node(None if own else scratch, extra=extra, wait_s=1)
+    assert seen == [started]

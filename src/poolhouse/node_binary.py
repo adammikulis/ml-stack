@@ -11,7 +11,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from poolhouse.features import windows_node
+from poolhouse.platform import is_windows
 from poolhouse.files import read_json, write_json, writing
 from poolhouse.runtime_store import MARK
 
@@ -26,8 +26,8 @@ class NodeBinaryError(OSError):
 
 
 def name() -> str:
-    """The binary's file name: ``.exe`` on Windows when the `windows-node` feature is on."""
-    return "poolhouse-node.exe" if windows_node() else "poolhouse-node"
+    """The binary's file name: ``.exe`` on Windows."""
+    return "poolhouse-node.exe" if is_windows() else "poolhouse-node"
 
 
 def target() -> str:

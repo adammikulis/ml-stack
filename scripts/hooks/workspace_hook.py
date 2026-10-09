@@ -194,7 +194,9 @@ def hook_notice(environment: dict, source: Path | None = None) -> str:
 def state_dir() -> Path:
     """Where hooks keep their small per-session memory (attention shown); private to the user."""
     named = os.environ.get('POOLHOUSE_HOOK_STATE')
-    path = Path(named) if named else Path(tempfile.gettempdir()) / f'poolhouse-hooks-{os.getuid()}'
+    # Windows has no uid; its temporary directory is already the user's own.
+    owner = os.getuid() if hasattr(os, 'getuid') else 'user'
+    path = Path(named) if named else Path(tempfile.gettempdir()) / f'poolhouse-hooks-{owner}'
     path.mkdir(parents=True, exist_ok=True, mode=0o700)
     return path
 

@@ -51,6 +51,13 @@ REFUSE = [
      "whatever another agent is halfway through writing -- it committed a failing test once, "
      "under somebody else's commit message. Name the files you mean: `git add path/one.py "
      "path/two.py`."),
+    (RUN + r"git\s+stash(\s*($|[;&|])|\s+(pop|save|clear)\b|\s+(-u|--include-untracked)\b|"
+     r"\s+push(?![^;&|\n]*\s-m\b))",
+     "Do not use a bare `git stash`, `stash pop` or an untagged `stash push`. The stash stack is shared by "
+     "every worktree, so a pop can restore another agent's work over yours (and a stash with no tag cannot "
+     "be found again). Set work aside with a WIP commit instead. If you must stash: `git stash push -u -m "
+     "<unique-tag>`, find your entry's SHA with `git stash list --format='%H %gs'`, restore it with "
+     "`git stash apply <sha>`, then drop that one entry by its re-found `stash@{n}`."),
     (r"until\s*!\s*pgrep|while\s+pgrep|until\s+pgrep",
      "Do not hand-write a waiter. `pgrep -f` matches the waiting shell's own command line, "
      "so the loop never exits -- two of them spun for an afternoon and the work queued "

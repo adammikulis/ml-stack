@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -22,7 +23,7 @@ BLOCKED, ALLOWED = 2, 0
 
 def guard(command: str, tool: str = "Bash", **env: str) -> int:
     done = subprocess.run(
-        [str(GUARD)], text=True, capture_output=True, env={**os.environ, **env},
+        [sys.executable, str(GUARD)], text=True, capture_output=True, env={**os.environ, **env},
         input=json.dumps({"tool_name": tool, "cwd": "/", "tool_input": {"command": command}}))
     assert done.returncode in (BLOCKED, ALLOWED), done.stderr
     if done.returncode == BLOCKED:
@@ -45,6 +46,11 @@ def guard(command: str, tool: str = "Bash", **env: str) -> int:
     ('git add . ', "the dot is the same"),
     ('git add -u', "every tracked change is the same"),
     ('git commit -am "x"', "commit -a stages everything too"),
+    ('git stash', "a bare stash lands on the stack every worktree shares"),
+    ('git stash pop', "a pop can restore another agent's stash over this work"),
+    ('git add x.py && git stash && git pull', "a bare stash in a chain"),
+    ('git stash -u', "untracked files stashed with no tag"),
+    ('git stash push -u', "a push with no tag cannot be found again"),
     ('git push origin main', "a push to main is the owner's to make"),
     ('git push origin 0.2dev:main', "the same, through a refspec"),
     ('git push --force origin main', "a forced push most of all"),
@@ -97,6 +103,11 @@ def test_the_shells_that_should_have_been_commands_are_refused(command, why):
     "grep -rn 'git push' docs/",
     'git push origin 0.2dev',
     'git merge --ff-only work && git push origin 0.2dev',
+    'git stash list --format="%H %gs"',
+    'git stash show --stat 9f7ee3e3',
+    'git stash apply 9f7ee3e3',
+    'git stash push -u -m "wip-tag-1" src/one.py',
+    'git commit -m "fix: a bare git stash is refused"',
     'git log --oneline origin/main..main',
     'git rev-list --left-right --count origin/main...main',
     'PYTHONPATH=src python3 -m pytest tests -q -n 4',
@@ -136,7 +147,7 @@ def test_the_guard_can_be_switched_off_for_a_session():
 
 def test_the_refusal_names_the_command_that_leases():
     done = subprocess.run(
-        [str(GUARD)], text=True, capture_output=True,
+        [sys.executable, str(GUARD)], text=True, capture_output=True,
         input=json.dumps({"tool_name": "Bash", "tool_input": {"command": "llama-server -m x"}}))
     assert done.returncode == BLOCKED
     assert "poolhouse-serve up MODEL" in done.stderr and "poolhouse-serve down" in done.stderr
