@@ -67,7 +67,9 @@ jobs:
           - os: windows-latest
             asset: ml-stack-windows-x86_64
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 25
+    # The Linux job spent 17 minutes in apt on a slow mirror and another 4 fetching the browser's
+    # system packages; 25 minutes cancelled it before the first test.
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -83,7 +85,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
+          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libappindicator3-dev \
             librsvg2-dev patchelf
       - run: python -m pip install --upgrade pip build
       - run: python packaging/build.py --bundle
