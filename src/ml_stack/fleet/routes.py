@@ -102,8 +102,11 @@ def _whole(text: str) -> int:
 def write(handler: Any, code: int, raw: bytes, content_type: str,
           extra: dict[str, str] | None = None) -> None:
     """Write one response whose body is bytes."""
+    kind = content_type.replace("\r", "").replace("\n", "")
+    if kind != content_type:
+        raise ValueError("the content type carries a line break")
     handler.send_response(code)
-    handler.send_header("Content-Type", content_type)
+    handler.send_header("Content-Type", kind)
     handler.send_header("Content-Length", str(len(raw)))
     for key, value in (extra or {}).items():
         clean = value.replace("\r", "").replace("\n", "")
