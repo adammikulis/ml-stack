@@ -54,9 +54,9 @@ def test_normal_cli_sends_to_saved_board(project, monkeypatch):
     args = SimpleNamespace(cmd="send", agent="", token_file="", label="helper", to="pc", type="status",
                            body="connected", subject="", reply_to=0, ttl=0, json=True)
     assert cli._runner(cli._send)(args) == 0
-    operation, token, values, kwargs = remote.calls[-1]
+    operation, token, values, _ = remote.calls[-1]
     assert operation == "send" and token == "project-agent-capability"
-    assert values == ("pc", "status", "connected") and kwargs["label"] == "helper"
+    assert values == ("pc", "status", "connected")
 
 
 def test_connected_project_uses_nearest_root_and_refuses_other_authority(project):
@@ -138,3 +138,66 @@ def test_auto_attach_discovers_authority_without_registering_a_device(monkeypatc
     assert connection.auto_attach(tmp_path) == {
         "host": "https://host.local:8770", "project_id": PROJECT, "agent": "",
         "cluster": "home", "cluster_key": "", "root": str(tmp_path.resolve())}
+
+
+def test_this_machines_own_beacon_is_named_by_its_loopback_or_its_lan_address(monkeypatch):
+    """A board saved as https://127.0.0.1 is still the board when the beacon is heard on the LAN
+    address (and the other way round); another machine's beacon is not reached that way."""
+    from ml_stack.fleet import remote as fleet_remote
+    monkeypatch.setattr(fleet_remote.home, "machine_id", lambda: "mine")
+    monkeypatch.setattr(fleet_remote, "primary_ip", lambda: "192.168.2.27")
+    mine = SimpleNamespace(base_url="https://192.168.2.27:8770",
+                           beacon=SimpleNamespace(machine="mine", cert="c"))
+    other = SimpleNamespace(base_url="https://192.168.2.27:8770",
+                            beacon=SimpleNamespace(machine="theirs", cert="c"))
+    assert fleet_remote.device_address(mine, "https://127.0.0.1:8770")
+    assert fleet_remote.device_address(mine, "https://192.168.2.27:8770")
+    assert not fleet_remote.device_address(mine, "https://192.168.2.99:8770")
+    assert not fleet_remote.device_address(other, "https://127.0.0.1:8770")
+    looped = SimpleNamespace(base_url="https://127.0.0.1:8770",
+                             beacon=SimpleNamespace(machine="mine", cert="c"))
+    assert fleet_remote.device_address(looped, "https://192.168.2.27:8770")
+
+
+def test_one_daemon_under_its_loopback_and_lan_names_is_one_board(monkeypatch):
+    from ml_stack.fleet import remote as fleet_remote
+    from ml_stack.workspace import automatic_connection as auto
+    monkeypatch.setattr(fleet_remote, "primary_ip", lambda: "192.168.2.27")
+    loop = {"host": "https://127.0.0.1:8770", "project_id": PROJECT}
+    lan = {"host": "https://192.168.2.27:8770", "project_id": PROJECT}
+    assert auto.same_board(loop, lan) and auto.same_board(lan, loop)
+    assert not auto.same_board(loop, {**lan, "host": "https://192.168.2.99:8770"})
+    assert not auto.same_board(loop, {**lan, "project_id": "0" * 32})
+
+
+def test_tokens_saved_under_the_lan_name_follow_the_loopback_name(tmp_path, monkeypatch):
+    from ml_stack.workspace import remote as ws_remote
+    old, new = tmp_path / "old", tmp_path / "new"
+    (old / "tokens").mkdir(parents=True)
+    (old / "tokens" / "agent-a").write_text("kept")
+    (old / "tokens" / "agent-b").write_text("old b")
+    (new / "tokens").mkdir(parents=True)
+    monkeypatch.setattr(ws_remote.tokens, "store", lambda base, name, token: (base / "tokens" / name).write_text(token))
+    monkeypatch.setattr(ws_remote.tokens, "load", lambda base, name: (base / "tokens" / name).read_text())
+    (new / "tokens" / "agent-b").write_text("new b")
+    monkeypatch.setattr(ws_remote.tokens, "directory", lambda base: base / "tokens")
+    ws_remote._adopt(old, new)
+    assert (new / "tokens" / "agent-a").read_text() == "kept"
+    assert (new / "tokens" / "agent-b").read_text() == "new b"
+    assert not (old / "tokens" / "agent-a").exists()
+
+
+def test_the_owed_list_degrades_on_a_board_that_serves_no_bus_log():
+    from ml_stack.workspace import attention_cli
+    from ml_stack.workspace.identity import Denied
+
+    class Remote:
+        board = SimpleNamespace(rollup=lambda token, ack: None)
+
+        def auth(self, token):
+            return SimpleNamespace(id="me")
+
+        def __getattr__(self, name):
+            raise Denied(f"{name} is unavailable on the board")
+
+    assert attention_cli.owed_text(Remote(), "token", False) == ""

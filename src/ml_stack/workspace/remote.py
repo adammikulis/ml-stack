@@ -13,12 +13,35 @@ from ml_stack import home, http, private_path, sealing
 from ml_stack.fleet import tls
 from ml_stack.fleet.discovery import derive_token, load_cluster_key, memberships
 from ml_stack.fleet.onboard.lan import require_local_url
-from ml_stack.fleet.remote import Peer, device_address
+from ml_stack.fleet.remote import Peer, device_address, primary_ip, same_machine_host
 from ml_stack.graph.store import GraphStore
 from ml_stack.http import ServerError, open_stream
 from ml_stack.workspace import coordinator_client, device_metadata, tokens
 from ml_stack.workspace.chain import held
 from ml_stack.workspace.identity import BoardUnavailable, Denied, valid_id
+
+
+def _label(host: str, project_id: str) -> str:
+    return hashlib.sha256(f"{host}/{project_id}".encode()).hexdigest()
+
+
+def _this_machine(host: str) -> str:
+    """One name for a Board on this machine: its loopback address, so the token directory does not
+    depend on whether the host was reached by loopback or by the LAN address."""
+    loopback = f"https://127.0.0.1:{urlsplit(host).port}"
+    return loopback if same_machine_host(host, loopback) else host
+
+
+def _adopt(source: Path, target: Path) -> None:
+    """Move the agent tokens saved under another name for the same daemon into ``target``,
+    never replacing one already there."""
+    old, new = tokens.directory(source), tokens.directory(target)
+    if not old.is_dir():
+        return
+    for entry in old.iterdir():
+        if not (new / entry.name).exists():
+            tokens.store(target, entry.name, tokens.load(source, entry.name))
+            entry.unlink()
 
 
 class RemoteWorkspace:
@@ -59,8 +82,10 @@ class RemoteWorkspace:
             self.device_cert = matched[0].beacon.cert if matched[0].beacon else ""
             if self.device_cert:
                 http.pin(parts.netloc, tls.pinned_context(self.device_cert))
-        label = hashlib.sha256(f"{self.host}/{project_id}".encode()).hexdigest()
-        self.base = home.state("workspace-remote", label)
+        self.base = home.state("workspace-remote", _label(_this_machine(self.host), project_id))
+        if _this_machine(self.host) != self.host or self.host.startswith("https://127."):
+            for alias in {self.host, f"https://{primary_ip()}:{parts.port}"} - {_this_machine(self.host)}:
+                _adopt(home.state("workspace-remote", _label(alias, project_id)), self.base)
 
     def _request(self, action: str, payload: dict) -> dict:
         def guard(url: str) -> str:
