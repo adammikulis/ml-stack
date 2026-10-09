@@ -83,7 +83,7 @@ and SHA-256, and `python -m ml_stack.redteam corpus` (and the tests) refuse a fi
 | `garak_sysprompt.json` | NVIDIA garak `sysprompt_extraction`, as ported in PyRIT 1.1.0 | Apache-2.0 |
 | `psfuzz_steal.json` | prompt-security ps-fuzz `steal_system_prompt`, as ported in PyRIT 1.1.0 | MIT |
 | `styles.json` | written for ml-stack | Apache-2.0 |
-| jailbreak templates | eight PyRIT templates, listed by name and hash in the manifest | not stated upstream (jailbreakchat, Wei et al.); the text is read from the installed PyRIT and not copied here |
+| jailbreak templates | eight PyRIT templates, listed by name and hash in the manifest | not stated upstream (jailbreakchat and the Jailbroken paper); the text is read from the installed PyRIT and not copied here |
 
 `ml_stack.redteam.corpus.build()` rewrites the files from the installed PyRIT.
 
