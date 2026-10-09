@@ -382,6 +382,10 @@ def contacts(line: str, allowed: set[str], rules: Shapes | None = None,
         if any(text in u for u in uuids):
             cleared(f"{text!r} cleared by patterns: uuid")
             continue
+        before, after = line[found.start() - 1:found.start()], line[found.end():found.end() + 1]
+        if before.isalnum() or after.isalnum() or "_" in (before, after):
+            cleared(f"{text!r} cleared by identifier: a run of digits joined to letters is part of a name")
+            continue
         if text.count(".") > 1 or DATEISH.match(text) or FRACTION.search(text):
             continue
         if TIMESTAMP.search(text):
