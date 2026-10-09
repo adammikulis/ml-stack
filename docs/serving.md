@@ -229,8 +229,8 @@ ml-stack-serve memory --for Qwen3.8-Flash-Next-UD-Q4_K_XL --ctx 262144 --kv q8_0
 Changing the limit is a system setting, so it is for a person only: an agent's process, a
 role, a tool call, an access token and another machine are all refused, the number is checked
 as an integer within range and is the only variable part of the privileged command. The same
-control is a slider in Settings (and in the first-run setup, skippable), and a "Make room for
-this model" panel on the Models screen: choose the model, context and cache type, and the
+control is a slider in Settings (and in the first-run setup, skippable), and a "Device memory
+controls" panel on the Models screen: choose the model, context and cache type, and the
 slider marks where it fits.
 
 ### IQ quantisations on Apple silicon

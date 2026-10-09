@@ -27,7 +27,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from ml_stack import home, person  # noqa: E402
 
 ENV = "release"
-SECRET = "RELEASE_SIGNING_KEY"
+SIGNER = "RELEASE_SIGNING_KEY"
 CHECKS = ("gates", "privacy", "licenses", "test (ubuntu-latest, 3.13, --slow)")
 SECURITY = {"secret_scanning": {"status": "enabled"},
             "secret_scanning_push_protection": {"status": "enabled"},
@@ -144,8 +144,8 @@ def plan(repo: str, args: argparse.Namespace) -> tuple[list[Step], str]:
                               f"repos/{repo}/environments/{ENV}/deployment-branch-policies",
                               {"name": "main", "type": "branch"}))
     held = gh("GET", f"repos/{repo}/environments/{ENV}/secrets") or {}
-    stop = "" if SECRET in {s["name"] for s in held.get("secrets", [])} else (
-        f"{SECRET} is not a secret of {ENV}: run scripts/release-key create (or rotate), then run "
+    stop = "" if SIGNER in {s["name"] for s in held.get("secrets", [])} else (
+        f"{SIGNER} is not a secret of {ENV}: run scripts/release-key create (or rotate), then run "
         "this again")
     repo_secrets = (gh("GET", f"repos/{repo}/actions/secrets") or {}).get("secrets", [])
     steps = env_steps + [Step(f"remove repository secret {s['name']}", "DELETE",

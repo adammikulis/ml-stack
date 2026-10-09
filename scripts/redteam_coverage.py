@@ -172,7 +172,20 @@ def tree_files() -> list[tuple[str, ast.Module]]:
     return out
 
 
-def route_names(node: ast.Compare | ast.Call, where: str) -> list[str]:
+def string_defaults(tree: ast.Module) -> dict[str, str]:
+    """Parameter names whose default is a string, so ``startswith(prefix)`` names its path."""
+    out: dict[str, str] = {}
+    for fn in ast.walk(tree):
+        if isinstance(fn, ast.FunctionDef):
+            args = fn.args
+            pairs = [*zip(args.args[len(args.args) - len(args.defaults):], args.defaults, strict=True),
+                     *zip(args.kwonlyargs, args.kw_defaults, strict=True)]
+            out.update({a.arg: d.value for a, d in pairs
+                        if isinstance(d, ast.Constant) and isinstance(d.value, str)})
+    return out
+
+
+def route_names(node: ast.Compare | ast.Call, where: str, defaults: dict[str, str] | None = None) -> list[str]:
     """The path constants a comparison or `startswith` tests."""
     names: list[str] = []
     if isinstance(node, ast.Call):
@@ -180,7 +193,9 @@ def route_names(node: ast.Compare | ast.Call, where: str) -> list[str]:
         if isinstance(func, ast.Attribute) and func.attr == "startswith" and node.args \
                 and ROUTE_NAME.search(ast.unparse(func.value)):
             arg = node.args[0]
-            if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+            if isinstance(arg, ast.Name) and arg.id in (defaults or {}):
+                names.append(defaults[arg.id] + "*")
+            elif isinstance(arg, ast.Constant) and isinstance(arg.value, str):
                 names.append(arg.value + "*")
         return [n for n in names if n.startswith("/") and len(n) > 2]
     if not any(isinstance(op, (ast.Eq, ast.NotEq, ast.In, ast.NotIn)) for op in node.ops):
@@ -214,10 +229,11 @@ def find_routes(found: dict[str, Surface], where: str, tree: ast.Module) -> None
     if not sub.startswith(ROUTE_DIRS) and sub not in ROUTE_FILES:
         return
     table = spans(tree)
+    defaults = string_defaults(tree)
     trust = next((t for k, t in TRUST_BY_FILE.items() if sub.startswith(k)), "")
     for node in ast.walk(tree):
         if isinstance(node, (ast.Compare, ast.Call)):
-            for name in route_names(node, where):
+            for name in route_names(node, where, defaults):
                 add(found, "route", f"{sub}:{name}", f"{sub}:{symbol(table, node.lineno)}", trust)
         if isinstance(node, ast.FunctionDef) and node.name.startswith("handle_"):
             add(found, "route", f"{sub}:{node.name}", f"{sub}:{node.name}", trust)

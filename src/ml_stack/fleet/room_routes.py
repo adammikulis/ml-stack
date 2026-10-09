@@ -52,16 +52,22 @@ class RoomRoutes:
 
     def _room(self) -> bool:
         hooks = self._hooks()
+        installed = hub.discover(formats=("gguf",))
         out: dict[str, object] = {"machine": _machine(hooks),
                                   "kv_types": list(wired.KV_TYPES),
                                   "contexts": list(wired.CONTEXTS),
-                                  "models": sorted({m.id for m in hub.discover(formats=("gguf",))})}
-        name = self.asked("model")
+                                  "models": sorted({m.id for m in installed})}
+        name = self.asked("model").strip()
         if name:
             try:
+                # the asked name is only compared with what is installed; the file read is
+                # the installed row's own path, never a path the request named
+                row = next((m for m in installed if name in (m.id, m.name, str(m.path))), None)
+                if row is None:
+                    raise FileNotFoundError(f"{name} is not installed")
                 ask = wired.Ask(int(self.asked("ctx", "131072")), self.asked("kv", "q8_0"),
                                 self.asked("mtp", "1") not in ("0", "false", "off"))
-                out["plan"] = wired.plan(name, ask, hooks).as_dict()
+                out["plan"] = wired.plan(str(row.path), ask, hooks).as_dict()
             except (FileNotFoundError, ValueError) as no:
                 self.send(400, {"error": str(no)[:300]})
                 return True

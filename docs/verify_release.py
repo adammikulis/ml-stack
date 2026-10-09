@@ -86,9 +86,9 @@ def _():
 
 @check("Setup", "a passphrase shorter than the minimum is refused")
 def _():
-    from ml_stack.fleet.discovery import MIN_PASSPHRASE, DiscoveryError, check_length
+    from ml_stack.fleet.discovery import MIN_JOIN_LENGTH, DiscoveryError, check_length
     try:
-        check_length("x" * (MIN_PASSPHRASE - 1))
+        check_length("x" * (MIN_JOIN_LENGTH - 1))
     except DiscoveryError as exc:
         return str(exc)[:60]
     raise AssertionError("accepted a short passphrase")

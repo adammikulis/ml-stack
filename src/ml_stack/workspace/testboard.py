@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import http.client
 import os
 import pickle
 import sqlite3
@@ -11,6 +10,7 @@ import struct
 import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
+from http.client import HTTPException
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +24,7 @@ __all__ = ["Acting", "BoardEvents", "acting", "follow_thread", "thread_for_key"]
 
 BOARD_ERRORS = (Denied, Refused, RateLimited, ArithmeticError, AssertionError, AttributeError, EOFError,
                 ImportError, LookupError, NotImplementedError, OSError, RuntimeError, StopIteration, TypeError,
-                ValueError, sqlite3.Error, subprocess.SubprocessError, http.client.HTTPException, struct.error,
+                ValueError, sqlite3.Error, subprocess.SubprocessError, HTTPException, struct.error,
                 pickle.PickleError)
 
 

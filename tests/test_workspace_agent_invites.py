@@ -71,7 +71,9 @@ def test_a_joined_child_is_listed_with_its_parent_and_its_sends_count_against_th
     shown = {r["id"]: r for r in kit.ws.registered()}
     assert shown[name]["parent"] == "lead-a" and shown["lead-a"]["parent"] == ""
     out = cli(kit.base, kit.token, "agents").stdout
-    assert f"Subagent · {name} (parent " in out
+    child = shown[name]["display_name"]
+    assert any(line.startswith(f"{child}  agent") and "not a coordinator: not a main session" in line
+               for line in out.splitlines())
     kit.limits(sends_per_window=3, announce_per_window=1000, child_sends_per_window=2)
     child = tokens.load(kit.base, name)
     sent = 0
@@ -364,8 +366,18 @@ def test_outputs_are_byte_stable_for_the_same_state(kit):
     join(kit, make(kit), "peer")
     first = cli(kit.base, kit.token, "agents").stdout
     assert first == cli(kit.base, kit.token, "agents").stdout
-    one, two = (cli(kit.base, kit.token, "status", "--json").stdout for _ in range(2))
+    one, two = (json.dumps(without_observation_time(json.loads(cli(kit.base, kit.token, "status", "--json").stdout)),
+                           sort_keys=True) for _ in range(2))
     assert one == two
+
+
+def without_observation_time(value):
+    """Every command re-stamps the acting device's wall-clock observed_at; nothing else may differ."""
+    if isinstance(value, dict):
+        return {k: without_observation_time(v) for k, v in value.items() if k != "observed_at"}
+    if isinstance(value, list):
+        return [without_observation_time(v) for v in value]
+    return value
 
 
 def test_rights_taken_from_the_issuer_after_the_invite_was_made_are_not_given_to_the_joiner(kit):

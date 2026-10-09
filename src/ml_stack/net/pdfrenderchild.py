@@ -32,7 +32,15 @@ class Refusal(Exception):
 
 
 def peak_bytes() -> int:
-    """The resident set high-water mark of this process, in bytes (0 where unknown)."""
+    """The resident set of this process, in bytes (0 where unknown).
+
+    On Linux this is the current resident set from ``/proc/self/statm``: ``ru_maxrss`` there
+    carries the high-water mark the parent had when it started this child, so a large test or
+    server process would make every render look over the limit before it began."""
+    try:
+        return int(Path("/proc/self/statm").read_text().split()[1]) * os.sysconf("SC_PAGE_SIZE")
+    except (OSError, ValueError, IndexError):
+        pass
     try:
         import resource
     except ImportError:

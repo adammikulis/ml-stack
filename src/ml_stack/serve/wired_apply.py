@@ -129,6 +129,11 @@ def _authorise(action: str, via: str, hooks: Hooks) -> None:
         raise HumanRequired(f"{action} through sudo needs a terminal on stdin and stdout")
 
 
+def require_person(via: str) -> None:
+    """Refuse, as `set_limit` does, a process an agent started; the command asks before it looks at the platform."""
+    _authorise("change the wiring limit", via, Hooks())
+
+
 def _run(argv: Sequence[str], capture: bool) -> tuple[int, str, str]:
     try:
         done = subprocess.run(list(argv), capture_output=capture, text=True, timeout=300,

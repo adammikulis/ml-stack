@@ -147,6 +147,9 @@ def run_marked(tmp_path: Path, env: dict[str, str], mark: str) -> subprocess.Com
 def run_in(tmp_path: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
     """Run the modules in ``tmp_path`` under a copy of this suite's conftest."""
     conftest = (TESTS / "conftest.py").read_text(encoding="utf-8")
+    here = "REPO = Path(__file__).resolve().parent.parent"
+    assert here in conftest, "the copied conftest must be told where the repository is"
+    conftest = conftest.replace(here, f"REPO = Path({str(TESTS.parent)!r})", 1)  # the copy sits in a temp directory
     (tmp_path / "conftest.py").write_text(conftest, encoding="utf-8")
     (tmp_path / "heavy-modules.txt").write_text("", encoding="utf-8")
     return subprocess.run(

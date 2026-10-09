@@ -125,8 +125,6 @@ def test_the_web_interface_answers_other_machines_only_when_told_to(tmp_path, ui
 def test_a_lan_daemon_serves_its_certificate_and_refuses_plain_http_from_the_lan(tmp_path):
     import ssl
 
-    from ml_stack.fleet import tls
-
     lan_address = primary_ip()
     if lan_address.startswith("127."):
         pytest.skip("this machine has no address other than loopback")
@@ -138,8 +136,12 @@ def test_a_lan_daemon_serves_its_certificate_and_refuses_plain_http_from_the_lan
         cert = tmp_path / "traind" / "tls" / "cert.pem"
         while not cert.exists() and time.monotonic() < deadline:
             time.sleep(0.2)
-        ctx = tls.pinned_context(__import__("base64").b64encode(
-            ssl.PEM_cert_to_DER_cert(cert.read_text())).decode())
+        # A stranger: it trusts the daemon's certificate but presents none of its own, as a browser would.
+        # (`tls.pinned_context` would present this machine's identity, which the daemon does not know.)
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_3
+        ctx.check_hostname = False
+        ctx.load_verify_locations(cadata=cert.read_text())
         with socket.create_connection((lan_address, port), timeout=5) as raw, \
                 ctx.wrap_socket(raw) as secure:
             secure.sendall(b"GET /health HTTP/1.0\r\n\r\n")

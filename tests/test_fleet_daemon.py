@@ -87,6 +87,10 @@ def test_ordinary_nested_paths_are_allowed(tmp_path):
     assert got == (tmp_path / "data" / "packed" / "train.npy").resolve()
 
 
+def test_a_dot_names_the_root_itself(tmp_path):
+    assert safe_relpath(tmp_path, ".") == tmp_path.resolve()
+
+
 # -- auth ----------------------------------------------------------------
 def test_health_needs_no_token(daemon):
     client, *_ = daemon

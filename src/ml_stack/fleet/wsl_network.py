@@ -160,7 +160,8 @@ class NetworkBridge:
     def _listen(self, port: int, handler: Callable[[socket.socket], None], *, host: str = "") -> socket.socket:
         listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.listeners.append(listener)
-        listener.bind((host or self.host, port))
+        # an address, never the empty string that means every interface
+        listener.bind((str(ipaddress.ip_address(host or self.host)), port))
         listener.listen(32)
         listener.settimeout(0.25)
         thread = threading.Thread(target=self._accept, args=(listener, handler), daemon=True)

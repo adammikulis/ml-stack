@@ -40,7 +40,9 @@ def install_push_hook(primary):
     interpreter = Path(sys.executable).as_posix()
     checker = (hook.parent / 'pushed').as_posix()
     installed = primary / '.git' / 'hooks' / 'pre-push'
-    installed.write_text(hook.read_text().replace('"${PYTHON:-python3}" "$here/pushed"', f'\"{interpreter}\" \"{checker}\"'))
+    text = hook.read_text().replace('"${PYTHON:-python3}" "$here/pushed"', f'\"{interpreter}\" \"{checker}\"')
+    text = text.replace('here=$(cd "$(dirname "$self")" && pwd)', f'here="{hook.parent.as_posix()}"')
+    installed.write_text(text.replace('python="${PYTHON:-python3}"', f'python="{interpreter}"'))
     installed.chmod(0o755)
 
 

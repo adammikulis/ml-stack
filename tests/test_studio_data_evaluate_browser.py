@@ -11,6 +11,11 @@ from ml_stack.scrape.browser import Window, browser
 pytestmark = pytest.mark.slow
 
 
+@pytest.fixture(autouse=True)
+def _needs_playwright():
+    pytest.importorskip("playwright.sync_api", reason="ml-stack[scrape]")
+
+
 def test_data_library_upload_preview_and_fine_tune(tmp_path):
     served = Serving(tmp_path)
     served.ui.settings.setup_done = True

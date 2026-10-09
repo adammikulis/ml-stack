@@ -36,14 +36,23 @@ def test_a_fake_installed_through_keyrings_own_interface_still_works():
         keyring.set_keyring(before)
 
 
+def usable_here(cls: type) -> bool:
+    """Whether keyring would load ``cls`` on this host: the macOS backend imports everywhere but runs on macOS."""
+    try:
+        cls.priority  # noqa: B018 - a backend that cannot run here raises when its priority is read
+    except (RuntimeError, ImportError, OSError):
+        return False
+    return True
+
+
 def test_a_process_a_test_starts_sees_the_real_keystore_as_absent():
     """The in-process guard cannot reach a child; the environment variable the suite sets does:
     a child whose active backend is the machine's own keystore finds none, and touches nothing."""
     from ml_stack import keystore
 
-    real = real_keystore_classes()
+    real = [c for c in real_keystore_classes() if usable_here(c)]
     if not real:
-        pytest.skip("no real keystore backend on this host")
+        pytest.skip("no real keystore backend can run on this host")
     cls = real[0]
     code = ("from ml_stack import keystore; import sys\n"
             "sys.exit(0 if not keystore.default().available() else 3)")
