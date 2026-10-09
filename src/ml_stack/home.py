@@ -10,15 +10,20 @@ from __future__ import annotations
 
 import os
 import secrets
+from importlib import import_module
 from pathlib import Path
 
 from ml_stack.files import promote
 
-__all__ = ["CACHE_ENV", "OVERRIDES", "ROOT_ENV", "cache", "expand", "home", "machine_id",
+if os.name == "posix":
+    import pwd
+
+__all__ = ["CACHE_ENV", "OVERRIDES", "ROOT_ENV", "account_roots", "cache", "device_id", "expand", "home", "machine_id",
            "moved", "state", "user_home"]
 
 ROOT_ENV = "ML_STACK_HOME"
 """Moves the state root."""
+DEFAULT_NAME = ".ml-stack"
 
 CACHE_ENV = "ML_STACK_CACHE"
 """Moves the cache root."""
@@ -42,6 +47,13 @@ def user_home() -> Path:
     return Path.home()
 
 
+def account_roots() -> tuple[Path, Path]:
+    """Return the actual account's default state and cache roots."""
+    account = Path(pwd.getpwuid(os.getuid()).pw_dir) if os.name == "posix" else user_home()
+    account = account.resolve()
+    return account / DEFAULT_NAME, account / ".cache" / "ml_stack"
+
+
 def expand(path: str | Path) -> Path:
     """A path somebody named, with a leading ``~`` resolved."""
     return Path(path).expanduser()
@@ -50,7 +62,7 @@ def expand(path: str | Path) -> Path:
 def home() -> Path:
     """The directory this machine keeps ml-stack's state in."""
     named = os.environ.get(ROOT_ENV)
-    return expand(named) if named else user_home() / ".ml-stack"
+    return expand(named) if named else user_home() / DEFAULT_NAME
 
 
 def state(*parts: str) -> Path:
@@ -105,3 +117,15 @@ def machine_id() -> str:
     finally:
         draft.unlink()
     return path.read_text(encoding="utf-8").strip()
+
+
+def device_id():
+    """Fail explicitly when the host provider cannot identify this device."""
+    try:
+        machineid = import_module("machineid")
+        identity = machineid.hashed_id("ml-stack")
+    except (ImportError, OSError, RuntimeError) as exc:
+        raise RuntimeError("physical device identity unavailable; install ml-stack[coordinator]") from exc
+    if not isinstance(identity, str) or len(identity) != 64 or any(c not in "0123456789abcdef" for c in identity):
+        raise RuntimeError("physical device identity provider returned an invalid app-scoped hash")
+    return identity

@@ -17,7 +17,12 @@ pw = pytest.importorskip("playwright.sync_api", reason="ml-stack[scrape]")
 #: Every test here launches headless Chromium and drives a real page.
 pytestmark = pytest.mark.slow
 
+from launch_support import sign_in  # noqa: E402
 from test_fleet_ui import WORDS, Serving  # noqa: E402
+
+#: where each screen is reached from the workspace rail
+RAIL = {"Chat": "#nav-tabs a[data-workspace='conversations']", "Models": "#nav-tabs a[data-workspace='studio']",
+        "Settings": "#nav-settings", "Cluster": "#nav-tabs a[data-workspace='pool']"}
 
 GIB = 1024 ** 3
 ROOM = 96 * GIB
@@ -35,12 +40,23 @@ def sample_fits():
     ]
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(autouse=True)
+def no_release_lookup(monkeypatch):
+    """The settings view asks the daemon for the newest release; a test does not ask GitHub."""
+    from ml_stack.fleet import updates
+
+    def offline(*args, **kwargs):
+        raise updates.UpdateError("no network in tests")
+
+    monkeypatch.setattr(updates, "check", offline)
+
+
+@pytest.fixture(scope="module")
 def browser(playwright):
     try:
         # headless is the default, said out loud: a test must never take the screen
         b = playwright.chromium.launch(headless=True)
-    except Exception as exc:                           # noqa: BLE001
+    except pw.Error as exc:
         pytest.skip(f"chromium did not launch: {exc}")
     yield b
     b.close()
@@ -75,10 +91,10 @@ def daemon(tmp_path, monkeypatch):
 @pytest.fixture
 def joined(daemon):
     """That daemon, in a cluster, with a session cookie for the browser."""
-    daemon.call("/ui/setup/join", method="POST",
+    daemon.cookie = sign_in(daemon)
+    daemon.call("/ui/setup/join", method="POST", cookie=daemon.cookie,
                 body={"passphrase": WORDS, "group": "home"})
-    _, _, headers = daemon.call("/ui/session", method="POST", body={"passphrase": WORDS})
-    daemon.cookie = headers["Set-Cookie"].split(";")[0]
+    daemon.ui.setup_finished()
     return daemon
 
 
@@ -110,6 +126,7 @@ def open_page(browser):
 
     def _open(served, *, path="/ui/", cookie=""):
         base = f"http://127.0.0.1:{served.port}"
+        path = "/ui/#cluster" if cookie and path == "/ui/" else path  # a signed-in session lands on Chats
         ctx = browser.new_context(viewport={"width": 1400, "height": 950})
         contexts.append(ctx)
         if cookie:
@@ -129,6 +146,18 @@ def open_page(browser):
         ctx.close()
 
 
+def connections(page):
+    """Open the pool screen's connections and pairing section, which starts closed."""
+    page.click("cluster-view summary:has-text('Pool connections')")
+    page.wait_for_selector("#cluster-joined .row")
+
+
+def open_capacity(page):
+    page.click(RAIL["Cluster"])
+    page.click('#nav-context a[href="#fit"]')
+    page.locator("#fit").scroll_into_view_if_needed()
+
+
 # -- first run ---------------------------------------------------------------------------
 class TestFirstRun:
     def test_a_machine_in_no_cluster_opens_on_the_wizard(self, daemon, open_page):
@@ -143,18 +172,22 @@ class TestFirstRun:
         page.fill("#n", "quillhaven")
         page.click("#first-run button:has-text('Continue')")
         page.wait_for_selector("#first-run h1:has-text('Clusters')")
-        assert page.locator("#p1").is_visible()
+        assert page.locator("#first-run button:has-text('Pair manually')").is_visible()
+        assert page.locator("#setup-cluster-passphrase").count() == 0
         assert not errors
 
     def test_a_short_passphrase_cannot_be_joined_with(self, daemon, open_page):
         page, errors = open_page(daemon)
         page.wait_for_selector("#first-run:not([hidden])")
+        page.fill("#n", "quillhaven")
         page.click("#first-run button:has-text('Continue')")
-        page.wait_for_selector("#p1")
-        page.fill("#p1", "abc")
-        assert page.locator("#first-run button:has-text('Join')").is_disabled()
-        page.fill("#p1", "correct horse battery")
-        assert page.locator("#first-run button:has-text('Join')").is_enabled()
+        page.click("#first-run button:has-text('Pair manually')")
+        page.wait_for_selector("#setup-cluster-passphrase")
+        page.fill("#setup-cluster-name", "default")
+        page.fill("#setup-cluster-passphrase", "abc")
+        assert page.locator("#first-run button:has-text('Join existing pool')").is_disabled()
+        page.fill("#setup-cluster-passphrase", "correct horse battery")
+        assert page.locator("#first-run button:has-text('Join existing pool')").is_enabled()
         assert not errors
 
     def test_the_reason_sits_beside_the_job_the_machine_was_given(self, daemon,
@@ -174,6 +207,113 @@ class TestFirstRun:
         assert "no GPU found" not in page.locator(
             "label[for=labels-train] .why").inner_text()
         assert not errors
+
+    def test_dev_can_pair_manually_and_return_to_automatic(self, daemon, open_page, monkeypatch):
+        from ml_stack.fleet import automatic_clusters
+        from ml_stack.fleet.discovery import memberships
+
+        monkeypatch.setattr(automatic_clusters, "offers", lambda port=None: [])
+        page, errors = open_page(daemon)
+        page.wait_for_selector("#device-mode")
+        page.click("#first-run button:has-text('Continue')")
+        page.click("#first-run button:has-text('Pair manually')")
+        page.select_option("#setup-cluster-action", "create")
+        page.fill("#setup-cluster-name", "private-lab")
+        page.fill("#setup-cluster-passphrase", WORDS)
+        page.click("#first-run button:has-text('Create new pool')")
+        page.wait_for_selector("#first-run .ok:has-text('Created')")
+        assert memberships(daemon.keyfile)[0].selection == "manual"
+        page.click("#first-run button:has-text('Connect automatically')")
+        page.wait_for_function("() => document.querySelector('first-run').setup.selection === 'automatic'")
+        assert memberships(daemon.keyfile)[0].selection == "automatic"
+        assert not errors
+
+    def test_fresh_automatically_joined_device_can_choose_prod(self, daemon, open_page, monkeypatch):
+        from ml_stack.fleet import automatic_clusters
+        from ml_stack.fleet.discovery import memberships
+
+        monkeypatch.setattr(automatic_clusters, "offers", lambda port=None: [])
+        automatic_clusters.ensure(daemon.keyfile, mode="dev")
+        page, errors = open_page(daemon)
+        page.wait_for_selector("#device-mode")
+        page.select_option("#device-mode", "prod")
+        page.click("#first-run button:has-text('Continue')")
+        page.wait_for_selector("#first-run h1:has-text('Clusters')")
+        assert memberships(daemon.keyfile) == []
+        assert daemon.ui.settings.cluster_mode == "prod"
+        assert page.locator("#setup-cluster-passphrase").is_visible()
+        assert page.locator("#first-run button:has-text('Connect automatically')").count() == 0
+        assert not errors
+
+    def test_dev_can_return_to_auto_after_leaving_all_clusters(self, daemon, open_page, monkeypatch):
+        from ml_stack.fleet import automatic_clusters
+        from ml_stack.fleet.discovery import memberships
+
+        monkeypatch.setattr(automatic_clusters, "offers", lambda port=None: [])
+        page, errors = open_page(daemon)
+        page.wait_for_selector("#device-mode")
+        page.click("#first-run button:has-text('Continue')")
+        page.wait_for_selector("#first-run h1:has-text('Clusters')")
+        daemon.ui.setup_finished()
+        page.reload()
+        page.click(RAIL["Cluster"])
+        connections(page)
+        page.click("#cluster-joined button:has-text('Leave')")
+        page.wait_for_selector("#cluster-joined button:has-text('Connect automatically')")
+        assert not memberships(daemon.keyfile)
+        page.click("#cluster-joined button:has-text('Connect automatically')")
+        page.wait_for_selector("#cluster-joined .row")
+        assert memberships(daemon.keyfile)[0].selection == "automatic"
+        assert not errors
+
+    def test_background_setup_can_finish_while_server_is_downloading(
+            self, daemon, open_page, monkeypatch):
+        import threading
+
+        from ml_stack.fleet import automatic_clusters, llama
+        from ml_stack.fleet.environment import Environment
+
+        entered, release = threading.Event(), threading.Event()
+        def install(root, **options):
+            options["on_progress"]("Downloading model server")
+            entered.set()
+            assert release.wait(20)
+            return root / "managed-server"
+        monkeypatch.setattr(llama, "ensure_server", install)
+        monkeypatch.setattr(automatic_clusters, "offers", lambda port=None: [])
+        daemon.ui.environment = Environment(daemon.ui.root)
+        page, errors = open_page(daemon)
+        try:
+            page.wait_for_selector("#device-mode")
+            page.click("#first-run button:has-text('Continue')")
+            page.wait_for_selector("#first-run h1:has-text('Clusters')")
+            page.click("#first-run button:has-text('Continue')")
+            page.wait_for_selector("#labels-prep")
+            page.click("#first-run button:has-text('Continue')")
+            page.wait_for_selector("#autostart-manual")
+            page.check("#autostart-manual")
+            page.click("#first-run button:has-text('Continue')")
+            page.wait_for_selector("#source-internet")
+            page.check("#source-internet")
+            page.click("#first-run button:has-text('Save and continue')")
+            page.wait_for_selector("#setup-chat")
+            for checkbox in page.locator("input[id^=lib_]").all():
+                checkbox.uncheck()
+            page.click("#first-run button:has-text('Install and continue')")
+            page.wait_for_selector("#first-run h1:has-text('When you are not using it')")
+            assert entered.wait(5)
+            assert daemon.ui.setup_jobs.all()[0]["state"] == "installing"
+            page.click("#first-run button:has-text('Continue')")
+            page.wait_for_selector("#first-run h1:has-text('Give models more memory?'), #first-run h1:has-text('Joined')")
+            if page.locator("#first-run button:has-text('Skip')").count():
+                page.click("#first-run button:has-text('Skip')")
+            page.wait_for_selector("#first-run h1:has-text('Joined')")
+            assert daemon.ui.settings.setup_done is True
+            assert daemon.ui.setup_jobs.all()[0]["state"] == "installing"
+            assert not errors
+        finally:
+            release.set()
+
 
 
 # -- signing in --------------------------------------------------------------------------
@@ -195,8 +335,10 @@ class TestSigningIn:
 
         page.fill("#p", WORDS)
         page.click("#signin-go")
+        page.wait_for_selector("#chat:not([hidden])")
+        page.click(RAIL["Cluster"])
         page.wait_for_selector("#cluster:not([hidden])")
-        assert page.locator("#cluster h1").inner_text() == "Cluster"
+        assert page.locator("#cluster h1").inner_text() == "Devices"
         assert not errors
 
 
@@ -205,15 +347,18 @@ class TestTheClusterView:
     def test_a_machine_on_its_own_says_how_to_add_another(self, joined, open_page):
         page, errors = open_page(joined, cookie=joined.cookie)
         page.wait_for_selector("#cluster-cards .empty")
-        assert "Just this machine so far" in page.locator("#cluster-cards").inner_text()
-        assert "MACHINES" in page.locator("#cluster-stat").inner_text().upper()
+        assert "Your pool starts here" in page.locator("#cluster-cards").inner_text()
+        assert "DEVICES" in page.locator("#cluster-stat").inner_text().upper()
         assert not errors
 
     def test_a_machines_card_says_what_it_is_and_what_it_is_doing(self, with_peers,
                                                                   open_page):
         page, errors = open_page(with_peers, cookie=with_peers.cookie)
         page.wait_for_selector("#cluster-cards .peer")
-        card = page.locator("#cluster-cards .peer").first.inner_text()
+        peer = page.locator("#cluster-cards .peer").first
+        # the meters draw inside their shadow roots, which inner_text does not enter
+        card = peer.inner_text() + " " + peer.evaluate(
+            "n => [...n.querySelectorAll('ml-meter')].map(m => m.shadowRoot.textContent).join(' ')")
         assert "greenhollow" in card
         assert "NVIDIA · CUDA" in card and "Marrowgate 5000" in card
         assert "3 running of 4" in card and "2 waiting" in card
@@ -228,19 +373,19 @@ class TestTheClusterView:
 
     def test_the_cluster_it_is_in_is_listed_with_a_way_out(self, joined, open_page):
         page, errors = open_page(joined, cookie=joined.cookie)
-        page.wait_for_selector("#cluster-joined:has-text('home')")
+        connections(page)
+        assert "home" in page.locator("#cluster-joined").inner_text()
         assert page.locator("#cluster-joined button:has-text('Leave')").count() == 1
         assert not errors
 
-    def test_the_sweep_command_follows_what_is_ticked(self, joined, open_page):
+    def test_benchmark_options_are_explicit_and_no_command_is_shown(self, joined, open_page):
         page, errors = open_page(joined, cookie=joined.cookie)
-        page.wait_for_selector("#cluster-sweep .searchrow")
-        shown = page.locator("#cluster-sweep pre.cmd").first
-        assert shown.inner_text().strip() == "ml-stack-bench sweep --fleet"
-        page.fill("#sample", "40")
-        page.fill("#label", "nightly")
-        assert "--sample 40" in shown.inner_text()
-        assert "--label nightly" in shown.inner_text()
+        page.locator("#cluster-sweep > summary").click()
+        page.locator("#cluster-sweep").get_by_label("Questions", exact=True).select_option("limit")
+        page.locator("#cluster-sweep").get_by_label("Question limit", exact=True).fill("40")
+        page.locator("#cluster-sweep").get_by_label("Run name", exact=False).fill("nightly")
+        assert page.locator("#sample").input_value() == "40"
+        assert "ml-stack-bench" not in page.locator("#cluster-sweep").inner_text()
         assert not errors
 
 
@@ -249,9 +394,9 @@ class TestTheChatView:
     def test_with_nothing_serving_it_says_where_to_start_one(self, joined, open_page):
         page, errors = open_page(joined, cookie=joined.cookie)
         page.wait_for_selector("#cluster:not([hidden])")
-        page.click("nav.tabs a:has-text('Chat')")
+        page.click(RAIL["Chat"])
         page.wait_for_selector("#chat-none:not([hidden])")
-        assert "No model is running yet" in page.locator("#chat-none").inner_text()
+        assert "No model is running" in page.locator("#chat-none").inner_text()
         assert page.locator("#chat-askrow").is_hidden()
         assert not errors
 
@@ -259,7 +404,7 @@ class TestTheChatView:
         joined.call("/ui/conversations", method="POST", cookie=joined.cookie,
                     body={"model": "thornfield-8B", "title": "about the roof"})
         page, errors = open_page(joined, cookie=joined.cookie)
-        page.click("nav.tabs a:has-text('Chat')")
+        page.click(RAIL["Chat"])
         page.wait_for_selector("#chat-list .chatrow")
         assert "about the roof" in page.locator("#chat-list").inner_text()
         page.click("#chat-list .chatrow a")
@@ -270,9 +415,11 @@ class TestTheChatView:
         joined.call("/ui/conversations", method="POST", cookie=joined.cookie,
                     body={"model": "thornfield-8B", "title": "about the roof"})
         page, errors = open_page(joined, cookie=joined.cookie)
-        page.click("nav.tabs a:has-text('Chat')")
+        page.click(RAIL["Chat"])
         page.wait_for_selector("#chat-list .chatrow")
+        page.get_by_label("Options for about the roof").click()
         page.click("#chat-list .chatrow button:has-text('Delete')")
+        page.get_by_role("button", name="Delete conversation", exact=True).click()
         page.wait_for_selector("#chat-list .chatrow", state="detached")
         assert not errors
 
@@ -282,20 +429,22 @@ class TestTheModelsView:
     def test_a_model_on_this_machine_is_listed_with_its_size(self, joined, open_page):
         (joined.files / "thornfield-8B-Q4_K_M.gguf").write_bytes(b"x" * (2 << 20))
         page, errors = open_page(joined, cookie=joined.cookie)
-        page.click("nav.tabs a:has-text('Models')")
-        page.wait_for_selector("#models-here h2")
-        here = page.locator("#models-here")
-        assert "thornfield-8B-Q4_K_M.gguf" in here.inner_text()
-        assert "GB free on this machine" in page.locator("#models-free").inner_text()
+        page.click(RAIL["Models"])
+        installed = page.locator("models-view")
+        pw.expect(installed).to_contain_text("thornfield-8B (Q4_K_M)")
+        pw.expect(installed).to_contain_text("2 MB")
+        assert "GiB" in installed.inner_text() and "Free storage on this device" in installed.inner_text()
         assert not errors
 
     def test_with_no_hub_the_search_box_still_takes_a_query(self, joined, open_page):
         page, errors = open_page(joined, cookie=joined.cookie)
-        page.click("nav.tabs a:has-text('Models')")
-        page.wait_for_selector("#models-popular .hint")
+        page.click(RAIL["Models"])
+        page.get_by_text("Add from your Pool or Hugging Face").click()
+        page.get_by_role("button", name="Hugging Face", exact=True).click()
+        page.wait_for_selector("#browser-source")
         page.fill("#hunt", "thornfield")
-        page.wait_for_selector("#models-popular h2:has-text('Models matching')")
-        assert "THORNFIELD" in page.locator("#models-popular h2").first.inner_text().upper()
+        page.wait_for_function("() => document.querySelector('model-browser').search.typed === 'thornfield'")
+        assert page.locator("#hunt").input_value() == "thornfield"
         assert not errors
 
 
@@ -303,19 +452,22 @@ class TestTheModelsView:
 class TestTheSettingsView:
     def test_it_says_what_this_machine_is_called(self, joined, open_page):
         page, errors = open_page(joined, cookie=joined.cookie)
-        page.click("nav.tabs a:has-text('Settings')")
+        page.click(RAIL["Settings"])
         page.wait_for_selector("#settings-sub:not(:empty)")
         assert "studio" in page.locator("#settings-sub").inner_text()
         assert not errors
 
     def test_choosing_a_job_and_saving_says_it_saved(self, joined, open_page):
         page, errors = open_page(joined, cookie=joined.cookie)
-        page.click("nav.tabs a:has-text('Settings')")
+        page.click(RAIL["Settings"])
+        page.get_by_role("tab", name="Compute & device").click()
         page.wait_for_selector("#settings-left .group")
-        page.check("#labels-train\\,prep")
+        page.locator("#settings-left").get_by_label("Both", exact=True).check()
+        page.get_by_role("tab", name="Models & providers").click()
+        page.check("#download_sources-both")
         page.click("#settings-save")
         page.wait_for_selector("#settings-note .ok")
-        assert page.locator("#settings-note .ok").inner_text() == "Saved."
+        assert page.locator("#settings-note .ok").inner_text() == "Preferences saved."
         _, got, _ = joined.call("/ui/settings", cookie=joined.cookie)
         assert sorted(got["settings"]["labels"]) == ["prep", "train"]
         assert not errors
@@ -323,13 +475,12 @@ class TestTheSettingsView:
     def test_no_screen_shows_the_word_null(self, joined, open_page):
         """`replaceChildren` writes the word "null" for a gap the way `el` never does."""
         page, errors = open_page(joined, cookie=joined.cookie)
-        page.wait_for_selector("#cluster-joined .row")
+        page.wait_for_selector("#cluster-cards")
         for tab, ready in (("Chat", "#chat-none, #chat-askrow"),
-                           ("Models", "#models-here h2"),
-                           ("Settings", "#settings-removal label.opt"),
-                           ("Fit", "table.fit tbody tr"),
-                           ("Cluster", "#cluster-sweep .searchrow")):
-            page.click(f"nav.tabs a:has-text('{tab}')")
+                           ("Models", "models-view h1"),
+                           ("Settings", "#settings-save"),
+                           ("Cluster", "#cluster-cards")):
+            page.click(RAIL[tab])
             page.wait_for_selector(ready)
             shown = page.locator("#root").inner_text()
             assert "\nnull" not in shown and not shown.startswith("null"), tab
@@ -337,7 +488,8 @@ class TestTheSettingsView:
 
     def test_the_remove_section_lists_what_would_go(self, joined, open_page):
         page, errors = open_page(joined, cookie=joined.cookie)
-        page.click("nav.tabs a:has-text('Settings')")
+        page.click(RAIL["Settings"])
+        page.get_by_role("tab", name="Maintenance", exact=True).click()
         page.wait_for_selector("#settings-removal label.opt")
         assert "cannot be undone" not in page.locator("#settings-removal").inner_text()
         page.click("#settings-removal button.danger")
@@ -357,7 +509,7 @@ class TestTheFitView:
         from ml_stack.serve.fit import Fit
 
         page, errors = open_page(joined, cookie=joined.cookie)
-        page.click("nav.tabs a:has-text('Fit')")
+        open_capacity(page)
         page.wait_for_selector("table.fit tbody tr")
         rows = page.locator("table.fit tbody tr")
         assert rows.count() == 2
@@ -373,7 +525,7 @@ class TestTheFitView:
 
     def test_moving_the_room_asks_again_and_slots_fewer(self, joined, open_page):
         page, errors = open_page(joined, cookie=joined.cookie)
-        page.click("nav.tabs a:has-text('Fit')")
+        open_capacity(page)
         page.wait_for_selector("table.fit tbody tr")
         before = page.locator("table.fit tbody tr").first.locator("td").nth(3).inner_text()
         page.select_option("#fit-controls select", "8")
@@ -391,7 +543,7 @@ class TestTheFitView:
 
     def test_both_panels_are_drawn(self, joined, open_page):
         page, errors = open_page(joined, cookie=joined.cookie)
-        page.click("nav.tabs a:has-text('Fit')")
+        open_capacity(page)
         page.wait_for_selector(".panels svg path.ln")
         assert page.locator(".panels .panel").count() == 2
         assert page.locator(".panels svg path.ln").count() >= 2
@@ -403,9 +555,10 @@ class TestTheFitView:
         costs at that point, the line nearest the pointer goes hot, and its row in the table
         lights with it. Fails when the cursor tracking is dropped from either panel."""
         page, errors = open_page(joined, cookie=joined.cookie)
-        page.click("nav.tabs a:has-text('Fit')")
+        open_capacity(page)
         page.wait_for_selector(".panels svg path.ln")
         cost = page.locator(".panels .panel").nth(1)
+        cost.scroll_into_view_if_needed()
         line = cost.locator("svg path.ln").first.bounding_box()
         page.mouse.move(line["x"] + line["width"] / 2, line["y"] + line["height"] / 2)
 
@@ -423,9 +576,10 @@ class TestTheFitView:
         whole axis back. Fails when the drag no longer narrows it, and when the
         double-click no longer restores it."""
         page, errors = open_page(joined, cookie=joined.cookie)
-        page.click("nav.tabs a:has-text('Fit')")
+        open_capacity(page)
         page.wait_for_selector(".panels svg path.ln")
         cost = page.locator(".panels .panel").nth(1).locator("svg")
+        cost.scroll_into_view_if_needed()
 
         def ticks():
             return cost.locator("text").all_text_contents()
@@ -453,12 +607,12 @@ class TestTheFitView:
 
     def test_the_other_two_views_open(self, joined, open_page):
         page, errors = open_page(joined, cookie=joined.cookie)
-        page.click("nav.tabs a:has-text('Fit')")
+        open_capacity(page)
         page.wait_for_selector("#fit-views button")
-        page.click("#fit-views button:has-text('What it cost to be right')")
-        page.wait_for_selector("#fit-heading:has-text('What it cost to be right')")
-        page.click("#fit-views button:has-text('What it has spent')")
-        page.wait_for_selector("#fit-heading:has-text('What it has spent')")
+        page.click("#fit-views button:has-text('Quality & speed')")
+        page.wait_for_selector("#fit-heading:has-text('Quality & speed')")
+        page.click("#fit-views button:has-text('Usage history')")
+        page.wait_for_selector("#fit-heading:has-text('Usage history')")
         assert "answers no questions" in page.locator("#fit-body").inner_text()
         assert not errors
 
@@ -489,23 +643,23 @@ class TestClosingTheWindow:
                                                                      open_page):
         daemon.call("/ui/setup/done", method="POST")
         page, errors = open_page(daemon)
-        page.wait_for_selector("#cluster:not([hidden])")
+        page.wait_for_function("() => typeof window.mlStackAskOnClose === 'function'")
 
         page.evaluate("window.mlStackAskOnClose()")
-        page.wait_for_selector("#close-sheet:not([hidden])")
+        page.wait_for_selector("#close-sheet[open] #close-why")
 
-        assert "part of your cluster" not in page.locator("#close-why").inner_text()
+        assert "part of your pool" not in page.locator("#close-why").inner_text()
         assert "Stays reachable" in page.locator("#close-background-d").inner_text()
         assert not errors
 
     def test_a_machine_in_a_cluster_is_told_what_the_others_lose(self, joined,
                                                                  open_page):
         page, errors = open_page(joined, cookie=joined.cookie)
-        page.wait_for_selector("#cluster:not([hidden])")
+        page.wait_for_function("() => typeof window.mlStackAskOnClose === 'function'")
 
         page.evaluate("window.mlStackAskOnClose()")
-        page.wait_for_selector("#close-sheet:not([hidden])")
+        page.wait_for_selector("#close-sheet[open] #close-why")
 
-        assert "part of your cluster" in page.locator("#close-why").inner_text()
-        assert "Leaves the cluster" in page.locator("#close-quit-d").inner_text()
+        assert "part of your pool" in page.locator("#close-why").inner_text()
+        assert "Leaves the pool" in page.locator("#close-quit-d").inner_text()
         assert not errors

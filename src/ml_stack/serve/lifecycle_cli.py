@@ -4,21 +4,28 @@ slots in place, stopping it, and switching the binary it is served by."""
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
+import threading
+from dataclasses import replace
+from pathlib import Path
 
-from ml_stack import hub
+from ml_stack import hub, limits as limits_mod, platform
+from ml_stack.client import thinking
 from ml_stack.command import flag, option
 from ml_stack.log import say, warn
-from ml_stack.serve import build, ops
-from ml_stack.serve.backend import ServerFailed, ServerSpec, UnknownFlag, parse_context
+from ml_stack.serve import build, holding, ops, quant_guard
+from ml_stack.serve.backend import ServerFailed, ServerSpec, parse_context
 from ml_stack.serve.binary import BinaryNotFound
 from ml_stack.serve.ops import Refused
 from ml_stack.serve.profile import ASK, WORKLOADS, profile_for, resolved
+from ml_stack.serve.quant_guard import BlockedQuant
 from ml_stack.serve.serving import said_cache, split_cache_type
 from ml_stack.serve.weights import DEFAULT_TIMEOUT_S
+from ml_stack.units import human_bytes, parse_duration
 
 __all__ = ["OPTIONS_BUILD", "OPTIONS_DOWN", "OPTIONS_ESCALATE", "OPTIONS_UP",
-           "cmd_build", "cmd_down", "cmd_escalate", "cmd_up", "from_profile"]
+           "cmd_build", "cmd_down", "cmd_escalate", "cmd_hold", "cmd_up", "from_profile"]
 
 _SPEC = ServerSpec(model="")
 DEFAULT_PORT = _SPEC.port
@@ -106,15 +113,19 @@ def _asked_spec(args: argparse.Namespace, model: str, extra: tuple[str, ...]) ->
     """The spec ``up`` was asked for, before 'auto' is answered."""
     kv = str(getattr(args, "kv", "") or "")
     draft_k, draft_v = split_cache_type(str(getattr(args, "draft_kv", "") or ""))
+    draft = str(getattr(args, "draft", "") or "")
+    plain = draft.lower() == "none" or str(getattr(args, "spec", "") or "").lower() == "none"
     return ServerSpec(
         model=model, port=args.port, context=args.context, parallel=args.parallel,
-        draft=str(getattr(args, "draft", "") or "") or None,
+        draft=None if plain else draft or None,
+        mtp=False if plain or not getattr(args, "mtp", True) else None,
         mmproj=str(getattr(args, "mmproj", "") or "") or None,
-        spec_type=str(getattr(args, "spec", "") or ""),
+        spec_type="" if plain else str(getattr(args, "spec", "") or ""),
         cache_type_k=kv, cache_type_v=kv,
         spec_draft_type_k=draft_k, spec_draft_type_v=draft_v,
         kv_unified=getattr(args, "kv_unified", None),
         embedding=bool(getattr(args, "embedding", False)),
+        reranking=bool(getattr(args, "reranking", False)),
         spec_draft_max=getattr(args, "spec_n_max", None),
         spec_p_min=getattr(args, "spec_p_min", None),
         spec_tree=getattr(args, "spec_tree", None),
@@ -130,8 +141,10 @@ def _asked_spec(args: argparse.Namespace, model: str, extra: tuple[str, ...]) ->
 
 OPTIONS_UP = [
     flag("model", help="path to a .gguf file, or hf:owner/repo/file.gguf"),
-    option("port", default=DEFAULT_PORT,
-           help=f"port to serve on (default: {DEFAULT_PORT})"),
+    option("port", default=0,
+           help="a port you would like. The broker picks the port and uses this one only "
+                "when it is free; a port held by another process is never taken or "
+                "fought over (default: the broker picks)"),
     option("context", type=parse_context, default=DEFAULT_CONTEXT,
            help=f"tokens across all slots -- 32768, 256k, 1m (default: "
                 f"{DEFAULT_CONTEXT}). Beyond what the model trained at, YaRN is "
@@ -140,12 +153,17 @@ OPTIONS_UP = [
     option("parallel", default=DEFAULT_PARALLEL,
            help=f"slots to serve at once (default: {DEFAULT_PARALLEL})"),
     flag("--escalate", action="store_true",
-         help="when a server is already up with fewer slots than --parallel asks for, "
-              "grow (or split, or summarise and split) it rather than refusing -- "
-              "keeps every live conversation"),
-    option("timeout",
-           help="seconds to wait for it to load (default: scales with the weights on "
-                f"disk -- 60s + 1.5s/GB, floor {DEFAULT_TIMEOUT:.0f}s)"),
+         help="refused: `ml-stack-serve escalate PORT` grows the slots of a server you hold"),
+    flag("--wait", action=argparse.BooleanOptionalAction, default=True,
+         help="when memory is short the lease queues behind the others: --wait (the "
+              "default) prints the queue position and waits for the server, --no-wait "
+              "returns at once with the lease queued"),
+    flag("--patience", type=float, default=holding.DEFAULT_WAIT_S, metavar="SECONDS",
+         help="how long the lease may wait in the queue before it is given up "
+              "(default: %(default)s)"),
+    flag("--idle", default="", metavar="DURATION",
+         help="release the lease after the server has been unused this long, e.g. 10m "
+              "(default: `ml-stack-serve limits --idle`, else held until `down`)"),
     option("json", help="print one JSON object instead of the human line"),
     flag("--preflight-only", action="store_true",
          help="run every check a load would run -- shards present, architecture this "
@@ -209,6 +227,9 @@ OPTIONS_UP = [
     flag("--embedding", action="store_true",
          help="serve an embedding model (llama-server --embedding), the way the graph's "
               "vectors and the thread's recall want one"),
+    flag("--reranking", action="store_true",
+         help="serve a reranker (llama-server --reranking, answering /v1/rerank); it is "
+              "never shared with a chat or embedding lease"),
     flag("--kv", default="q8_0", metavar="TYPE",
          help="what the KV cache is stored as (default q8_0: measured 2026-09-02 on "
               "Flash-Next, F1 unchanged, faster, half the cache; the recurrent state is "
@@ -217,13 +238,13 @@ OPTIONS_UP = [
          help="one cache pool for every slot, masked per sequence, rather than a cache "
               "per slot; --no-kv-unified asks for the latter outright. Left unset, the "
               "build decides"),
-    flag("--draft-kv", default="", metavar="TYPE",
-         help="what the draft head's own KV cache is stored as. It is a second cache, "
-              "not the one --kv sets, and llama.cpp stores it at full size whatever "
-              "--kv says. The head only proposes and the model checks every token, so "
-              "a smaller cache here costs acceptance and never correctness. The types "
-              "this build takes are in its --help; f16 is its default. One value sets "
-              "both halves, K/V sets them apart"),
+    flag("--draft-kv", default="q8_0", metavar="TYPE",
+         help="the head's own KV cache: q8_0 by default, f16 for full precision. "
+              "One value sets both halves; K/V sets them separately"),
+    flag("--mtp", action=argparse.BooleanOptionalAction, default=True,
+         help="serve the model's own multi-token-prediction head when it has one that is "
+              "trusted and loads (the default; ML_STACK_MTP=off turns it off everywhere). "
+              "--no-mtp, --draft none and --spec none serve without"),
     flag("--draft", default="", metavar="MODEL_OR_AUTO",
          help="a small model to guess ahead, which the large one checks in one pass -- "
               "a path, an hf: reference, or 'auto' to use the draft head shipped beside "
@@ -239,15 +260,17 @@ OPTIONS_UP = [
               "(`ml-stack-serve profile MODEL` prints it). A flag given wins over the "
               "record. --no-profile serves the model bare, at this command's own "
               "defaults rather than the ones that measured best"),
-    flag("--for", dest="workload", default=ASK, choices=sorted(WORKLOADS),
-         metavar="WORKLOAD",
+    flag("--for", dest="reason", default="", metavar="TEXT",
+         help="why this lease is taken, in one line; `status`, `leases` and `history` show it "
+              "(default: $ML_STACK_LEASE_FOR, else none given)"),
+    flag("--workload", default=ASK, choices=sorted(WORKLOADS), metavar="WORKLOAD",
          help=f"which workload the profile is for: "
               f"{'; '.join(f'{k}, {v}' for k, v in WORKLOADS.items())} "
               f"(default: {ASK})"),
-    flag("--anyway", action="store_true",
-         help="start the server even while a measurement holds this card; both its "
-              "timings and anything measured through this server are then two models "
-              "sharing a GPU"),
+    flag("--iq", choices=quant_guard.MODES, default="",
+         help="what an IQ-family quantisation on Apple silicon gets: warn (default; one "
+              "warning, may be slower and less accurate than a K-quant), off (no warning) "
+              "or block (refused). $ML_STACK_IQ sets the default"),
 ]
 
 
@@ -273,6 +296,7 @@ def cmd_up(args: argparse.Namespace) -> int:
     chosen = str(getattr(args, "binary", "") or "")
     manager = ops.manager_for(chosen, str(getattr(args, "build", "") or ""))
     extra = tuple(profile.extra_args) if profile is not None else ()
+    manager.iq = str(getattr(args, "iq", "") or "")
     resolved_spec = ops.resolve_spec(_asked_spec(args, model, extra), manager=manager)
     for note in resolved_spec.notes:
         warn(note)
@@ -287,35 +311,63 @@ def cmd_up(args: argparse.Namespace) -> int:
         say(report.said())
         return 0 if report.ok else 1
 
+    if getattr(args, "escalate", False):
+        warn("error: up no longer grows a server; `ml-stack-serve escalate PORT` does")
+        return 2
+    return _lease(args, spec, manager, chosen=chosen, profile=profile)
+
+
+def _idle_seconds(args: argparse.Namespace) -> float:
+    asked = str(getattr(args, "idle", "") or "")
+    return float(parse_duration(asked)) if asked else float(limits_mod.read().idle_s or 0.0)
+
+
+def _lease(args: argparse.Namespace, spec: ServerSpec, manager: object, *, chosen: str,
+           profile: object | None) -> int:
+    """``up``: ask the broker for a lease with this shape and hold it."""
+    ask = args.model
     try:
-        started = ops.up(spec, manager=manager, timeout=args.timeout,
-                         escalate=bool(getattr(args, "escalate", False)),
-                         anyway=bool(getattr(args, "anyway", False)),
-                         root=args.root, say=warn, on_event=_print_event)
-    except UnknownFlag as exc:
-        # Refused before the load, not at the end of it: the build was asked what it
-        # accepts and the answer is printed one flag per line, with the nearest it has.
-        warn(exc)
+        quant_guard.enforce(spec.model, gpu_layers=spec.n_gpu_layers,
+                            asked=str(getattr(args, "iq", "") or ""), who="ml-stack-serve up")
+        weight = holding.check_fits(spec, ask=str(ask))
+        held = holding.up(
+            spec, manager=manager, say=warn,
+            terms=holding.Terms(wait_s=float(args.patience), wait=bool(args.wait),
+                                idle_s=_idle_seconds(args), port=int(args.port or 0),
+                                weight=weight, reason=str(args.reason or "")))
+    except holding.Refusal as no:
+        for line in no.lines:
+            warn(line)
         return 2
     except (ServerFailed, BinaryNotFound, OSError) as exc:
         warn(f"error: {exc}")
-        return 2
+        return 3 if isinstance(exc, BlockedQuant) else 2
 
-    info, told = started.info, started.announced
+    told = ""
+    if held.status == "ready":
+        told = ops.announce(args.root, replace(spec, port=held.port))
+        if args.port and int(args.port) != held.port:
+            warn(f"port {args.port} was only a request; the broker picked {held.port}")
     if args.json:
-        say(json.dumps({"base_url": info.base_url, "port": info.port, "pid": info.pid,
-                        "adopted": info.adopted, "model": str(spec.model),
+        say(json.dumps({"base_url": held.base_url, "port": held.port, "lease": held.id,
+                        "status": held.status, "adopted": held.adopted,
+                        "holder_pid": held.pid, "model": str(spec.model),
                         "context": spec.context, "parallel": spec.parallel,
                         "draft": str(spec.draft or ""),
                         "draft_cache_type": said_cache(spec.spec_draft_type_k,
                                                        spec.spec_draft_type_v),
                         "announced": told.startswith("announced")}, indent=2))
         return 0
-
-    where = f" (pid {info.pid})" if info.pid else ""
-    say(f"{'adopted' if info.adopted else 'started'} {info.base_url}{where}")
+    if held.status != "ready":
+        say(f"queued lease {held.id} for {Path(str(spec.model)).name}")
+        return 0
+    say(f"{'adopted' if held.adopted else 'started'} {held.base_url} (lease {held.id}, "
+        f"held by pid {held.pid}"
+        + (f", {human_bytes(held.memory)}" if held.memory else "") + ")")
     if chosen:
         say(f"  with {chosen}")
+    if profile is None:
+        say("  no measured profile: served with the defaults the broker uses for this shape")
     if spec.draft:
         say(f"  guessing ahead with {str(spec.draft).rsplit('/', 1)[-1]}")
     if spec.spec_draft_type_k or spec.spec_draft_type_v:
@@ -324,14 +376,24 @@ def cmd_up(args: argparse.Namespace) -> int:
         say(f"  reading pictures with {str(spec.mmproj).rsplit('/', 1)[-1]}")
     if spec.spec_type:
         say(f"  guessing ahead by {spec.spec_type}")
-    if told:
-        say(f"  {told}")
+    for line in filter(None, (told, thinking.policy())):
+        say(f"  {line}")
     return 0
 
 
+def cmd_hold(args: argparse.Namespace) -> int:
+    """``ml-stack-serve hold ID`` -- the process `up` starts to hold its lease (not typed by
+    hand)."""
+    stop = threading.Event()
+    platform.on_quit(lambda *_: stop.set())
+    return holding.run_holder(args.id, manager=ops.manager_for(), stop=stop)
+
+
 OPTIONS_DOWN = [
-    option("port", default=DEFAULT_PORT,
-           help=f"port of the server to stop (default: {DEFAULT_PORT})"),
+    flag("target", nargs="?", default="", metavar="MODEL_OR_PORT_OR_LEASE",
+         help="the lease to release: a lease id, a port, or part of a model name. The "
+              "server is stopped only when no other lease uses it"),
+    option("port", default=0, help="a port, as an alternative to the positional"),
     flag("--orphans", action="store_true",
          help="instead of a port: stop every recorded server whose leasing process has "
               "gone, and nothing else"),
@@ -353,8 +415,20 @@ def cmd_down(args: argparse.Namespace) -> int:
                 f"{stopped.owner_pid}")
         return 0
 
+    which = str(getattr(args, "target", "") or (args.port or ""))
+    manager = ops.manager_for()
+    found = [h for h in holding.holds() if h.id == which] or holding.target(which)
+    if found:
+        for released, said_of in holding.down(found, manager=manager):
+            say(f"released lease {released.id} on port {released.port}: {said_of}")
+            with contextlib.suppress(OSError):
+                warn(ops.withdraw(args.root, released.port))
+        return 0
+    if not which.isdigit():
+        say(f"no lease held for {which or 'anything'}; `ml-stack-serve status` lists them")
+        return 1
     try:
-        stopped, said = ops.down(args.port, root=args.root)
+        stopped, said = ops.down(int(which), root=args.root)
     except Refused as no:
         if len(no.lines) == 1:
             say(no.lines[0])

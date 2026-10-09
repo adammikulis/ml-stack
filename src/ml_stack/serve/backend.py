@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import difflib
+import json
 import logging
 import math
 import os
@@ -15,10 +16,13 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
-from ml_stack import home
-from ml_stack.client import wait_for_health
+from ml_stack import home, sentinel, serverkeys
+from ml_stack.client import families, wait_for_health
 from ml_stack.platform import process_group_kwargs
+from ml_stack.serve import confined as confinement, exit_guard, grant
 from ml_stack.serve.binary import child_env, require_binary
+from ml_stack.serve.leases import recorded_servers
+from ml_stack.serve.logs import prune
 from ml_stack.serve.ports import DEFAULT_HOST, port_is_free, reclaim_port
 
 logger = logging.getLogger(__name__)
@@ -40,11 +44,13 @@ def logs_of(name: str, port: int) -> list[Path]:
 
 
 def server_log(name: str, port: int) -> Path:
-    """A new log path for ``name`` starting on ``port``, removing the oldest past `LOGS_KEPT`."""
+    """A new log path for ``name`` starting on ``port``, removing the oldest past `LOGS_KEPT`
+    and, across every port, past the count, size and age `ml_stack.serve.logs.limits` allows."""
     logs = log_dir()
-    logs.mkdir(parents=True, exist_ok=True)
+    logs.mkdir(parents=True, exist_ok=True, mode=0o700)
     for old in logs_of(name, port)[:-(LOGS_KEPT - 1) or None]:
         old.unlink(missing_ok=True)
+    prune(logs, [Path(str(one["log"])) for one in recorded_servers().values() if one.get("log")])
     return logs / f"{name}-{port}-{time.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}.log"
 
 
@@ -80,6 +86,24 @@ _FLAG_IN_HELP = re.compile(r"(?:^|,)\s*(-{1,2}[A-Za-z][\w-]*)")
 _ALLOWED_IN_HELP = re.compile(r"allowed values:\s*(.+?)\s*$")
 
 
+def _binary_info(path: Path, *, devices: bool, timeout: float) -> str:
+    """Read a fixed information command without loading a model or starting a server."""
+    option = "--list-devices" if devices else "--help"
+    try:
+        got = subprocess.run([str(path), option], capture_output=True, text=True,
+                             errors="replace", timeout=timeout, env=child_env(path))
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    if devices and got.returncode != 0:
+        return ""
+    return got.stdout + "\n" + got.stderr
+
+
+def devices_of(binary: str | Path, *, timeout: float = 20.0) -> str:
+    """Currently available devices; unlike help, this initializes backend discovery."""
+    return _binary_info(Path(binary), devices=True, timeout=timeout)
+
+
 def help_of(binary: str | Path, *, timeout: float = 20.0) -> str:
     """A build's ``--help``, stdout and stderr together; ``""`` when it cannot be read."""
     path = Path(binary)
@@ -89,12 +113,7 @@ def help_of(binary: str | Path, *, timeout: float = 20.0) -> str:
         return ""
     if key in _HELP:
         return _HELP[key]
-    try:
-        got = subprocess.run([str(path), "--help"], capture_output=True, text=True,
-                             errors="replace", timeout=timeout, env=child_env(path))
-    except (OSError, subprocess.SubprocessError):
-        return ""
-    text = got.stdout + "\n" + got.stderr
+    text = _binary_info(path, devices=False, timeout=timeout)
     if not text.strip():
         return ""
     _HELP[key] = text
@@ -166,41 +185,6 @@ def _load_mode(spec: ServerSpec) -> str:
     return "none" if no_mmap else ""
 
 
-def emitted_flags(backend: LlamaServerBackend) -> list[str]:
-    """Every flag ``backend.command`` can emit, from specs with every field set.
-
-    Several shapes are needed because they exclude each other: an embedding server drops
-    ``--jinja`` for ``--embeddings``, an ``hf:`` reference swaps ``-m`` for ``--hf-repo``,
-    and a ``--no-`` flag is only emitted where its positive form is not. Values are harmless placeholders; nothing here is run.
-    """
-    full = ServerSpec(
-        model="model.gguf", parallel=2, mmproj="mmproj-model.gguf", draft="draft.gguf",
-        spec_type="draft-simple", spec_draft_max=3, spec_p_min=0.5, spec_draft_min=1, spec_ngram_min=48,
-        spec_ngram_max=64, spec_draft_ngl=99, spec_draft_type_k="q8_0",
-        spec_draft_type_v="q8_0", lookup_static="static.bin", lookup_dynamic="dynamic.bin",
-        cache_reuse=256, warmup=False, context_per_slot=4096, override_tensor=("x=CPU",),
-        cpu_moe=True, n_cpu_moe=1, kv_unified=True, cache_ram_mb=8192, cache_idle_slots=True,
-        slot_prompt_similarity=0.5, slot_save_path="slots", chat_template_file="t.jinja",
-        cache_type_k="q8_0",
-        cache_type_v="q8_0", mlock=True, reasoning_budget=2048, rope_scaling="yarn",
-        rope_scale=4.0, yarn_orig_ctx=32768, yarn_ext_factor=1.0, yarn_attn_factor=1.0,
-        yarn_beta_fast=32.0, yarn_beta_slow=1.0)
-    # the `--no-` forms are a third shape for the same reason: True and False exclude
-    # each other on one spec
-    shapes = (full,
-              ServerSpec(model="model.gguf", kv_unified=False, cache_idle_slots=False,
-                         mmap=False),
-              ServerSpec(model="model.gguf", embedding=True),
-              ServerSpec(model="hf:owner/repo/model.gguf", mmproj="hf:owner/repo/mmproj.gguf",
-                         draft="hf:owner/repo"))
-    flags: list[str] = []
-    for shape in shapes:
-        for token in backend.command(shape)[1:]:
-            if token.startswith("-") and token.lstrip("-")[:1].isalpha() and token not in flags:
-                flags.append(token)
-    return flags
-
-
 _CONTEXT_SUFFIX = {"": 1, "k": 1_000, "m": 1_000_000}
 
 
@@ -249,11 +233,16 @@ class ServerSpec:
     port: int = 8080
     context: int = 4096
     n_gpu_layers: int | str = "auto"
+    device: str = ""
     parallel: int = 1
     embedding: bool = False
+    # A reranker (llama-server --reranking, serving /v1/rerank): it scores a query against
+    # documents, so it never shares a server with chat or embedding.
+    reranking: bool = False
     mmproj: str | Path | None = None
     flash_attn: bool = True
     jinja: bool = True
+    api_key: str = ""
     # A small model of the same family, guessing ahead so the large one only has to agree.
     # Same two forms as `model`: a path, or hf:owner/repo[/file.gguf].
     draft: str | Path | None = None
@@ -266,6 +255,9 @@ class ServerSpec:
     # transcribing, summarising -- and costs no weights and no memory, where a draft head
     # costs both. `ngram-simple`, `ngram-map-k`, `ngram-map-k4v`, `ngram-mod`, `ngram-cache`.
     spec_type: str = ""
+    # Multi-token prediction: None serves the model's MTP head when one is found and trusted
+    # (`serve.mtp.plan`); False serves without; True marks a head that default picked.
+    mtp: bool | None = None
     spec_draft_max: int | None = None       # tokens guessed ahead (server default 3)
     spec_p_min: float | None = None         # draft's minimum probability (server default 0.00)
     # Guess ahead in a tree rather than a chain: the branches the drafter expands per depth,
@@ -421,6 +413,12 @@ class ServerInfo:
     # shaders and allocating the KV cache happen on the first real request whether or not
     # anything measures them; this is what makes the *next* one the first that pays for it.
     warmup_s: float | None = None
+    #: the broker's id for the lease this info was granted under; "" for a record read back
+    lease: str = ""
+    mtp: str = ""
+    """What multi-token prediction the server was started with: ``embedded``, a head's file
+    name, or "" for none; ``mtp_note`` says which and why."""
+    mtp_note: str = ""
     # The ``Popen`` for a server this process started, for whoever stops it to wait on.
     # Never serialised: it is not a value, and it is None for an adopted server.
     process: Any = field(default=None, repr=False, compare=False)
@@ -432,15 +430,18 @@ class Lease:
 
     A backend launches nothing without one, so a server this code base spawns is recorded
     by construction -- before the process exists, with the pid filled in after -- and
-    "a server nobody recorded" cannot come out of the library. Adam: "this wouldn't
-    happen in the first place if we ensured that it wasn't possible to have an untracked
-    server." Only `ServerManager` makes these; a test that wants a server goes through a
-    manager on a temporary state file, the way everything else does.
+    "a server nobody recorded" cannot come out of the library. Only `ServerManager` makes
+    these, inside the broker's `grant.broker_grant()`; a test that wants a server goes
+    through a manager and a broker on a temporary state file.
     """
 
     port: int
     owner_pid: int
     state_file: str
+    stop_on_exit: bool = True
+
+    def __post_init__(self) -> None:
+        grant.require()
 
 
 class ServerBackend(ABC):
@@ -471,22 +472,30 @@ def claim_port(spec: ServerSpec, lease: Lease) -> None:
             )
 
 
-def launch(argv: list[str], *, port: int, log_path: Path, timeout: float,
-           env: dict[str, str]) -> tuple[Any, str, float]:
+def launch(  # noqa: PLR0913 - the independent facts of one spawn; a bundle type would only rename them
+        argv: list[str], lease: Lease, *, log_path: Path, timeout: float,
+        env: dict[str, str], cwd: str | None = None) -> tuple[Any, str, float]:
     """``(process, base_url, load seconds)`` for ``argv`` started and answering its health check.
 
-    Raises ``ServerFailed`` with the log's tail when it exits or never answers.
+    The server stops with this process when the lease says ``stop_on_exit``. Raises
+    ``ServerFailed`` with the log's tail when it exits or never answers.
     """
+    grant.require(lease, Lease)
+    port = lease.port
     started_at = time.monotonic()
     with log_path.open("wb") as log_handle:
-        process = subprocess.Popen(argv, stdout=log_handle, stderr=subprocess.STDOUT, env=env,
-                                   **process_group_kwargs())
+        process = subprocess.Popen(argv, stdout=log_handle, stderr=subprocess.STDOUT,
+                                   env=sentinel.default().scrub_env(env),
+                                   cwd=cwd, **process_group_kwargs())
+    if lease.stop_on_exit:
+        exit_guard.protect(process.pid)
     base_url = f"http://{DEFAULT_HOST}:{port}"
     if not wait_for_health(base_url, timeout=timeout, is_alive=lambda: process.poll() is None):
         code = process.poll()
         process.terminate()
         with contextlib.suppress(subprocess.TimeoutExpired):
             process.wait(timeout=5.0)
+        exit_guard.release(process.pid)
         raise ServerFailed(
             f"{Path(argv[0]).name} did not become healthy on {base_url}"
             + (f" (exited {code})" if code is not None else f" within {timeout:.0f}s")
@@ -508,11 +517,19 @@ class LlamaServerBackend(ServerBackend):
         vendor_dir: Path | None = None,
         build: str | None = None,
         quiet: bool = True,
+        sandboxed: bool | None = None,
     ) -> None:
+        self.sandboxed = sandboxed
         self._explicit = binary
         self._vendor_dir = vendor_dir
         self._build = build
         self.quiet = quiet
+
+    def options(self) -> dict[str, Any]:
+        """The arguments that make another backend like this one, for the broker to rebuild."""
+        return {k: str(v) if isinstance(v, Path) else v for k, v in {
+            "binary": self._explicit, "vendor_dir": self._vendor_dir, "build": self._build,
+            "quiet": self.quiet, "sandboxed": self.sandboxed}.items() if v is not None}
 
     @property
     def binary(self) -> Path:
@@ -537,6 +554,8 @@ class LlamaServerBackend(ServerBackend):
     def command(self, spec: ServerSpec) -> list[str]:
         """Build the argv."""
         argv = [str(self.binary), "--host", DEFAULT_HOST, "--port", str(spec.port)]
+        if spec.api_key:
+            argv += ["--api-key", spec.api_key]
         argv += self._model_source_argv(spec)
         argv += self._companion_argv(spec)
         argv += self._speculative_argv(spec)
@@ -544,6 +563,11 @@ class LlamaServerBackend(ServerBackend):
         argv += self._cache_argv(spec)
         argv += self._runtime_argv(spec)
         argv += self._rope_argv(spec)
+        defaults = families.thinkingcap_defaults(spec.model)
+        overridden = any(flag.split("=", 1)[0] == "--chat-template-kwargs"
+                         for flag in spec.extra_args)
+        if defaults and spec.jinja and not spec.embedding and not spec.reranking and not overridden:
+            argv += ["--chat-template-kwargs", json.dumps(defaults, separators=(",", ":"))]
         argv += list(spec.extra_args)
         return argv
 
@@ -561,7 +585,9 @@ class LlamaServerBackend(ServerBackend):
 
         argv += ["-c", str(spec.context)]
 
-        if spec.n_gpu_layers == "auto":
+        if spec.device == "cpu":
+            argv += ["-ngl", "0"]
+        elif spec.n_gpu_layers == "auto":
             argv += ["-ngl", "99"]
         elif spec.n_gpu_layers is not None:
             argv += ["-ngl", str(spec.n_gpu_layers)]
@@ -569,6 +595,8 @@ class LlamaServerBackend(ServerBackend):
         argv += ["-np", str(max(1, spec.parallel))]
         if spec.embedding:
             argv += ["--embeddings", "--pooling", "mean"]
+        if spec.reranking:
+            argv += ["--reranking"]
         return argv
 
     @staticmethod
@@ -670,7 +698,7 @@ class LlamaServerBackend(ServerBackend):
         argv: list[str] = []
         if spec.flash_attn:
             argv += ["-fa", "on"]
-        if spec.jinja and not spec.embedding:
+        if spec.jinja and not spec.embedding and not spec.reranking:
             argv += ["--jinja"]
         if spec.cache_type_k:
             argv += ["--cache-type-k", str(spec.cache_type_k)]
@@ -703,8 +731,8 @@ class LlamaServerBackend(ServerBackend):
 
     @staticmethod
     def resolved_model(spec: ServerSpec) -> ServerSpec:
-        """The spec with a model named by `hf:` file fetched into the Hub cache and served
-        by path; a reference naming no file is left for the server."""
+        """The spec with a model named by `hf:` reference fetched into the model store and
+        served by path."""
         return replace(spec, model=fetched(spec.model, "model"))
 
     @staticmethod
@@ -755,6 +783,8 @@ class LlamaServerBackend(ServerBackend):
         ``True`` unless passed otherwise.
         """
         spec = self.resolved_draft(self.resolved_model(spec))
+        if spec.mmproj:
+            spec = replace(spec, mmproj=fetched(spec.mmproj, "projector"))
         spec, yarn_said = self.resolved_context(spec)
         if yarn_said:
             logger.warning(yarn_said)
@@ -763,6 +793,7 @@ class LlamaServerBackend(ServerBackend):
             if not model.is_file():
                 raise ServerFailed(f"no model file at {model}")
 
+        spec = replace(spec, api_key=serverkeys.issue(spec.port))
         argv = self.command(spec)
         if starting.get("check_flags", True):
             argv = self.checked(argv)
@@ -782,7 +813,8 @@ class LlamaServerBackend(ServerBackend):
             # directory" is its whole complaint.
             Path(spec.slot_save_path).mkdir(parents=True, exist_ok=True)
         log_path = server_log("llama-server", spec.port)
-        logger.info("starting: %s", " ".join(argv))
+        logger.info("starting: %s", " ".join("***" if prev == "--api-key" else a
+                                             for prev, a in zip(["", *argv], argv, strict=False)))
 
         extra_env = {}
         if spec.slot_save_path:
@@ -792,10 +824,20 @@ class LlamaServerBackend(ServerBackend):
             # nothing to summarise.
             extra_env["LLAMA_SERVER_SLOTS_DEBUG"] = "1"
 
-        process, base_url, load_s = launch(
-            argv, port=spec.port, log_path=log_path, timeout=timeout,
-            env=child_env(self.binary, extra_env or None))
+        env = child_env(self.binary, extra_env or None)
+        confined = None
+        if confinement.wanted(self.sandboxed):
+            confined = confinement.confine(
+                argv, env, self.binary, writable=[spec.slot_save_path] if spec.slot_save_path else [])
+            argv, env = confined.argv, confined.env
+        try:
+            process, base_url, load_s = launch(argv, lease, log_path=log_path, timeout=timeout,
+                                               env=env, cwd=confined.cwd if confined else None)
+        except ServerFailed as failure:
+            refused = confined.refusals() if confined else ""
+            raise ServerFailed(f"{failure}\n{refused}" if refused else str(failure)) from failure
 
+        serverkeys.bind(spec.port, process.pid)
         warmup_s = None
         if starting.get("warmup_request", True):
             warmup_s = self._warm_up(base_url, timeout=timeout)
@@ -832,15 +874,17 @@ class LlamaServerBackend(ServerBackend):
 
 
 def fetched(ref: str | Path, what: str) -> str | Path:
-    """``ref`` downloaded into the Hub cache when it is an `hf:` file, else ``ref``."""
+    """``ref`` downloaded into the model store through the net pipeline when it is an `hf:`
+    reference (a repository alone takes its default build), else ``ref``. llama-server is
+    never handed an `hf:` reference, so it never downloads anything itself."""
     parts = ServerSpec.hf_parts(ref)
-    if not parts or not parts[1]:
+    if not parts:
         return ref
-    from ml_stack.hub import fetch
+    from ml_stack.hub import fetch, pull
 
     try:
-        return str(fetch(str(ref)))
-    except (ValueError, OSError) as exc:
+        return str(fetch(str(ref)) if parts[1] else pull(str(ref)))
+    except (ValueError, OSError, RuntimeError) as exc:
         raise ServerFailed(f"could not fetch the {what} {ref}: {exc}") from exc
 
 

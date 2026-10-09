@@ -6,7 +6,6 @@ editable install), the bench store and the managed llama.cpp builds. Each is a `
 
 from __future__ import annotations
 
-import argparse
 import json
 import os
 import re
@@ -16,9 +15,10 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-from ml_stack import checks
+from ml_stack import agent_hooks, bench, checks, hook_diagnostics, hookcheck
 from ml_stack.bench.underway import measuring, measuring_file
 from ml_stack.checks import Finding, ask
+from ml_stack.command import Group, flag, option
 from ml_stack.log import say
 from ml_stack.serve.binary import child_env, managed_current, managed_named
 from ml_stack.serve.build_platform import server_name
@@ -31,8 +31,8 @@ __all__ = ["HOOKS", "STALE_BUILD_DAYS", "ahead_of", "bench_of", "builds_of",
 STALE_BUILD_DAYS = 14
 """A managed llama.cpp older than this is noted."""
 
-HOOKS = ("pre-commit", "commit-msg", "pre-push")
-"""The git hooks every repository here installs, from the directory it ships them in."""
+HOOKS = hookcheck.HOOKS
+"""The git hooks a repository here installs, each when it ships one, from the directory it ships them in."""
 
 _SHIPPED = ("scripts/hooks", "services/hooks")
 _STAMP = re.compile(r"(\d{8}T\d{6})\.log$")
@@ -94,23 +94,38 @@ def hooks_of(repo: Path) -> Finding | None:
     shipped = _shipped_hooks(repo)
     if not shipped:
         return None
+    if shipped == hookcheck.SCRIPTS:
+        return _running_hooks(repo)
     common = _git(repo, "rev-parse", "--git-common-dir")
     hooks = Path(common) if Path(common).is_absolute() else repo / common
-    missing = [h for h in HOOKS if not _installed(hooks / "hooks" / h, shipped)]
+    missing = [h for h in HOOKS if (repo / shipped / h).exists() and not _installed(hooks / "hooks" / h, shipped)]
     installer = repo / "scripts" / "install-hooks.sh"
     if installer.is_file():
-        fix = f"cd {repo} && sh scripts/install-hooks.sh"
+        fix = ["sh", "scripts/install-hooks.sh"]
     else:
-        fix = f"cd {repo} && " + " && ".join(
-            f"ln -sf ../../{shipped}/{h} .git/hooks/{h}" for h in missing)
+        fix = ["ln", "-sf", *[f"../../{shipped}/{h}" for h in missing], ".git/hooks/"]
     return Finding(
         name=f"{repo.name}: hooks", good=not missing,
         said=("installed, from " + shipped) if not missing else
              "not installed: " + ", ".join(missing),
-        fix="" if not missing else fix,
+        fix=[] if not missing else fix, cwd=str(repo),
         note="" if not missing else
              f"git runs nothing from {shipped}/ until they are; a real name or a scrape "
              "goes into a commit unrefused")
+
+
+def _running_hooks(repo: Path) -> Finding:
+    """Whether git will run the hooks: hooks directory, hook files, repository config and guard scripts.
+
+    A repair that edits the repository config is only written in the note, for a person to run.
+    """
+    problems = hookcheck.inspect(repo)
+    installable = bool(problems) and all(p.kind == "install" and p.repair.startswith("sh ") for p in problems)
+    return Finding(
+        name=f"{repo.name}: hooks", good=not problems,
+        said=f"installed, from {hookcheck.SCRIPTS}" if not problems else "; ".join(p.what for p in problems),
+        fix=["sh", "scripts/install-hooks.sh"] if installable else [], cwd=str(repo),
+        note="; ".join(f"a person runs: {p.repair}" for p in problems if p.repair))
 
 
 def status_of(repo: Path) -> Finding:
@@ -181,7 +196,7 @@ def install_of(repo: Path, *, checkout: Path | None = None,
         error = str(exc)
     else:
         error = (got.stderr.strip().splitlines() or [""])[-1]
-    fix = f"{python} -m pip install -e {checkout}"
+    fix = [str(python), "-m", "pip", "install", "-e", str(checkout)]
     if got is None or got.returncode != 0:
         return Finding(name=f"{repo.name}: editable install", good=False,
                        said=f"{python}: import ml_stack fails -- {error or 'no output'}",
@@ -194,7 +209,7 @@ def install_of(repo: Path, *, checkout: Path | None = None,
     return Finding(
         name=f"{repo.name}: editable install", good=under,
         said=str(found),
-        fix="" if under else fix,
+        fix=[] if under else fix,
         note="" if under else
              f"{python} imports a copy, not {checkout}: what is edited there is not "
              "what runs here")
@@ -228,9 +243,7 @@ def _measuring(home: Path) -> Finding | None:
 
 def _newest_run_at(store: Path) -> tuple[float, int]:
     """When the newest kept run was written, as epoch seconds, and how many there are."""
-    from ml_stack.bench import runs
-
-    kept = runs(store) if store.exists() else []
+    kept = bench.runs(store) if store.exists() else []
     at = 0.0
     for one in kept:
         try:
@@ -258,9 +271,7 @@ def bench_of(home: Path) -> list[Finding]:
         return out
     store = home / "runs.ladybug"
     try:
-        from ml_stack.bench import empties
-
-        hollow = empties(store)
+        hollow = bench.empties(store)
     except Exception as exc:  # noqa: BLE001
         out.append(Finding(name="bench: runs", good=False, said=f"{store} did not open: {exc}"))
         return out
@@ -269,7 +280,7 @@ def bench_of(home: Path) -> list[Finding]:
             name="bench: runs", good=False,
             said=f"{len(hollow)} run(s) read back as nothing: "
                  + ", ".join(hollow[:3]) + (" ..." if len(hollow) > 3 else ""),
-            fix=f"ml-stack-bench forget --empty --kept {store}",
+            fix=["ml-stack-bench", "forget", "--empty", "--kept", str(store)],
             note="each was a measurement that saved a row of dashes; the table skips them "
                  "and says nothing about why"))
 
@@ -321,13 +332,13 @@ def builds_of(current: Path, named: Path, *, stale_days: int = STALE_BUILD_DAYS)
     server = current / server_name()
     if not (current.is_symlink() or current.exists()):
         out.append(Finding(name="llama.cpp: current", good=False,
-                           said="not built yet", fix="ml-stack-serve build",
+                           said="not built yet", fix=["ml-stack-serve", "build"],
                            note="serving falls back to whatever llama-server is on PATH, "
                                 "which lags master by an architecture or two"))
     elif not _answers_help(server):
         out.append(Finding(name="llama.cpp: current", good=False,
                            said=f"{server} does not answer --help",
-                           fix="ml-stack-serve build",
+                           fix=["ml-stack-serve", "build"],
                            note="the link is there and the binary behind it is not, or "
                                 "cannot load: it will fail the same way at serve time"))
     else:
@@ -338,7 +349,7 @@ def builds_of(current: Path, named: Path, *, stale_days: int = STALE_BUILD_DAYS)
             name="llama.cpp: current", good=not stale,
             said=f"{commit}, " + (f"{age}d old" if age is not None else "age unknown")
                  + ", answers --help",
-            fix="ml-stack-serve build" if stale else "",
+            fix=["ml-stack-serve", "build"] if stale else [],
             note="" if not stale else
                  f"older than {stale_days} days; master has gained an architecture or two "
                  "since, and a model in one of them exits saying only 'unknown model "
@@ -361,8 +372,6 @@ def look_checkouts(repos: list[Path] | None = None, *, bench_home: Path | None =
     """The repositories and the working state, without changing a thing: hooks, the
     working tree, the branch, worktrees, the editable install, the bench store, and the
     managed llama.cpp builds."""
-    from ml_stack.bench import home_dir
-
     out: list[Finding] = []
     seen_python: set[Path] = set()
     repos = repositories(None) if repos is None else repos
@@ -389,35 +398,42 @@ def look_checkouts(repos: list[Path] | None = None, *, bench_home: Path | None =
             found = install_of(repo, checkout=checkout, python=python)
             if found is not None:
                 out.append(found)
-    out.extend(bench_of(home_dir() if bench_home is None else bench_home))
+    out.extend(bench_of(bench.home_dir() if bench_home is None else bench_home))
     out.extend(builds_of(managed_current() if current is None else current,
                          managed_named() if named is None else named))
     return out
 
 
-def main(argv: list[str] | None = None) -> int:
-    """``ml-stack-doctor`` -- the repositories and the working state, at the start of a
-    session. Exit 0 when every finding is good, 1 otherwise."""
-    ap = argparse.ArgumentParser(
-        prog="ml-stack-doctor",
-        description="Check what ml-stack-setup does not: the checkouts (hooks, working "
-                    "tree, branch, worktrees, the editable install), the bench store "
-                    "(empty runs, a dead lock, a log with no run) and the managed "
-                    "llama.cpp. Offers a fix for what has one; never pushes.")
-    ap.add_argument("--repo", action="append", metavar="PATH",
-                    help="a checkout to look at; may repeat. Default: those "
-                         f"${CHECKOUTS} lists, separated by {os.pathsep!r}")
-    ap.add_argument("--bench-home", metavar="PATH",
-                    help="the bench's home (default: where ml-stack-bench keeps its store)")
-    ap.add_argument("--yes", action="store_true",
-                    help="run every offered fix without asking")
-    args = ap.parse_args(argv)
+def _findings(args) -> int:
+    if args.action == "hooks":
+        return hook_diagnostics.inspect(args)
     say("ml-stack: the repositories and the working state\n")
-    findings = look_checkouts(
+    findings = agent_hooks.findings() + look_checkouts(
         repositories(args.repo) if args.repo else None,
         bench_home=Path(args.bench_home).expanduser() if args.bench_home else None)
     ask(findings, yes=args.yes)
     return 0 if all(f.good for f in findings) else 1
+
+
+COMMAND = Group(
+    "ml-stack-doctor",
+    "Check what ml-stack-setup does not: the checkouts (hooks, working tree, branch, "
+    "worktrees, the editable install), the bench store (empty runs, a dead lock, a log "
+    "with no run) and the managed llama.cpp. Offers a fix for what has one; never pushes.",
+    options=[flag("action", nargs="?", choices=("hooks",), help="inspect local hook failures"),
+             flag("id", nargs="?", help="hook diagnostic ID; omitted lists recent failures"),
+             flag("--repo", action="append", metavar="PATH",
+                  help="a checkout to look at; may repeat. Default: those "
+                       f"${CHECKOUTS} lists, separated by {os.pathsep!r}"),
+             flag("--bench-home", metavar="PATH",
+                  help="the bench's home (default: where ml-stack-bench keeps its store)"),
+             option("yes", help="run every offered fix without asking")],
+    run=_findings,
+    epilog="ml-stack-doctor hooks [ID] inspects local hook failures, first occurrence, "
+           "checkout branch and installed runtime revision.")
+
+
+main = COMMAND.run
 
 
 if __name__ == "__main__":

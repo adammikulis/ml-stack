@@ -1,7 +1,6 @@
 """Fakes with the real signatures, so what the real thing refuses, the fake refuses too.
 
-`mirrors` diffs each against the real one; ``tests/test_testing_fakes.py`` runs it over
-`MIRRORED`.
+`mirrors` diffs each against the real one; ``tests/test_testing_fakes.py`` runs it over `MIRRORED`.
 
 - `FakeClient` / `ScriptedModel`: a `Client` that reaches no server; a scripted model.
 - `FakeServe` / `fake_serve` / `Yielding`: `serve()` that starts nothing.
@@ -14,7 +13,6 @@
 
 from __future__ import annotations
 
-import inspect
 import json
 import os
 import sys
@@ -47,6 +45,8 @@ from ml_stack.serve.backend import (
 )
 from ml_stack.serve.manager import ServerManager, serve
 from ml_stack.serve.preflight import Check, Preflight, Report
+from ml_stack.testing.answers import answers_in
+from ml_stack.testing.rerank_fake import rerank_results
 
 __all__ = [
     "DRAFTING",
@@ -62,13 +62,11 @@ __all__ = [
     "ScriptedModel",
     "Served",
     "Yielding",
-    "drift",
     "fake_binary",
     "fake_llama_binary",
     "fake_llama_server",
     "fake_serve",
     "metrics_text",
-    "mirrors",
     "reply_from",
     "serve_from_argv",
 ]
@@ -330,6 +328,7 @@ class FakeServe:
         manager: ServerManager | None = None,
         **spec_kwargs: object,
     ) -> Iterator[ServerInfo]:
+        spec_kwargs.pop("reason", None)
         spec = ServerSpec(model=model, port=port if port is not None else 1,
                           context=context, **spec_kwargs)  # type: ignore[arg-type]
         self.leased.append(spec)
@@ -439,7 +438,7 @@ class FakeConverse:
 LLAMA_SERVER_FLAGS = (
     "-m, --model FNAME", "-c, --ctx-size N", "-ngl, --gpu-layers, --n-gpu-layers N",
     "-fa, --flash-attn [on|off|auto]", "-np, --parallel N", "--host HOST", "--port PORT",
-    "--alias NAME", "--jinja", "--metrics", "--embeddings", "--pooling TYPE",
+    "--alias NAME", "--api-key KEY", "--jinja", "--metrics", "--embeddings", "--pooling TYPE",
     "-lm, --load-mode MODE", "--no-warmup", "--chat-template-file FNAME", "--cache-reuse N",
     "--cache-ram N", "--cache-idle-slots, --no-cache-idle-slots", "-ctk, --cache-type-k TYPE",
     "-ctv, --cache-type-v TYPE", "-kvu, --kv-unified, --no-kv-unified",
@@ -494,11 +493,10 @@ def metrics_text(counted: Speculative | None) -> str:
 class Served:
     """What a fake llama-server is holding, and what it says when asked.
 
-    ``counted`` standing in for the draft head llama.cpp reports nothing else about:
-    None is a server with no head and no speculative counters on ``/metrics``.
-    ``metrics`` False is a server started without ``--metrics``, which answers 501 there.
-    ``answer`` is the reply a completion comes back with, or a callable given the request
-    body; ``pieces`` is how a streamed one is broken up and ``gap`` the seconds between.
+    ``counted`` standing in for the draft head llama.cpp reports nothing else about: None is a server with no head
+    and no speculative counters on ``/metrics``. ``metrics`` False is a server started without ``--metrics``, which
+    answers 501 there. ``answer`` is the reply a completion comes back with, or a callable given the request body;
+    ``pieces`` is how a streamed one is broken up and ``gap`` the seconds between.
     """
 
     model: str = "quince-2b.gguf"
@@ -517,7 +515,7 @@ class Served:
     @property
     def name(self) -> str:
         """The id ``/v1/models`` lists: the weights file's own name."""
-        return PurePosixPath(self.model).name or self.model
+        return PurePosixPath(self.model.replace("\\", "/")).name or self.model
 
     def props(self) -> dict[str, Any]:
         """``/props``, with the fields `serving_params` and `drafting_of` read."""
@@ -534,7 +532,8 @@ class FakeLlamaServer:
     ``requests`` is every ``(method, path, body)`` it took; ``saved`` and ``restored``
     every slot the manager asked it to write out or read back; ``slots`` the rows
     ``/slots`` answers with, which a test may edit. ``refuse`` maps a path -- with its
-    query, or without -- to the status it answers there instead. ``disconnected`` is set
+    query, or without -- to the status it answers there instead. ``api_key``, when set, is
+    the bearer key every route but ``/health`` demands. ``disconnected`` is set
     when a reader hangs up mid-stream.
     """
 
@@ -546,6 +545,7 @@ class FakeLlamaServer:
         self.slots = [{"id": n, "n_ctx": self.served.context // max(self.served.slots, 1),
                        "is_processing": False} for n in range(self.served.slots)]
         self.refuse: dict[str, int] = {}
+        self.api_key = ""
         self.disconnected = threading.Event()
         self._httpd = Server(("127.0.0.1", port), _routes(self))
         self.port = int(self._httpd.server_address[1])
@@ -621,6 +621,8 @@ class FakeLlamaServer:
             return _json({"content": " ".join(str(n) for n in body.get("tokens") or [])})
         if bare in ("/v1/embeddings", "/embedding", "/embeddings"):
             return _json({"data": [{"index": 0, "embedding": [0.1, 0.2, 0.3]}]})
+        if bare in ("/v1/rerank", "/rerank"):
+            return _json({"results": rerank_results(body)})
         if len(parts) == 2 and parts[0] == "slots" and parts[1].isdigit():
             return self._slot(int(parts[1]), query, body)
         return _json({"error": f"no such route: {bare}"}, status=404)
@@ -650,22 +652,44 @@ def _json(payload: Any, *, status: int = 200) -> tuple[int, str, bytes]:
     return status, "application/json", json.dumps(payload).encode()
 
 
+class _Quiet(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+    log_message = lambda self, *args: None  # noqa: E731
+
+
+def http_handler(route: Callable[[BaseHTTPRequestHandler], None]) -> type[BaseHTTPRequestHandler]:
+    """A quiet HTTP/1.1 handler class that hands every GET and HEAD to ``route``."""
+    return type("_Routed", (_Quiet,), dict.fromkeys(("do_GET", "do_HEAD"), lambda self: route(self)))
+
+
 def _routes(fake: FakeLlamaServer) -> type[BaseHTTPRequestHandler]:
     """A handler class answering ``fake``'s routes."""
 
-    class _H(BaseHTTPRequestHandler):
-        protocol_version = "HTTP/1.1"
+    class _H(_Quiet):
+
+        def _unauthorised(self) -> bool:
+            """Answer 401 and return True when ``fake.api_key`` is set and not presented."""
+            if not fake.api_key or self.path.startswith("/health"):
+                return False
+            if self.headers.get("Authorization") == f"Bearer {fake.api_key}":
+                return False
+            self._answer(*_json({"error": "invalid api key"}, status=401))
+            return True
 
         def do_GET(self) -> None:
             fake.requests.append(("GET", self.path, b""))
-            self._answer(*fake.get(self.path))
+            if not self._unauthorised():
+                self._answer(*fake.get(self.path))
 
         def do_POST(self) -> None:
             length = int(self.headers.get("content-length") or 0)
             raw = self.rfile.read(length) if length else b""
             fake.requests.append(("POST", self.path, raw))
+            if self._unauthorised():
+                return
             body = json_body(raw)
-            if body.get("stream") and self.path.split("?")[0].endswith("/chat/completions"):
+            if (body.get("stream") and self.path.split("?")[0].endswith("/chat/completions")
+                    and fake.refused(self.path) is None):
                 self._stream(fake.frames(body))
                 return
             self._answer(*fake.post(self.path, body))
@@ -691,9 +715,6 @@ def _routes(fake: FakeLlamaServer) -> type[BaseHTTPRequestHandler]:
             except (BrokenPipeError, ConnectionResetError):
                 fake.disconnected.set()
 
-        def log_message(self, *args: object) -> None:
-            pass
-
     return _H
 
 
@@ -710,9 +731,36 @@ def fake_llama_server(served: Served | None = None, *, port: int = 0
 
 # ---------------------------------------------------------------- as a binary
 
+def _windows_fake(where: Path, name: str) -> Path:
+    """Build a Windows executable launcher for the fake program."""
+    from distlib.scripts import ScriptMaker
+
+    maker = ScriptMaker(None, str(where))
+    maker.variants = {""}
+    maker.executable = sys.executable
+    maker.script_template = maker.script_template.replace(
+        "import sys\n", f"import sys\nsys.path.insert(0, {str(_import_root())!r})\n")
+    created = maker.make(f"{name} = ml_stack.testing.fakes:_fake_entry")
+    return Path(created[0])
+
+
+def _fake_entry() -> int:
+    """Run the Windows fake executable's help stub or socket server."""
+    path = Path(sys.argv[0])
+    stub = path.with_suffix(".stub")
+    if stub.is_file():
+        if "--help" in sys.argv[1:]:
+            sys.stdout.write(stub.read_text(encoding="utf-8"))
+        return 0
+    return serve_from_argv(sys.argv[1:], where=path.parent)
+
+
 def fake_binary(where: Path, *, help_text: str = "-m, --model FNAME  model path\n",
                 name: str = "llama-server") -> Path:
     """An executable in ``where`` answering ``--help`` with ``help_text``, exit 0 otherwise."""
+    if os.name == "nt":
+        (where / f"{name}.stub").write_text(help_text, encoding="utf-8")
+        return _windows_fake(where, name)
     path = where / name
     path.write_text("#!/bin/sh\nif [ \"$1\" = --help ]; then cat <<'HELP'\n"
                     + help_text + "HELP\nexit 0\nfi\nexit 0\n")
@@ -735,11 +783,12 @@ def _after(argv: list[str], names: tuple[str, ...]) -> str:
 def serve_from_argv(argv: list[str], *, where: Path) -> int:
     """Serve `fake_llama_server` on the ``--port`` in ``argv`` until the process is killed.
 
-    ``--help`` prints `LLAMA_SERVER_HELP` and returns instead. The argv it was launched
-    with is written to ``argv.json`` in ``where``, for a test asserting on a command line.
+    ``--help`` prints ``help.txt`` from ``where``, else `LLAMA_SERVER_HELP`, and returns
+    instead. The argv it was launched with is written to ``argv.json`` in ``where``.
     """
     if "--help" in argv:
-        sys.stdout.write(LLAMA_SERVER_HELP)
+        stated = where / "help.txt"
+        sys.stdout.write(stated.read_text() if stated.is_file() else LLAMA_SERVER_HELP)
         return 0
     (where / "argv.json").write_text(json.dumps(argv))
     context = _after(argv, _FLAGS["context"])
@@ -749,7 +798,7 @@ def serve_from_argv(argv: list[str], *, where: Path) -> int:
                     context=int(context) if context.isdigit() else 4096,
                     slots=int(slots) if slots.isdigit() else 1,
                     draft=draft, spec_type=_after(argv, _FLAGS["spec_type"]),
-                    counted=DRAFTING if draft else None)
+                    counted=DRAFTING if draft else None, answer=answers_in(where))
     port = _after(argv, _FLAGS["port"])
     FakeLlamaServer(served, port=int(port) if port.isdigit() else 8080)
     threading.Event().wait()
@@ -788,14 +837,21 @@ def _interpreter() -> str:
         else sys.executable
 
 
-def fake_llama_binary(where: Path, *, name: str = "llama-server") -> Path:
-    """An executable in ``where`` that answers ``--help`` and then really serves.
+def fake_llama_binary(where: Path, *, name: str = "llama-server",
+                      help_text: str | None = None) -> Path:
+    """An executable in ``where`` that answers ``--help`` with ``help_text`` and then serves.
 
     Started for real by ``Popen``, it binds the ``--port`` it was given, presents to a
     process scan as ``llama-server``, and answers everything `FakeLlamaServer` answers
     for the model, context, slots and draft head its command line named.
     """
+    if os.name == "nt":
+        if help_text is not None:
+            (where / "help.txt").write_text(help_text, encoding="utf-8")
+        return _windows_fake(where, name)
     path = where / name
+    if help_text is not None:
+        (where / "help.txt").write_text(help_text)
     path.write_text(_LAUNCHER.format(python=sys.executable, interpreter=_interpreter(),
                                      root=str(_import_root())))
     path.chmod(0o755)
@@ -826,55 +882,6 @@ class FakeBackend(ServerBackend):
         return ServerInfo(base_url=f"http://127.0.0.1:{spec.port}", port=spec.port,
                           pid=self.pid + len(self.started), backend=self.name,
                           load_s=self.load_s, warmup_s=self.warmup_s)
-
-
-# ---------------------------------------------------------------- the diff
-
-_VARIADIC = (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
-
-
-def _params(obj: Any) -> dict[str, inspect.Parameter]:
-    """``obj``'s parameters, less a leading ``self`` -- so an unbound method and a plain
-    function that stands in for it compare on what a caller passes."""
-    params = list(inspect.signature(obj).parameters.values())
-    if params and params[0].name == "self":
-        params = params[1:]
-    return {p.name: p for p in params}
-
-
-def drift(fake: Any, real: Any) -> list[str]:
-    """Every way ``fake``'s signature fails to mirror ``real``'s; empty when it does.
-
-    A fake may leave out an *optional* parameter of the real one. It may not take a name
-    the real one lacks, give a shared name a different kind or default, leave out a required
-    one, or take ``*args``/``**kwargs`` the real one does not -- that last is the one that
-    lets a wrong keyword through, and is the reason this module exists.
-    """
-    mine = _params(fake)
-    theirs = _params(real)
-    out: list[str] = []
-    for name, p in mine.items():
-        if p.kind in _VARIADIC:
-            if not any(q.kind is p.kind for q in theirs.values()):
-                out.append(f"takes {p} where the real one takes nothing of the kind")
-            continue
-        if name not in theirs:
-            out.append(f"takes {name!r}, which the real one does not")
-        elif theirs[name].kind is not p.kind:
-            out.append(f"{name!r} is {p.kind.description}; the real one's is "
-                       f"{theirs[name].kind.description}")
-        elif theirs[name].default != p.default:
-            out.append(f"{name!r} defaults to {p.default!r}; the real one's to "
-                       f"{theirs[name].default!r}")
-    for name, q in theirs.items():
-        if name not in mine and q.kind not in _VARIADIC and q.default is inspect.Parameter.empty:
-            out.append(f"leaves out {name!r}, which the real one requires")
-    return out
-
-
-def mirrors(fake: Any, real: Any) -> bool:
-    """True when ``fake`` takes what ``real`` takes -- see `drift` for how it may not."""
-    return not drift(fake, real)
 
 
 MIRRORED: tuple[tuple[str, Any, Any], ...] = (

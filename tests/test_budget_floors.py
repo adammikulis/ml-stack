@@ -18,12 +18,43 @@ FLOORS = "floors-only-rise"
 RECORDED = json.loads((REPO / "budgets.json").read_text(encoding="utf-8"))
 
 
+def test_nested_optional_package_discovery_never_executes_its_parent(tmp_path, monkeypatch):
+    package = tmp_path / 'native_floor_probe'
+    package.mkdir()
+    (package / '__init__.py').write_text("raise RuntimeError('native initialization must not run')\n")
+    (package / 'child.py').write_text('available = True\n')
+    monkeypatch.syspath_prepend(str(tmp_path))
+    assert _floors.installed('native_floor_probe.child')
+    assert not _floors.installed('native_floor_probe.missing')
+    assert 'native_floor_probe' not in sys.modules
+
+
+def test_nested_namespace_presence_and_missing_modules_remain_distinct(tmp_path, monkeypatch):
+    package = tmp_path / 'namespace_floor_probe'
+    package.mkdir()
+    (package / 'child.py').write_text('available = True\n')
+    monkeypatch.syspath_prepend(str(tmp_path))
+    assert _floors.installed('namespace_floor_probe.child')
+    assert not _floors.installed('namespace_floor_probe.absent')
+    assert not _floors.installed('missing_floor_probe.child')
+
+
 def test_the_collected_count_is_recorded_as_a_floor() -> None:
     least = RECORDED.get(FLOORS, {})
     assert _floors.NAME in least, (
         f"budgets.json records no floor for {_floors.NAME} -- run scripts/budgets --update"
     )
     assert isinstance(least[_floors.NAME], int) and least[_floors.NAME] > 0
+
+
+def test_repository_collection_reuses_the_budget_tree_fingerprint(monkeypatch) -> None:
+    seen = []
+    monkeypatch.setattr("gates.repo_fingerprint", lambda: "shared-tree-hash")
+    monkeypatch.setattr(_floors, "remembered",
+                        lambda root, name, compute, salt="", fingerprint="":
+                        seen.append(fingerprint) or [10, 0])
+    assert _floors.collect(REPO) == (10, 0)
+    assert seen == ["shared-tree-hash"]
 
 
 @pytest.mark.slow

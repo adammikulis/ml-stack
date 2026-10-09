@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import importlib.machinery
 import importlib.util
 import os
 import re
@@ -10,7 +11,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-from ._util import dotted, parse, python_files
+from ._perfile import each
+from ._util import dotted, parse, python_files, remembered
 
 NAME = "tests-collected"
 OWNER = ""
@@ -26,25 +28,33 @@ def describe() -> str:
 
 def guards(root: Path) -> list[str]:
     """Every import a test module waits on before it will collect at all."""
-    out = set()
-    for path in python_files(root, ROOTS):
+    def skipped_imports(path: Path) -> list[str]:
         tree = parse(path)
-        if tree is None:
-            continue
-        for node in tree.body:
+        out = set()
+        for node in tree.body if tree is not None else []:
             for inner in ast.walk(node):
                 if not isinstance(inner, ast.Call) or dotted(inner.func) != "pytest.importorskip":
                     continue
                 first = inner.args[0] if inner.args else None
                 if isinstance(first, ast.Constant) and isinstance(first.value, str):
                     out.add(first.value)
-    return sorted(out)
+        return sorted(out)
+
+    found = each(root, python_files(root, ROOTS), skipped_imports, owner=guards)
+    return sorted({name for names in found for name in names})
 
 
 def installed(name: str) -> bool:
-    """Whether this module can be imported here."""
+    """Whether this module is discoverable, without executing native package parents."""
     try:
-        return importlib.util.find_spec(name) is not None
+        parts = name.split('.')
+        spec = importlib.util.find_spec(parts[0])
+        for index in range(1, len(parts)):
+            if spec is None or spec.submodule_search_locations is None:
+                return False
+            spec = importlib.machinery.PathFinder.find_spec(
+                '.'.join(parts[:index + 1]), spec.submodule_search_locations)
+        return spec is not None
     except (ImportError, ValueError):
         return False
 
@@ -61,7 +71,23 @@ def skip(root: Path) -> str:
 
 
 def collect(root: Path) -> tuple[int, int]:
-    """How many tests pytest collects under root, and how many modules failed to."""
+    """How many tests pytest collects under root, and how many modules failed to.
+
+    A tree whose files are byte-identical to one already counted gets the same answer back
+    instead of being collected again.
+    """
+    fingerprint = ""
+    if root.resolve() == Path(__file__).resolve().parents[2]:
+        from . import repo_fingerprint
+
+        fingerprint = repo_fingerprint()
+    counted = remembered(root, "collect", lambda: list(collect_fresh(root)),
+                         ",".join(f"{n}={installed(n)}" for n in guards(root)), fingerprint)
+    return int(counted[0]), int(counted[1])
+
+
+def collect_fresh(root: Path) -> tuple[int, int]:
+    """Collect under root with pytest, whatever was counted before."""
     env = {**os.environ, "PYTHONPATH": os.pathsep.join(
         [str(root / "src"), os.environ.get("PYTHONPATH", "")]).rstrip(os.pathsep)}
     done = subprocess.run([sys.executable, "-m", "pytest", "--collect-only", "-q",

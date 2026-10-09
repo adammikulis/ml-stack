@@ -1,10 +1,14 @@
 """The git hook that lets an agent push the development branch and nothing else."""
 
 import os
+import shlex
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
+
+from ml_stack.workspace.person_ancestry import under_harness
 
 HOOK = Path(__file__).resolve().parent.parent / "scripts" / "hooks" / "pre-push"
 ZERO = "0" * 40
@@ -38,9 +42,17 @@ def push(where: Path, *refs: str, sha: str = "", base: str = ZERO,
          **env: str) -> subprocess.CompletedProcess:
     sha = sha or git(where, "rev-parse", "HEAD")
     lines = "".join(f"refs/heads/{r} {sha} refs/heads/{r} {base}\n" for r in refs)
+    hook = Path(git(where, "rev-parse", "--path-format=absolute", "--git-common-dir")) / "hooks" / "pre-push"
+    hook.write_text("#!/bin/sh\nexec sh " + shlex.quote(HOOK.as_posix()) + " \"$@\"\n",
+                    encoding="utf-8", newline="\n")
+    hook.chmod(hook.stat().st_mode | 0o111)
+    source = hook.parent.parent / "push-input"
+    source.write_text(lines, encoding="utf-8")
     return subprocess.run(
-        [str(HOOK), "origin", "https://example.invalid/x.git"], cwd=where,
-        text=True, capture_output=True, input=lines, env={**os.environ, **env})
+        ["git", "hook", "run", "--to-stdin=" + str(source), "pre-push", "--",
+         "origin", "https://example.invalid/x.git"], cwd=where,
+        text=True, capture_output=True,
+        env={**os.environ, "PYTHON": Path(sys.executable).as_posix(), **env})
 
 
 def test_an_agent_pushes_the_development_branch(checkout):
@@ -61,9 +73,9 @@ def test_main_rides_along_with_the_development_branch_and_is_still_refused(check
     assert "refs/heads/main" in done.stderr and "refs/heads/0.9dev" not in done.stderr
 
 
-def test_main_goes_through_when_the_owner_has_opened_it(checkout):
+def test_the_opener_variable_does_not_open_main_for_an_agent(checkout):
     done = push(checkout, "main", CLAUDECODE="1", ML_STACK_PUSH_MAIN="yes")
-    assert done.returncode == 0, done.stderr
+    assert done.returncode != 0
 
 
 def test_the_opener_opens_main_and_nothing_else(checkout):
@@ -81,6 +93,21 @@ def test_any_other_value_of_the_opener_is_not_one(checkout):
     assert push(checkout, "main", CLAUDECODE="1", ML_STACK_PUSH_MAIN="1").returncode != 0
 
 
+def test_a_new_promote_snapshot_branch_goes_through(checkout):
+    done = push(checkout, "promote/2026-10-08", CLAUDECODE="1")
+    assert done.returncode == 0, done.stderr
+
+
+def test_a_promote_branch_that_already_exists_is_not_rewritten(checkout):
+    sha = git(checkout, "rev-parse", "HEAD")
+    assert push(checkout, "promote/x", base=sha, CLAUDECODE="1").returncode != 0
+
+
+def test_the_refusal_names_the_promotion_pull_request(checkout):
+    done = push(checkout, "main", CLAUDECODE="1")
+    assert "refs/heads/promote/<date>" in done.stderr
+
+
 def test_an_agents_push_of_a_work_branch_is_refused(checkout):
     assert push(checkout, "split-something", CLAUDECODE="1").returncode != 0
 
@@ -95,6 +122,7 @@ def test_main_is_refused_even_when_the_primary_checkout_is_on_it(tmp_path):
     assert push(tmp_path, "main", CLAUDECODE="1").returncode != 0
 
 
+@pytest.mark.skipif(under_harness(), reason="a run under an agent harness is not a person's terminal")
 def test_a_person_is_not_stopped(checkout):
     """No terminal sets CLAUDECODE, and neither does a GUI client, so the owner's own
     push meets nothing -- the one push this hook must never be in the way of."""
@@ -124,16 +152,29 @@ def test_an_agents_push_of_a_data_file_is_refused(checkout):
     assert "store.lbug" in done.stderr
 
 
-def test_a_merged_worktree_blocks_the_development_branch_until_removed_or_locked(checkout):
+def test_a_merged_worktree_is_warned_about_and_never_blocks_the_development_branch(checkout):
     tree = checkout.parent / "done"
     git(checkout, "worktree", "add", "-q", "-b", "done-work", str(tree))
     commit(tree, "work.py", "z = 3\n")
     git(checkout, "merge", "-q", "--ff-only", "done-work")
     done = push(checkout, "0.9dev", CLAUDECODE="1")
-    assert done.returncode != 0
-    assert f"git worktree remove {tree}" in done.stderr
+    assert done.returncode == 0, done.stderr
+    assert "warning" in done.stderr
+    assert shlex.join(["git", "worktree", "remove", tree.as_posix()]) in done.stderr
     git(checkout, "worktree", "lock", str(tree))
-    assert push(checkout, "0.9dev", CLAUDECODE="1").returncode == 0
+    quiet = push(checkout, "0.9dev", CLAUDECODE="1")
+    assert quiet.returncode == 0 and "warning" not in quiet.stderr
+
+
+def test_the_development_branch_pushes_from_a_clean_sibling_worktree(checkout):
+    tree = checkout.parent / "side"
+    git(checkout, "worktree", "add", "-q", "-b", "side-work", str(tree))
+    tip = git(checkout, "rev-parse", "0.9dev")
+    # git exports GIT_DIR to a hook; the hook must still read the primary checkout's branch
+    env = {"CLAUDECODE": "1", "GIT_DIR": git(tree, "rev-parse", "--absolute-git-dir")}
+    assert push(tree, "0.9dev", sha=tip, **env).returncode == 0
+    assert push(tree, "main", sha=tip, **env).returncode != 0
+    assert push(tree, "side-work", sha=tip, **env).returncode != 0
 
 
 def test_a_worktree_with_its_own_commits_does_not_block(checkout):
@@ -146,3 +187,30 @@ def test_a_worktree_with_its_own_commits_does_not_block(checkout):
 def test_a_fresh_worktree_with_no_commits_yet_does_not_block(checkout):
     git(checkout, "worktree", "add", "-q", "-b", "just-started", str(checkout.parent / "fresh"))
     assert push(checkout, "0.9dev", CLAUDECODE="1").returncode == 0
+
+
+@pytest.mark.parametrize("agent", ["", "1"])
+def test_dirty_checkout_warns_and_never_blocks_publication(checkout, agent):
+    (checkout / "pending.txt").write_text("pending")
+    done = push(checkout, "0.9dev", CLAUDECODE=agent)
+    assert done.returncode == 0, done.stderr
+    assert "uncommitted changes" in done.stderr
+
+
+def test_clean_checkout_with_pending_operation_warns_and_never_blocks_publication(checkout):
+    (checkout / ".git" / "CHERRY_PICK_HEAD").write_text(git(checkout, "rev-parse", "HEAD"))
+    done = push(checkout, "0.9dev", CLAUDECODE="1")
+    assert done.returncode == 0, done.stderr
+    assert "unresolved git operation" in done.stderr
+
+
+def test_a_dirty_primary_and_other_worktrees_do_not_block_a_sibling_push(checkout):
+    (checkout / "other-agents-file.txt").write_text("pending")
+    other = checkout.parent / "other"
+    git(checkout, "worktree", "add", "-q", "-b", "other-work", str(other))
+    commit(other, "x.py", "x = 1\n")
+    tree = checkout.parent / "mine"
+    git(checkout, "worktree", "add", "-q", "-b", "mine-work", str(tree))
+    tip = git(checkout, "rev-parse", "0.9dev")
+    env = {"CLAUDECODE": "1", "GIT_DIR": git(tree, "rev-parse", "--absolute-git-dir")}
+    assert push(tree, "0.9dev", sha=tip, **env).returncode == 0

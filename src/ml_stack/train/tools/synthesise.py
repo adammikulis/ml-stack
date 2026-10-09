@@ -181,7 +181,7 @@ def _row(system: str, question: str, tool: str, arguments: dict[str, Any] | None
         assistant: dict[str, Any] = {"role": "assistant", "content": reply}
     else:
         # arguments as a mapping, which is what a chat template renders; the OpenAI wire
-        # shape carries them as a JSON string, and functiongemma's template prints that raw
+        # shape carries them as a JSON string, and the Gemma template prints that raw
         assistant = {"role": "assistant", "content": None, "tool_calls": [
             {"id": "call_0", "type": "function",
              "function": {"name": tool, "arguments": dict(arguments or {})}}]}
@@ -249,7 +249,7 @@ def synthesise(tools: Any, *, prompts: Mapping[str, Sequence[str]] | None = None
     if not schemas:
         raise ValueError("no tools to synthesise from")
     by_name = {_fn(s)["name"]: s for s in schemas}
-    rng = random.Random(seed)
+    rng = random.Random(seed)  # noqa: S311 - a sample, not a secret
     examples = examples_in(schemas, prompts)
 
     rows: list[dict[str, Any]] = []

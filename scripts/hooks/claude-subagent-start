@@ -1,0 +1,100 @@
+#!/usr/bin/env python3
+"""A SubagentStart hook: puts the worktree rule and the development branch in a subagent's context."""
+
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import rules_loader
+import workspace_hook
+
+
+ALIASES = {"sonnet": "claude-sonnet-5-5", "opus": "claude-opus-5-5", "haiku": "claude-haiku-5-5",
+           "fable": "claude-fable-5-1"}
+
+
+def definition_model(event: dict) -> str:
+    """The model id an agent definition's `model:` names, or an empty string when it inherits."""
+    kind = str(event.get("agent_type") or "")
+    root = Path(event.get("cwd") or ".")
+    for path in (root / ".claude" / "agents" / f"{kind}.md", Path.home() / ".claude" / "agents" / f"{kind}.md"):
+        try:
+            head = path.read_text().split("---")[1]
+        except (OSError, IndexError):
+            continue
+        for line in head.splitlines():
+            key, _, value = line.partition(":")
+            if key.strip() == "model":
+                value = value.strip()
+                return ALIASES.get(value, value if value.startswith("claude-") else "")
+    return ""
+
+
+def spawn(event: dict) -> bool:
+    """Ask the board to register this subagent as a child of whoever started it; the board names it."""
+    agent = str(event.get("agent_id") or "")
+    if not agent:
+        workspace_hook.warning("SubagentStart", "the event has no agent_id; the subagent cannot be given its own name")
+        return False
+    parent = workspace_hook.parent_environment(event, "SubagentStart")
+    if parent is None:
+        return False
+    command = ["ml-stack-workspace", "spawn", "--session", agent, "--harness", "claude-code"]
+    model = definition_model(event)
+    if model:
+        command += ["--model", model]
+    return workspace_hook.run(command, "SubagentStart", environment=parent) is not None
+
+
+def workspace_brief(event: dict) -> str:
+    """Register the subagent as its own identity, announce it as itself and return its brief."""
+    if not spawn(event):
+        return ""
+    environment = workspace_hook.own_environment(event, "SubagentStart")
+    if environment is None:
+        return ""
+    purpose = " ".join(str(event.get("description") or event.get("agent_type") or "subagent").split())[:190]
+    workspace_hook.run(["ml-stack-workspace", "announce", "joined", purpose], "SubagentStart", environment=environment)
+    done = workspace_hook.run(["ml-stack-workspace", "brief", "--registered"],
+                              "SubagentStart", environment=environment)
+    return done.stdout.strip() if done else ""
+
+
+def main() -> int:
+    event = workspace_hook.event("SubagentStart")
+    if event is None:
+        return 0
+    rules = rules_loader.load()
+    try:
+        found = rules.checkouts(event.get("cwd") or ".") if rules else None
+    except (OSError, subprocess.TimeoutExpired, ValueError, TypeError) as error:
+        workspace_hook.warning("SubagentStart", error)
+        found = None
+    parts = [workspace_brief(event)]
+    if found:
+        parts.append(checkout_rule(found[1]))
+    text = "\n\n".join(p for p in parts if p)
+    if not text:
+        return 0
+    print(json.dumps({"hookSpecificOutput": {"hookEventName": "SubagentStart",
+                                             "additionalContext": text}}))
+    return 0
+
+
+def checkout_rule(primary: Path) -> str:
+    done = workspace_hook.run(["git", "-C", str(primary), "branch", "--show-current"], "SubagentStart")
+    dev = done.stdout.strip() if done else "unknown"
+    return (f"Checkout rule: the primary checkout {primary} is on the development branch {dev}. "
+            "Use it when that is the best way to complete the task; concurrent writers, experiments "
+            "and conflicts require separate sibling worktrees and branches. Acquire authenticated "
+            "claims before mutation, preserve unrelated work, and stage files by name. "
+            "Independent review and affected tests are required. Never use editable installs "
+            "or commit or push main without the owner's explicit instruction.")
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import contextlib
-import json
 import os
 import secrets
 import subprocess
@@ -14,10 +13,13 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ml_stack.credentials import child_environment
 from ml_stack.log import say
 from ml_stack.platform import process_group_kwargs, stop_gently, stop_pid
 
+from . import job_exit
 from .environment import Environment
+from .job_records import Records, ownership, owns, process_started
 
 
 class DaemonError(RuntimeError):
@@ -32,6 +34,9 @@ class Job:
     cwd: str
     state: str = "queued"          # queued | preparing | running | done | failed | stopped
     pid: int | None = None
+    process_started: float | None = None
+    recovery_note: str = ""
+    capacity_held: bool = False
     returncode: int | None = None
     submitted_at: float = 0.0
     started_at: float | None = None
@@ -42,7 +47,11 @@ class Job:
     started with ``--detach`` writes under the bench's home, and the runner reads that."""
 
     def public(self) -> dict[str, Any]:
+        """The view clients see. A launch in progress is still waiting from where they stand;
+        the durable record keeps the exact state."""
         d = asdict(self)
+        if self.state == "launching":
+            d["state"] = "queued"
         if self.started_at:
             end = self.finished_at or time.time()
             d["elapsed_s"] = round(end - self.started_at, 1)
@@ -66,12 +75,77 @@ class JobRunner:
         self._queue: list[str] = []
         self._running: dict[str, subprocess.Popen] = {}
         self._adopted: set[str] = set()
+        self._starting: set[str] = set()
+        self._recovered: set[str] = set()
+        self._uncertain: set[str] = set()
+        self._settled: dict[str, threading.Event] = {}
         self._lock = threading.Lock()
         self._wake = threading.Event()
         self._stop = threading.Event()
         self._threads: list[threading.Thread] = []
         self._held_because = ""
-        self._spawn(slots)
+        self._records = Records(self.files_root / "jobs")
+        with contextlib.ExitStack() as cleanup:
+            cleanup.callback(self._records.close)
+            self._restore()
+            self._spawn(slots)
+            cleanup.pop_all()
+
+    def _restore(self):
+        for row in self._records.load():
+            values = {key: value for key, value in row.items() if key in Job.__dataclass_fields__}
+            job = Job(**values)
+            self.jobs[job.id] = job
+            if job.state == 'queued' and row.get('version') == 2:
+                self._queue.append(job.id)
+            elif row.get('version') == 2 and job.state == 'running' and owns(job):
+                self._adopted.add(job.id)
+                self._recovered.add(job.id)
+            elif self._finished(job):
+                pass
+            elif job.state in ('queued', 'launching', 'preparing', 'running'):
+                job.capacity_held = ownership(job) is None
+                job.state = 'interrupted'
+                job.finished_at = time.time()
+                job.recovery_note = 'The prior execution outcome is unknown; the job was not replayed.'
+            if job.capacity_held:
+                self._uncertain.add(job.id)
+            self.record(job)
+        self._queue.sort(key=lambda ident: (self.jobs[ident].submitted_at, ident))
+
+    def _finished(self, job):
+        """Settle a job whose process is gone from the exit status its own launcher recorded."""
+        if job.state not in ('launching', 'running') or ownership(job) is not False:
+            return False
+        code = job_exit.read(self.job_dir(job.id), job.pid)
+        if code is None:
+            return False
+        job.returncode, job.finished_at = code, time.time()
+        job.state = 'done' if code == 0 else 'failed'
+        job.capacity_held = False
+        job.recovery_note = 'The job finished while the daemon was restarting; its exit code was recovered.'
+        return True
+
+    def _reconcile(self):
+        for ident in list(self._recovered):
+            job = self.jobs[ident]
+            saved = self._records.read(self.job_dir(ident) / 'job.json')
+            if saved['state'] in ('done', 'failed', 'stopped'):
+                for key in Job.__dataclass_fields__:
+                    if key in saved:
+                        setattr(job, key, saved[key])
+                self._recovered.discard(ident)
+            elif job.state == 'running' and not owns(job) and self._finished(job):
+                self._recovered.discard(ident)
+                self.record(job)
+            elif job.state == 'running' and not owns(job):
+                job.capacity_held = ownership(job) is None
+                if job.capacity_held:
+                    self._uncertain.add(ident)
+                job.state = 'interrupted'
+                job.finished_at = time.time()
+                job.recovery_note = 'The recovered process exited without a durable terminal outcome.'
+                self.record(job)
 
     def _spawn(self, upto: int) -> None:
         while len(self._threads) < upto:
@@ -94,15 +168,17 @@ class JobRunner:
     def status(self) -> dict[str, Any]:
         """Capacity and what is on it. Taken under the lock, because a placement loop"""
         with self._lock:
-            running = sorted({*self._running, *(j for j in self._adopted
+            self._reconcile()
+            running = sorted({*self._running, *self._starting, *self._uncertain, *(j for j in self._adopted
                                                  if self.jobs[j].state == "running")})
-            return {"slots": self.slots, "free": max(0, self.slots - len(running)),
+            return {"slots": self.slots, "free": 0 if self._uncertain else max(0, self.slots - len(running)),
                     "busy": bool(running), "running": running,
                     "queued": len(self._queue)}
 
     def snapshot(self) -> list[dict[str, Any]]:
         """Every job's public view. Copied under the lock -- iterating ``self.jobs``"""
         with self._lock:
+            self._reconcile()
             return [j.public() for j in list(self.jobs.values())]
 
     # -- paths -----------------------------------------------------------
@@ -139,6 +215,7 @@ class JobRunner:
             raise DaemonError("an adopted job needs the pid of the process that owns it")
         job.submitted_at = job.submitted_at or time.time()
         job.started_at = job.started_at or time.time()
+        job.process_started = process_started(job.pid)
         self.job_dir(job.id).mkdir(parents=True, exist_ok=True)
         with self._lock:
             stopped = job.state == "stopped"
@@ -146,7 +223,10 @@ class JobRunner:
                 job.state = "running"
             self.jobs[job.id] = job
             self._adopted.add(job.id)
-        if stopped:
+        if owns(job):
+            job.capacity_held = False
+            self._uncertain.discard(job.id)
+        if stopped and owns(job):
             with contextlib.suppress(OSError):
                 stop_pid(job.pid)
         self.record(job)
@@ -154,7 +234,7 @@ class JobRunner:
 
     def record(self, job: Job) -> None:
         """Write a job's public view beside its log, as `_run_one` does on every change."""
-        (self.job_dir(job.id) / "job.json").write_text(json.dumps(job.public(), indent=2))
+        self._records.write(job)
 
     # -- submission ------------------------------------------------------
     def submit(self, name: str, argv: Iterable[str], cwd: str,
@@ -166,10 +246,10 @@ class JobRunner:
         job = Job(id=job_id, name=name or argv[0], argv=argv, cwd=cwd,
                   submitted_at=time.time(),
                   env={str(k): str(v) for k, v in (env or {}).items()})
-        d = self.job_dir(job_id)
-        d.mkdir(parents=True, exist_ok=True)
-        (d / "job.json").write_text(json.dumps(job.public(), indent=2))
         with self._lock:
+            if self._stop.is_set() or self._records.fd is None:
+                raise DaemonError('the Fleet runner is frozen; submit to its active replacement')
+            self.record(job)
             self.jobs[job_id] = job
             self._queue.append(job_id)
         self._wake.set()
@@ -180,9 +260,13 @@ class JobRunner:
             job = self.jobs.get(job_id)
             if job is None:
                 raise DaemonError(f"unknown job {job_id}")
+            if job_id in self._uncertain:
+                raise DaemonError('this interrupted launch requires verified process recovery before releasing capacity')
             if job.state == "queued":
                 self._queue.remove(job_id)
                 job.state = "stopped"
+                job.finished_at = time.time()
+                self.record(job)
                 return job
             proc = self._running.get(job_id)
             adopted = job_id in self._adopted
@@ -194,7 +278,7 @@ class JobRunner:
             if preparing:
                 job.finished_at = time.time()
                 self.record(job)
-            if adopted and job.state == "running" and job.pid:
+            if adopted and job.state == "running" and job.pid and owns(job):
                 # By pid, never by name: the bench turns the signal into an exit that
                 # takes its served model down, and nobody else's server with it. There
                 # is no Popen to hand `stop_gently`, so `stop_pid` does the same by pid.
@@ -213,6 +297,7 @@ class JobRunner:
         if proc.poll() is None:
             proc.kill()
         job.state = "stopped"
+        self.record(job)
         return job
 
     # -- the loop --------------------------------------------------------
@@ -229,10 +314,15 @@ class JobRunner:
                 if not allowed:
                     continue
             with self._lock:
-                if not self._queue:
+                self._reconcile()
+                busy = len(self._running) + len(self._starting) + len(self._uncertain) + sum(self.jobs[ident].state == "running" for ident in self._adopted)
+                if self._stop.is_set() or self._uncertain or busy >= self.slots or not self._queue:
                     continue
                 job_id = self._queue.pop(0)
                 job = self.jobs[job_id]
+                self._starting.add(job_id)
+                job.state = "launching"
+                self.record(job)
             self._run_one(job)
 
     def _holding(self, why: str) -> None:
@@ -249,48 +339,84 @@ class JobRunner:
         say(f"  holding {waiting} queued job(s): {why}" if why
             else "  taking queued work again", flush=True)
 
-    def _run_one(self, job: Job) -> None:
-        log = self.log_path(job.id)
-        log.parent.mkdir(parents=True, exist_ok=True)
-        env = {**os.environ, **job.env, "PYTHONUNBUFFERED": "1",
+    def _environment(self, job):
+        env = {**child_environment(), **job.env, "PYTHONUNBUFFERED": "1",
                "ML_STACK_JOB_ID": job.id,
                "ML_STACK_JOB_DIR": str(self.job_dir(job.id)),
                "ML_STACK_FILES_ROOT": str(self.files_root),
                "ML_STACK_OUT": str(self.job_dir(job.id) / "out")}
         if self.environment is not None and self.environment.exists:
-            # A job that asks for "python" gets the environment the machine was set up
-            # with, not whatever interpreter happens to be first on PATH -- and in a
-            # bundled install there is no other one.
             env["ML_STACK_PYTHON"] = str(self.environment.python)
             env["PATH"] = os.pathsep.join(
                 [str(self.environment.python.parent), env.get("PATH", "")])
+        return env
+
+    def _launch(self, job, fh, env):
+        """Start the job's process and checkpoint its ownership, or None when admission is frozen."""
+        with self._lock:
+            if self._stop.is_set():
+                return None
+            job.state = 'launching'
+            self.record(job)
+            self._settled[job.id] = threading.Event()
+            job_exit.clear(self.job_dir(job.id))
+            proc = subprocess.Popen(job_exit.command(self.job_dir(job.id), job.argv),
+                                    cwd=job.cwd or None, env=env, stdout=fh, stderr=subprocess.STDOUT,
+                                    **process_group_kwargs())
+            self._starting.discard(job.id)
+            self._running[job.id] = proc
+            job.state = "running"
+            job.pid = proc.pid
+            job.process_started = process_started(proc.pid)
+            job.started_at = time.time()
+            self.record(job)
+            return proc
+
+    def _run_one(self, job: Job) -> None:
+        log = self.log_path(job.id)
+        log.parent.mkdir(parents=True, exist_ok=True)
+        env = self._environment(job)
         try:
+            program = Path(job.argv[0])
+            managed = (program.name in {"python", "python3", "python.exe"}
+                       or program.name.startswith("ml-stack-")
+                       or (self.environment is not None and program == self.environment.python))
+            if self.environment is not None and managed:
+                self.environment.require_current_runtime()
             with log.open("ab") as fh:
                 # Its own process group (a session on POSIX, CREATE_NEW_PROCESS_GROUP on
                 # Windows), so a stop reaches this job and nothing beside it.
-                proc = subprocess.Popen(job.argv, cwd=job.cwd or None, env=env,
-                                        stdout=fh, stderr=subprocess.STDOUT,
-                                        **process_group_kwargs())
-                with self._lock:
-                    self._running[job.id] = proc
-                    job.state = "running"
-                    job.pid = proc.pid
-                    job.started_at = time.time()
+                proc = self._launch(job, fh, env)
+                if proc is None:
+                    return
                 rc = proc.wait()
+                recorded = job_exit.read(self.job_dir(job.id), proc.pid)
+                rc = rc if recorded is None else recorded
         except (OSError, ValueError, subprocess.SubprocessError) as exc:
-            job.state = "failed"
-            job.returncode = -1
-            log.write_text(f"failed to start: {exc}\n")
+            if proc := self._running.get(job.id):
+                self._stop.set()
+                job.recovery_note = 'Process ownership checkpoint failed; admission is frozen.'
+                with log.open('a') as failure_log:
+                    failure_log.write(f'ownership checkpoint failed: {exc}\n')
+                job.returncode = proc.wait()
+                job.state = 'done' if job.returncode == 0 else 'failed'
+            else:
+                job.state = "failed"
+                job.returncode = -1
+                log.write_text(f"failed to start: {exc}\n")
         else:
             job.returncode = rc
             if job.state != "stopped":
                 job.state = "done" if rc == 0 else "failed"
         finally:
-            job.finished_at = time.time()
-            with self._lock:
-                self._running.pop(job.id, None)
-            (self.job_dir(job.id) / "job.json").write_text(
-                json.dumps(job.public(), indent=2))
+            if job.id in self._running or not self._stop.is_set():
+                job.finished_at = time.time()
+                with self._lock:
+                    self._running.pop(job.id, None)
+                    self._starting.discard(job.id)
+                    self.record(job)
+                if settled := self._settled.get(job.id):
+                    settled.set()
             self._wake.set()
 
     def stop_running(self, *, grace_s: float = 30.0) -> list[str]:
@@ -303,14 +429,44 @@ class JobRunner:
                 self.stop(job_id, grace_s=grace_s)
             except DaemonError:
                 continue
-            if job is not None:
+            settled = self._settled.get(job_id)
+            if job is not None and settled and settled.wait(timeout=5):
                 job.state = "queued"
-                job.pid = job.returncode = None
+                job.pid = job.returncode = job.process_started = None
+                job.started_at = job.finished_at = None
+                self.record(job)
                 with self._lock:
                     self._queue.insert(0, job_id)
         self._wake.set()
         return running
 
+    def checkpoint_restart(self) -> dict[str, int]:
+        """Freeze execution and persist process ownership without stopping child processes."""
+        with self._lock:
+            original_queue = list(self._queue)
+            original_states = {ident: self.jobs[ident].state for ident in self._starting}
+            with contextlib.ExitStack() as rollback:
+                rollback.callback(self._restore_checkpoint, original_queue, original_states)
+                for ident in self._starting:
+                    if ident not in self._running:
+                        self.jobs[ident].state = 'queued'
+                        if ident not in self._queue:
+                            self._queue.append(ident)
+                for job in self.jobs.values():
+                    self.record(job)
+                self._stop.set()
+                rollback.pop_all()
+            running = len(self._running) + len(self._uncertain) + sum(self.jobs[ident].state == 'running'
+                                               for ident in self._adopted)
+            return {'queued': len(self._queue), 'running': running}
+
+    def _restore_checkpoint(self, queue, states):
+        self._queue = queue
+        for ident, state in states.items():
+            self.jobs[ident].state = state
+
     def shutdown(self) -> None:
-        self._stop.set()
+        with self._lock:
+            self._stop.set()
+            self._records.close()
         self._wake.set()

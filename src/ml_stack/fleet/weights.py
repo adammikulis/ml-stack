@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import re
 
-from ml_stack.http import ServerError, request_json
+from ml_stack import net
+from ml_stack.http import ServerError
 
 __all__ = ["BESIDE", "QUANTS", "ModelError", "is_a_piece", "is_beside", "quant_in",
            "repo_files", "resolve"]
@@ -15,6 +16,9 @@ class ModelError(RuntimeError):
 
 
 QUANTS = ("q4_k_m", "q4_k_s", "q4_1", "q4_0", "q5_k_m", "q8_0")
+
+
+LISTING = "https://huggingface.co/api/models"
 
 
 def resolve(source: str) -> str:
@@ -41,8 +45,8 @@ def resolve(source: str) -> str:
 def repo_files(owner: str, repo: str) -> list[str]:
     """Every file Hugging Face lists in a repository."""
     try:
-        listed = request_json(f"https://huggingface.co/api/models/{owner}/{repo}",
-                              method="GET", timeout=30, tries=3)
+        listed = net.default().json(f"{LISTING}/{owner}/{repo}",
+                                    net.Ask(purpose="model hub", tries=3))
     except (ServerError, OSError, ValueError) as exc:
         raise ModelError(f"could not read hf:{owner}/{repo}: {exc}") from None
     return [str(f.get("rfilename", "")) for f in listed.get("siblings") or []]
@@ -76,4 +80,6 @@ def is_a_piece(name: str) -> bool:
 def is_beside(name: str) -> bool:
     """Whether a file is an accessory rather than the model itself."""
     stem = name.rsplit("/", 1)[-1].lower()
+    if stem.endswith("-mtp.gguf") and not stem.startswith("mtp-"):
+        return any(word in stem for word in BESIDE if word != "mtp")
     return any(word in stem for word in BESIDE)

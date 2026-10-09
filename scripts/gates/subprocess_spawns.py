@@ -5,15 +5,19 @@ from __future__ import annotations
 from pathlib import Path
 
 from . import Finding
-from ._util import calls, exempt, parse, python_files, rel
+from ._perfile import finder
+from ._util import calls, exempt, parse
 
 NAME = "subprocess-spawns"
 OWNER = "ml_stack.platform"
+INCREMENTAL = True
 ROOTS = ("src/ml_stack",)
 OWNS = (
     "src/ml_stack/platform.py",
     "src/ml_stack/jobs.py",
     "src/ml_stack/serve/backend.py",
+    "src/ml_stack/serve/exit_guard.py",
+    "src/ml_stack/sandbox/run.py",
 )
 
 
@@ -21,16 +25,17 @@ def describe() -> str:
     return "A detached process started here; ml_stack.platform launches and records one."
 
 
-def find(root: Path) -> list[Finding]:
+def scan(path: Path, where: str) -> list[Finding]:
     out = []
-    for path in python_files(root, ROOTS):
-        where = rel(path, root)
-        if exempt(where, OWNS):
-            continue
-        tree = parse(path)
-        if tree is None:
-            continue
-        for node, name in calls(tree):
-            if name == "subprocess.Popen":
-                out.append(Finding(where, node.lineno, "subprocess.Popen"))
+    if exempt(where, OWNS):
+        return out
+    tree = parse(path)
+    if tree is None:
+        return out
+    for node, name in calls(tree):
+        if name == "subprocess.Popen":
+            out.append(Finding(where, node.lineno, "subprocess.Popen"))
     return out
+
+
+find = finder(ROOTS, scan)

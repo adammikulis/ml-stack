@@ -33,7 +33,8 @@ def to_wav_16k(audio: Path | str | bytes, *, sample_rate: int = DEFAULT_SAMPLE_R
 
     data = as_bytes(audio)
     result = subprocess.run(
-        [ffmpeg, "-hide_banner", "-loglevel", "error", "-i", "pipe:0",
+        [ffmpeg, "-hide_banner", "-loglevel", "error",
+         "-protocol_whitelist", "pipe,file,crypto", "-allowed_extensions", "NONE", "-i", "pipe:0",
          "-ar", str(sample_rate), "-ac", "1", "-f", "wav", "pipe:1"],
         input=data,
         capture_output=True,

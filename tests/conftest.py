@@ -12,6 +12,7 @@ from __future__ import annotations
 import contextlib
 import inspect
 import json
+import math
 import os
 import site
 import socket
@@ -19,16 +20,74 @@ import struct
 import subprocess
 import sys
 import threading
+import time
 import types
 from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 
+import psutil
 import pytest
 
 REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO / "tests"))
+sys.path.insert(0, str(REPO))
+
+
+def _no_shadowing_tests_package() -> None:
+    """The repository test package must not resolve to an installed wheel."""
+    import importlib.util
+
+    spec = importlib.util.find_spec("tests")
+    where = [str(p) for p in (spec.submodule_search_locations or [])] if spec else []
+    if spec and spec.origin and not any(Path(p).resolve() == REPO / "tests" for p in where):
+        raise pytest.UsageError(
+            f"a package named 'tests' at {spec.origin} shadows this repo's tests/ (wheels such as confusables and "
+            "ecoji ship one by mistake); remove that directory from site-packages (it holds only their own unit "
+            "tests), or run in a virtual environment")
+
+
+_no_shadowing_tests_package()
+os.environ.setdefault("MLSTACK_GUARD_JUDGE", "off")
 sys.path.insert(0, str(REPO / "src"))
+os.environ["HF_HUB_OFFLINE"] = "1"
+os.environ["ML_STACK_RUNTIME_ENSURE"] = "off"
 sys.path.insert(0, str(REPO / "scripts"))
+
+
+def _no_desktop_notifications() -> None:
+    """A test never raises a real desktop notification or dialog. ``ML_STACK_NOTIFY=console``
+    makes the code under test choose the console, and shims named like the desktop's tools sit
+    first on PATH (so child processes inherit them): a shim records the attempt in
+    ``ML_STACK_SHIM_LOG`` and fails, and the session fails if anything was recorded."""
+    os.environ["ML_STACK_NOTIFY"] = "console"
+    if os.name == "nt":
+        return
+    import tempfile
+
+    shims = Path(tempfile.mkdtemp(prefix="mlstack-shims-"))
+    for name in ("osascript", "notify-send", "zenity", "kdialog", "open", "xdg-open",
+                 "x-terminal-emulator", "gnome-terminal", "konsole", "xterm"):
+        shim = shims / name
+        shim.write_text('#!/bin/sh\necho "$0 $*" >> "$ML_STACK_SHIM_LOG"\nexit 97\n')
+        shim.chmod(0o755)
+    os.environ["ML_STACK_SHIM_LOG"] = str(shims / "attempts.log")
+    os.environ["PATH"] = f"{shims}{os.pathsep}{os.environ.get('PATH', '')}"
+
+
+_no_desktop_notifications()
+os.environ["ML_STACK_AUTHORITY_FLOOR"] = "person"
+"""Every gate reads as a person's in the suite and its children; a test of delegation clears it."""
+os.environ["PYTHON_KEYRING_BACKEND"] = "keyring.backends.fail.Keyring"
+"""A child process a test starts has no keyring that works, so it can never reach the person's own keystore."""
+
+
+def pytest_sessionfinish(session, exitstatus) -> None:
+    """Fail the run if any process of it reached for a desktop notifier."""
+    log = Path(os.environ.get("ML_STACK_SHIM_LOG", ""))
+    if log.is_file() and log.read_text().strip():
+        print(f"\nDESKTOP NOTIFIER CALLED BY THE TESTS:\n{log.read_text()}")
+        session.exitstatus = 1
 
 
 def _install_git_hooks() -> None:
@@ -62,11 +121,40 @@ def _install_git_hooks() -> None:
 _install_git_hooks()
 
 # ``src`` goes on the path above, so these cannot be imported with the rest.
+import testslots  # noqa: E402  (``scripts`` is on the path above)
+from environ_guard import environment_is_restored  # noqa: E402,F401  (an autouse fixture)
+
 from ml_stack.http import Server  # noqa: E402
+from ml_stack.testing import live  # noqa: E402
 from ml_stack.testing.fakes import (  # noqa: E402
     LLAMA_SERVER_HELP as LLAMA_SERVER_HELP,
     fake_binary as fake_binary,
 )
+
+os.environ.setdefault("DEV_TEST_SLOTS_DIR", str(testslots.slots_dir()))
+"""The machine-wide slot directory, fixed before the session moves ``HOME`` so every worker and
+every run shares one set of heavy lanes."""
+
+
+
+def _quick_server_shutdown() -> None:
+    """``BaseServer.shutdown()`` waits for ``serve_forever`` to notice, and it looks once per
+    ``poll_interval`` (half a second by default), so stopping each of the thousand or so servers
+    the suite starts cost a quarter of a second on average: about eight minutes of worker time in
+    teardown. A server in a test process polls every 20 ms instead; a server in a child process
+    is not touched."""
+    import socketserver
+
+    original = socketserver.BaseServer.serve_forever
+
+    def serve_forever(self, poll_interval: float = 0.5) -> None:
+        original(self, min(poll_interval, 0.02))
+
+    socketserver.BaseServer.serve_forever = serve_forever  # type: ignore[method-assign]
+
+
+_quick_server_shutdown()
+
 
 Handler = Callable[[str, str, bytes], tuple[int, bytes]]
 """``(method, path, body) -> (status, response_body)``"""
@@ -147,13 +235,13 @@ def json_reply(payload: object, status: int = 200) -> tuple[int, bytes]:
 #: Environment a developer's shell may carry that would otherwise steer a test: the
 #: variables that move one corner of the state root, and the ones that pick a model or a
 #: ceiling.
-_STEERING = ("MLSTACK_BENCH_CEILING", "MLSTACK_BENCH_HOME", "MLSTACK_BENCH_TRACE",
+_STEERING = ("CODEX_THREAD_ID", "CODEX_SESSION_ID", "MLSTACK_BENCH_CEILING", "MLSTACK_BENCH_HOME", "MLSTACK_BENCH_TRACE",
              "MLSTACK_FIT_FILE", "MLSTACK_INGEST_HOME", "MLSTACK_JOBS_HOME",
              "MLSTACK_KOKORO_MODEL", "MLSTACK_KOKORO_VOICES", "MLSTACK_LIMITS_FILE",
              "MLSTACK_LLAMA_BUILD", "MLSTACK_PIPER_VOICE", "MLSTACK_PROFILES_FILE",
              "MLSTACK_SEARCH", "MLSTACK_TRAIN_CEILING", "MLSTACK_TRAIN_HOME",
              "MLSTACK_WEB_PROFILE", "MLSTACK_WHISPER_CPP_MODEL", "ML_STACK_CHECKOUTS",
-             "ML_STACK_RATES")
+             "ML_STACK_RATES", *live.CREDENTIALS)
 
 
 #: What a store in the suite may hold in memory. Left to the engine it is a share of the
@@ -175,6 +263,7 @@ def _no_machine_state(monkeypatch, tmp_path):
     """
     monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "machine-state"))
     monkeypatch.setenv("MLSTACK_STORE_MEMORY", str(STORE_MEMORY))
+    monkeypatch.setenv("ML_STACK_BROKER_LOCAL", "1")
     for name in _STEERING:
         monkeypatch.delenv(name, raising=False)
 
@@ -182,6 +271,9 @@ def _no_machine_state(monkeypatch, tmp_path):
 
     progress = sys.modules.get("ml_stack.bench.progress") or importlib.import_module(
         "ml_stack.bench.progress")
+    unmanaged = sys.modules.get("ml_stack.serve.unmanaged") or importlib.import_module(
+        "ml_stack.serve.unmanaged")
+    monkeypatch.setattr(unmanaged, "every_server", lambda: [])
     monkeypatch.setattr(progress, "serving_lines", lambda: [])
     monkeypatch.setattr(progress, "beside_on_the_card", lambda: [])
     monkeypatch.setattr(progress, "results_since", lambda started, kept=None: "")
@@ -191,6 +283,21 @@ def _no_machine_state(monkeypatch, tmp_path):
     speech = sys.modules.get("ml_stack.speech") or importlib.import_module("ml_stack.speech")
     for attr in ("ASR", "TTS", "VAD"):
         monkeypatch.setattr(speech, attr, speech.Registry(kind=attr.lower()))
+
+
+@pytest.fixture(autouse=True)
+def _no_reputation_observer_leaks():
+    """The process-wide reputation observer a test installs does not outlive it. One that did made
+    ``127.0.0.1`` a "watch" host for whichever test ran next on the same xdist worker, so a
+    llama.cpp test failed or passed by which neighbours it was scheduled beside."""
+    from ml_stack.sentinel import observers
+
+    before = observers.installed()
+    yield
+    if observers.installed() is not before:
+        observers.uninstall()
+        if before is not None:
+            observers.install(before)
 
 
 @pytest.fixture(autouse=True)
@@ -342,25 +449,21 @@ def fake_memory(*, total: int, available: int, wired: int):
 
 # -- a bench run, without measuring one --------------------------------------------------
 
-def a_row(question: str, *, expected: list[str], shown: list[str], calls: int = 3,
-          chars: int = 200, error: str = "", label: str = "tried"):
+def a_row(question: str, *, expected: list[str], shown: list[str], label: str = "tried", **measurement):
     """One measured question: what was wanted, what the answer showed, what it cost."""
     from ml_stack.bench import Row
 
     return Row(label=label, question=question, expected=expected, shown=shown,
-               calls=calls, answer_chars=chars, error=error)
+               calls=measurement.get("calls", 3), answer_chars=measurement.get("chars", 200), error=measurement.get("error", ""))
 
 
-def scored_rows(label: str, *, questions: int, hits: int, seconds: float,
-                expected: str = "person:iris", miss: list[str] | None = None,
-                question: str = "q{n}?", tokens: tuple[int, int] = (0, 0),
-                draft: tuple[int, int] = (0, 0)) -> list:
-    """``hits`` of ``questions`` answered in full, the rest showing ``miss``, over
-    ``seconds`` altogether -- so the F1 of the run is ``hits / questions`` exactly.
-
-    ``tokens`` is (processed, completion) per row and ``draft`` is (guessed, taken), both
-    of which the report and the rates read; left at zero they are simply not measured.
-    """
+def scored_rows(label: str, *, questions: int, hits: int, seconds: float, **content) -> list:
+    """Create measured rows with a specified number of matching answers."""
+    expected = content.get("expected", "person:iris")
+    miss = content.get("miss", [])
+    question = content.get("question", "q{n}?")
+    tokens = content.get("tokens", (0, 0))
+    draft = content.get("draft", (0, 0))
     out = []
     for n in range(questions):
         row = a_row(question.format(n=n), expected=[expected],
@@ -418,6 +521,120 @@ def _no_real_cache_or_ports(monkeypatch, tmp_path):
     monkeypatch.setenv("ML_STACK_CACHE", str(tmp_path / "cache"))
 
 
+from ml_stack.keystore import ENV_NO_REAL  # noqa: E402
+
+os.environ[ENV_NO_REAL] = "1"
+"""Every process a test starts inherits this: the machine's own keystore reads as absent to it."""
+
+REAL_KEYSTORES = (("macOS", "Keyring"), ("SecretService", "Keyring"), ("Windows", "WinVaultKeyring"),
+                  ("kwallet", "DBusKeyring"), ("libsecret", "Keyring"))
+"""The `keyring` backends that talk to the machine's own keystore: (module, class)."""
+
+
+def refuse_the_real_keystore(*_args, **_kwargs):
+    raise RuntimeError("a test reached the real OS keystore: install a fake keyring backend "
+                       "(tests/memory_keys.py or tests/onboard_support.py) before it runs")
+
+
+def real_keystore_classes() -> list[type]:
+    """The real keystore backends that can be imported here."""
+    import importlib
+
+    found: list[type] = []
+    for module, name in REAL_KEYSTORES:
+        with contextlib.suppress(Exception):
+            found.append(getattr(importlib.import_module(f"keyring.backends.{module}"), name))
+    return found
+
+
+@pytest.fixture(autouse=True)
+def _no_real_keychain(monkeypatch):
+    """No test may read, write or delete an item in the person's own keystore. The real backends
+    refuse, so a test that forgot its fake fails loudly instead of prompting for (or storing)
+    hundreds of Keychain items. Fakes installed through keyring's own interface are untouched."""
+    for backend in real_keystore_classes():
+        for method in ("get_password", "set_password", "delete_password"):
+            monkeypatch.setattr(backend, method, refuse_the_real_keystore)
+
+
+@pytest.fixture(autouse=True)
+def _fake_keyring(monkeypatch):
+    """The keyring is a dictionary unless a test installs its own: code that keeps an encrypted
+    store (the request inbox, the activity log) never needs the person's keystore."""
+    import keyring
+
+    from tests.memory_keys import MemoryRing
+
+    before = keyring.get_keyring()
+    keyring.set_keyring(MemoryRing())
+    yield
+    keyring.set_keyring(before)
+
+
+@pytest.fixture(autouse=True)
+def _activity_log_is_quiet(request, monkeypatch):
+    """Only the activity tests write the activity log; everywhere else `record` does nothing, so
+    a test about something else never asks the keystore for the log's key."""
+    if request.module.__name__.rpartition(".")[2].startswith(("test_activity", "test_redteam_activity")):
+        return
+    from ml_stack.activity import writer
+
+    monkeypatch.setattr(writer, "_put", lambda *_a, **_k: None)
+
+
+@pytest.fixture(autouse=True)
+def _keystore_has_a_person(monkeypatch):
+    """The keystore treats a test as a session with a person present, whatever the host has."""
+    from ml_stack import keystore
+
+    monkeypatch.setattr(keystore, "interactive", lambda: True)
+
+
+@pytest.fixture(autouse=True)
+def _no_internet(monkeypatch, tmp_path):
+    """Every fetch goes through a pipeline that cannot leave this machine.
+
+    The default pipeline admits no host, so a test that reaches for the internet gets a
+    refusal naming the host. A test that serves from a local server installs its own with
+    ``net.use``; ``HF_ENDPOINT`` and the host variables are cleared so a shell cannot steer one.
+    """
+    from ml_stack import net
+    from ml_stack.httpguard import Limits, Refused
+
+    for name in ("HF_ENDPOINT", "ML_STACK_NET_ALLOW_HOSTS", "ML_STACK_FETCH_ALLOW_HOSTS",
+                 "ML_STACK_NET_UNSCANNED", "ML_STACK_NET_SCAN_MODELS", "ML_STACK_NET_HASH_LOOKUP"):
+        monkeypatch.delenv(name, raising=False)
+
+    def nowhere(host, port):
+        raise Refused(f"tests do not reach the internet: {host}")
+
+    sealed = net.Pipeline(policy=net.Policy(allowed=[], path=tmp_path / "net-approvals.jsonl"),
+                          limits=Limits(resolver=nowhere), scanners=[])
+    with net.use(sealed):
+        yield
+
+
+@pytest.fixture(autouse=True)
+def origins():
+    """A fresh record of where each URL a web tool may fetch was seen, for one test."""
+    from ml_stack.net import untrusted
+    from ml_stack.net.policy import default
+
+    with untrusted.using(untrusted.Origins(default())) as fresh:
+        yield fresh
+
+
+@pytest.fixture
+def loopback_net():
+    """The net pipeline allowed to reach 127.0.0.1 (a local test server), scanning with a clean
+    fake, for the block of one test."""
+    from ml_stack import net
+    from tests.web_site import loopback_pipeline
+
+    with net.use(loopback_pipeline()) as pipeline:
+        yield pipeline
+
+
 @pytest.fixture(autouse=True)
 def _no_machine_binary(monkeypatch):
     """No test finds the llama-server this machine happens to have installed.
@@ -449,13 +666,51 @@ def _no_machine_binary(monkeypatch):
     monkeypatch.setattr(binary_module, "machine_binary", withheld)
 
 
+@pytest.fixture(autouse=True)
+def _pages_open_with_a_launch_ticket(monkeypatch):
+    """A Playwright page that opens a test daemon's ``/ui`` carries the launch ticket the app's
+    own window would; `launch_support.hand_typed` opens one without."""
+    try:
+        from playwright.sync_api import Page
+    except ImportError:
+        return
+    import launch_support
+
+    opened = Page.goto
+
+    def goto(self, url, **options):
+        return opened(self, launch_support.with_ticket(url), **options)
+
+    monkeypatch.setattr(Page, "goto", goto)
+
+
 # -- the fixtures above are trusted; these fail the run if that trust is misplaced ------
 
 _GUARDED_PORTS = range(8080, 8100)
 """Where a stray model server would collide with one already serving."""
 
 
+def _testmon_ignores_scripts_without_a_suffix() -> None:
+    """Keep pytest-testmon from recording scripts such as ``scripts/budgets``.
+
+    A few tests import those in-process, and testmon raises on a covered file with no suffix.
+    """
+    try:
+        from testmon.testmon_core import TestmonData
+    except ImportError:
+        return
+    recorded = TestmonData.get_tests_fingerprints
+
+    def get_tests_fingerprints(self, nodes_files_lines, reports):
+        suffixed = {test: {name: lines for name, lines in files.items() if "." in Path(name).name}
+                    for test, files in nodes_files_lines.items()}
+        return recorded(self, suffixed, reports)
+
+    TestmonData.get_tests_fingerprints = get_tests_fingerprints
+
+
 def pytest_configure(config):
+    _testmon_ignores_scripts_without_a_suffix()
     config.addinivalue_line(
         "markers",
         "real_port: exempt from _no_real_ports -- binds or connects to a real port on "
@@ -519,6 +774,60 @@ def _no_real_ports(request):
 
     if violations:
         pytest.fail("a real port was touched:\n" + "\n".join(violations), pytrace=False)
+
+
+@pytest.fixture(autouse=True)
+def _no_public_network(request):
+    """No test resolves, connects to or sends to a host beyond this machine and its LAN.
+
+    A UDP socket may ``connect`` anywhere: that only picks the local address and sends nothing.
+
+    A test marked ``live_api`` or ``live_net`` is skipped unless its switch is set, so what
+    reaches this fixture with one of them is already allowed.
+    """
+    if request.node.get_closest_marker("live_api") or request.node.get_closest_marker("live_net"):
+        yield
+        return
+
+    violations: list[str] = []
+    real_connect, real_connect_ex = socket.socket.connect, socket.socket.connect_ex
+    real_sendto, real_resolve = socket.socket.sendto, socket.getaddrinfo
+
+    def refuse(what: str, host: object) -> None:
+        violations.append(f"{what} {host} at {_call_site()}")
+        raise OSError(f"a test reached {host}: set {live.LIVE_NET}=1 and mark it live_net")
+
+    def connect(self, address):
+        if self.type != socket.SOCK_DGRAM and isinstance(address, tuple) and live.outside(address[0]):
+            refuse("connect to", address[0])
+        return real_connect(self, address)
+
+    def connect_ex(self, address):
+        if self.type != socket.SOCK_DGRAM and isinstance(address, tuple) and live.outside(address[0]):
+            refuse("connect to", address[0])
+        return real_connect_ex(self, address)
+
+    def sendto(self, data, *rest):
+        address = rest[-1]
+        if isinstance(address, tuple) and live.outside(address[0]):
+            refuse("send to", address[0])
+        return real_sendto(self, data, *rest)
+
+    def resolve(host, *args, **kwargs):
+        if live.outside(host):
+            refuse("resolve", host)
+        return real_resolve(host, *args, **kwargs)
+
+    socket.socket.connect, socket.socket.connect_ex = connect, connect_ex
+    socket.socket.sendto, socket.getaddrinfo = sendto, resolve
+    try:
+        yield
+    finally:
+        socket.socket.connect, socket.socket.connect_ex = real_connect, real_connect_ex
+        socket.socket.sendto, socket.getaddrinfo = real_sendto, real_resolve
+
+    if violations:
+        pytest.fail("a real remote host was reached:\n" + "\n".join(violations), pytrace=False)
 
 
 def truncated_logs(before: dict[str, tuple[int, int]],
@@ -598,24 +907,170 @@ def points_at(link) -> str:
         return ""
 
 
-#: Names at the top of the real state root that a process outside the suite rewrites on
-#: its own: a running broker's holders, record and lock, the edit guard's cache, and the
-#: lease file and server logs, which `_real_cache_and_state_untouched` reads by content.
+#: Top-level names in the real state root that something outside the suite rewrites (a running
+#: broker's holders, record and lock, the edit guard's cache, the lease file and logs, which
+#: `_real_cache_and_state_untouched` reads) or that hold built environments, not state.
 LIVE_WRITERS = frozenset({"broker-leases.json", "broker.json", "broker.lock", "servers.json",
-                          "servers.lock", "logs", "guard"})
+                          "servers.lock", "logs", "guard", "runtimes", "traind/env", "spec-venv", "llama.cpp"})
+
+#: Paths below the state root that OTHER agents and test runs on the machine append to while this
+#: run is going (every `scripts/test` run ends by logging to `activity/`; every agent message lands
+#: in `workspace/`), so a write there says nothing about this run. A glob per path, and only logs
+#: and the hub: the keystore, key files, manifests, canaries, honey, requests, credentials and the
+#: sentinel's records stay guarded, because a test that reached for those would be an escape.
+LIVE_PATHS = ("workspace/*", "harness/*", "workspace-connections.json", "workspace-remote/*/worktree-lifecycle.db*", "activity/*/activity.log*", "activity/*/activity.log.lock",
+              "sentinel/events.log*", "sentinel/anchor.log")
 
 
-def file_mtimes(root: Path, skip: frozenset[str] = LIVE_WRITERS) -> dict[str, int]:
+def _live(rel: str) -> bool:
+    import fnmatch
+
+    return rel.endswith(".key") is False and any(fnmatch.fnmatch(rel, g) for g in LIVE_PATHS)
+
+
+def _external_keystore_lock(root: Path, rel: Path) -> bool:
+    if rel.as_posix() not in ("keystore/state.lock", "keystore/flight.lock"):
+        return False
+    try:
+        owner = int((root / rel).read_text(encoding="ascii")[:32].strip())
+    except (OSError, ValueError, UnicodeError):
+        return False
+    return owner > 0 and not ours({"owner_pid": owner})
+
+
+def _external_keystore_rate(root: Path, rel: Path) -> bool:
+    if rel.as_posix() != "keystore/rate.json":
+        return False
+    try:
+        record = json.loads((root / rel).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    if not isinstance(record, dict) or type(record.get("writer_pid")) is not int:
+        return False
+    return record["writer_pid"] > 0 and not ours({"owner_pid": record["writer_pid"]})
+
+
+def _external_harness_key(root: Path, rel: Path) -> bool:
+    import re
+
+    import psutil
+
+    match = re.fullmatch(r"workspace/local-agents/([a-z0-9][a-z0-9._-]{0,47})-chats/harness/"
+                         r"[0-9a-f]{12}/[0-9a-f]{24}/sessions/([1-9][0-9]{0,9})\.[0-9a-f]{64}\.key",
+                         rel.as_posix())
+    if match is None or ours({"owner_pid": int(match[2])}):
+        return False
+    try:
+        process = psutil.Process(int(match[2]))
+        saved = json.loads((root / 'workspace' / 'local-agents' / f'{match[1]}.json').read_text())
+        if not isinstance(saved, dict) or type(saved.get('pid')) is not int:
+            return False
+        parent = next((parent for parent in process.parents() if parent.pid == saved.get('pid')), None)
+        return parent is not None and parent.create_time() == saved.get('process_started')
+    except (OSError, ValueError, psutil.Error):
+        return False
+
+
+def _external_scanner_snapshot(root: Path, rel: Path) -> int:
+    try:
+        beat = json.loads((root / rel).read_text())['payload']
+        pid, started = beat['pid'], beat['started']
+        if type(pid) is not int or pid <= 0 or ours({'owner_pid': pid}) or beat['running'] is not True:
+            return 0
+        process = psutil.Process(pid)
+        born = process.create_time()
+        values = (born, started, beat['beat'], beat['interval_s'])
+        if any(type(value) not in (int, float) or not math.isfinite(value) or value <= 0 for value in values):
+            return 0
+        if beat['interval_s'] > 86400 or not process.is_running() or born > started or started > beat['beat']:
+            return 0
+        if beat.get('process_started', born) != born or not 0 <= time.time() - beat['beat'] <= 3 * beat['interval_s'] + 5:
+            return 0
+        return pid
+    except (OSError, ValueError, KeyError, TypeError, psutil.Error):
+        return 0
+
+
+def _external_scanner_write(root: Path, rel: Path) -> bool:
+    if rel.as_posix() not in ('sentinel/scanner.json', 'sentinel/scanner.json.prev', 'sentinel/state.lock'):
+        return False
+    if rel.name != 'state.lock':
+        return bool(_external_scanner_snapshot(root, rel))
+    try:
+        words = (root / rel).read_text(encoding='ascii').split()
+        pid = int(words[1]) if len(words) >= 2 and words[0] == 'pid' else int(words[0])
+        return pid in {_external_scanner_snapshot(root, Path('sentinel/scanner.json')),
+                       _external_scanner_snapshot(root, Path('sentinel/scanner.json.prev'))} and pid > 0
+    except (OSError, ValueError, IndexError, UnicodeError):
+        return False
+
+
+
+def _activity_writer_user(process, user: int) -> bool:
+    """Match an activity writer to the directory's operating-system account."""
+    if hasattr(process, "uids"):
+        return process.uids().real == user
+    return (sys.platform == "win32" and user == 0
+            and process.username() == psutil.Process().username())
+
+
+def _external_activity_drop_write(root: Path, rel: Path) -> bool:
+    if len(rel.parts) != 3 or rel.parts[0] != 'activity' or rel.name != 'drops.json':
+        return False
+    user = rel.parts[1].removeprefix('u-')
+    if not rel.parts[1].startswith('u-') or not user.isascii() or not user.isdigit():
+        return False
+    try:
+        record = json.loads((root / rel).read_text())
+        pid, born, written = record['writer_pid'], record['writer_started'], record['writer_at']
+        if type(pid) is not int or pid <= 0 or ours({'owner_pid': pid}):
+            return False
+        if type(born) not in (int, float) or type(written) not in (int, float):
+            return False
+        process = psutil.Process(pid)
+        return (process.is_running() and process.create_time() == born
+                and _activity_writer_user(process, int(user)) and born <= written
+                and 0 <= time.time() - written <= 60)
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, psutil.Error):
+        return False
+
+def _external_board_write(root: Path, rel: Path) -> bool:
+    """Whether ``rel`` is under a directory a live process outside this session serves."""
+    from tests.foreign_writers import served_by_foreign
+
+    return served_by_foreign(root, rel, ours)
+
+
+def _external_state_write(root: Path, rel: Path) -> bool:
+    return (_external_keystore_lock(root, rel) or _external_board_write(root, rel)
+            or _external_keystore_rate(root, rel)
+            or _external_harness_key(root, rel) or _external_scanner_write(root, rel)
+            or _external_activity_drop_write(root, rel))
+
+
+def real_state_changes(root: Path, before: dict[str, int], after: dict[str, int]) -> list[str]:
+    from tests.foreign_writers import held_by_foreign
+
+    names = [n for n in changed_files(before, after) if not _external_state_write(root, Path(n))]
+    foreign = held_by_foreign(root, [Path(n) for n in names]) if names else set()
+    return [n for n in names if Path(n) not in foreign]
+
+
+def file_mtimes(root: Path, skip: frozenset[str] = LIVE_WRITERS, *, attribute_external: bool = True) -> dict[str, int]:
     """Every file under ``root`` by relative path with its mtime in ns, leaving out the
     top-level names in ``skip`` and atomic-write temporaries; empty when ``root`` is absent."""
     out: dict[str, int] = {}
     for dirpath, dirnames, filenames in os.walk(root):
         rel = Path(dirpath).relative_to(root)
+        dirnames[:] = [d for d in dirnames if (rel / d).as_posix() not in skip]
         if not rel.parts:
-            dirnames[:] = [d for d in dirnames if d not in skip]
             filenames = [f for f in filenames if f not in skip]
         for name in filenames:
             if name.endswith(".tmp"):
+                continue
+            if attribute_external and skip is LIVE_WRITERS and _external_state_write(root, rel / name):
+                continue
+            if skip is LIVE_WRITERS and _live((rel / name).as_posix()):
                 continue
             try:
                 out[(rel / name).as_posix()] = (Path(dirpath) / name).lstat().st_mtime_ns
@@ -630,6 +1085,20 @@ def changed_files(before: dict[str, int], after: dict[str, int]) -> list[str]:
 
 
 @pytest.fixture(scope="session", autouse=True)
+def _public_suffix_list_is_the_bundled_one():
+    """tldextract reads the list it ships instead of fetching the current one from the web."""
+    try:
+        import tldextract.tldextract as module
+    except ImportError:
+        yield
+        return
+    kept = module.TLD_EXTRACTOR
+    module.TLD_EXTRACTOR = module.TLDExtract(cache_dir=None, suffix_list_urls=())
+    yield
+    module.TLD_EXTRACTOR = kept
+
+
+@pytest.fixture(scope="session", autouse=True)
 def _real_home(tmp_path_factory):
     """The real state and cache roots, captured before the session moves ``HOME``,
     ``ML_STACK_HOME`` and ``ML_STACK_CACHE`` into a temporary directory; fails the run when
@@ -637,7 +1106,9 @@ def _real_home(tmp_path_factory):
     from ml_stack import home
 
     real = types.SimpleNamespace(state=home.home(), cache=home.cache())
-    before = file_mtimes(real.state)
+    from state_attribution import Watch
+
+    watch = Watch(real.state, lambda r: file_mtimes(r, attribute_external=False), lambda b, a: real_state_changes(real.state, b, a))
     away = tmp_path_factory.mktemp("home")
     account = home.user_home()
     browsers = account / ("Library/Caches" if sys.platform == "darwin" else ".cache")
@@ -646,14 +1117,14 @@ def _real_home(tmp_path_factory):
         mp.setenv("PYTHONUSERBASE", site.getuserbase())
         mp.setenv("PLAYWRIGHT_BROWSERS_PATH",
                   os.environ.get("PLAYWRIGHT_BROWSERS_PATH") or str(browsers / "ms-playwright"))
+        # matplotlib rebuilds its font list in an empty HOME, once per worker
+        mp.setenv("MPLCONFIGDIR", os.environ.get("MPLCONFIGDIR") or str(browsers / "matplotlib"))
         mp.setenv("HOME", str(away))
         mp.setenv("ML_STACK_HOME", str(away / ".ml-stack"))
         mp.setenv("ML_STACK_CACHE", str(away / ".cache" / "ml_stack"))
         yield real
-    written = changed_files(before, file_mtimes(real.state))
-    if written:
-        pytest.fail(f"the real state root {real.state} was written during the run: "
-                    + ", ".join(written[:20]), pytrace=False)
+    if failure := watch.settle():
+        pytest.fail(failure, pytrace=False)
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -756,9 +1227,9 @@ def leased(backend, spec, **starting):
     return ServerManager(backend=backend, state_file=state).lease(spec, roam=False, **starting)
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="module")
 def playwright():
-    """The one Playwright this worker gets; a second in the same thread refuses."""
+    """The shared Playwright context for this test module."""
     pw = pytest.importorskip("playwright.sync_api", reason="ml-stack[scrape]")
     with pw.sync_playwright() as play:
         yield play
@@ -768,15 +1239,33 @@ def pytest_addoption(parser) -> None:
     parser.addoption("--slow", action="store_true", default=False,
                      help="also run the tests marked slow (a browser, a subprocess, a "
                           "wheel build, a network timeout)")
+    parser.addoption("--redteam", action="store_true", default=False,
+                     help="also run the tests marked redteam (they need the redteam extra)")
+
+
+def heavy_modules() -> frozenset[str]:
+    """The test modules listed in ``tests/heavy-modules.txt``, one file name per line."""
+    listed = (Path(__file__).parent / "heavy-modules.txt").read_text(encoding="utf-8")
+    return frozenset(line.split("#")[0].strip() for line in listed.splitlines()
+                     if line.split("#")[0].strip())
 
 
 def pytest_collection_modifyitems(config, items) -> None:
-    """Leave the slow tests out unless --slow was asked for."""
-    if config.getoption("--slow"):
+    """Mark the modules in ``heavy-modules.txt``, skip the live tests nobody switched on, leave
+    the slow tests out unless --slow, and the redteam tests out unless --redteam."""
+    heavy = heavy_modules()
+    for item in items:
+        if Path(str(item.fspath)).name in heavy:
+            item.add_marker(pytest.mark.heavy)
+        reason = live.skip_reason((m.name for m in item.iter_markers()), os.environ)
+        if reason:
+            item.add_marker(pytest.mark.skip(reason=reason))
+    left_out = [name for name in ("slow", "redteam") if not config.getoption(f"--{name}")]
+    if not left_out:
         return
     kept, dropped = [], []
     for item in items:
-        (dropped if "slow" in item.keywords else kept).append(item)
+        (dropped if any(item.get_closest_marker(name) for name in left_out) else kept).append(item)
     if dropped:
         config.hook.pytest_deselected(items=dropped)
         items[:] = kept

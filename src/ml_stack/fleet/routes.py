@@ -1,9 +1,4 @@
-"""The ``/ui/*`` route table: one mixin per screen, composed into `Router`.
-
-`Base` holds the request and how to answer it; each mixin answers the paths of one screen
-and hands anything else on. `Router.run` puts them in order: the page and its files, then
-setup and session, then everything a session is needed for.
-"""
+"""UI routes with owner authentication and screen mixins."""
 
 from __future__ import annotations
 
@@ -14,16 +9,45 @@ from importlib.util import find_spec
 from pathlib import Path
 from typing import Any
 
+from ml_stack.ui import assets as ui_assets
+
+from . import (
+    component_routes,
+    credential_routes,
+    invite_routes,
+    lan_clusters,
+    project_client,
+    recovery,
+)
+from .chat_routes import ChatRoutes
 from .discovery import (
     DiscoveryError,
     cluster_group,
-    derive_token,
     in_cluster,
     load_cluster_key,
+    memberships,
+    require_name,
 )
+from .extension_routes import ExtensionRoutes
+from .gym_recording_routes import GymRecordingRoutes
+from .gym_routes import GymRoutes
+from .initial_setup_routes import InitialSetupRoutes
+from .knowledge_routes import KnowledgeRoutes
+from .launch_routes import LaunchRoutes
+from .onboard.clusters import known_clusters
+from .onboard.joining import JoinOptions, cluster_action, join_by_passphrase
 from .page import COMPONENTS, render
+from .page_security import PAGE_HEADERS
 from .pausing import minutes_of
+from .project_board_routes import ProjectBoardRoutes
+from .room_routes import RoomRoutes
+from .runtime_repair_routes import RuntimeRepairRoutes
 from .session import parse_cookie
+from .setup_jobs import jobs, libraries, provenance, server
+from .setup_recovery_routes import SetupRecoveryRoutes
+from .startup_models import choices
+from .themes import default_appearance, registry, resolve
+from .workspace_routes import WorkspaceRoutes
 
 ASSETS = Path(__file__).parent / "web"
 
@@ -35,6 +59,15 @@ def asset_bytes(name: str) -> tuple[bytes, str] | None:
     """One file from ``web/``, by exact name."""
     allowed = {p.name: p for p in ASSETS.iterdir() if p.is_file()} if ASSETS.is_dir() else {}
     path = allowed.get(name)
+    if path is None:
+        return None
+    kind, _ = mimetypes.guess_type(name)
+    return path.read_bytes(), kind or "application/octet-stream"
+
+
+def ui_asset(name: str) -> tuple[bytes, str] | None:
+    """One file from the ml-ui folder, by exact name."""
+    path = ui_assets().get(name)
     if path is None:
         return None
     kind, _ = mimetypes.guess_type(name)
@@ -69,11 +102,17 @@ def _whole(text: str) -> int:
 def write(handler: Any, code: int, raw: bytes, content_type: str,
           extra: dict[str, str] | None = None) -> None:
     """Write one response whose body is bytes."""
+    kind = content_type.replace("\r", "").replace("\n", "")
+    if kind != content_type:
+        raise ValueError("the content type carries a line break")
     handler.send_response(code)
-    handler.send_header("Content-Type", content_type)
+    handler.send_header("Content-Type", kind)
     handler.send_header("Content-Length", str(len(raw)))
     for key, value in (extra or {}).items():
-        handler.send_header(key, value)
+        clean = value.replace("\r", "").replace("\n", "")
+        if clean != value or "\r" in key or "\n" in key:
+            raise ValueError(f"header {key!r} carries a line break")
+        handler.send_header(key, clean)
     handler.end_headers()
     if handler.command != "HEAD":
         handler.wfile.write(raw)
@@ -146,7 +185,18 @@ class PageRoutes:
             except OSError:
                 self.send(500, {"error": "the UI assets are missing from this install"})
                 return True
-            write(self.handler, 200, page.encode("utf-8"), "text/html; charset=utf-8")
+            write(self.handler, 200, page.encode("utf-8"), "text/html; charset=utf-8", PAGE_HEADERS)
+            return True
+        if self.path in ("/ui/gallery", "/ui/gallery/"):
+            self.send(302, {}, {"Location": "/ui/ml-ui/gallery.html"})
+            return True
+        if self.path.startswith("/ui/ml-ui/"):
+            asset = ui_asset(self.path[len("/ui/ml-ui/"):])
+            if asset is None:
+                self.send(404, {"error": "no such asset"})
+                return True
+            write(self.handler, 200, asset[0], asset[1],
+                  {"Cache-Control": "no-cache", "X-Content-Type-Options": "nosniff"})
             return True
         if self.path.startswith("/ui/static/"):
             asset = asset_bytes(self.path[len("/ui/static/"):])
@@ -156,6 +206,14 @@ class PageRoutes:
             write(self.handler, 200, asset[0], asset[1], {"Cache-Control": "no-cache"})
             return True
         return super().open_route()
+
+
+def found_clusters(routes: Any) -> bool:
+    """Answer with the clusters on this machine and those the network offers."""
+    ui = routes.ui
+    found = known_clusters(ui.cluster_key_path, port=ui.discovery_port, self_names=(ui.name,))
+    routes.send(200, {"found": [c.public() for c in found]})
+    return True
 
 
 class SetupRoutes:
@@ -171,6 +229,21 @@ class SetupRoutes:
             return True
         if self.path == "/ui/setup/join" and self.method == "POST":
             return self._join()
+        if self.path == "/ui/setup/clusters" and self.method == "GET":
+            why = self._may_setup() if not in_cluster(self.ui.cluster_key_path) else ""
+            if why:
+                self.send(403, {"error": why})
+            elif in_cluster(self.ui.cluster_key_path) and not self.ui.authed(self.cookie):
+                self.send(401, {"error": "sign in to discover clusters"})
+            else:
+                try:
+                    self.send(200, {"clusters": lan_clusters.nearby(port=self.ui.discovery_port),
+                                    "found": [c.public() for c in known_clusters(
+                                        self.ui.cluster_key_path, port=self.ui.discovery_port,
+                                        self_names=(self.ui.name,))]})
+                except OSError:
+                    self.send(503, {"error": "LAN discovery is unavailable; enter the cluster name manually."})
+            return True
         if self.path == "/ui/setup/suggest" and self.method == "GET":
             return self._suggest()
         if self.path in ("/ui/setup/prefs", "/ui/setup/done") and self.method == "POST":
@@ -194,8 +267,14 @@ class SetupRoutes:
                 return True
         req = self.body()
         try:
+            if not isinstance(req.get("existing", False), bool):
+                raise DiscoveryError("existing cluster selection must be true or false")
+            held = ui.sessions.get(parse_cookie(self.cookie))
             state, sid = ui.join(str(req.get("passphrase") or ""),
-                                 str(req.get("group") or ""), self.client_ip)
+                                 require_name(req.get("group")), self.client_ip,
+                                 options=JoinOptions(action=req.get("mode"), existing=req.get("existing") is True,
+                                                     mode=req.get("cluster_mode")),
+                                 origin=held.origin if held is not None and held.credentialed else "")
         except DiscoveryError as exc:
             self.send(429 if "attempts" in str(exc) or "busy" in str(exc) else 400,
                       {"error": str(exc)})
@@ -298,8 +377,13 @@ class SettingsRoutes:
     """Settings, the libraries this machine has, and taking the install off it."""
 
     def route(self) -> bool:
+        if self.path == "/ui/setup/jobs" and self.method == "GET":
+            self.send(200, {"jobs": jobs(self.ui).all() if self.ui.root else []})
+            return True
         if self.path == "/ui/settings":
             return self._settings()
+        if self.path == "/ui/credentials":
+            return credential_routes.route(self) or super().route()
         if self.path == "/ui/libraries":
             return self._libraries()
         if self.path == "/ui/uninstall":
@@ -313,6 +397,8 @@ class SettingsRoutes:
             from .updates import current_version
             self.send(200, {
                 "settings": ui.settings.public() if ui.settings else {},
+                "theme_registry": registry(),
+                "resolved_theme": resolve(ui.settings.appearance if ui.settings else default_appearance()),
                 "name": ui.name,
                 "group": cluster_group(ui.cluster_key_path),
                 "version": current_version(),
@@ -334,7 +420,7 @@ class SettingsRoutes:
         report = ui.report() if callable(ui.report) else {}
         vendor = str(report.get("vendor") or "cpu")
         if self.method == "GET":
-            self.send(200, ui.environment.state(vendor))
+            self.send(200, {**ui.environment.state(vendor), "jobs": jobs(ui).all() if ui.root else []})
             return True
         if self.method == "POST":
             return self._change_libraries(vendor)
@@ -343,17 +429,21 @@ class SettingsRoutes:
     def _change_libraries(self, vendor: str) -> bool:
         req = self.body()
         add = [str(s) for s in req.get("install") or []]
-        drop = [str(s) for s in req.get("remove") or []]
-        out: dict[str, Any] = {}
-        try:
-            if drop:
-                out.update(self.ui.environment.uninstall(drop))
-            if add:
-                out.update(self.ui.environment.install(add))
-        except OSError as exc:
-            self.send(400, {"error": str(exc)})
+        settings = self.ui.settings
+        if add and settings is not None and settings.download_sources not in ("internet", "both"):
+            self.send(409, {"error": "Installing training libraries requires Internet only or Both download sources."})
             return True
-        self.send(200, {"changed": out, **self.ui.environment.state(vendor)})
+        drop = [str(s) for s in req.get("remove") or []]
+        if self.ui.root is None:
+            self.send(501, {"error": "this daemon does not know where to keep setup jobs"})
+            return True
+        try:
+            job = jobs(self.ui).start("libraries", {"install": add, "remove": drop},
+                                      lambda progress: libraries(self.ui, vendor, add, drop, progress), provenance=provenance(self))
+        except ValueError as exc:
+            self.send(429, {"error": str(exc)})
+            return True
+        self.send(202, {"ok": True, "job": job})
         return True
 
     def _uninstall(self) -> bool:
@@ -380,12 +470,24 @@ class ModelRoutes:
     """The models here and elsewhere, what may be downloaded, and what is being served."""
 
     def route(self) -> bool:
+        if component_routes.route(self):
+            return True
+        if self.path == "/ui/models/startup" and self.method == "GET":
+            ui = self.ui
+            self.send(200, choices(disk_gb=ui.models.free_gb() if ui.models else 0,
+                                   installed=(m.name for m in ui.models.all()) if ui.models else ()))
+            return True
         if self.path == "/ui/models/popular" and self.method == "GET":
             return self._popular()
         if self.path == "/ui/models":
             return self._models()
-        if self.path == "/ui/serving/install" and self.method == "POST":
-            return self._install_server()
+        if self.path == "/ui/serving/install":
+            if self.method == "GET":
+                rows = [row for row in jobs(self.ui).all() if row["kind"] == "server"] if self.ui.root else []
+                self.send(200, rows[-1] if rows else {"state": "idle", "note": ""})
+                return True
+            if self.method == "POST":
+                return self._install_server()
         if self.path == "/ui/serving":
             return self._serving()
         return super().route()
@@ -452,6 +554,7 @@ class ModelRoutes:
                 elsewhere.setdefault(str(row.get("name")), []).append(str(beacon.get("name")))
         self.send(200, {
             "here": [m.public() for m in ui.models.all()],
+            "library": ui.models.library(),
             "elsewhere": [{"name": n, "peers": p}
                           for n, p in sorted(elsewhere.items()) if n not in here],
             "free_gb": free,
@@ -470,7 +573,15 @@ class ModelRoutes:
         if not name:
             self.send(400, {"error": "no model was named"})
             return True
+        try:
+            components = component_routes.selected(ui.models, req, key)
+        except (ModelError, ValueError) as exc:
+            self.send(400, {"error": str(exc)})
+            return True
         if ui.downloads is None:
+            if components:
+                self.send(501, {"error": "Background component downloads are unavailable"})
+                return True
             try:
                 got = ui.models.ensure(name, source=str(req.get("source") or ""), key=key,
                                        autodownload=auto_models)
@@ -480,12 +591,19 @@ class ModelRoutes:
             self.send(200, got.public())
             return True
         here = ui.models.find(name)
-        if here is not None:
+        if here is not None and not components:
             self.send(200, here.public())
             return True
-        started = ui.downloads.start(name, source=str(req.get("source") or ""),
+        if ui.settings is not None and not ui.settings.download_sources:
+            self.send(409, {"error": "Choose download sources in Settings before downloading a model."})
+            return True
+        source = str(req.get("source") or "")
+        integrated = next((row for row in components if row["packaging"] == "integrated"), None)
+        if integrated and here is None:
+            name, source = integrated["name"], integrated["ref"]
+        started = ui.downloads.start(name, source=source,
                                      key=key, autodownload=auto_models,
-                                     draft=str(req.get("draft") or ""))
+                                     components=components)
         self.send(202, started.public())
         return True
 
@@ -498,13 +616,12 @@ class ModelRoutes:
             self.send(501, {"error": "this install cannot run a model itself; a machine "
                                      "on your network can serve one instead"})
             return True
-        from .llama import LlamaError, ensure_server
         try:
-            got = ensure_server(ui.root)
-        except LlamaError as exc:
-            self.send(400, {"error": str(exc)})
+            job = jobs(ui).start("server", {}, lambda progress: server(ui, progress), provenance=provenance(self))
+        except ValueError as exc:
+            self.send(429, {"error": str(exc)})
             return True
-        self.send(200, {"ok": True, "server": str(got)})
+        self.send(202, {"ok": True, "job": job})
         return True
 
     def _serving(self) -> bool:
@@ -531,7 +648,11 @@ class ModelRoutes:
                                      "machine on your network can serve one instead"})
             return True
         req = self.body()
-        found = ui.models.find(str(req.get("name") or "")) if ui.models else None
+        path = req.get("path")
+        found = ui.models.library_model(path) if ui.models and isinstance(path, str) else None
+        if found is None and not path and ui.models:
+            legacy = ui.models.find(str(req.get("name") or ""))
+            found = ui.models.library_model(str(legacy.path)) if legacy else None
         if found is None:
             self.send(404, {"error": "no such model on this machine"})
             return True
@@ -542,122 +663,6 @@ class ModelRoutes:
             return True
         self.send(201, served.public())
         return True
-
-
-class ChatRoutes:
-    """The kept conversations, and a question put to whatever is serving a model."""
-
-    def route(self) -> bool:
-        if self.path.startswith("/ui/conversations"):
-            return self._conversations()
-        if self.path == "/ui/chat":
-            return self._chat()
-        return super().route()
-
-    def _conversations(self) -> bool:
-        ui = self.ui
-        if ui.conversations is None:
-            self.send(501, {"error": "no chat store on this daemon"})
-            return True
-        rest = self.path[len("/ui/conversations"):].strip("/")
-        if rest:
-            return self._one_conversation(rest)
-        if self.method == "GET":
-            self.send(200, {"conversations": [
-                c.public(full=False) for c in ui.conversations.search(self.asked("q"))]})
-            return True
-        if self.method == "POST":
-            req = self.body()
-            made = ui.conversations.start(model=str(req.get("model") or ""),
-                                          title=str(req.get("title") or ""))
-            self.send(201, made.public())
-            return True
-        return super().route()
-
-    def _one_conversation(self, rest: str) -> bool:
-        ui = self.ui
-        found = ui.conversations.get(rest)
-        if found is None:
-            self.send(404, {"error": "no such chat"})
-            return True
-        if self.method == "GET":
-            self.send(200, found.public())
-            return True
-        if self.method == "DELETE":
-            ui.conversations.remove(rest)
-            self.send(200, {"removed": rest})
-            return True
-        if self.method == "POST":
-            renamed = ui.conversations.rename(rest, str(self.body().get("title") or ""))
-            self.send(200, renamed.public(full=False))
-            return True
-        return super().route()
-
-    def _chat(self) -> bool:
-        from .chat import targets
-        ui = self.ui
-        key = load_cluster_key(ui.cluster_key_path)
-        available = targets(ui.peers() if key is not None else [], ui.serving,
-                            derive_token(key) if key else "")
-        if self.method == "GET":
-            self.send(200, {"models": [t.public() for t in available]})
-            return True
-        if self.method == "POST":
-            return self._say(available)
-        return super().route()
-
-    def _say(self, available: list) -> bool:
-        from .chat import ChatError, find, reply_text, stream
-        req = self.body()
-        target = find(available, str(req.get("model") or ""))
-        if target is None:
-            self.send(503, {"error": "no machine on this network is serving a model"})
-            return True
-        messages = [m for m in (req.get("messages") or [])
-                    if isinstance(m, dict) and m.get("content")]
-        if not messages:
-            self.send(400, {"error": "nothing to send"})
-            return True
-        payload = {"model": target.model, "messages": messages, "stream": True}
-        if req.get("temperature") is not None:
-            payload["temperature"] = float(req["temperature"])
-        try:
-            pieces = stream(target, payload)
-            first = next(pieces, b"")
-        except ChatError as exc:
-            self.send(502, {"error": str(exc)})
-            return True
-        cid = str(req.get("conversation") or "")
-        if self.ui.conversations is not None and cid:
-            self.ui.conversations.append(cid, "user", str(messages[-1]["content"]))
-        said = self._relay(target, first, pieces)
-        if self.ui.conversations is not None and cid:
-            spoken = reply_text(said)
-            if spoken:
-                self.ui.conversations.append(cid, "assistant", spoken)
-        return True
-
-    def _relay(self, target: Any, first: bytes, pieces: Any) -> bytes:
-        """Stream the answer to the caller as it arrives, and return all of it."""
-        handler = self.handler
-        handler.send_response(200)
-        handler.send_header("Content-Type", "text/event-stream")
-        handler.send_header("Cache-Control", "no-store")
-        handler.send_header("X-ML-Stack-Peer", target.peer or "")
-        handler.send_header("X-ML-Stack-Model", target.model)
-        handler.send_header("Connection", "close")
-        handler.end_headers()
-        said = bytearray(first)
-        try:
-            handler.wfile.write(first)
-            handler.wfile.flush()
-            for block in pieces:
-                said += block
-                handler.wfile.write(block)
-                handler.wfile.flush()
-        except (BrokenPipeError, ConnectionResetError):
-            pass
-        return bytes(said)
 
 
 class UpdateRoutes:
@@ -700,6 +705,8 @@ class ClusterRoutes:
     def route(self) -> bool:
         if self.path == "/ui/clusters":
             return self._clusters()
+        if self.path == "/ui/clusters/found" and self.method == "GET":
+            return found_clusters(self)
         if self.path == "/ui/peers" and self.method == "GET":
             self.send(200, {"peers": self.ui.peers(), "self": self.ui.name,
                             "group": cluster_group(self.ui.cluster_key_path)})
@@ -727,7 +734,6 @@ class ClusterRoutes:
         return True
 
     def _clusters(self) -> bool:
-        from .discovery import join, leave, memberships
         ui = self.ui
         if self.method == "GET":
             self.send(200, {"clusters": [m.public() for m in
@@ -736,18 +742,27 @@ class ClusterRoutes:
         if self.method == "POST":
             req = self.body()
             words = str(req.get("passphrase") or "")
-            group = str(req.get("group") or "").strip() or "ml-stack"
             try:
-                rows = join(words, group=group, path=ui.cluster_key_path)
+                group = require_name(req.get("group"))
+                with ui.join_guard():
+                    if req.get("mode") is not None:
+                        cluster_action(str(req["mode"]), words, group, ui.cluster_key_path,
+                                       options=JoinOptions(port=ui.discovery_port, mode=req.get("cluster_mode")))
+                    else:
+                        join_by_passphrase(words, group, ui.cluster_key_path,
+                                           options=JoinOptions(port=ui.discovery_port, mode=req.get("cluster_mode")))
             except DiscoveryError as exc:
                 self.send(400, {"error": str(exc)})
                 return True
+            recovery.remember(words, group, ui.cluster_key_path)
+            rows = memberships(ui.cluster_key_path)
             ui.rejoined()
-            self.send(200, {"clusters": [m.public() for m in rows], "joined": group})
+            self.send(200, {"clusters": [m.public() for m in rows], "joined": group,
+                            "mode": str(req.get("mode") or "join")})
             return True
         if self.method == "DELETE":
             group = str(self.body().get("group") or "")
-            rows = leave(group, ui.cluster_key_path)
+            rows = ui.leave(group)
             ui.rejoined()
             self.send(200, {"clusters": [m.public() for m in rows], "left": group})
             return True
@@ -763,7 +778,7 @@ class ClusterRoutes:
             return True
         try:
             self.send(200, self.ui.join_fleet(
-                passphrase=words, group=str(req.get("group") or ""),
+                passphrase=words, group=require_name(req.get("group")) if words else "",
                 persist=bool(req.get("persist")), name=str(req.get("name") or "")))
         except (JoinError, DiscoveryError) as exc:
             self.send(400, {"error": str(exc)})
@@ -829,8 +844,9 @@ class JobRoutes:
         return True
 
 
-class Router(PageRoutes, SetupRoutes, SessionRoutes, MeasureRoutes, SettingsRoutes,
-             ModelRoutes, ChatRoutes, UpdateRoutes, ClusterRoutes, JobRoutes, Base):
+class Router(InitialSetupRoutes, RuntimeRepairRoutes, PageRoutes, SetupRecoveryRoutes, SetupRoutes, SessionRoutes, MeasureRoutes, SettingsRoutes,
+             ProjectBoardRoutes, RoomRoutes, ModelRoutes, ChatRoutes, UpdateRoutes, ClusterRoutes, JobRoutes,
+             KnowledgeRoutes, WorkspaceRoutes, GymRecordingRoutes, GymRoutes, LaunchRoutes, ExtensionRoutes, Base):
     """Every screen's routes, in the order a request meets them."""
 
     def run(self) -> bool:
@@ -844,6 +860,10 @@ class Router(PageRoutes, SetupRoutes, SessionRoutes, MeasureRoutes, SettingsRout
         if self.public_route():
             return True
         if not self.signed_in():
+            return True
+        if invite_routes.ui_route(self):
+            return True
+        if project_client.route(self):
             return True
         if self.route():
             return True

@@ -16,11 +16,13 @@ from pathlib import Path
 import pytest
 
 from ml_stack import mcp as server
+from ml_stack.workspace import tools as workspace_tools
 
 EXPECTED = {"serve_status", "serve_up", "serve_down", "serve_escalate", "models_find",
             "models_files", "models_fetch", "bench_run", "bench_status", "bench_history",
-            "bench_show", "fleet_peers", "fleet_join", "world_make", "setup_look", "doctor",
-            "speech_providers", "speech_transcribe", "speech_say"}
+            "bench_show", "fleet_peers", "world_make", "setup_look", "doctor",
+            "speech_providers", "speech_transcribe", "speech_say", "decide",
+            "conversation_compact", *workspace_tools.NAMES}
 
 
 def rpc(ident, method, **params):
@@ -65,7 +67,15 @@ class TestTheProtocol:
             "type": "array", "items": {"type": "string"}}
         assert tools["serve_status"]["inputSchema"]["properties"]["port"] == {
             "type": "integer", "default": 8080}
-        assert tools["fleet_join"]["inputSchema"]["properties"]["persist"]["type"] == "boolean"
+        assert set(tools["serve_up"]["inputSchema"]["properties"]) == {
+            "model", "context", "draft", "mmproj", "extra"}
+
+    def test_optional_array_options_keep_their_item_schema(self):
+        for fn, name in ((server.serve_up, "extra"), (server.doctor, "repos")):
+            schema = server.schema_of(fn)
+            assert schema["properties"][name] == {"type": "array", "items": {"type": "string"}}
+            assert name not in schema.get("required", [])
+        assert server.schema_of(server.decide)["required"] == ["question", "options"]
 
     def test_a_bad_line_and_an_unknown_method_are_answered_not_fatal(self):
         reader = io.StringIO('not json\n' + json.dumps(rpc(5, "resources/list")) + "\n")
@@ -90,8 +100,17 @@ class TestTheProtocol:
 
 
 class TestTheTools:
+    def test_serve_options_are_isolated_between_keyword_calls(self, monkeypatch):
+        captured = []
+        monkeypatch.setattr(server.quant_guard, "blocked_message", lambda _: "")
+        monkeypatch.setattr(server, "detached", lambda module, argv, **kw: captured.append(argv) or {})
+        server.serve_up("model.gguf", context=4096, extra=["--threads", "2"])
+        server.serve_up("model.gguf")
+        assert captured[0][-4:] == ["--context", "4096", "--threads", "2"]
+        assert "--threads" not in captured[1] and "--context" not in captured[1]
+
     def test_serve_status_calls_the_look_the_command_calls(self, monkeypatch):
-        from ml_stack.serve import cli, ops
+        from ml_stack.serve import ops
 
         monkeypatch.setattr(ops, "recorded_servers", lambda state: {8083: {"model": "x"}})
         monkeypatch.setattr(ops, "look", lambda port, records: ops.Snapshot(
@@ -175,6 +194,28 @@ class TestTheTools:
         assert "ml_stack.hub fetch" in said
 
 
+class TestTheCompactTool:
+    def test_it_fits_a_chat_file_to_a_budget_and_rewrites_it(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        chat = [{"role": "system", "content": "s"}, {"role": "user", "content": "go"}]
+        for n in range(5):
+            chat += [{"role": "assistant", "content": None, "tool_calls": [
+                         {"id": f"c{n}", "type": "function",
+                          "function": {"name": "look", "arguments": json.dumps({"q": n})}}]},
+                     {"role": "tool", "tool_call_id": f"c{n}", "name": "look",
+                      "content": "word " * 400}]
+        chat.append({"role": "user", "content": "now"})
+        path = tmp_path / "chat.json"
+        path.write_text(json.dumps(chat))
+        out = said(drive(rpc(1, "tools/call", name="conversation_compact",
+                             arguments={"path": str(path), "budget": 1200, "keep_last": 1, "write": True}))[0])
+        assert out["strategy"] == "elide+truncate" and out["written"]
+        assert out["tokens_after"] <= 1200 < out["tokens_before"]
+        rewritten = json.loads(path.read_text())
+        assert rewritten[0] == chat[0] and rewritten[-1] == chat[-1]
+        assert len(rewritten) < len(chat)
+
+
 class TestTheSpeechTools:
     """No speech engine is installed where the suite runs, so a fake stands on the registry
     the tools resolve through -- the same one ``ml-stack-speech`` resolves through."""
@@ -222,7 +263,8 @@ class TestTheSpeechTools:
         assert found["asr"]["auto"] == "fake"
         assert found["tts"]["providers"][0]["name"] == "fake-voice"
 
-    def test_speech_transcribe_returns_the_text_and_its_segments(self, tmp_path):
+    def test_speech_transcribe_returns_the_text_and_its_segments(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
         clip = tmp_path / "clip.wav"
         clip.write_bytes(self.wav.encode(b"\x00\x00" * 1600, sample_rate=16000))
         (reply,) = drive(rpc(1, "tools/call", name="speech_transcribe",
@@ -232,14 +274,15 @@ class TestTheSpeechTools:
         assert got["segments"][0]["end_s"] == 1.5
 
     def test_speech_say_writes_the_wav_and_says_where(self, tmp_path):
-        out = tmp_path / "spoken" / "said.wav"
         (reply,) = drive(rpc(1, "tools/call", name="speech_say",
-                             arguments={"text": "the fleet is up", "out": str(out)}))
+                             arguments={"text": "the fleet is up"}))
         got = said(reply)
-        assert got["out"] == str(out) and got["duration_s"] == 0.5
+        out = Path(got["out"])
+        assert out.parent == server.mcp_home() / "speech" and got["duration_s"] == 0.5
         assert self.wav.decode(out.read_bytes())[1].sample_rate == 16000
 
     def test_no_engine_is_an_error_result_rather_than_a_crash(self, monkeypatch, tmp_path):
+        monkeypatch.chdir(tmp_path)
         from ml_stack import speech as package
         from ml_stack.speech import Registry
 
@@ -272,4 +315,25 @@ class TestTheCommand:
         listed = on_a_fresh_loop(app.list_tools())
         assert {t.name for t in listed} == EXPECTED
         by_name = {t.name: t for t in listed}
-        assert by_name["bench_run"].inputSchema["required"] == ["argv"]
+        assert by_name["bench_run"].input_schema["required"] == ["argv"]
+        assert by_name["serve_status"].annotations.read_only_hint is True
+        assert by_name["serve_down"].annotations.destructive_hint is True
+        assert by_name["models_find"].annotations.open_world_hint is True
+        assert by_name["serve_status"].output_schema["type"] == "object"
+
+
+def test_workspace_subset_rejects_server_admin_tools(monkeypatch):
+    names = {"workspace_inbox", "workspace_send", "workspace_thread", "workspace_claim",
+             "workspace_who_owns", "workspace_announce", "workspace_ack", "workspace_status",
+             "workspace_reputation"}
+    monkeypatch.setattr(server, "TOOLS", list(server.TOOLS))
+    monkeypatch.setattr(server, "_BY_NAME", dict(server._BY_NAME))
+    listing = rpc(1, "tools/list")
+    attack = rpc(2, "tools/call", name="serve_down", arguments={"port": 8080})
+    monkeypatch.setattr(server.sys, "stdin", io.StringIO(json.dumps(listing) + "\n" + json.dumps(attack) + "\n"))
+    output = io.StringIO()
+    monkeypatch.setattr(server.sys, "stdout", output)
+    assert server.main(["--builtin", "--workspace-only"]) == 0
+    replies = [json.loads(line) for line in output.getvalue().splitlines()]
+    assert {t["name"] for t in replies[0]["result"]["tools"]} == names
+    assert replies[1]["result"]["isError"] is True

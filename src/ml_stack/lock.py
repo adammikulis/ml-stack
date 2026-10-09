@@ -121,11 +121,12 @@ def only_one(what: str | Path, *, wait: bool = True, timeout: float = 0.0,
     at a stalled machine can see who has it, and it is announced rather than waited on
     silently -- a wait nobody can see is indistinguishable from a hang. `note` follows the
     pid, saying what the holder is doing.
+    A waiter tries again after 20 ms, doubling up to 0.5 s.
     """
     path = Path(what).expanduser()
     path.parent.mkdir(parents=True, exist_ok=True)
     handle = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
-    began, told, taken = time.monotonic(), False, False
+    began, told, taken, tries = time.monotonic(), False, False, 0
     try:
         while not take(handle):
             held = _holder(handle)
@@ -136,7 +137,8 @@ def only_one(what: str | Path, *, wait: bool = True, timeout: float = 0.0,
                 told = True
             if timeout and time.monotonic() - began > timeout:
                 raise Busy(f"{path} still held by {held} after {timeout:.0f}s")
-            time.sleep(0.5)
+            time.sleep(min(0.5, 0.02 * 2 ** tries))
+            tries += 1
         taken = True
         _write_holder(handle, note)
         yield path
@@ -170,3 +172,18 @@ def held_by(what: str | Path) -> str:
         return ""
     finally:
         os.close(handle)
+
+
+def pid_alive(pid: int) -> bool:
+    """Whether a process is running here. Asked, never assumed."""
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True          # it exists; it belongs to somebody else
+    except OSError:
+        return False
+    return True

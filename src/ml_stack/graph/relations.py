@@ -8,7 +8,7 @@ from typing import Any
 
 from ml_stack.graph.dag import topological_order
 
-__all__ = ["HIERARCHY", "INVERSES", "canonical_direction", "cycles", "rings"]
+__all__ = ["HIERARCHY", "INVERSES", "cycles", "rings", "standard_direction"]
 
 # The direction a fact is kept in, and the verbs that say the same thing the other way.
 INVERSES: dict[str, frozenset[str]] = {
@@ -20,7 +20,7 @@ INVERSES: dict[str, frozenset[str]] = {
     "requires": frozenset({"required_by", "enables"}),
     "supersedes": frozenset({"superseded_by", "replaced_by"}),
 }
-"""``{canonical verb: the verbs that state it with the ends swapped}``. ``X has_part Y`` is
+"""``{standard verb: the verbs that state it with the ends swapped}``. ``X has_part Y`` is
 ``Y part_of X``; the pass keeps the left-hand form."""
 
 #: The relations that say one thing is under another, each of which must be a DAG: nothing
@@ -28,8 +28,8 @@ INVERSES: dict[str, frozenset[str]] = {
 HIERARCHY: tuple[str, ...] = ("part_of", "reports_to", "contains", "member_of", "supersedes")
 
 
-def canonical_direction(rel: str) -> tuple[str, bool]:
-    """``(canonical verb, flipped)``: the verb a fact is kept under, and whether the ends
+def standard_direction(rel: str) -> tuple[str, bool]:
+    """``(standard verb, flipped)``: the verb a fact is kept under, and whether the ends
     must be swapped to get there."""
     if rel in INVERSES:
         return rel, False
@@ -78,7 +78,7 @@ def rings(n: int, src: list[int], dst: list[int]) -> list[list[int]]:
 
     outgoing: list[list[int]] = [[] for _ in range(n)]
     incoming: list[list[int]] = [[] for _ in range(n)]
-    for u, v in zip(src, dst):
+    for u, v in zip(src, dst, strict=False):
         outgoing[u].append(v)
         incoming[v].append(u)
 

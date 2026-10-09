@@ -1,0 +1,29 @@
+#!/usr/bin/env python3
+"""Refuse an agent commit on main or a shared development branch in a linked checkout.
+
+An agent is a command run with CLAUDECODE, ML_STACK_AGENT or ML_STACK_NONINTERACTIVE set, or one
+whose stdin or stdout is not a terminal. A person at a terminal is never refused.
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import rules_loader  # noqa: E402
+
+
+def main() -> int:
+    rules = rules_loader.load()
+    why = rules.commit_refusal(os.getcwd()) if rules else ""
+    if why:
+        print(f"primary-only: refused {why}\n(MLSTACK_GUARD=off for a person's own session.)",
+              file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,23 +1,26 @@
-"""Build wheels and a standalone bundle for this platform.
-
-    python packaging/build.py             wheels only
-    python packaging/build.py --bundle    wheels, the daemon, and the window around it
-    python packaging/build.py --bundle --no-window    the daemon on its own
-    python packaging/build.py --wheelhouse            wheels, and the extras beside them
-"""
+"""Build wheels, dependency wheelhouses and standalone platform bundles."""
 
 from __future__ import annotations
 
 import argparse
+import os
+import runpy
 import shutil
 import subprocess
 import sys
+import tempfile
+import zipfile
+from email.parser import BytesParser
 from pathlib import Path
+
+from packaging.utils import canonicalize_name
+from packaging.version import InvalidVersion, Version
 
 ROOT = Path(__file__).resolve().parent.parent
 DIST = ROOT / "dist"
 APP = ROOT / "app"
-EXTERNAL = ("pyinstaller", "packaging", "psutil", "numpy")
+STAMP = runpy.run_path(str(ROOT / "src/ml_stack/fleet/wheel_provenance.py"))["stamp"]
+EXTERNAL = ("pyinstaller", "packaging", "psutil", "ladybug>=0.20.4,<0.21", "py-machineid")
 SIDECAR = "ml-stack-headless"
 
 
@@ -29,12 +32,16 @@ def run(argv: list[str], **kw) -> None:
 
 def wheels() -> list[Path]:
     DIST.mkdir(exist_ok=True)
-    # The bundle carries every wheel it finds here, including a previous version's.
-    for old in DIST.glob("*.whl"):
+    for old in DIST.glob("ml_stack-*.whl"):
         old.unlink()
     run([sys.executable, "-m", "build", "--wheel", "--outdir", str(DIST), str(ROOT)],
         stdout=subprocess.DEVNULL)
-    return sorted(DIST.glob("*.whl"))
+    made = sorted(DIST.glob("*.whl"))
+    commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+    for wheel in made:
+        if wheel.name.startswith("ml_stack-"):
+            STAMP(wheel, commit, ROOT)
+    return made
 
 
 def wheelhouse(out: Path) -> list[Path]:
@@ -44,21 +51,67 @@ def wheelhouse(out: Path) -> list[Path]:
 
     out.mkdir(parents=True, exist_ok=True)
     run([sys.executable, "-m", "pip", "wheel", "--wheel-dir", str(out),
+         "--find-links", str(DIST), "--find-links", str(out),
          f"ml-stack[{extras()}] @ file://{ROOT}"], stdout=subprocess.DEVNULL)
     for mine in out.glob("ml_stack-*.whl"):
         mine.unlink()
     return sorted(out.glob("*.whl"))
 
 
-def built_from() -> Path:
-    """Write the commit this tree is at where ``ml-stack.spec`` puts it beside
-    `ml_stack.fleet.measuring`, which is what the frozen daemon answers as its commit."""
-    sys.path.insert(0, str(ROOT / "src"))
-    from ml_stack.fleet.measuring import BUILT_FROM, installed_commit
+def owned_telemetry(source: Path) -> Path:
+    """Build a validated metal-smi wheel from an isolated source snapshot."""
+    source = source.expanduser().resolve()
+    if not source.is_dir() or not (source / 'pyproject.toml').is_file():
+        raise SystemExit('--metal-smi-source must name a project directory with pyproject.toml')
+    with tempfile.TemporaryDirectory(prefix='ml-stack-metal-smi-') as temporary:
+        stage = Path(temporary)
+        copied, output = stage / 'source', stage / 'wheels'
+        shutil.copytree(source, copied, ignore=shutil.ignore_patterns(
+            '.git', '.venv', 'venv', '__pycache__', '*.pyc', '*.egg-info',
+            'build', 'dist', '.pytest_cache', '.ruff_cache'))
+        run([sys.executable, '-m', 'pip', 'wheel', '--no-deps', '--wheel-dir', str(output), str(copied)],
+            cwd=stage, stdout=subprocess.DEVNULL)
+        found = list(output.glob('*.whl'))
+        if len(found) != 1:
+            raise SystemExit('metal-smi source must build exactly one wheel')
+        _telemetry_metadata(found[0])
+        DIST.mkdir(parents=True, exist_ok=True)
+        into = DIST / found[0].name
+        shutil.copy2(found[0], into)
+    return into
 
-    where = ROOT / ".build-work" / BUILT_FROM
+
+def _telemetry_metadata(wheel: Path) -> None:
+    """Require the owned telemetry distribution and declared minimum version."""
+    with zipfile.ZipFile(wheel) as archive:
+        metadata = [name for name in archive.namelist() if name.endswith('.dist-info/METADATA')]
+        if len(metadata) != 1:
+            raise SystemExit('metal-smi wheel must contain one distribution metadata record')
+        headers = BytesParser().parsebytes(archive.read(metadata[0]))
+    try:
+        version = Version(headers.get('Version', '0'))
+    except InvalidVersion as exc:
+        raise SystemExit('telemetry wheel has invalid version metadata') from exc
+    if canonicalize_name(headers.get('Name', '')) != 'metal-smi' or version < Version('1.1.0'):
+        raise SystemExit('telemetry wheel must provide metal-smi>=1.1.0')
+
+
+def built_from(python: Path) -> Path:
+    """Write the current commit marker into the build directory.
+
+    Asked of the build venv's interpreter, which has ml-stack's dependencies; the
+    interpreter running this script has none, and importing the package there fails.
+    """
+    probe = ("from ml_stack.fleet.measuring import BUILT_FROM, installed_commit;"
+             "print(BUILT_FROM);print(installed_commit())")
+    done = subprocess.run([str(python), "-c", probe], cwd=ROOT, capture_output=True, text=True,
+                          env={**os.environ, "PYTHONPATH": str(ROOT / "src")})
+    if done.returncode != 0:
+        raise SystemExit(f"could not read the commit marker: {done.stderr.strip()}")
+    name, _, commit = done.stdout.partition("\n")
+    where = ROOT / ".build-work" / name
     where.parent.mkdir(parents=True, exist_ok=True)
-    where.write_text(installed_commit() + "\n", encoding="utf-8")
+    where.write_text(commit.strip() + "\n", encoding="utf-8")
     return where
 
 
@@ -69,12 +122,12 @@ def daemon() -> Path:
         run([sys.executable, "-m", "venv", str(env)])
     pip = env / ("Scripts" if sys.platform == "win32" else "bin") / "pip"
     run([str(pip), "install", "-q", "--upgrade", *EXTERNAL])
-    # force-reinstall: the version has not changed between builds, so pip would keep
-    # the wheel already in the build venv and bundle code that is one edit behind.
     run([str(pip), "install", "-q", "--no-index", "--find-links", str(DIST),
          "--force-reinstall", "--no-deps", "ml-stack"])
+    run([str(pip), "install", "-q", "--find-links", str(DIST),
+         "ml-stack[agents,hub,fleet-onboard,coordinator]"])
 
-    built_from()
+    built_from(env / ("Scripts" if sys.platform == "win32" else "bin") / ("python.exe" if sys.platform == "win32" else "python"))
     tool = env / ("Scripts" if sys.platform == "win32" else "bin") / "pyinstaller"
     run([str(tool), "--clean", "--noconfirm", "--distpath", str(DIST / "bundle"),
          "--workpath", str(ROOT / ".build-work"), "ml-stack.spec"],
@@ -109,15 +162,19 @@ def window(frozen: Path) -> list[Path]:
     run([npm, "ci", "--silent"], cwd=APP)
     run([npm, "run", "--silent", "build"], cwd=APP)
 
+    artifacts = _artifacts(APP / "src-tauri" / "target" / "release" / "bundle")
+    if not artifacts:
+        raise SystemExit("the native build produced no application bundle")
     made: list[Path] = []
-    for found in _artifacts(APP / "src-tauri" / "target" / "release" / "bundle"):
+    for found in artifacts:
         into = DIST / "bundle" / found.name
         shutil.rmtree(into, ignore_errors=True)
         into.unlink(missing_ok=True)
         (shutil.copytree if found.is_dir() else shutil.copy2)(found, into)
         made.append(into)
     if sys.platform == "darwin":
-        _adhoc_sign(DIST / "bundle" / "ml-stack.app")
+        for app in made:
+            _adhoc_sign(app)
     return made
 
 
@@ -131,10 +188,12 @@ def _artifacts(out: Path) -> list[Path]:
 
 
 def _adhoc_sign(app: Path) -> None:
-    """Sign with no identity, which is what macOS needs to open it at all."""
+    """Ad-hoc sign and verify the native application bundle."""
     if app.exists():
         run(["codesign", "--force", "--deep", "--sign", "-", str(app)],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            stdout=subprocess.DEVNULL)
+        run(["codesign", "--verify", "--deep", "--strict", str(app)],
+            stdout=subprocess.DEVNULL)
 
 
 def report(made: Path) -> None:
@@ -154,6 +213,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--wheelhouse", action="store_true",
                     help="also download the extras, for a machine with no network")
     ap.add_argument("--clean", action="store_true")
+    ap.add_argument('--metal-smi-source', type=Path,
+                    help='build and bundle owned metal-smi>=1.1.0 from this local source directory')
     a = ap.parse_args(argv)
 
     if a.clean:
@@ -162,6 +223,8 @@ def main(argv: list[str] | None = None) -> int:
             shutil.rmtree(path, ignore_errors=True)
 
     built = wheels()
+    if a.metal_smi_source:
+        built = sorted({*built, owned_telemetry(a.metal_smi_source)})
     print(f"{len(built)} wheels in {DIST}")
     for w in built:
         print(f"  {w.name}  {w.stat().st_size / 1024:.0f} KB")

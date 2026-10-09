@@ -282,7 +282,7 @@ class TestRecipe:
     def test_the_loss_is_on_the_assistant_turn_only(self, dataset):
         from transformers import AutoTokenizer
 
-        from ml_stack.train.recipes.tool_calls import IGNORE, render
+        from ml_stack.train.recipes.conversations import IGNORE, render
 
         data, base = dataset
         tokenizer = AutoTokenizer.from_pretrained(base)
@@ -291,7 +291,7 @@ class TestRecipe:
         ids, labels = render(tokenizer, row["messages"], row["tools"], context=512)
 
         assert len(ids) == len(labels)
-        read = tokenizer.decode([i for i, lab in zip(ids, labels) if lab == IGNORE])
+        read = tokenizer.decode([i for i, lab in zip(ids, labels, strict=False) if lab == IGNORE])
         answer = tokenizer.decode([lab for lab in labels if lab != IGNORE])
         assert row["messages"][1]["content"] in read
         assert "<start_function_declaration>" in read
@@ -302,12 +302,26 @@ class TestRecipe:
     def test_a_row_the_context_cuts_off_entirely_is_dropped_not_taught(self, dataset):
         from transformers import AutoTokenizer
 
-        from ml_stack.train.recipes.tool_calls import render
+        from ml_stack.train.recipes.conversations import render
 
         data, base = dataset
         tokenizer = AutoTokenizer.from_pretrained(base)
         row = json.loads((data / "train.jsonl").read_text().splitlines()[0])
         assert render(tokenizer, row["messages"], row["tools"], context=8) is None
+
+    def test_configured_local_base_trains_despite_different_manifest(self, dataset, tmp_path):
+        from ml_stack.train.run import _base_of, run
+
+        data, base = dataset
+        manifest_path = data / "manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest["base"] = "invented/unavailable-causal"
+        manifest_path.write_text(json.dumps(manifest))
+        config = {"base": str(base), "steps": 20, "context": 256, "batch_size": 4}
+        assert _base_of("tool-calls", config, data) == (str(base), {})
+        got = run("tool-calls", config, data, tmp_path / "run", dry=True)
+        assert got["steps"] == 20
+        assert not got["checkpoint"]
 
     def test_the_tiny_base_trains_and_checkpoints_through_the_existing_trainer(self, dataset,
                                                                                tmp_path):
@@ -393,7 +407,7 @@ class TestCommandLine:
         assert main(["--tools", str(tools), "--prompts", str(prompts), "--out", str(out),
                      "--only", "synth"]) == 0
         manifest = json.loads((out / "data" / "manifest.json").read_text())
-        assert manifest["base"] == "google/functiongemma-270m-it"
+        assert manifest["base"] == "unsloth/gemma-4-E4B-it"
         assert manifest["train"] + manifest["holdout"] == manifest["rows"]
         assert (out / "data" / "train.jsonl").read_text().count("\n") == manifest["train"]
 
@@ -624,7 +638,7 @@ class TestFromBench:
     def test_a_directory_out_is_a_dataset_the_recipe_reads(self, tmp_path):
         """The same rows the synthesiser writes, so the two sources mix in one directory
         and `ml-stack-train-run --recipe tool-calls --data` reads either."""
-        from ml_stack.train.recipes.tool_calls import read_conversations
+        from ml_stack.train.recipes.conversations import read_conversations
         from ml_stack.train.tools import from_bench, write_dataset
 
         rows = from_bench(_kept_run([_traced_row(q) for q in

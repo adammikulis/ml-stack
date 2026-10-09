@@ -1,6 +1,6 @@
 <!-- fleet-model: the daemon's routes, the pieces every screen builds out of, and which screen is showing -->
 <style>
-cluster-view, chat-view, models-view, settings-view, fit-view { display: contents; }
+cluster-view, chat-view, models-view, settings-view, fit-view, data-view, training-view, gym-view, benchmarks-view, tools-view { display: contents; }
 [hidden] { display: none !important; }
 </style>
 <script>
@@ -8,14 +8,43 @@ cluster-view, chat-view, models-view, settings-view, fit-view { display: content
   const M = window.fleetModel = {};
   const H = M.headers = { "X-ML-Stack-UI": "1", "Content-Type": "application/json" };
 
+  let releaseBoot;
+  const bootReady = new Promise(resolve => { releaseBoot = resolve; });
+
   M.MIN_PASS = 5;
 
+  M.downloadMessage = function (g) {
+    if (g.error) return g.error;
+    const parts = [g.note || (g.phase === "mtp" ? "Downloading MTP head" : "Downloading model")];
+    if (g.speed_bps > 0) parts.push(`${M.fileSize(g.speed_bps)}/s`);
+    if (g.eta_s !== null && g.eta_s !== undefined) {
+      parts.push(`about ${Math.max(1, Math.ceil(g.eta_s / 60))} min left`);
+    }
+    return parts.join(" · ");
+  };
+
   /** One call to the daemon: `{ok, status, ...body}`. */
-  M.api = async function (path, opts = {}) {
+  async function request(path, opts = {}) {
     const r = await fetch(path, { ...opts, headers: { ...H, ...(opts.headers || {}) } });
     let body = {};
     try { body = await r.json(); } catch { /* an empty body is fine */ }
     return { ok: r.ok, status: r.status, ...body };
+  }
+
+  M.api = async function (path, opts = {}) {
+    const signal = opts.signal;
+    signal?.throwIfAborted();
+    let aborted;
+    try {
+      await (signal ? Promise.race([bootReady, new Promise((_, reject) => {
+        aborted = () => reject(signal.reason);
+        signal.addEventListener("abort", aborted, {once:true});
+      })]) : bootReady);
+    } finally {
+      if (aborted) signal.removeEventListener("abort", aborted);
+    }
+    signal?.throwIfAborted();
+    return request(path, opts);
   };
 
   /** One element, its attributes and its children. */
@@ -25,6 +54,7 @@ cluster-view, chat-view, models-view, settings-view, fit-view { display: content
       if (k === "class") n.className = v;
       else if (k === "html") n.innerHTML = v;
       else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+      else if (["disabled", "checked", "selected", "hidden", "required", "multiple", "readonly", "open"].includes(k) && typeof v === "boolean") n.toggleAttribute(k, v);
       else if (v !== null && v !== undefined) n.setAttribute(k, v);
     }
     for (const kid of kids.flat()) {
@@ -35,9 +65,87 @@ cluster-view, chat-view, models-view, settings-view, fit-view { display: content
   };
   const el = M.el;
 
+  M.preferences = {always_show_advanced:false};
+  M.applyAdvanced = function (root = document) {
+    const details = [...root.querySelectorAll("details")];
+    if (root.matches?.("details")) details.unshift(root);
+    for (const node of details) {
+      if (!node.hasAttribute("data-advanced") && !/advanced/i.test(node.querySelector(":scope > summary")?.textContent || "")) continue;
+      node.setAttribute("data-advanced", "");
+      if (M.preferences.always_show_advanced) node.open = true;
+    }
+  };
+  function luminance(hex) {
+    const digits=hex.slice(1), full=digits.length === 3 ? [...digits].map(c=>c+c).join("") : digits;
+    const rgb=[0,2,4].map(at=>parseInt(full.slice(at,at+2),16)/255)
+      .map(channel=>channel<=.04045 ? channel/12.92 : ((channel+.055)/1.055)**2.4);
+    return rgb[0]*.2126 + rgb[1]*.7152 + rgb[2]*.0722;
+  }
+  function foreground(fill, navy) {
+    const light=luminance(fill), ink=luminance(navy);
+    if ((Math.max(light,ink)+.05)/(Math.min(light,ink)+.05)>=4.5) return navy;
+    return (light+.05)/.05 >= 1.05/(light+.05) ? "#000000" : "#ffffff";
+  }
+  M.applyTheme = function () {
+    const theme = M.preferences.resolved_theme;
+    const root = document.documentElement;
+    root.dataset.theme = theme?.base === "dark" ? "dark" : "light";
+    root.dataset.density = theme?.density || "comfortable";
+    const colors = {
+      pink:"--poolside-pink", orange:"--poolside-orange", yellow:"--poolside-yellow",
+      cyan:"--poolside-cyan", navy:"--poolside-navy", background:"--ml-bg",
+      panel:"--ml-surface", sunken:"--ml-sunken", text:"--ml-text", muted:"--ml-muted", border:"--ml-line"
+    };
+    for (const [key, variable] of Object.entries(colors)) {
+      if (theme?.colors?.[key]) root.style.setProperty(variable, theme.colors[key]);
+      else root.style.removeProperty(variable);
+    }
+    const palette=getComputedStyle(root), navy=palette.getPropertyValue("--poolside-navy").trim();
+    for (const color of ["pink","orange","yellow","cyan","navy"]) {
+      root.style.setProperty(`--poolside-${color}-ink`,
+        foreground(palette.getPropertyValue(`--poolside-${color}`).trim(),navy));
+    }
+    if (theme?.colors?.pink) root.style.setProperty("--ml-accent", theme.colors.pink);
+    else root.style.removeProperty("--ml-accent");
+    root.style.setProperty("--ui-font-size", `${theme?.font_size || 14}px`);
+  };
+  M.setPreferences = function (settings) {
+    const previous = M.preferences.always_show_advanced;
+    M.preferences = {...settings, always_show_advanced:settings.always_show_advanced === true};
+    if (previous && !M.preferences.always_show_advanced) {
+      for (const node of document.querySelectorAll("details[data-advanced]")) node.open = false;
+    }
+    M.applyTheme();
+    M.applyAdvanced();
+    window.dispatchEvent(new CustomEvent("fleet-preferences", {detail:M.preferences}));
+  };
+  new MutationObserver(records => {
+    for (const record of records) for (const node of record.addedNodes) {
+      if (node.nodeType === Node.ELEMENT_NODE) M.applyAdvanced(node);
+    }
+  }).observe(document.documentElement, {childList:true, subtree:true});
+  document.addEventListener("toggle", event => {
+    if (M.preferences.always_show_advanced && event.target.matches?.("details[data-advanced]") && !event.target.open) event.target.open = true;
+  }, true);
+  M.loadPreferences = async function () {
+    const result = await request("/ui/settings");
+    if (result.ok && !result.error) M.setPreferences({...result.settings, resolved_theme:result.resolved_theme});
+  };
+
+  /** An ml-ui element with its properties set; a property set before the element is defined
+      is kept by the element when it upgrades. */
+  M.ui = function (tag, props = {}) {
+    const n = document.createElement(tag);
+    for (const [k, v] of Object.entries(props)) if (v !== null && v !== undefined) n[k] = v;
+    return n;
+  };
+
   /** The children that are there: `replaceChildren` writes the word "null" for a gap. */
   M.kids = (...nodes) => nodes.flat()
     .filter((n) => n !== null && n !== undefined && n !== false);
+
+  /** The most rows of a list the page carries: every node costs a frame, so a list is cut here, before it is drawn. */
+  M.LIST_MAX = 100;
 
   M.row = (label, why) => el("span", {},
     el("b", {}, label), why ? el("span", { class: "why" }, why) : null);
@@ -60,56 +168,70 @@ cluster-view, chat-view, models-view, settings-view, fit-view { display: content
     return { key: "cpu", text: `${d.cpus || "?"} CPU` };
   };
 
-  // What a conversation costs to keep in memory. Two tensors per layer, per token, at
-  // two bytes each; the shape below is a 27B-class model, which is what most people end
-  // up running. A smaller model costs proportionally less.
-  const CTX_STEPS = M.CTX_STEPS = [2048, 4096, 8192, 16384, 32768, 65536, 131072];
-  const KV_MB_PER_TOKEN = 2 * 48 * 8 * 128 * 2 / (1024 * 1024);
+  const CTX_STEPS = M.CTX_STEPS = [2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576];
+  const KV_MB_PER_TOKEN = 17 * 4 * 256 * 2 * (34 / 32) / (1024 * 1024);
 
-  M.ctxRam = (tokens) => {
-    const mb = tokens * KV_MB_PER_TOKEN;
-    return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`;
-  };
+  M.ctxWords = (tokens) => `${Number(tokens).toLocaleString()} tokens`;
 
-  M.ctxWords = (n) => (n >= 1024 ? `${Math.round(n / 1024)}k tokens` : `${n} tokens`);
-
-  /** The slider for how much a conversation reads, and what it costs. */
   M.contextPicker = function (start, onPick) {
-    let at = Math.max(0, CTX_STEPS.indexOf(start));
-    if (at < 0) at = 2;
-    const out = el("b", {});
-    const slider = el("input", { type: "range", min: "0",
-      max: String(CTX_STEPS.length - 1), value: String(at), id: "ctx" });
-    const paint = () => {
-      const n = CTX_STEPS[Number(slider.value)];
-      out.textContent = `${M.ctxWords(n)} · about ${M.ctxRam(n)} of memory`;
+    const slider = M.ui("ml-slider", {
+      label: "Context length", stops: CTX_STEPS,
+      value: CTX_STEPS.includes(start) ? start : 8192,
+      hint: "Maximum tokens in the model's context. Larger contexts require more memory." });
+    slider.id = "ctx";
+    const paint = (n) => {
+      slider.valueText = `${new Intl.NumberFormat().format(n)} tokens`;
+      slider.hint = n > 262144
+        ? "Extended context: Qwen uses YaRN above its native 256K window. Larger contexts require more memory."
+        : "Maximum tokens in the model’s context. Larger contexts require more memory.";
       onPick(n);
     };
-    slider.oninput = paint;
-    paint();
-    return el("div", { class: "meter" },
-      el("div", { class: "cap" }, el("span", {}, "how much it reads"), out),
-      slider,
-      el("div", { class: "hint" },
-        "Roughly a page of text per 500 tokens. The memory is for a 27B model; a "
-        + "smaller one costs less."));
+    slider.addEventListener("input", (e) => {
+      if (Number.isFinite(e.detail?.value)) paint(e.detail.value);
+    });
+    paint(slider.value);
+    return el("div", { class: "meter" }, slider);
   };
 
   // ------------------------------------------------------------- which screen is showing
-  const IN_APP = ["cluster", "chat", "models", "settings", "fit"];
+  const IN_APP = ["tasks", "history", "chat", "board", "projects", "models", "data", "knowledge", "training", "gym", "benchmarks", "cluster", "tools", "settings", "fit"];
+  const available = (name) => IN_APP.includes(name) && !!document.querySelector(`${name}-view`);
+  M.requestedRoute = "";
   const watchers = [];
   M.route = "";
   M.group = "";
   M.inCluster = false;
   M.signInMessage = "";
+  M.launchOnly = false;
 
   /** Show one screen by name, and tell every component that is watching. */
-  M.go = function (name) {
+  M.go = function (name, remember = true) {
+    if (name === "cluster" && ["sign-in", "first-run"].includes(M.route) && available(M.requestedRoute)) {
+      name = M.requestedRoute;
+    }
+    if (name === "cluster" && ["sign-in", "first-run"].includes(M.route) && !available(M.requestedRoute)) name = available("chat") ? "chat" : "fit";
+    if (IN_APP.includes(name) && !available(name)) name = available("chat") ? "chat" : "fit";
+    if (IN_APP.includes(name)) {
+      M.requestedRoute = name;
+      if (remember && location.hash !== `#${name}`) history.pushState(null, "", `#${name}`);
+    }
+    if (["sign-in", "first-run"].includes(M.route) && IN_APP.includes(name)) M.loadPreferences().catch(() => {});
     M.route = name;
     const app = document.getElementById("app");
     if (app) app.hidden = !IN_APP.includes(name);
     for (const fn of watchers) fn(name);
+    const workspace = document.getElementById("workspace");
+    if (workspace && IN_APP.includes(name)) workspace.scrollTop = 0;
   };
+
+  function followLocation() {
+    const name = location.hash.slice(1);
+    if (!available(name)) return;
+    M.requestedRoute = name;
+    if (IN_APP.includes(M.route) && M.route !== name) M.go(name, false);
+  }
+  window.addEventListener("popstate", followLocation);
+  window.addEventListener("hashchange", followLocation);
 
   /** Run `fn` whenever the screen changes, and now if one is already showing. */
   M.onRoute = function (fn) {
@@ -120,12 +242,15 @@ cluster-view, chat-view, models-view, settings-view, fit-view { display: content
   /** Ask for the passphrase, saying why. */
   M.signIn = function (message) {
     M.signInMessage = message || "";
-    M.go("sign-in");
+    M.go(M.launchOnly && document.querySelector("launch-needed") ? "launch-needed" : "sign-in");
   };
 
   /** True when the route refused for want of a session, and the screen has been changed. */
   M.refused = function (r) {
-    if (r && r.status === 401) { M.signIn(); return true; }
+    if (r && r.status === 401) {
+      if (M.route !== "first-run") M.signIn();
+      return true;
+    }
     return false;
   };
 
@@ -137,15 +262,54 @@ cluster-view, chat-view, models-view, settings-view, fit-view { display: content
 
   /** What to show when the page opens: setup, sign in, or a screen. */
   M.boot = async function () {
-    const asked = location.pathname.replace(/\/$/, "") === "/ui/fit" ? "fit" : "cluster";
-    const opened = document.querySelector(`${asked}-view`) ? asked
-      : (IN_APP.find((n) => document.querySelector(`${n}-view`)) || asked);
-    const setup = await M.api("/ui/setup");
-    M.inCluster = !!setup.needs_password;
-    if (setup.needs_setup && document.querySelector("first-run")) return M.go("first-run");
-    if (!setup.needs_password) return M.go(opened);
-    const s = await M.api("/ui/session");
-    return s.signed_in ? M.go(opened) : M.signIn();
+    try {
+      const launchURL = new URL(location.href);
+      const ticket = launchURL.searchParams.get("launch_ticket");
+      if (ticket !== null) {
+        launchURL.searchParams.delete("launch_ticket");
+        history.replaceState(null, "", launchURL.pathname + launchURL.search + launchURL.hash);
+        if (location.hostname === "127.0.0.1" || location.hostname === "localhost" || location.hostname === "[::1]") {
+          try { await request("/ui/session", {method:"POST", body:JSON.stringify({ticket})}); }
+          catch (_) { /* The ordinary sign-in view handles expired tickets. */ }
+        }
+      }
+      const hash = location.hash.slice(1);
+      const asked = available(hash) ? hash
+        : (location.pathname.replace(/\/$/, "") === "/ui/fit" ? "fit" : "chat");
+      const opened = document.querySelector(`${asked}-view`) ? asked
+        : (IN_APP.find((n) => document.querySelector(`${n}-view`)) || asked);
+      M.requestedRoute = opened;
+      const setup = await request("/ui/setup");
+      M.group = setup.group || "";
+      M.inCluster = !!setup.needs_password;
+      const launched = (await request("/ui/session")).signed_in;
+      M.launchOnly = !!document.querySelector("launch-needed")
+        && ["127.0.0.1", "localhost", "[::1]"].includes(location.hostname)
+        && (!setup.in_cluster || setup.cluster_mode === "dev");
+      if (!launched && M.launchOnly) { releaseBoot(); return M.go("launch-needed"); }
+      if (setup.needs_setup && document.querySelector("first-run")) { releaseBoot(); return M.go("first-run"); }
+      if (!setup.needs_password) { await M.loadPreferences(); releaseBoot(); return M.go(opened); }
+      const s = await request("/ui/session");
+      if (s.signed_in) await M.loadPreferences();
+      releaseBoot();
+      return s.signed_in ? M.go(opened) : M.signIn();
+    } finally {
+      releaseBoot();
+    }
+  };
+
+  M.followSetupJob = async function (job, onUpdate = () => {}) {
+    let current = job;
+    while (true) {
+      onUpdate(current);
+      if (current.state === "done") return current.result || {};
+      if (current.state === "failed") throw new Error(current.error || current.note || "Installation failed.");
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      const response = await M.api("/ui/setup/jobs");
+      if (response.error || response.status === 401) throw new Error(response.error || "Sign in to check installation status.");
+      current = (response.jobs || []).find((candidate) => candidate.id === job.id);
+      if (!current) throw new Error("Installation status is unavailable. Open settings to retry.");
+    }
   };
 
   class FleetModel extends HTMLElement {

@@ -9,7 +9,9 @@ import urllib.parse
 from dataclasses import dataclass
 from typing import Any
 
-from ml_stack.http import ServerError, request_json
+from ml_stack import net
+from ml_stack.http import ServerError
+from ml_stack.hub import kinds
 
 from .weights import QUANTS, is_a_piece, is_beside
 
@@ -51,6 +53,10 @@ class Suggestion:
     unfiltered: bool = False
     draft_ref: str = ""
     draft_gb: float = 0.0
+    mtp_ref: str = ""
+    mtp_gb: float = 0.0
+    vision_ref: str = ""
+    vision_gb: float = 0.0
 
     @property
     def file(self) -> str:
@@ -62,14 +68,21 @@ class Suggestion:
 
     def public(self) -> dict[str, Any]:
         return {"name": self.name, "ref": self.ref, "gb": self.gb,
+                "download_gb": round(self.gb * 2**30 / 1e9, 1),
+                "draft_download_gb": round(self.draft_gb * 2**30 / 1e9, 1),
                 "what": self.what, "file": self.file,
                 "family": self.family or family_of(self.name),
                 "params_b": self.params_b, "active_b": self.active_b,
                 "moe": self.moe,
+                "kind": kinds.classify(name=self.name, repo=self.ref,
+                                       has_projector="image" in self.takes),
                 "takes": [MODALITY.get(m, m) for m in self.takes],
                 "gives": [MODALITY.get(m, m) for m in self.gives],
                 "unfiltered": self.unfiltered or is_unfiltered(self.name),
-                "draft_ref": self.draft_ref, "draft_gb": self.draft_gb}
+                "draft_ref": self.draft_ref, "draft_gb": self.draft_gb,
+                "mtp_ref": self.mtp_ref, "mtp_download_gb": round(self.mtp_gb * 2**30 / 1e9, 1),
+                "vision_ref": self.vision_ref, "vision_download_gb": round(self.vision_gb * 2**30 / 1e9, 1),
+                "mtp_recommended": bool(self.draft_ref or self.mtp_ref)}
 
 
 MODALITY = {"text": "💬", "image": "🖼", "audio": "🔊", "video": "🎬"}
@@ -99,9 +112,23 @@ SUGGESTED: tuple[Suggestion, ...] = (
     Suggestion("Gemma 4 12B",
                "hf:unsloth/gemma-4-12b-it-GGUF/gemma-4-12b-it-Q4_K_M.gguf", 6.7,
                "For a machine with room to spare."),
+    Suggestion("Qwen3.8 27B · GSQ IQ3_S",
+               "hf:ISTA-DASLab/Qwen3.8-27B-GSQ-RCO-GGUF/Qwen3.8-27B-GSQ-RCO-IQ3_S.gguf", 11.8e9 / 2**30,
+               "Smaller weights with optional integrated prediction and vision.", params_b=27,
+               mtp_ref="hf:ISTA-DASLab/Qwen3.8-27B-GSQ-RCO-GGUF/Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf",
+               mtp_gb=12.1e9 / 2**30,
+               vision_ref="hf:ISTA-DASLab/Qwen3.8-27B-GSQ-RCO-GGUF/mmproj-Qwen3.8-27B-BF16.gguf",
+               vision_gb=0.9e9 / 2**30),
     Suggestion("Qwen3.8 27B",
-               "hf:unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M.gguf", 15.4,
-               "The best of these, for a machine with 24 GB or more."),
+               "hf:unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_XL.gguf", 16.35,
+               "For a GPU with 24 GB or more, with multi-token prediction.", params_b=27,
+               draft_ref="hf:unsloth/Qwen3.8-27B-GGUF/MTP/mtp-Qwen3.8-27B-Q4_0.gguf",
+               draft_gb=1.28),
+    Suggestion("Qwen3.8 27B · smaller weights",
+               "hf:unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ4_XS.gguf", 13.3,
+               "Smaller weights leave more memory for a longer context, with Q8 KV cache.", params_b=27,
+               draft_ref="hf:unsloth/Qwen3.8-27B-GGUF/MTP/mtp-Qwen3.8-27B-Q4_0.gguf",
+               draft_gb=1.28),
     Suggestion("Tiny stories 15M",
                "hf:ggml-org/models/tinyllamas/stories15M-q4_0.gguf", 0.02,
                "Twenty megabytes, for seeing that all this works."),
@@ -193,7 +220,7 @@ def family_of(name: str) -> str:
 
 
 def _hub(url: str, timeout: float = 25.0) -> Any:
-    return request_json(url, method="GET", timeout=timeout, tries=3)
+    return net.default().json(url, net.Ask(purpose="model hub", tries=3))
 
 
 def _params_in(name: str) -> tuple[float, float]:
@@ -251,7 +278,7 @@ def _best_gguf(repo: str) -> tuple[str, int, bool] | None:
         size = int(row.get("size") or (row.get("lfs") or {}).get("size") or 0)
         if "mmproj" in stem:
             sees = True
-        if size and ("draft" in stem or "mtp" in stem):
+        if size and is_beside(path) and ("draft" in stem or "mtp" in stem):
             drafts.append((path, size))
         if is_a_piece(path) or is_beside(path):
             continue

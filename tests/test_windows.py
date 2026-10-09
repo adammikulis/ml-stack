@@ -1,14 +1,4 @@
-"""What Windows gets instead, proved against a faked platform on whatever runs the tests.
-
-Nothing here runs a real Windows call: this machine is a Mac, and ``msvcrt``, ``schtasks``,
-``netsh``, ``icacls`` and ``CTRL_BREAK_EVENT`` exist only there. What each test proves is
-that the *branch* is taken -- the right module asked, the right argv built, the right
-Popen keyword chosen -- against a fake that stands in for the Windows side. The one place a
-fake is more than a recorder is the lock: the stand-in ``msvcrt.locking`` is built on
-``flock``, so the Windows code path is exercised with real cross-process exclusion, and
-a second process really is refused. Whether ``LockFile`` itself behaves the way the fake
-does is the first thing a Windows machine will tell Adam (README, "On Windows").
-"""
+"""Platform process controls, file locking, autostart, and firewall behavior."""
 
 from __future__ import annotations
 
@@ -32,6 +22,12 @@ SRC = REPO / "src"
 
 
 @pytest.fixture
+def posix(monkeypatch):
+    """Simulate the POSIX platform branch."""
+    monkeypatch.setattr(platform, "system", lambda: "Darwin")
+
+
+@pytest.fixture
 def windows(monkeypatch):
     """``platform.system()`` says Windows; everything that reads it at call time follows."""
     monkeypatch.setattr(platform, "system", lambda: "Windows")
@@ -46,7 +42,11 @@ def _ok(returncode: int = 0, stdout: str = "", stderr: str = "") -> types.Simple
 # refuses with EACCES the way LockFile does; LK_UNLCK releases. Installed in this process
 # by the fixture and in a child by the same source, so both sides run the Windows branch.
 FAKE_MSVCRT = textwrap.dedent("""
-    import errno, fcntl, sys, types
+    import errno, os, sys, types
+    if os.name == "nt":
+        import msvcrt as _native
+    else:
+        import fcntl
     _m = types.ModuleType("msvcrt")
     _m.LK_UNLCK, _m.LK_LOCK, _m.LK_NBLCK = 0, 1, 2
     _m.calls = []
@@ -54,11 +54,17 @@ FAKE_MSVCRT = textwrap.dedent("""
         _m.calls.append((mode, nbytes))
         if mode == _m.LK_NBLCK:
             try:
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                if os.name == "nt":
+                    _native.locking(fd, _native.LK_NBLCK, nbytes)
+                else:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except OSError:
                 raise OSError(errno.EACCES, "Permission denied") from None
         elif mode == _m.LK_UNLCK:
-            fcntl.flock(fd, fcntl.LOCK_UN)
+            if os.name == "nt":
+                _native.locking(fd, _native.LK_UNLCK, nbytes)
+            else:
+                fcntl.flock(fd, fcntl.LOCK_UN)
         else:
             raise AssertionError(f"blocking mode {mode} must never be used")
     _m.locking = _locking
@@ -75,7 +81,7 @@ def win_lock(monkeypatch):
     # every later test on this worker would inherit it (ssl went looking for the Windows
     # certificate store the first time this was got wrong).
     monkeypatch.setattr(sys, "platform", "win32")
-    monkeypatch.setitem(sys.modules, "msvcrt", None)
+    monkeypatch.setitem(sys.modules, "msvcrt", sys.modules.get("msvcrt"))
     scope: dict = {}
     exec(FAKE_MSVCRT, scope)            # noqa: S102 - our own source, above
     fake = scope["_m"]
@@ -105,10 +111,9 @@ class TestTheLockOnWindows:
     def test_a_second_holder_is_refused_rather_than_allowed_to_overlap(
             self, win_lock, tmp_path):
         only_one, Busy, _ = win_lock
-        with only_one(tmp_path / "l", wait=False):
-            with pytest.raises(Busy) as why:
-                with only_one(tmp_path / "l", wait=False):
-                    raise AssertionError("two runs held the same lock at once")
+        with (only_one(tmp_path / "l", wait=False), pytest.raises(Busy) as why,
+              only_one(tmp_path / "l", wait=False)):
+            raise AssertionError("two runs held the same lock at once")
         assert str(os.getpid()) in str(why.value), "says who has it, for a stalled machine"
 
     def test_the_lock_is_released_when_the_block_ends(self, win_lock, tmp_path):
@@ -120,9 +125,8 @@ class TestTheLockOnWindows:
 
     def test_it_is_released_even_when_the_run_raises(self, win_lock, tmp_path):
         only_one, _, _ = win_lock
-        with pytest.raises(ValueError):
-            with only_one(tmp_path / "l"):
-                raise ValueError("a run that failed still has to let the next one in")
+        with pytest.raises(ValueError), only_one(tmp_path / "l"):
+            raise ValueError("a run that failed still has to let the next one in")
         with only_one(tmp_path / "l", wait=False):
             pass
 
@@ -132,29 +136,29 @@ class TestTheLockOnWindows:
         only_one, _, _ = win_lock
         said = []
         other = subprocess.Popen(
-            [sys.executable, "-c", FAKE_MSVCRT + textwrap.dedent(f"""
+            [sys.executable, "-c", "import ml_stack\n" + FAKE_MSVCRT + textwrap.dedent(f"""
                 import time
                 from ml_stack.lock import only_one
                 with only_one({str(tmp_path / 'l')!r}):
-                    print("held", flush=True)
+                    print("held", os.getpid(), flush=True)
                     time.sleep(1.5)
             """)], stdout=subprocess.PIPE, text=True,
             env={**os.environ, "PYTHONPATH": str(SRC)})
         try:
-            assert other.stdout.readline().strip() == "held"
+            marker, holder_pid = other.stdout.readline().split()
+            assert marker == "held"
             with only_one(tmp_path / "l", timeout=10, announce=said.append):
                 pass
         finally:
             other.wait(timeout=10)
         assert said and "waiting for" in said[0]
-        assert str(other.pid) in said[0], "the holder's pid was read back across processes"
+        assert holder_pid in said[0], "the holder's pid was read back across processes"
 
     def test_a_bounded_wait_gives_up_and_says_so(self, win_lock, tmp_path):
         only_one, Busy, _ = win_lock
-        with only_one(tmp_path / "l"):
-            with pytest.raises(Busy, match="still held"):
-                with only_one(tmp_path / "l", timeout=0.2, announce=lambda _: None):
-                    pass
+        with (only_one(tmp_path / "l"), pytest.raises(Busy, match="still held"),
+              only_one(tmp_path / "l", timeout=0.2, announce=lambda _: None)):
+            pass
 
     def test_the_pid_is_written_at_the_front_where_a_person_can_read_it(
             self, win_lock, tmp_path):
@@ -178,7 +182,7 @@ class TestProcessGroups:
         assert kwargs == {"creationflags": CREATE_NEW_PROCESS_GROUP}
         assert CREATE_NEW_PROCESS_GROUP == 0x200, "Win32's own value, the same everywhere"
 
-    def test_posix_keeps_its_session(self):
+    def test_posix_keeps_its_session(self, posix):
         from ml_stack.platform import process_group_kwargs
 
         assert process_group_kwargs() == {"start_new_session": True}
@@ -190,7 +194,7 @@ class TestProcessGroups:
             "creationflags": CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS}
         assert DETACHED_PROCESS == 0x8, "Win32's own value, the same everywhere"
 
-    def test_a_detached_job_on_posix_is_a_session_of_its_own(self):
+    def test_a_detached_job_on_posix_is_a_session_of_its_own(self, posix):
         from ml_stack.platform import detached_kwargs
 
         assert detached_kwargs() == {"start_new_session": True}
@@ -220,7 +224,7 @@ class TestProcessGroups:
         assert stop_gently(proc) == "TerminateProcess"
         assert terminated == [True]
 
-    def test_posix_still_sends_sigterm(self):
+    def test_posix_still_sends_sigterm(self, posix):
         from ml_stack.platform import stop_gently
 
         sent: list[int] = []
@@ -258,7 +262,7 @@ class TestStopByPid:
         assert stop_pid(4242) == "TerminateProcess"
         assert sent == [(4242, signal.SIGTERM)]
 
-    def test_posix_sends_sigterm_by_pid(self, monkeypatch):
+    def test_posix_sends_sigterm_by_pid(self, posix, monkeypatch):
         from ml_stack.platform import stop_pid
 
         sent: list[tuple[int, int]] = []
@@ -351,12 +355,12 @@ class TestQuitSignals:
         monkeypatch.setattr(signal, "SIGBREAK", 21, raising=False)
         assert quit_signals() == [signal.SIGTERM, 21]
 
-    def test_posix_hooks_only_sigterm(self):
+    def test_posix_hooks_only_sigterm(self, posix):
         from ml_stack.platform import quit_signals
 
         assert quit_signals() == [signal.SIGTERM]
 
-    def test_the_handler_is_installed_from_the_main_thread_and_not_from_a_worker(self):
+    def test_the_handler_is_installed_from_the_main_thread_and_not_from_a_worker(self, posix):
         from ml_stack.platform import on_quit
 
         before = signal.getsignal(signal.SIGTERM)
@@ -389,13 +393,15 @@ class TestPrivateFile:
         assert ran == [["icacls", str(target), "/inheritance:r", "/grant:r",
                         "fixture-user:F"]]
 
-    def test_posix_is_chmod_600(self, tmp_path):
+    def test_posix_is_chmod_600(self, posix, monkeypatch, tmp_path):
         from ml_stack.platform import private_file
 
         target = tmp_path / "cluster.json"
         target.write_text("[]")
+        modes = []
+        monkeypatch.setattr(Path, "chmod", lambda path, mode: modes.append((path, mode)))
         private_file(target)
-        assert oct(target.stat().st_mode)[-3:] == "600"
+        assert modes == [(target, 0o600)]
 
     def test_the_cluster_key_goes_through_it(self, windows, monkeypatch, tmp_path):
         """`discovery` used to chmod directly, which on Windows protects nothing."""
@@ -406,7 +412,7 @@ class TestPrivateFile:
         monkeypatch.setattr(platform_module.subprocess, "run",
                             lambda argv, **k: ran.append(list(argv)) or _ok())
         monkeypatch.setenv("USERNAME", "fixture-user")
-        create_cluster_key(tmp_path / "cluster.key")
+        create_cluster_key(tmp_path / "cluster.key", group="ml-stack")
         assert any(argv[0] == "icacls" and argv[1].endswith("cluster.json") for argv in ran)
 
 
@@ -450,14 +456,14 @@ class TestAutostartOnWindows:
         wrapper = Path(create[create.index("/TR") + 1].strip('"'))
         assert wrapper == done.path == tmp_path / "ml-stack-traind.cmd"
         body = wrapper.read_text()
-        assert '"C:\\Tools\\ml stack\\ml-stack-traind.exe" --slots 2 --label prep' in body
+        assert "-m ml_stack.fleet.launch --no-browser --slots 2 --label prep" in body
         assert str(tmp_path / "traind.log") in body, "a task's /TR cannot redirect; the wrapper does"
         assert ["schtasks", "/Run", "/TN", auto.LOGIN_TASK] in ran, "started now, not at the next logon"
         assert not (tmp_path / "startup.cmd").exists()
 
     def test_when_schtasks_refuses_the_startup_folder_is_the_fallback(
             self, win_autostart, tmp_path):
-        auto, ran, refuse = win_autostart
+        auto, _ran, refuse = win_autostart
         refuse["/Create"] = 1
 
         done = auto.install("login", log_dir=tmp_path)
@@ -465,7 +471,7 @@ class TestAutostartOnWindows:
         assert done.installed
         assert done.path == tmp_path / "startup.cmd"
         assert "Startup folder" in done.note and "Access is denied" in done.note
-        assert "ml-stack-traind.exe" in done.path.read_text()
+        assert "-m ml_stack.fleet.launch --no-browser" in done.path.read_text()
 
     def test_changing_the_answer_ends_and_deletes_the_logon_task(
             self, win_autostart, monkeypatch, tmp_path):
@@ -503,10 +509,10 @@ class TestTraindPersist:
                                        note="scheduled task runs it at logon")
 
         monkeypatch.setattr(autostart, "install", fake_install)
-        monkeypatch.setattr(daemon_module, "serve_forever",
+        monkeypatch.setattr(daemon_module, "serve",
                             lambda *a, **k: pytest.fail("--persist must not serve"))
 
-        code = daemon_module.main(["--persist", "--slots", "2", "--label", "prep",
+        code = daemon_module.run(["--persist", "--slots", "2", "--label", "prep",
                                    "--report", "ml_stack.fleet.device:stdlib_device_report"])
 
         assert code == 0
@@ -520,7 +526,7 @@ class TestTraindPersist:
 
         monkeypatch.setattr(autostart, "install", lambda mode, **k: autostart.Autostart(
             mode, installed=False, command="schtasks /Create ...", note="no permission"))
-        assert daemon_module.main(["--persist"]) == 2
+        assert daemon_module.run(["--persist"]) == 2
         err = capsys.readouterr().err
         assert "schtasks /Create" in err and "no permission" in err
 
@@ -552,7 +558,7 @@ class TestDiscoveryAndTheFirewall:
         from ml_stack.fleet import discovery
         from ml_stack.fleet.discovery import Advertiser, Beacon, _verify
 
-        discovery.create_cluster_key(tmp_path / "cluster.key")
+        discovery.create_cluster_key(tmp_path / "cluster.key", group="ml-stack")
         key = discovery.load_cluster_key(tmp_path / "cluster.key")
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as ear:
             ear.bind(("127.0.0.1", 0))
@@ -562,7 +568,7 @@ class TestDiscoveryAndTheFirewall:
             monkeypatch.setattr(discovery, "_destinations",
                                 lambda group, port: [(("127.0.0.1", heard_on), "")])
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-                s.bind(("", 0))
+                s.bind(("127.0.0.1", 0))
                 serve_on = s.getsockname()[1]
             adv = Advertiser(Beacon(name="fixture-box", port=8770), key,
                              port=serve_on, interval_s=60.0).start()
@@ -586,8 +592,9 @@ class TestDiscoveryAndTheFirewall:
         finding = found[0]
         assert not finding.good and finding.root
         assert "ml-stack traind" in finding.said and "ml-stack discovery" in finding.said
-        assert "protocol=TCP localport=8770" in finding.fix
-        assert "protocol=UDP localport=8771" in finding.fix
+        assert finding.fix[:2] == ["cmd", "/c"]
+        assert "protocol=TCP localport=8770" in finding.fix[2]
+        assert "protocol=UDP localport=8771" in finding.fix[2]
         assert "administrator" in finding.note
 
     def test_setup_is_satisfied_once_netsh_finds_them(self, windows, monkeypatch):
@@ -600,15 +607,15 @@ class TestDiscoveryAndTheFirewall:
         finding = next(f for f in setup.look() if f.name == "firewall")
         assert finding.good and not finding.fix
 
-    def test_no_firewall_finding_anywhere_else(self, monkeypatch):
+    def test_no_firewall_finding_anywhere_else(self, posix, monkeypatch):
         from ml_stack import setup
 
         monkeypatch.setattr(setup, "_arches", lambda binary, known=None: set())
         assert not [f for f in setup.look() if f.name == "firewall"]
 
-    def test_peers_init_says_how_to_copy_the_key_in_powershell(self, capsys, tmp_path):
+    def test_peers_init_uses_recovery_on_windows_to_preserve_the_name(self, capsys, tmp_path):
         from ml_stack.fleet.peers import main
 
-        assert main(["--cluster-key", str(tmp_path / "cluster.key"), "init"]) == 0
+        assert main(["--cluster-key", str(tmp_path / "cluster.key"), "init", "--group", "Cedar lab"]) == 0
         out = capsys.readouterr().out
-        assert "chmod 600" in out and "Set-Content" in out
+        assert "recovery export" in out and "recovery import" in out and "PowerShell" in out

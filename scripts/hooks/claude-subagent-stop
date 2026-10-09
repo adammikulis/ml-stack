@@ -1,0 +1,65 @@
+#!/usr/bin/env python3
+"""A SubagentStop hook: records the subagent's model from its transcript, announces that it finished as itself (never its last chat line) and retires its identity."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import workspace_hook
+
+
+def transcript_model(path: str) -> str:
+    """The model id on the last assistant line of a transcript, or an empty string."""
+    found = ""
+    try:
+        with open(path) as lines:
+            for line in lines:
+                try:
+                    model = json.loads(line).get("message", {}).get("model", "")
+                except (ValueError, AttributeError):
+                    continue
+                if isinstance(model, str) and model.startswith("claude-"):
+                    found = model
+    except OSError:
+        return ""
+    return found
+
+
+def checkout_note(event: dict) -> str:
+    """` on BRANCH in WORKTREE` for the checkout the subagent stopped in, or an empty string when it is not a git checkout."""
+    where = str(event.get("cwd") or "")
+    if not where:
+        return ""
+    branch = workspace_hook.run(["git", "-C", where, "branch", "--show-current"], "SubagentStop")
+    top = workspace_hook.run(["git", "-C", where, "rev-parse", "--show-toplevel"], "SubagentStop")
+    if not branch or not top or not branch.stdout.strip():
+        return ""
+    return f" on {branch.stdout.strip()} in {Path(top.stdout.strip()).name}"
+
+
+def main() -> int:
+    event = workspace_hook.event("SubagentStop")
+    if event is None:
+        return 0
+    environment = workspace_hook.own_environment(event, "SubagentStop")
+    if environment is None:
+        return 0
+    path = event.get("agent_transcript_path") or ""
+    model = transcript_model(str(path)) if path else ""
+    if model:
+        workspace_hook.run(["ml-stack-workspace", "whoami", "--model", model, "--harness", "claude-code"],
+                           "SubagentStop", environment=environment)
+    place = checkout_note(event)
+    said = workspace_hook.run(["ml-stack-workspace", "announce", "done", f"finished{place}"[:200]],
+                              "SubagentStop", environment=environment)
+    if said is None:
+        workspace_hook.run(["ml-stack-workspace", "announce", "milestone", f"stopped, done refused{place}"[:200]],
+                           "SubagentStop", environment=environment)
+        return 0
+    workspace_hook.run(["ml-stack-workspace", "retire"], "SubagentStop", environment=environment)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

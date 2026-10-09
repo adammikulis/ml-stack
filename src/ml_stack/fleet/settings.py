@@ -10,7 +10,9 @@ from typing import Any
 
 from ml_stack.records import Document
 
-__all__ = ["Settings", "Suggestion", "suggest"]
+from .themes import default_appearance, validate_appearance
+
+__all__ = ["Settings", "Suggestion", "apply_preferences", "suggest"]
 
 
 @dataclass
@@ -25,7 +27,11 @@ class Settings:
     """``stop`` gets the machine back now, at the cost of restarting the current job"""
     autostart: str = "manual"
     setup_done: bool = False
-    """Whether the first-run wizard was finished. A machine may finish it in no cluster."""
+    cluster_mode: str = ""
+    gym_python: str = ""
+    """The default interpreter for installed simulator libraries."""
+    gym_pythons: dict[str, str] = field(default_factory=dict)
+    """Existing interpreter overrides by simulator ID, retained across launches."""
     on_close: str = ""
     auto_update: bool = True
     """Follow releases: a bundled install replaces itself when a newer one is published,
@@ -40,11 +46,15 @@ class Settings:
     update_channel: str = "stable"
     fetch_slots: int = 2
     autodownload_models: bool = True
+    download_sources: str = ""
+    chat_max_output_tokens: int | None = 8192
+    always_show_advanced: bool = False
+    appearance: dict[str, Any] = field(default_factory=default_appearance)
     context: int = 8192
     """How much of a conversation a model is given to read. Costs memory per token."""
 
     @classmethod
-    def load(cls, path: Path | str) -> "Settings":
+    def load(cls, path: Path | str) -> Settings:
         """What ``path`` holds, or the defaults."""
         return _DOC.read(path)
 
@@ -56,9 +66,15 @@ class Settings:
         return asdict(self)
 
 
-_DOC: Document["Settings"] = Document(
-    build=lambda raw: Settings(**{k: v for k, v in raw.items()
-                                  if k in Settings.__dataclass_fields__}),
+def _build(raw: dict[str, Any]) -> Settings:
+    values = {k: v for k, v in raw.items() if k in Settings.__dataclass_fields__}
+    if "appearance" in values:
+        values["appearance"] = validate_appearance(values["appearance"])
+    return Settings(**values)
+
+
+_DOC: Document[Settings] = Document(
+    build=_build,
     unbuild=lambda one: dict(sorted(asdict(one).items())),
     empty=Settings)
 
@@ -130,3 +146,29 @@ def suggest(report: dict[str, Any] | None = None) -> dict[str, Suggestion]:
         "stop", "pausing gives the machine back straight away; the run picks up from "
                 "its last checkpoint")
     return out
+
+
+def apply_preferences(settings: Settings, request: dict[str, Any]) -> str:
+    """Validate and apply interface and conversation defaults."""
+    if "always_show_advanced" in request and not isinstance(request["always_show_advanced"], bool):
+        return "Always show advanced options must be a boolean."
+    limit = request.get("chat_max_output_tokens")
+    if limit is not None and (type(limit) is not int or limit < 1):
+        return "Default output tokens must be null or a positive integer."
+    if "download_sources" in request and request["download_sources"] not in ("internet", "lan", "both"):
+        return "Choose Internet only, LAN only, or Both."
+    values = {key: request[key] for key in ("always_show_advanced", "chat_max_output_tokens", "download_sources")
+              if key in request}
+    if "context" in request:
+        try:
+            values["context"] = max(512, min(1 << 20, int(request["context"])))
+        except (TypeError, ValueError, OverflowError):
+            return "Context length must be an integer."
+    if "appearance" in request:
+        try:
+            values["appearance"] = validate_appearance(request["appearance"])
+        except ValueError as exc:
+            return str(exc)
+    for key, value in values.items():
+        setattr(settings, key, value)
+    return ""

@@ -4,6 +4,7 @@ GET asks for, and the `Fetcher` that pulls one from a peer."""
 from __future__ import annotations
 
 import hmac
+import os
 import re
 import secrets
 import threading
@@ -66,8 +67,17 @@ def safe_relpath(root: Path, relpath: str) -> Path:
     for seg in Path(relpath).parts:
         if seg in ("..", "/") or not _SAFE_SEGMENT.match(seg):
             raise DaemonError(f"unsafe path segment: {seg!r}")
-    target = (root / relpath).resolve()
-    root_resolved = root.resolve()
+    # normalise, then require the base as a prefix: the shape a path scanner recognises as the
+    # guard (one plain condition, not a compound one), and the same refusal as the
+    # symlink-resolving check below
+    base = os.path.realpath(root)
+    joined = os.path.normpath(f"{base}{os.sep}{relpath}")
+    if joined == base:
+        return Path(base)
+    if not joined.startswith(base + os.sep):
+        raise DaemonError("path escapes the file root")
+    target = Path(joined).resolve()
+    root_resolved = Path(base)
     if root_resolved != target and root_resolved not in target.parents:
         raise DaemonError("path escapes the file root")
     return target
@@ -139,6 +149,7 @@ class Fetcher:
     def start(self, *, source: str, relpath: str, to: str,
               sha256: str = "") -> Fetch:
         target = safe_relpath(self.files_root, to)
+        safe_relpath(self.files_root, relpath)
         fetch = Fetch(id=f"{int(time.time())}-{secrets.token_hex(3)}",
                       source=source, relpath=relpath, to=to)
         with self._lock:

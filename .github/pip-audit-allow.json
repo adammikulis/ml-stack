@@ -1,0 +1,4 @@
+{
+  "comment": "Accepted pip-audit findings. Each entry needs id, package, reason and an ISO expires date in the future; an expired entry stops suppressing and the audit job fails again. Empty means every finding fails the job.",
+  "allow": []
+}

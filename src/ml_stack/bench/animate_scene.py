@@ -236,7 +236,7 @@ class Comparison(Scene):
         where = _fit(_text(" · ".join(p for p in (card["machine"], card["date"]) if p), 26,
                            MUTED), 12.0).next_to(head, DOWN, buff=0.35)
         rows = VGroup()
-        for cfg, line in zip(self.doc["configs"], card["configs"]):
+        for cfg, line in zip(self.doc["configs"], card["configs"], strict=False):
             row = VGroup(_swatch(self.colours[cfg["label"]], 0.3), _fit(_text(line, 28), 10.5))
             rows.add(row.arrange(RIGHT, buff=0.25))
         rows.arrange(DOWN, buff=0.35, aligned_edge=LEFT).next_to(where, DOWN, buff=0.9)

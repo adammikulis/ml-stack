@@ -8,7 +8,6 @@ across every CUDA device the machine has.
 
 from __future__ import annotations
 
-import os
 import sys
 
 from ml_stack.serve.backend import (
@@ -21,6 +20,7 @@ from ml_stack.serve.backend import (
     launch,
     server_log,
 )
+from ml_stack.serve.binary import hub_environment
 
 __all__ = ["ENGINES", "SGLangBackend", "VllmBackend", "cuda_devices"]
 
@@ -52,8 +52,8 @@ class _PythonEngine(ServerBackend):
         argv = self.command(spec)
         claim_port(spec, lease)
         log_path = server_log(self.name, spec.port)
-        process, base_url, load_s = launch(argv, port=spec.port, log_path=log_path,
-                                           timeout=timeout, env=dict(os.environ))
+        process, base_url, load_s = launch(argv, lease, log_path=log_path,
+                                           timeout=timeout, env=hub_environment())
         return ServerInfo(base_url=base_url, port=spec.port, pid=process.pid, backend=self.name,
                           log_path=log_path, load_s=load_s, process=process)
 

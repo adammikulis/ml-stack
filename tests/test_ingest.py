@@ -21,7 +21,7 @@ from test_sources_pdf import a_textbook
 from ml_stack import hub, ingest, jobs
 from ml_stack.contracts import grammar_for
 
-pytest.importorskip("pymupdf", reason="ml-stack[pdf]")
+pytest.importorskip("pymupdf", reason="pymupdf is the test-only PDF writer here (AGPL, opt-in): pip install pymupdf")
 
 
 # What a model is scripted to say about the invented lattice textbook.

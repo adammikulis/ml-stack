@@ -1,0 +1,15 @@
+#!/usr/bin/env python3
+"""A UserPromptSubmit, AskUserQuestion PostToolUse and SessionEnd hook: records what the person typed or answered, and any authorization it speaks."""
+
+from __future__ import annotations
+
+import workspace_hook
+
+
+def main() -> int:
+    event = workspace_hook.event("UserPrompt")
+    return 0 if event is None else workspace_hook.person(event, "UserPrompt")
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

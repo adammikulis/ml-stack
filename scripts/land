@@ -1,0 +1,106 @@
+#!/usr/bin/env python3
+"""Land ready branches as one verified batch.
+
+    scripts/land plan [--cover] [BRANCH...]   unique patches, minimal cover, merge order, conflicts
+    scripts/land run [--dry-run] BRANCH...    merge in an integration worktree, verify once, eject failures
+    scripts/land finish [--apply]             fast-forward the target from the verified batch, clean up
+    scripts/land serve [--once]               the board-fed runner: lands reviewed land-requests, pushes only the target
+
+run and plan also take --entries FILE (JSON list of {branch, tip}) and refuse a branch whose tip moved.
+
+plan, run and finish never push. serve pushes only the development branch, normally; never main, never forces.
+Every test and gate runs through scripts/test.
+The last line of output is a JSON summary.
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+
+import land_board
+import land_check
+import land_entries
+import land_finish
+import land_git as lg
+import land_plan
+import land_run
+
+
+def show_plan(plan: land_plan.Plan) -> dict:
+    """Print the plan and return its summary."""
+    for n, entry in enumerate(plan.order, 1):
+        flags = ", ".join(filter(None, [
+            "conflicts with " + plan.target if entry.conflicts_with_target else "",
+            "conflicts with earlier merges" if entry.conflicts_with_plan else "",
+            "dirty worktree" if entry.dirty else ""]))
+        print(f"{n}. {entry.branch}: {len(entry.patches)} commits, {entry.behind} behind, "
+              f"{len(entry.files)} files" + (f" [{flags}]" if flags else ""))
+        for path in entry.files[:8]:
+            print(f"     {path}")
+        for note in entry.warnings:
+            print(f"     warning: {note}")
+    for entry in plan.covered:
+        print(f"covered: {entry.branch} is contained in {entry.contained_in or 'the plan'}")
+    for name in plan.empty:
+        print(f"nothing to land: {name}")
+    for name in plan.dirty:
+        print(f"dirty worktree (left alone): {name}")
+    return {"command": "plan", "target": plan.target, "order": [e.view() for e in plan.order],
+            "covered": [e.branch for e in plan.covered], "empty": plan.empty, "dirty": plan.dirty}
+
+
+def main() -> int:
+    """Parse the command and run it."""
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("command", choices=["plan", "run", "finish", "serve"])
+    parser.add_argument("branches", nargs="*")
+    parser.add_argument("--cover", action="store_true", help="plan: every local branch with a worktree")
+    parser.add_argument("--dry-run", action="store_true", help="run: plan and predict, change nothing")
+    parser.add_argument("--apply", action="store_true", help="finish: do it (default is a dry run)")
+    parser.add_argument("--entries", type=Path, help="plan/run: JSON list of {branch, tip}; a moved tip is refused")
+    parser.add_argument("--target", default=lg.TARGET, help="branch to land on")
+    parser.add_argument("--conflicts", choices=["eject", "stop"], default="eject")
+    parser.add_argument("-n", "--workers", type=int, default=0, help="affected-test worker ceiling (default 0: what the broker grants)")
+    parser.add_argument("--once", action="store_true", help="serve: one pass, then exit")
+    parser.add_argument("--interval", type=float, default=30.0, help="serve: seconds between passes")
+    parser.add_argument("--stall-minutes", type=float, default=20.0, help="serve: abort a gate silent this long")
+    parser.add_argument("--remote", default="origin", help="serve: remote the development branch is pushed to")
+    parser.add_argument("--repo", type=Path, default=Path.cwd(), help="a checkout of the repository")
+    args = parser.parse_args()
+    root = lg.toplevel(args.repo)
+    if args.command == "serve":
+        flags = {"once": args.once, "interval": args.interval, "remote": args.remote,
+                 "stall_minutes": args.stall_minutes}
+        try:
+            lg.refuse_protected(args.target)
+            return land_board.serve(root, args.target, flags)
+        except (ValueError, RuntimeError) as error:
+            print(f"land: {error}", file=sys.stderr)
+            return 4
+    try:
+        lg.refuse_protected(args.target, *args.branches)
+        if args.command == "finish":
+            status, summary = land_finish.finish(root, args.apply)
+        else:
+            names = land_plan.cover_branches(root, args.target) if args.cover else args.branches
+            if args.entries:
+                names = [*names, *land_entries.load(root, args.target, args.entries)]
+            if args.command == "plan":
+                status, summary = 0, show_plan(land_plan.build(root, args.target, names))
+            else:
+                status, summary = land_run.run(root, args.target, names, {
+                    "dry_run": args.dry_run, "conflicts": args.conflicts, "workers": args.workers})
+    except (ValueError, RuntimeError) as error:
+        print(f"land: {error}", file=sys.stderr)
+        status, summary = 4, {"command": args.command, "status": "error", "error": str(error)}
+    print(land_check.summary_json(summary))
+    return status
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

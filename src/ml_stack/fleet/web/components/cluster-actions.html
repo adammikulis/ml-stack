@@ -1,0 +1,209 @@
+<script>
+(function () {
+  const M = window.fleetModel;
+  const el = M.el;
+  class ClusterActions extends HTMLElement {
+    setup({ endpoint, onComplete, group = "default", groups = [], clusterMode }) {
+    const scope = endpoint.includes("/setup/") ? "setup-cluster" : "fleet-cluster";
+    const mode = el("select", { id: `${scope}-action` },
+      el("option", { value: "join" }, "Join existing pool"),
+      el("option", { value: "create" }, "Create new pool"));
+    const named = el("input", { id: `${scope}-name`, type: "text", required: "1", value: group });
+    const words = el("input", { id: `${scope}-passphrase`, type: "password", required: "1" });
+    const submit = el("button", { class: "ghost small" }, "Join existing pool");
+    const note = el("div", { role: "status", "aria-live": "polite" });
+    const explain = el("div", { class: "hint" });
+    const check = () => { submit.disabled = !named.value.trim() || words.value.trim().length < M.MIN_PASS; };
+    const choose = () => {
+      submit.textContent = mode.value === "create" ? "Create new pool" : "Join existing pool";
+      explain.textContent = mode.value === "create"
+        ? "Start a separate pool with this name and a new passphrase."
+        : "Use the name and passphrase of a pool already running on your network.";
+      check();
+    };
+    named.oninput = words.oninput = check;
+    mode.onchange = choose;
+    submit.onclick = async () => {
+      submit.disabled = true;
+      note.replaceChildren(el("span", { class: "spin" }),
+        mode.value === "create" ? " Creating pool…" : " Looking for the existing pool…");
+      const group = named.value.trim();
+      const action = mode.value;
+      const got = await M.api(endpoint, { method: "POST",
+        body: JSON.stringify({ group, passphrase: words.value, mode: action, cluster_mode: clusterMode }) });
+      if (got.error || got.ok === false) {
+        note.replaceChildren(el("div", { class: "err" }, got.error || "The pool action failed."));
+        check();
+        return;
+      }
+      words.value = "";
+      check();
+      note.replaceChildren(el("div", { class: "ok" },
+        `${action === "create" ? "Created" : "Joined"} pool '${group}'.`));
+      await onComplete(got);
+    };
+    const nearby = el("div", { role: "status", "aria-live": "polite" });
+    const recovered = el("div");
+    const refresh = el("button", { class: "ghost small", onclick: async () => {
+      refresh.disabled = true;
+      try {
+        const result = await M.api("/ui/clusters/found");
+        nearby.replaceChildren(...(result.found || []).filter(c => !c.mine).map(c =>
+          el("div", { class: "row" }, el("span", {}, c.name),
+            el("button", { class: "ghost small", onclick: () => {
+              named.value = c.name; mode.value = "join"; choose();
+              recovered.replaceChildren();
+              if (c.method === "recovery") recovered.append(window.setupRecovery(c.name, onComplete));
+              else words.focus();
+            } }, c.method === "recovery" ? "Join with recovery file" : "Join"))));
+        if (!nearby.childNodes.length) nearby.textContent = result.error || "No nearby pools found.";
+      } catch { nearby.textContent = "Could not discover nearby pools."; }
+      finally { refresh.disabled = false; }
+    } }, "Find nearby pools");
+    choose();
+    this.replaceChildren(M.inviteForm({ groups, onComplete, scope }),
+      el("div", { class: "group", id: `${scope}-form` },
+      el("h3", {}, "Nearby pools"), nearby, refresh, recovered,
+      el("label", { for: `${scope}-action` }, "What would you like to do?"), mode, explain,
+      el("label", { for: `${scope}-name` }, "Pool name (required)"), named,
+      el("label", { for: `${scope}-passphrase` }, "Pool passphrase"), words,
+      submit, note));
+    }
+  }
+  class FleetInvites extends HTMLElement {
+    setup({ groups, onComplete, scope }) {
+      this.generation = 0;
+      const note = el("div", { role: "status", "aria-live": "polite" });
+      const invite = el("textarea", { id: `${scope}-invite`, rows: "3", autocomplete: "off",
+        autocapitalize: "off", spellcheck: "false" });
+      const join = el("button", { class: "small" }, "Join with invite");
+      const check = () => { join.disabled = !invite.value.trim(); };
+      invite.oninput = check;
+      join.onclick = async () => {
+        const generation = this.generation;
+        join.disabled = true;
+        note.textContent = "Joining the invited pool...";
+        try {
+          const got = await M.api("/ui/fleet/join-invite", { method: "POST",
+            body: JSON.stringify({ invite: invite.value.trim() }) });
+          if (generation !== this.generation || M.refused(got)) return;
+          if (got.error || got.ok === false) throw new Error(got.error || "Could not join this invite.");
+          invite.value = "";
+          note.textContent = `Joined pool '${got.group || ""}'.`;
+          await onComplete(got);
+        } catch (error) { note.textContent = error.message; }
+        finally { check(); }
+      };
+      check();
+      this.replaceChildren(el("div", { class: "group", "aria-label": "Pool invitations" },
+        el("h3", {}, "Connect another device"),
+        el("p", { class: "hint" }, "Create an invite on a machine in your pool, then paste it here on the machine joining. Both machines must be reachable on your network."),
+        el("label", { for: `${scope}-invite` }, "Invitation"), invite, join, note));
+      if (!groups.length) return;
+      const named = el("select", { id: `${scope}-invite-group` },
+        ...groups.map(group => el("option", { value: group }, group)));
+      const kind = el("select", { id: `${scope}-invite-kind` },
+        el("option", { value: "computer" }, "Owned computer: full pool access"),
+        el("option", { value: "android" }, "Owned Android phone: local status and chat for one hour"));
+      const issued = el("div");
+      const create = el("button", { class: "ghost small" }, "Create invite");
+      const creation = el("div", { role: "status", "aria-live": "polite" });
+      create.onclick = async () => {
+        const generation = this.generation;
+        create.disabled = true;
+        creation.textContent = "Creating an invite...";
+        try {
+          const got = await M.api("/ui/fleet/invites", { method: "POST",
+            body: JSON.stringify({ group: named.value, kind: kind.value }) });
+          if (generation !== this.generation || M.refused(got)) return;
+          if (got.error || got.ok === false) throw new Error(got.error || "Could not create an invite.");
+          if (!got.invite || !got.id || !Number.isFinite(got.expires)) throw new Error("The invite response is incomplete.");
+          creation.textContent = kind.value === "android" ? "Scan this invite in the Android companion on a phone you own." : "Share this invite with the computer you own.";
+          if (this.isConnected) this.showInvite(got, issued, creation, create);
+        } catch (error) { creation.textContent = error.message; create.disabled = false; }
+      };
+      this.create = create; this.issued = issued;
+      this.firstChild.append(el("label", { for: `${scope}-invite-group` }, "Cluster to invite into"),
+        named, el("label", { for: `${scope}-invite-kind` }, "Device and permissions"), kind,
+        el("p", { class: "hint" }, "Only add computers you own. This invite grants full pool access, including permission to run commands."),
+        create, creation, issued);
+      const devices = el("div");
+      const refresh = el("button", { class: "ghost small" }, "Show Android connections");
+      refresh.onclick = async () => {
+        const got = await M.api("/ui/fleet/android-devices");
+        if (M.refused(got)) return;
+        if (got.error) { creation.textContent = got.error; return; }
+        devices.replaceChildren(...(got.devices || []).map(device => el("div", { class: "row" },
+          el("span", {}, `${device.device_name} (${device.group})`),
+          el("button", { class: "ghost small", onclick: async () => {
+            const result = await M.api("/ui/fleet/android-devices", { method: "DELETE",
+              body: JSON.stringify({ device_id: device.device_id }) });
+            if (result.error) creation.textContent = result.error;
+            else refresh.click();
+          } }, "Revoke Android connection"))));
+        if (!devices.childNodes.length) devices.textContent = "No active Android connections.";
+      };
+      this.firstChild.append(refresh, devices);
+    }
+    showInvite(got, issued, note, create) {
+      const text = el("textarea", { rows: "4", readonly: "1", "aria-label": "Created invitation",
+        spellcheck: "false" });
+      text.value = got.invite;
+      const expiry = el("div", { class: "hint" });
+      const copy = el("button", { class: "small" }, "Copy invite");
+      copy.onclick = async () => {
+        try {
+          if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(text.value);
+          else {
+            text.focus(); text.select();
+            if (!document.execCommand("copy")) throw new Error("Select the invitation and copy it.");
+          }
+          note.textContent = "Invite copied. On the other machine, open Poolside and choose Join with invite.";
+        } catch { text.focus(); text.select(); note.textContent = "Select the invitation and copy it."; }
+      };
+      const revoke = el("button", { class: "ghost small" }, "Revoke invite");
+      const tick = () => {
+        const seconds = Math.max(0, Math.ceil(got.expires - Date.now() / 1000));
+        expiry.textContent = seconds ? `Single use; expires in ${Math.ceil(seconds / 60)} minute(s).` : "This invite has expired.";
+        if (!seconds) { text.value = ""; issued.querySelector("img")?.remove(); copy.disabled = true; create.disabled = false; clearInterval(this.timer); }
+      };
+      revoke.onclick = async () => {
+        revoke.disabled = true;
+        try {
+          const result = await M.api("/ui/fleet/invites", { method: "DELETE", body: JSON.stringify({ id: got.id }) });
+          if (result.error || result.ok === false) throw new Error(result.error || "Could not revoke this invite.");
+          clearInterval(this.timer); text.value = ""; issued.replaceChildren(); create.disabled = false;
+          note.textContent = "Invite revoked.";
+        } catch (error) { note.textContent = error.message; revoke.disabled = false; }
+      };
+      const qr = typeof got.qr === "string" && got.qr.startsWith("data:image/svg+xml;")
+        ? el("img", { src: got.qr, alt: "Invitation QR code", width: "240", height: "240" }) : null;
+      issued.replaceChildren(...M.kids(qr), text, expiry, el("div", { class: "row" }, copy, revoke));
+      clearInterval(this.timer); tick(); if (got.expires > Date.now() / 1000) this.timer = setInterval(tick, 1000);
+    }
+    clear() {
+      this.generation++; clearInterval(this.timer);
+      this.querySelectorAll("textarea").forEach(field => { field.value = ""; });
+      this.querySelectorAll('[role="status"]').forEach(note => { note.textContent = ""; });
+      this.querySelector("button").disabled = true;
+      this.issued?.replaceChildren();
+      if (this.create) this.create.disabled = false;
+    }
+    disconnectedCallback() { clearInterval(this.timer); }
+  }
+  customElements.define("fleet-invites", FleetInvites);
+  M.onRoute(route => document.querySelectorAll("fleet-invites").forEach(form => {
+    if ((form.closest("#cluster") && route !== "cluster")
+        || (form.closest("#first-run") && route !== "first-run")) form.clear();
+  }));
+  M.inviteForm = (options) => {
+    const form = el("fleet-invites"); form.setup(options); return form;
+  };
+  customElements.define("cluster-actions", ClusterActions);
+  M.clusterForm = (options) => {
+    const form = el("cluster-actions");
+    form.setup(options);
+    return form;
+  };
+})();
+</script>

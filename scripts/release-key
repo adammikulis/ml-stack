@@ -1,0 +1,177 @@
+#!/usr/bin/env python3
+"""Make, store, rotate and load the key that signs releases (docs/release.md).
+
+    scripts/release-key create [--write]     new key: OS keystore, release environment secret, public line
+    scripts/release-key show-public          the stored key's public line
+    scripts/release-key rotate [--write]     replace the stored key and the environment secret
+    scripts/release-key agent                load the stored key into ssh-agent
+
+A person runs it at a terminal; an agent marker or a missing terminal refuses.
+"""
+from __future__ import annotations
+
+import argparse
+import base64
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "src"))
+
+from cryptography.hazmat.primitives import serialization  # noqa: E402
+
+from ml_stack import credentials, person  # noqa: E402
+
+REPO_NAME = "RELEASE_SIGNING_KEY"
+ITEM = "ML_STACK_RELEASE_SIGNING_KEY"
+SIGNING = ROOT / "src" / "ml_stack" / "fleet" / "signing.py"
+LINE = re.compile(r'^RELEASE_KEY = ".*"$', re.M)
+
+
+class Failed(RuntimeError):
+    pass
+
+
+def _run(argv: list[str], *, data: bytes | None = None, cwd: Path | None = None) -> bytes:
+    try:
+        done = subprocess.run(argv, input=data, capture_output=True, cwd=cwd, check=False)
+    except FileNotFoundError:
+        raise Failed(f"{argv[0]} is not installed") from None
+    if done.returncode:
+        raise Failed(f"{' '.join(argv[:3])} failed: {done.stderr.decode(errors='replace').strip()}")
+    return done.stdout
+
+
+def _stored() -> bytes | None:
+    held = credentials.get(ITEM)
+    return base64.b64decode(str(held)) if held else None
+
+
+def _public(private: bytes) -> str:
+    """The ``ssh-ed25519 AAAA...`` line of a private key, derived in memory: the key is never
+    written to a file to be read back."""
+    try:
+        held = serialization.load_ssh_private_key(private, password=None)
+    except ValueError as bad:
+        raise Failed(f"the stored key is not an OpenSSH private key: {bad}") from None
+    line = held.public_key().public_bytes(serialization.Encoding.OpenSSH,
+                                          serialization.PublicFormat.OpenSSH)
+    return " ".join(line.decode().split()[:2])
+
+
+def _wipe(work: Path) -> None:
+    for path in work.iterdir():
+        with path.open("r+b") as fh:
+            fh.write(b"\0" * max(path.stat().st_size, 1))
+    shutil.rmtree(work, ignore_errors=True)
+
+
+def _generate() -> bytes:
+    work = Path(tempfile.mkdtemp(prefix="release-key-"))
+    try:
+        work.chmod(0o700)
+        key = work / "key"
+        _run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "ml-stack-release", "-f", str(key)])
+        return key.read_bytes()
+    finally:
+        _wipe(work)
+
+
+def _set_secret(private: bytes) -> None:
+    try:
+        _run(["gh", "secret", "set", REPO_NAME, "--env", "release"], data=private, cwd=ROOT)
+    except Failed as exc:
+        raise Failed(f"{exc}\nthe environment secret, the keystore and signing.py are unchanged; run "
+                     "`gh auth status` in this repository and run the command again") from None
+
+
+def _record(public: str, write: bool) -> None:
+    edit = f'RELEASE_KEY = "{public}"'
+    print(f"public key: {public}")
+    if not write:
+        print(f"set this line in {SIGNING.relative_to(ROOT)}:\n    {edit}")
+        return
+    text = SIGNING.read_text()
+    if not LINE.search(text):
+        raise Failed(f"no RELEASE_KEY line in {SIGNING}; the key is stored, set it by hand: {edit}")
+    SIGNING.write_text(LINE.sub(lambda _m: edit, text, count=1))
+    print(f"wrote {SIGNING.relative_to(ROOT)}; commit it")
+
+
+def _store(private: bytes) -> None:
+    try:
+        credentials.set(ITEM, base64.b64encode(private).decode(), keychain=True)
+    except credentials.CredentialError as exc:
+        raise Failed(f"{exc}\nthe environment secret now holds a key that is not stored; run "
+                     "`scripts/release-key rotate`") from None
+
+
+def create(args: argparse.Namespace) -> int:
+    """Make the first key."""
+    if _stored() is not None:
+        raise Failed("a release key is already stored; `scripts/release-key rotate` replaces it")
+    private = _generate()
+    _set_secret(private)
+    _store(private)
+    _record(_public(private), args.write)
+    return 0
+
+
+def rotate(args: argparse.Namespace) -> int:
+    """Replace the stored key, the environment secret and RELEASE_KEY."""
+    private = _generate()
+    _set_secret(private)
+    _store(private)
+    _record(_public(private), args.write)
+    print("releases signed before this verify only against the old public key")
+    return 0
+
+
+def show_public(_args: argparse.Namespace) -> int:
+    """Print the stored key's public line."""
+    private = _stored()
+    if private is None:
+        raise Failed("no release key is stored; run `scripts/release-key create`")
+    print(_public(private))
+    return 0
+
+
+def agent(_args: argparse.Namespace) -> int:
+    """Load the stored key into ssh-agent and print the git settings that sign with it."""
+    private = _stored()
+    if private is None:
+        raise Failed("no release key is stored; run `scripts/release-key create`")
+    if not os.environ.get("SSH_AUTH_SOCK"):
+        raise Failed("no ssh-agent: SSH_AUTH_SOCK is not set")
+    _run(["ssh-add", "-"], data=private)
+    print("git config gpg.format ssh")
+    print(f"git config user.signingkey 'key::{_public(private)}'")
+    print("git config commit.gpgsign true")
+    return 0
+
+
+def main(argv: list[str] | None = None, terminal: tuple[bool, bool] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="release-key", description=__doc__.splitlines()[0])
+    sub = parser.add_subparsers(dest="command", required=True)
+    for name, fn in (("create", create), ("rotate", rotate)):
+        one = sub.add_parser(name, help=fn.__doc__)
+        one.add_argument("--write", action="store_true", help="set RELEASE_KEY in signing.py")
+        one.set_defaults(run=fn)
+    sub.add_parser("show-public", help=show_public.__doc__).set_defaults(run=show_public)
+    sub.add_parser("agent", help=agent.__doc__).set_defaults(run=agent)
+    args = parser.parse_args(argv)
+    try:
+        person.require_person("scripts/release-key", terminal)
+        return args.run(args)
+    except (Failed, person.HumanRequired, credentials.CredentialError) as exc:
+        print(f"release-key: {exc}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

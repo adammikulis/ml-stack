@@ -119,8 +119,8 @@ class Profile:
     build: str = ""                      # a named llama.cpp build, "" for the managed one
     draft: str = ""                      # the head's file name, path, or hf: reference
     spec_type: str = ""                  # draft-mtp, draft-eagle3; "" reads it off the name
-    cache_type: str = ""                 # "" leaves the serving's own, q8_0
-    draft_cache_type: str = ""           # the draft's own cache; "" leaves the build's f16
+    cache_type: str = ""
+    draft_cache_type: str = ""           # the draft's own cache
     reasoning_budget: int | None = None  # 0 turns the thinking off; None leaves it alone
     mmproj: str = ""                     # a path, or "auto" to find it beside the weights
     extra_args: tuple[str, ...] = ()     # -ub 2048
@@ -194,10 +194,10 @@ class Profile:
         each, note = (_alone_context(self, served) if taken == 1
                      else (self.slot_context, ""))
         return Serving(model=served, port=port, slots=taken,
-                     slot_context=each, cache_type=self.cache_type,
+                     slot_context=each, cache_type=self.cache_type or "q8_0",
                      draft=draft, draft_n_max=self.spec_draft_max,
                      draft_p_min=self.spec_p_min,
-                     draft_cache_type=self.draft_cache_type,
+                     draft_cache_type=self.draft_cache_type or "q8_0",
                      spec_type=self.spec_type, mmproj=seeing,
                      reasoning_budget=self.reasoning_budget, build=self.build,
                      extra_args=tuple(self.extra_args), note=note)
@@ -208,7 +208,7 @@ class Profile:
         return Asking(**{flag: bool(getattr(self, flag)) for flag in FLAGS},
                       reach=self.reach, rounds=self.rounds)
 
-    def talking(self, *, n_predict: int = 16384, timeout: float = 300.0) -> Any:
+    def talking(self, *, n_predict: int | None = None, timeout: float | None = None) -> Any:
         """The client this record measured with, as a :class:`~ml_stack.serve.Talking`.
 
         The sampling and the speculative depth are the record's, and both go out with each
@@ -221,7 +221,7 @@ class Profile:
                        spec_draft_max=self.spec_draft_max)
 
     def alone(self, *, port: int = 8080, model: str = "", resolve: bool = True,
-              n_predict: int = 16384, timeout: float = 300.0) -> Any:
+              n_predict: int | None = None, timeout: float | None = None) -> Any:
         """This record as one conversation: one slot holding the whole cache the record
         measured across its ``parallel`` slots. The same as :meth:`config` with no ``slots``.
         """
@@ -229,7 +229,7 @@ class Profile:
                         n_predict=n_predict, timeout=timeout)
 
     def config(self, *, port: int = 8080, slots: int | None = None, model: str = "",
-            resolve: bool = True, n_predict: int = 16384, timeout: float = 300.0) -> Any:
+            resolve: bool = True, n_predict: int | None = None, timeout: float | None = None) -> Any:
         """This record whole, as a :class:`~ml_stack.serve.Config`: how to serve it,
         the asking to ask it with, and the client.
 

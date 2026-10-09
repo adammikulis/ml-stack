@@ -1,26 +1,100 @@
 # The test suite
 
-About three thousand tests in a little over two minutes on every core. Nothing here serves a
-model, touches a GPU, reaches the Hub, or reads anything under `~/.ml-stack`, `~/.cache` or a
-real home directory — see *Nothing reads the machine* below for how that is enforced rather
-than remembered. Every person, company, place and model file is invented.
+Nothing here serves a model, touches a GPU, reaches the Hub, or reads anything under
+`~/.ml-stack`, `~/.cache` or a real home directory — see *Nothing reads the machine* below for
+how that is enforced rather than remembered. Every person, company, place and model file is
+invented.
 
 ## Running them
 
+One command per tier, `scripts/test <tier>`; `-n N` sets a worker ceiling (default 0: an automatic pool up to what the broker grants; `-n 1` is sequential) and any other
+argument goes to pytest. Each run queues for them in the machine-wide budget
+(`scripts/testslots.py`; `python scripts/testslots.py status`) and uses what it is granted, so
+run the tiers, not a bare `pytest -n N`. `DEV_TEST_BUDGET` sets the budget (default logical CPU count minus one). Agents must not disable the queue with `DEV_TEST_SLOTS=off`.
+
+[AGENTS.md](../AGENTS.md#scoped-merge-gates-and-background-verification) defines when checks run. Agents test their own changed behavior. The main agent runs shared
+structural/security gates once per consolidated integration batch, handles full end-to-end
+checks and background suites, and honors the owner-directed Linux pause.
+
+| tier | what runs | when |
+| --- | --- | --- |
+| `quick` | the tests the change reaches (below) | when relevant changed behavior needs verification |
+| `fast` | every test not marked `slow` or `heavy`, and not the four that import mlx while collecting | when broader affected coverage is justified |
+| `full` | every test not marked `slow` | background verification per batch/schedule |
+| `slow` | only the tests marked `slow` | after touching packaging, the page or the fleet |
+| `all` | everything, `--slow` included | background/CI suite, or explicit affected slow-test selectors |
+
 ```sh
-pytest                      # everything, on every core (`-n auto` is in pyproject.toml)
-pytest -n 4                 # while a bench has the GPU: four workers, not sixteen
-pytest -m "not slow"        # the fast subset -- no browser, no subprocess, no network wait
-pytest -n 0                 # one process, in file order, when a failure needs a clean order
-pytest -n 0 -p no:randomly  # the same, with any ordering plugin disabled
-pytest --durations=0 --durations-min=1.8    # what is costing the wall clock
+scripts/test quick --explain      # which file selected which test file
+scripts/test fast -n 2            # while a bench has the GPU
+scripts/test all tests/<affected-file>.py -n 1   # brokered sequential reproduction
+scripts/test full --durations=0 --durations-min=1.8    # scheduled background timing
 ```
 
-`-n 4` is the one to use while a measurement is running: a full `-n auto` run competes with
-the bench for cores and both get slower, and a bench's wall clock is the thing being measured.
+A run that names test files prints `ran` or `reused from <run id>` for each file and counts both;
+`--no-reuse` executes every file, and tier, `gate` and `quick` runs always execute. A tier is a
+background job: `scripts/test submit all tests/<file>.py` prints a job id for `status`, `wait`,
+`result`, `cancel` and `subscribe`. Keys, what is never reused and the limits are in
+[docs/test-reuse.md](../docs/test-reuse.md).
 
-The default run has no `-m` filter, so `pytest` alone still runs every test including the slow
-ones. `-m "not slow"` is a convenience for the inner loop, not the suite of record.
+Every run records how long each passing test takes (`scripts/testdurations.py`). `scripts/test`
+estimates the run from that history before admission, prints the estimate, and classes it `background`
+at 180 s or more (`DEV_TEST_BACKGROUND_S`), `interactive` below. The broker grants the shortest
+estimated work first, caps long runs to half the budget on weekdays 08:00-21:00
+(`DEV_TEST_NORMAL_HOURS`) and runs them at lower CPU priority (`docs/test-execution.md`, *Scheduling*).
+`--background` forces the class. The `slow` and `heavy` labels never enter the estimate or the class;
+only measured durations do.
+
+Use the workers granted by the maintained broker. Coordinate test concurrency with active
+benchmarks; do not reserve a fixed worker pool or bypass shared admission.
+
+### How `quick` chooses
+
+The main agent owns `quick`, including cold-map recording and fallbacks that can start full
+runs. Workers use explicit affected selectors for their own changes.
+
+It diffs the working tree against the merge-base with `0.2dev` (`--base` to change it), then
+takes the union of two selections:
+
+- **pytest-testmon** records, per test, the functions it executed, in `.testmondata` (ignored
+  by git, one per checkout). The first `quick` in a checkout runs the whole full tier to
+  record it; after that testmon reruns the tests that executed a changed function, and the
+  ones that failed last time.
+- **The import graph** (`scripts/affected.py`): every test file that imports a changed
+  module directly, counting imports inside functions and a module named in a string
+  (`-m ml_stack.x`, `import_module`). It exists for what testmon cannot see, such as code that
+  only a child process runs. `--explain` prints each file and what selected it.
+
+It runs the full tier, and says why, when the change touches `pyproject.toml`,
+`tests/conftest.py`, a `budgets.json` change that raises a number or changes its shape, a file
+that is not source, a test or prose and that no test names, a deleted module, or when
+pytest-testmon is not installed (`pip install -e '.[test]'`). `--explain` prints the reason for
+each path that forces it.
+
+Three cases are narrower (`scripts/affected_rules.py`; `tests/test_affected_scripts.py` pins them
+and replays recent commits). A changed **script** (`scripts/<name>.py`, an extensionless one such
+as `scripts/test`, or one in `scripts/hooks/`) selects every test file that imports it, names
+`scripts/<name>` in a string or command line, builds its path from the bare name, or reaches it
+through another script or a `tests/` helper that does, plus the tests that enumerate `scripts/`.
+A script that `tests/conftest.py` imports, or a `-p` plugin of `scripts/test` or what the plugin
+imports (`testslots.py` and its modules, `testdurations.py`, `testphases.py`), runs in every test
+session and still means the full tier. A **`budgets.json`** whose integers only fell selects the
+budget tests and the tests of the scripts that read it. A **generated file**
+(`docs/redteam/coverage.json`, `docs/commands.md`) selects the tests that name it or run its
+generator; the gate (`scripts/test gate`) re-checks the file itself.
+
+`quick` adds the cheap tree-wide checks (`test_layers`, `test_wiring`, the conftest and isolation
+guards) to every selection and leaves out the slow ones (`test_budgets`, `test_gates_*`,
+`test_no_data_files`): the pre-commit hook runs the budgets, and `full` and `all` run all
+of them. `tests/test_quick_select.py` pins the selection rules, and `scripts/verify-quick`
+mutates a function in each module named and reports any mutation `quick` let through that a
+test would have caught (run it in a throwaway worktree).
+
+### `heavy`
+
+`tests/heavy-modules.txt` lists the modules that cost the most; `conftest.py` marks them
+`heavy`. `scripts/test heavy` rewrites the list from the recorded test durations.
+Labels schedule, they never block: `heavy` and `slow` order and place a run, and never stop a file's result from being cached or reused.
 
 ## What is slow, and why
 
@@ -37,6 +111,12 @@ clock from about 145 s to about 109 s on four workers.
 | `test_no_real_names.py` (the two wrapper tests) | runs the commit hook through `sh`; the in-process `check()` tests are fast and stay in |
 | `test_packaging.py`, `test_fleet_environment.py` | builds a wheel |
 | `test_bench_selfcheck.py` (four of them) | runs the whole self-check path |
+
+`test_packaging_install_runs.py` (slow) builds what it needs from the checkout: the ml-stack wheel through
+`packaging/build.py` (hatchling, from the local pip cache or the index) and a stand-in wheelhouse of the
+extras plus every unconditional requirement read from the built wheel's metadata, then installs with
+`--no-index`. The Windows-installer tests need `pwsh` (skipped with that reason when it is absent). Nothing
+else is a prerequisite once hatchling is cached.
 
 Two costs are *not* marked, because marking them would move the cost rather than remove it:
 
@@ -70,12 +150,46 @@ What still reads the real machine, on purpose:
 
 - `test_gguf.py` compares the shipped `source_dirs()` against `Path.home() / ".unsloth"`, which
   is the value under test — it asserts what the default *is*, and never opens the path.
-- `test_web.py`'s one live search is skipped unless `MLSTACK_NET` is set on purpose.
+- `test_web.py`'s one live search is marked `live_net` and skipped unless `ML_STACK_LIVE_NET=1`.
 - `test_fleet_install.py` asserts the `HF_HOME` an installer *writes* into a plist or unit
   file. It composes a path from a home directory; it does not read one.
 - `test_serve_build.py` runs a real (tiny, hand-written) executable and real `strings` against
   fake dylibs, all inside `tmp_path`; the packaging tests build real wheels there. Neither
   compiles anything or reaches the network.
+
+## Live services
+
+No test reaches a paid or quota-limited API (Anthropic, OpenAI, any cloud model) or a public
+endpoint on its own. A test that has to is marked `live_api` or `live_net`, and conftest skips it
+unless `ML_STACK_LIVE_API=1` or `ML_STACK_LIVE_NET=1` is set. A key or login in the environment
+switches nothing on, and `conftest.py` deletes the credential variables (`live.CREDENTIALS`) from
+every test's environment. An autouse fixture refuses every other test a connection or a name
+lookup beyond loopback, the LAN and link-local addresses; the test fails and names the call site.
+`test_no_live_calls.py` also fails on an unmarked import of a paid SDK, a read of a credential
+variable, or a spawn of the `claude` command anywhere under `tests/`. Local models served through
+the broker are not remote services and are untouched by all of this.
+
+## Attack runs against a served model
+
+`ml_stack.testing.verdicts` is what a model-backed red-team, canary or guard-eval run uses to
+avoid repeating itself. Attacks still go to the model one at a time through the broker.
+
+- **`run(attacks, execute, Subject(model_hash, guard_version))`** serves a *passing* verdict from
+  `$ML_STACK_CACHE/verdicts/attacks/` while its key is unchanged: the hash of the model file
+  (`model_hash`, read once per file version), the attack id, the guard or prompt version, and the
+  bytes of every module or file in `Attack.surfaces`. Editing a guard, a prompt, a surface or
+  swapping the model changes the key, so the attack runs again and a regression shows. A failing
+  verdict is never served; `use_cache=False` (the runner's `--no-cache`) runs everything and
+  records nothing.
+- **`sample(attacks, fraction=0.1, seed=..., changed=...)`** is the quick mode: a seeded tenth plus
+  every attack in a class (`Attack.klass`) with an attack that touches a changed file. The full
+  sweep is the nightly and release command.
+- **`Limits(max_tokens, stop, thinking=False, cache_prompt=True).body(base)`** is the request a run
+  sends: few tokens, thinking off, the prompt prefix kept warm so only the attack text is
+  processed, and the canary as a stop string so generation ends at the objective.
+
+`test_verdicts.py` runs the real Bash guard as the attack target: it breaks a copy of the guard
+and checks the cached run reports the regression.
 
 ## The shared fakes, in `conftest.py`
 
@@ -104,3 +218,23 @@ Import them like the tests already do: `from conftest import write_gguf`.
   sequence passes anything), and a `try: ... except Exception: pass` around the call under
   test (assert the seam was reached instead).
 - Name a test after the behaviour it pins, as a sentence.
+
+## Writes under the real state root
+
+Tests run with `HOME`, `ML_STACK_HOME` and `ML_STACK_CACHE` moved to a temporary directory, so a
+write under the real `~/.ml-stack` can only come from a bug that bypasses home resolution. The
+session fixture `_real_home` snapshots that tree before the run and judges it after
+(`tests/state_attribution.py`). Brokers, the keystore, `ml-stack-bench prepare` and the sentinel of
+other sessions write there too, so the rule is:
+
+1. Ignored: zero-byte `*.lock` files (an mtime change on one is not a state write), the
+   top-level `LIVE_WRITERS`, the `LIVE_PATHS` logs, and files a live outside process is proven to
+   own (`_external_state_write`).
+2. A remaining changed file **fails** the run when no other live ml-stack process (a console
+   script `ml-stack-*` or `python -m ml_stack...` outside this pytest session's own process tree)
+   was seen at the start or at the end of the run: CI, a calibration run, a quiet machine.
+3. When one was seen, the same files are a **warning**, printed once at teardown with the files
+   and the writers seen, because the run cannot tell its own write from theirs.
+
+`tests/test_state_attribution.py` pins both outcomes with a child process that ignores the moved
+`HOME`, against a temporary directory standing in for the real root.

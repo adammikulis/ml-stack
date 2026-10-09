@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import contextlib
+import hashlib
 import json
 import logging
 import os
 import sys
 from pathlib import Path
 from typing import Any
+
+import psutil
 
 from ml_stack.client.health import reported_models
 from ml_stack.home import state
@@ -105,7 +109,7 @@ def footprint_of(process: Any) -> int:
             if got:
                 return got
     except Exception:  # noqa: BLE001
-        pass
+        logger.debug('Process memory information is unavailable', exc_info=True)
     through_kernel = _rusage_footprint(int(getattr(process, "pid", 0) or 0))
     if through_kernel:
         return through_kernel
@@ -120,11 +124,32 @@ def pid_exists(pid: int | None) -> bool:
     if not pid or pid <= 0:
         return False
     try:
-        import psutil
-
         return psutil.Process(pid).status() != psutil.STATUS_ZOMBIE
-    except Exception:
+    except psutil.AccessDenied:
+        return True
+    except psutil.Error:
         return False
+
+
+def started_at(pid: int | None) -> float | None:
+    """When ``pid`` started, in seconds since the epoch, or None when it is not running."""
+    if not pid_exists(pid):
+        return None
+    try:
+        return float(psutil.Process(pid).create_time())
+    except psutil.Error:
+        return None
+
+
+def cmdline_digest(pid: int | None) -> str | None:
+    """A digest of ``pid``'s command line, or None when it is not running or will not say."""
+    if not pid_exists(pid):
+        return None
+    try:
+        argv = psutil.Process(pid).cmdline()
+    except psutil.Error:
+        return None
+    return hashlib.sha256("\0".join(argv).encode("utf-8", "replace")).hexdigest() if argv else None
 
 
 def self_or_ancestor(pid: int | None) -> bool:
@@ -133,10 +158,6 @@ def self_or_ancestor(pid: int | None) -> bool:
         return False
     if pid == os.getpid():
         return True
-    try:
-        import psutil
-    except ImportError:
-        return pid == os.getppid()
     try:
         return any(parent.pid == pid for parent in psutil.Process(os.getpid()).parents())
     except psutil.Error:
@@ -147,11 +168,9 @@ def kill_pid(pid: int, *, grace_s: float = 1.0) -> None:
     """Terminate ``pid`` gracefully, escalating to kill after ``grace_s``."""
     if not pid_exists(pid):
         return
-    import psutil
-
     try:
         proc = psutil.Process(pid)
-    except Exception as exc:
+    except psutil.Error as exc:
         logger.debug("kill_pid(%s) lookup failed: %s", pid, exc)
         return
     try:
@@ -165,18 +184,14 @@ def kill_pid(pid: int, *, grace_s: float = 1.0) -> None:
         pass
     except psutil.NoSuchProcess:
         return
-    try:
+    with contextlib.suppress(psutil.NoSuchProcess, psutil.AccessDenied):
         proc.kill()
-    except (psutil.NoSuchProcess, psutil.AccessDenied):
-        pass
 
 
 def kill_process_tree(pid: int, *, grace_s: float = 5.0) -> list[int]:
     """Terminate ``pid`` and every descendant, returning the pids acted on."""
     if not pid_exists(pid):
         return []
-    import psutil
-
     try:
         parent = psutil.Process(pid)
         victims = [*parent.children(recursive=True), parent]
@@ -197,6 +212,17 @@ def kill_process_tree(pid: int, *, grace_s: float = 5.0) -> list[int]:
     return [proc.pid for proc in victims]
 
 
+def offloaded_layers(argv: list[str]) -> str:
+    """The layer count a llama-server command line offloads (``-ngl``), ``auto`` when absent."""
+    for i, a in enumerate(argv):
+        if a in ("-ngl", "--n-gpu-layers", "--gpu-layers") and i + 1 < len(argv):
+            return argv[i + 1]
+        for flag in ("--n-gpu-layers=", "--gpu-layers="):
+            if a.startswith(flag):
+                return a[len(flag):]
+    return "auto"
+
+
 def every_server() -> list[dict]:
     """Every llama-server process on this machine, leased or not: pid, port, model, the draft
     head it was started with, memory.
@@ -204,10 +230,6 @@ def every_server() -> list[dict]:
     A server nobody recorded -- a Homebrew one from before the managed build, a hand start
     -- holds memory a lease cannot see.
     """
-    try:
-        import psutil
-    except ImportError:
-        return []
     out = []
     for proc in psutil.process_iter(["pid", "name", "cmdline", "memory_info"]):
         try:
@@ -219,10 +241,10 @@ def every_server() -> list[dict]:
         if "llama-server" not in head and "llama-server" not in name:
             continue
 
-        def after(flag: str, short: str = "") -> str:
-            for i, a in enumerate(argv[:-1]):
+        def after(flag: str, short: str = "", arguments=tuple(argv)) -> str:
+            for i, a in enumerate(arguments[:-1]):
                 if a == flag or (short and a == short):
-                    return argv[i + 1]
+                    return arguments[i + 1]
                 if a.startswith(flag + "="):
                     return a.split("=", 1)[1]
             return ""
@@ -240,12 +262,28 @@ def every_server() -> list[dict]:
                     "defunct": state == psutil.STATUS_ZOMBIE,
                     "model": after("--model", "-m") or after("-hf") or "",
                     "binary": argv[0] if argv else name,
+                    "embedding": ('--embeddings' in argv or '--embedding' in argv) if argv else None,
                     "draft": after("--spec-draft-model", "-md") or after("--model-draft")
                              or after("-hfd"),
                     "spec_type": after("--spec-type"),
+                    "n_gpu_layers": offloaded_layers(argv),
                     "draft_max": int(ahead) if ahead.isdigit() else None,
                     "rss": rss})
     return sorted(out, key=lambda r: r["port"])
+
+
+def running_within(path: Path) -> list[int]:
+    """Pids of live processes whose executable, working directory or arguments lie inside ``path``."""
+    base = str(path)
+    found = []
+    for proc in psutil.process_iter(["pid", "exe", "cwd", "cmdline"]):
+        try:
+            words = [proc.info.get("exe") or "", proc.info.get("cwd") or "", *(proc.info.get("cmdline") or [])]
+        except (psutil.Error, OSError):
+            continue
+        if any(word == base or word.startswith(base + os.sep) for word in words):
+            found.append(int(proc.info["pid"]))
+    return found
 
 
 def loaded_twice(servers: list[dict] | None = None) -> dict[str, list[int]]:
@@ -272,15 +310,11 @@ def loaded_twice(servers: list[dict] | None = None) -> dict[str, list[int]]:
 
 def machine_memory() -> dict | None:
     """What the machine holds: total, used, wired, free, the llama-servers' resident total,
-    everything else's, and the five largest non-server processes -- None without psutil."""
-
-    try:
-        import psutil
-    except ImportError:
-        return None
+    everything else's, and the five largest non-server processes -- None when the machine
+    will not say."""
     try:
         vm = psutil.virtual_memory()
-    except Exception:  # noqa: BLE001
+    except (psutil.Error, OSError):
         return None
     servers = 0
     rest: list[tuple[int, str]] = []
@@ -301,3 +335,26 @@ def machine_memory() -> dict | None:
             "wired": int(getattr(vm, "wired", 0) or 0), "free": int(vm.available),
             "servers": servers, "others": sum(r for r, _ in rest),
             "largest": [f"{name} {human_bytes(r)}" for r, name in rest[:5]]}
+
+
+def listener(port: int) -> dict[str, Any] | None:
+    """The process listening on ``port``: its pid, address, owner and executable. ``None``
+    when no process this user can inspect listens there."""
+    try:
+        import psutil
+    except ImportError:
+        return None
+    for proc in psutil.process_iter():
+        try:
+            for conn in proc.net_connections(kind="inet"):
+                if (conn.status == psutil.CONN_LISTEN and conn.laddr
+                        and conn.laddr.port == port):
+                    uids = proc.uids() if hasattr(proc, "uids") else None
+                    return {"pid": proc.pid, "ip": conn.laddr.ip,
+                            "uid": uids.real if uids else None,
+                            "user": proc.username(), "exe": proc.exe(),
+                            "n_gpu_layers": offloaded_layers(proc.cmdline()),
+                            "rss": int(proc.memory_info().rss)}
+        except (psutil.Error, OSError):
+            continue
+    return None

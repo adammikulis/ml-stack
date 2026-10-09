@@ -1,0 +1,15 @@
+body { margin: 0; background: var(--ml-bg); color: var(--ml-text);
+  font: 15px/1.5 var(--ml-font); -webkit-font-smoothing: antialiased; }
+main { max-width: 1100px; margin: 0 auto; padding: 24px 20px 80px; }
+h1 { font-size: 22px; margin: 0 0 4px; }
+h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .07em; color: var(--ml-muted);
+  margin: 36px 0 12px; border-bottom: 1px solid var(--ml-line); padding-bottom: 6px; }
+h3 { font-size: 12px; color: var(--ml-muted); margin: 0 0 8px; font-weight: 600; }
+.grid { display: grid; gap: 18px; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
+.cell { background: var(--ml-surface); border: 1px solid var(--ml-line); border-radius: var(--ml-radius);
+  padding: 14px 16px; min-width: 0; }
+.cell.wide { grid-column: 1 / -1; }
+.row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+button.demo { padding: 7px 14px; border-radius: 8px; border: 1px solid var(--ml-line-strong);
+  background: transparent; color: var(--ml-text); font: inherit; cursor: pointer; }
+.narrow { max-width: 260px; }

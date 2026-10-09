@@ -15,6 +15,13 @@ from __future__ import annotations
 
 from ml_stack.hub.cards import advice, card, in_gguf
 from ml_stack.hub.cli import main
+from ml_stack.hub.discover import (
+    FORMATS,
+    ModelInfo,
+    discover,
+    find as installed_find,
+    installed_for,
+)
 from ml_stack.hub.drafts import (
     _DRAFT_NOTES,  # noqa: F401 - the per-process cache a test clears
     DRAFT_DEPTH,
@@ -30,6 +37,7 @@ from ml_stack.hub.drafts import (
     head_choice,
     heads_for,
 )
+from ml_stack.hub.kinds import KINDS as KINDS
 from ml_stack.hub.listing import (
     PREFER,
     Found,
@@ -49,6 +57,7 @@ from ml_stack.hub.local import (
     on_disk,
     repo_of,
     shards_beside,
+    standard,
     weight_paths,
 )
 from ml_stack.hub.memory import free_memory, machine_room, room, total_memory
@@ -67,19 +76,46 @@ from ml_stack.hub.naming import (
     pretty_name,
     spec_for,
 )
+from ml_stack.hub.probe import Gpu, MachineMemory, machine_memory
+from ml_stack.hub.remote import Filters, Repo, search
+from ml_stack.hub.transfer import (
+    Cancelled,
+    CancelToken,
+    ChecksumMismatch,
+    GatedRepo,
+    NotEnoughSpace,
+    NotFound,
+    Progress,
+    held_snapshot,
+    pull,
+    snapshot,
+)
 
 __all__ = [
     "DRAFT_DEPTH",
     "DRAFT_KINDS",
     "DRAFT_MARK",
+    "FORMATS",
     "NO_HEAD",
     "PREFER",
     "QUANT",
     "SHARD",
     "WEIGHT_SUFFIXES",
+    "CancelToken",
+    "Cancelled",
+    "ChecksumMismatch",
     "Chosen",
+    "Filters",
     "Found",
+    "GatedRepo",
+    "Gpu",
     "Head",
+    "MachineMemory",
+    "ModelInfo",
+    "NotEnoughSpace",
+    "NotFound",
+    "Progress",
+    "Repo",
     "advice",
     "aside",
     "base_words",
@@ -90,6 +126,7 @@ __all__ = [
     "card",
     "choose_head",
     "default_roots",
+    "discover",
     "draft_for",
     "draft_note",
     "drafting",
@@ -101,21 +138,29 @@ __all__ = [
     "free_memory",
     "head_choice",
     "heads_for",
+    "held_snapshot",
     "hub_cache",
     "in_gguf",
+    "installed_find",
+    "installed_for",
     "iq_on_metal",
     "is_head",
     "located",
+    "machine_memory",
     "machine_room",
     "main",
     "mmproj_for",
     "on_disk",
     "pretty_name",
+    "pull",
     "ref",
     "repo_of",
     "room",
+    "search",
     "shards_beside",
+    "snapshot",
     "spec_for",
+    "standard",
     "total_memory",
     "weight_paths",
 ]

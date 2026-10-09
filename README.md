@@ -42,8 +42,65 @@ Everything runs on your own hardware. Nothing leaves the network.
   before it believes what it says about a page.
 - **Mixed hardware is the normal case.** NVIDIA, AMD ROCm, Apple silicon and plain CPUs
   in one cluster, each reporting its own temperature, clocks and throttle state.
+- **An agent that asks first.** `ml-stack-chat` operates ml-stack for you under a role
+  (`read-only`, `approve-first` or `plan-and-go`): reads run, anything that starts, stops, downloads or
+  measures asks, and each question offers Allow this time, Always allow or Never allow.
+  Releasing quarantine, approving a host and changing the roles or rules are yours alone
+  ([roles and rules](docs/agent-roles.md)).
+- **Memory that is encrypted and scoped.** What the agent remembers is a graph of facts,
+  kept per user and per project, sealed under one key held in the operating system's keystore
+  ([memory](docs/memory.md), [keystore](docs/keystore.md)).
+- **Decision models.** Ask a small local model to pick one of the options you name and
+  get a probability for each, with no text generated; train one from labelled cases
+  ([decision models](docs/decision-models.md)).
 
 [Full list of what it does](docs/FEATURES.md).
+
+## Ask Qwen on another device to review documentation
+
+From this Git checkout, use the shared Dev pool and project Board:
+
+```sh
+ml-stack-peers ls
+ml-stack-workspace remote-agent --device DEVICE_NAME --json \
+  --max-output-tokens 4096 --max-rounds 12 --max-tool-calls 30 \
+  --max-model-calls 24 --max-task-seconds 600 \
+  --task "Read AGENTS.md, README.md and docs/workspace.md. Recommend documentation changes with file references, priorities and evidence. Do not edit files."
+```
+
+Replace `DEVICE_NAME` with the other device's name from `ml-stack-peers ls`; omit
+`--device` when there is only one remote device. Both devices need running Dev cluster
+services; the target needs a registered checkout of this project and a downloaded Qwen.
+The broker admits the model on that device and the worker receives the task on the shared
+project Board. No invitation or credential copy is needed.
+
+Keep the returned `requested_by` (launcher), `identity` (worker), `model` and `task_seq`.
+Use those returned values to read the answer:
+
+```sh
+ml-stack-workspace inbox --agent LAUNCHER_ID --all
+ml-stack-workspace thread TASK_SEQ --agent LAUNCHER_ID
+```
+
+`state: starting` means the model is loading. Reuse the same launcher and worker name
+for follow-up jobs; an existing worker keeps its launch settings. Check the returned
+`effective_limits` before assigning a job. See
+[remote Qwen jobs](docs/workspace.md#run-a-qwen-model-on-another-dev-device) for follow-up
+messages, limits and troubleshooting.
+
+## Security
+
+Treat every network, page, model file and model reply as untrusted. Fetches go through one
+pipeline with a host allow-list, size caps, hash pins and checks, and a quarantine for what
+fails; model servers start only through the machine's broker; the daemon is on loopback until
+a machine joins a cluster and is TLS with signed requests beyond it; one operating-system
+keystore item protects memory, the cluster signing key and stored credentials; and a watcher
+(sentinel) holds what changed or was forged until a person releases it at a terminal or from
+one dialog. An agent's process cannot do the things reserved to a person. These defences
+reduce what a fooled model can do; they do not make it impossible. Read
+[the threat model](docs/security.md), [the design contract for an assistant that acts for
+you](docs/assistant-security.md) (what is built and what is not) and [the red-team
+record](docs/redteam.md), and report a problem as [SECURITY.md](SECURITY.md) says.
 
 ## Install
 
@@ -58,6 +115,9 @@ curl -fsSL https://raw.githubusercontent.com/adammikulis/ml-stack/main/packaging
 
 **Windows**, in PowerShell:
 
+The application runs in Ubuntu on WSL and opens in your Windows browser.
+[Windows runtime setup](docs/windows-runtime.md) lists the Linux packages and GPU requirements.
+
 ```
 irm https://raw.githubusercontent.com/adammikulis/ml-stack/main/packaging/install.ps1 | iex
 ```
@@ -65,7 +125,7 @@ irm https://raw.githubusercontent.com/adammikulis/ml-stack/main/packaging/instal
 Do the same on every machine you want to work with, typing the same passphrase. They find
 each other on their own.
 
-**If you write Python**, it runs on 3.13 and pulls in nothing heavy, so the machine you
+**If you write Python**, it runs on 3.12 and later (developed and tested on 3.13) and pulls in nothing heavy, so the machine you
 drive from needs no CUDA, no MLX and no training stack:
 
 ```
@@ -85,8 +145,8 @@ answers every prompt without a terminal to type at.
 Make this machine a peer, and see who else answers:
 
 ```
-ml-stack-fleet join --persist
-ml-stack-fleet status
+ml-stack-cluster join --persist
+ml-stack-cluster status
 ```
 
 Put a model up and talk to it:
@@ -148,9 +208,11 @@ reading and how long is left; `--resume` starts where a killed run stopped.
 `ml-stack-jobs wait ingest` blocks until it has ended, so the next step is `wait && next`
 rather than a loop you wrote by hand.
 
-`ml-stack-do "..."` takes the task in words instead: a model on your own hardware, holding
-every command here as a tool, asks what the task leaves open, prints a plan, waits for the
-go, runs it and says where the results are. `ml-stack-mcp` hands the same functions to an
+`ml-stack-chat "..."` takes the task in words instead: a model on your own hardware, holding
+the serving, download and benchmark commands here as tools, asks what the task leaves open,
+prints a plan, waits for the go, runs the calls that plan names and says where the results
+are; bare `ml-stack-chat` is the same agent as a conversation, and `--role` sets what it may do
+(`docs/agent-roles.md`). `ml-stack-mcp` hands the same functions to an
 agent over MCP, and anything long returns a log and a pid rather than blocking the call.
 
 ## Pictures and speech
@@ -190,14 +252,26 @@ on whichever machine is free rather than the one you are typing at.
 | --- | --- |
 | [What it does](docs/FEATURES.md) | every feature; `docs/verify_release.py` checks claims from each section but Entities |
 | [Installing](docs/install.md) | the four modes, the one model cache per machine, Windows, and an install a script drives |
+| [The agent workspace](docs/workspace.md) | one bus for the agents on a machine: messages, boards and threads, subscriptions, notes, claims, and a read-only Board page for you |
 | [The commands](docs/commands.md) | every `ml-stack-<command>`, what it takes and what it prints |
-| [The fleet](docs/fleet.md) | joining, placing people across machines, following a branch, and running work on peers from Python |
+| [Clusters](docs/fleet.md) | joining, placing people across machines, following a branch, and running work on peers from Python |
 | [Finding and serving a model](docs/serving.md) | one manager per machine, the settings each model scored best with, how many people fit in a card, llama.cpp builds and draft heads |
 | [Working with a graph](docs/graph.md) | the six things a model is given instead of the graph, how a question is asked, and a conversation of any length |
 | [Documents into a graph](docs/ingest.md) | a book read section by section, with the page and the model behind every claim |
 | [Training](docs/training.md) | the loop, the recipes, and a fine-tune that ends in a model calling your own tools |
+| [Studio and live Gym](docs/studio-gym.md) | organized workspaces, live sensor/decision views, specialist simulators, PPO, and reviewed training trajectories |
 | [Measuring](docs/bench.md) | timing and scoring a model's answers, what that settled here, and an evening of runs as a file |
 | [An invented world](docs/world.md) | a community with people who talk, the days they talk over, and the exports their corpus arrives as; nobody real in any of it |
+| [Chatting and roles](docs/chat.md) | `ml-stack-chat`: conversation or task, the three roles, saved Always/Never rules ([roles](docs/agent-roles.md)) |
+| [Agent memory](docs/memory.md) | the encrypted fact graph, user and project scopes, `ml-stack-memory` |
+| [The keystore](docs/keystore.md) | the one OS keystore item, what prompts, `ml-stack-security unlock` and `keystore-reset` |
+| [Sentinel](docs/sentinel.md) | what is watched and held, the one click-to-release dialog, `ML_STACK_NOTIFY` |
+| [Reputation](docs/reputation.md) | how each source has behaved, `ml-stack-reputation` |
+| [The activity log](docs/activity-log.md) | one encrypted, tamper-evident record of what agents, people and the stack did, and `ml-stack-log` to read it |
+| [Security](docs/security.md) | the threat model, findings and what is fixed ([assistant contract](docs/assistant-security.md), [red-teaming](docs/redteam.md)) |
+| [Requests](docs/requests.md) | one place for everything that waits for a person: raised by any component, answered at the terminal, in the browser page or in the desktop dialog, first answer wins, `ml-stack-requests` |
+| [Destructive actions](docs/destructive-actions.md) | the classifier that makes destructive or unsure tool calls ask first: what asks and why, how it meets roles and rules, measured recall |
+| [Decision models](docs/decision-models.md) | typed answers with probabilities, training and evaluating one, JevBench ([integration plan](docs/decision-model-integration-plan.md)) |
 | [Packages](docs/packages.md) | what each module is, and the extras it carries |
 | [Model ranking](docs/model-ranking.md) | one line per model: its best run, and what that run cost |
 | [Architectures](docs/architectures/README.md) | the models that behave unlike a dense transformer when served |

@@ -9,9 +9,11 @@ from __future__ import annotations
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -67,11 +69,24 @@ def check(where: Path, tmp_path: Path, **files: str) -> tuple[int, str]:
     return code, said.getvalue()
 
 
+def shell_path() -> str:
+    shell = shutil.which("sh")
+    if not shell and os.name == "nt":
+        git = shutil.which("git")
+        candidate = Path(git).parent.parent / "usr" / "bin" / "sh.exe" if git else None
+        shell = str(candidate) if candidate and candidate.is_file() else None
+    assert shell, "a POSIX shell is required"
+    return shell
+
 def check_wrapper(where: Path, tmp_path: Path, script: str = str(HOOK),
                   python: str = sys.executable, **files: str) -> tuple[int, str]:
     """Stage those files and run the shell wrapper the way git does."""
     stage(where, files)
-    done = subprocess.run(["sh", script], cwd=where, capture_output=True, text=True,
+    source = where / "src" / "ml_stack"
+    if not source.exists():
+        shutil.copytree(HOOK.parents[2] / "src" / "ml_stack", source)
+        shutil.copytree(HOOK.parents[2] / "contracts", where / "contracts")
+    done = subprocess.run([shell_path(), script], cwd=where, capture_output=True, text=True,
                           env={**wiring(tmp_path), "PYTHON": python})
     return done.returncode, done.stdout + done.stderr
 
@@ -88,6 +103,21 @@ def test_a_name_from_the_graph_is_refused(tmp_path):
     code, said = check(where, tmp_path, notes="Ask Wren Halloway about the kiln.\n")
     assert code == 1
     assert "Wren Halloway" in said
+
+
+def test_a_merge_is_checked_for_what_it_adds_not_for_what_the_other_parent_brought(tmp_path):
+    where = repo(tmp_path, PEOPLE)
+    git = lambda *a: subprocess.run(["git", *a], cwd=where, check=True, capture_output=True)  # noqa: E731
+    commit(where, {"base.txt": "clean\n"}, "base")
+    git("checkout", "-q", "-b", "other")
+    commit(where, {"theirs.txt": "Ask Wren Halloway about the kiln.\n"}, "theirs")
+    git("checkout", "-q", "-")
+    commit(where, {"ours.txt": "clean too\n"}, "ours")
+    git("merge", "--no-commit", "--no-ff", "other")
+    said = io.StringIO()
+    assert hook.main(env=wiring(tmp_path), root=where, stdout=said) == 0, said.getvalue()
+    code, said = check(where, tmp_path, added="Ask Wren Halloway about the kiln.\n")
+    assert code == 1 and "Wren Halloway" in said
 
 
 def test_a_short_real_name_keeps_its_protection(tmp_path):
@@ -203,6 +233,47 @@ def test_geography_is_not_shaped_like_a_person(tmp_path):
     assert code == 0, said
 
 
+def test_technical_phrases_that_look_like_people_are_stood_down(tmp_path, monkeypatch):
+    """Named technical phrases are not refused just because Presidio reads them as people."""
+    class Engine:
+        def analyze(self, text, language):
+            for phrase in ("Git metadata", "Cloud Files", "LM Studio", "Bea Marlow",
+                           "Cloud Files " + "Bea Marlow"):
+                start = text.find(phrase)
+                if start >= 0:
+                    yield SimpleNamespace(entity_type="PERSON", score=0.99, start=start,
+                                          end=start + len(phrase))
+
+    monkeypatch.setattr(hook, "recogniser", Engine)
+    where = repo(tmp_path, graph={"nodes": []})
+    code, said = check(where, tmp_path, **{"recovery.md": (
+        "LM Studio manages local models.\n"
+        "Git metadata still points at the original checkout.\n"
+        "Cloud Files placeholders remain in the old worktree.\n"
+        "Cloud Files " + "Bea Marlow" + " is in the log.\n"
+        "Bea Marlow owns the sample checkout.\n")})
+    assert code == 1
+    assert "LM Studio" not in said
+    assert "Git metadata" not in said
+    assert not any("Cloud Files" in line and "Bea Marlow" not in line
+                   for line in said.splitlines())
+    assert "Bea Marlow" in said
+    assert "Cloud Files " + "Bea Marlow" in said
+
+
+def test_the_technical_phrase_rule_does_not_clear_similar_person_names():
+    rules = hook.shapes()
+    assert rules.in_context("Git metadata") == "context_product: Git metadata"
+    assert rules.in_context("Cloud Files") == "context_product: Cloud Files"
+    assert rules.in_context("LM Studio") == "context_product: LM Studio"
+    assert rules.in_context("LM Studio " + "Bea Marlow") is None
+    assert rules.in_context("Bea Marlow " + "LM Studio") is None
+    assert rules.in_context("Git " + "Marlow") is None
+    assert rules.in_context("Cloud " + "Marlow") is None
+    assert rules.in_context("Cloud Files " + "Bea Marlow") is None
+    assert rules.in_context("Bea Marlow " + "Cloud Files") is None
+
+
 def test_a_person_quoted_beside_a_place_is_still_refused(tmp_path):
     """The place rule must not widen into a hole: an ordinary name-shaped pair on the same
     line as a place is still flagged."""
@@ -246,6 +317,23 @@ def test_a_compact_date_time_stamp_is_not_a_phone_number(tmp_path):
     code, said = check(where, tmp_path, **{"t.py": (
         'LOG = f"llama-server-{port}-20260923-170000-1.log"\n')})
     assert code == 0, said
+
+
+def test_digits_inside_an_identifier_are_not_a_phone_number(tmp_path):
+    """A bundle named for a hash that ends in digits, a dash and a date holds a digit run at a phone
+    number's length. A phone number stands alone; a run glued to letters on either side is part of a name."""
+    where = repo(tmp_path, graph={"nodes": []})
+    for text in ("".join(("land-old-cd6da", "681", "-", "20261008", ".bundle")), "sha-9f3c1204-5551234567x", "run_20261008-123456-7890ab"):
+        code, said = check(where, tmp_path, **{"t.py": f'NAME = "{text}"\n'})
+        assert code == 0, (text, said)
+
+
+def test_a_phone_number_beside_words_is_still_refused(tmp_path):
+    where = repo(tmp_path, graph={"nodes": []})
+    number = "-".join(("415", "555", "0134"))
+    for text in (f"call {number} today", f"tel:+1 (415) {number[4:]}."):
+        code, said = check(where, tmp_path, **{"t.py": f'NOTE = "{text}"\n'})
+        assert code == 1 and "phone number" in said, (text, said)
 
 
 def test_a_job_title_is_not_shaped_like_a_person(tmp_path):
@@ -313,21 +401,50 @@ def test_the_shell_wrapper_runs_the_hook_end_to_end(tmp_path):
 
 
 def test_the_wrapper_finds_the_source_tree_when_ml_stack_is_not_installed(tmp_path):
-    """Run through a `.git/hooks/pre-commit` symlink with a Python that has no site-packages
-    (`-I -S`): the wrapper resolves the symlink to find `../../src`, and the exact list still
-    refuses the name. Presidio is absent from that Python, so the hook says so."""
+    """The copied hook loads checkout source with no installed site packages."""
     where = repo(tmp_path, PEOPLE)
     bare = tmp_path / "bare-python"
-    bare.write_text(f'#!/bin/sh\nexec "{sys.executable}" -I -S "$@"\n')
+    bare.write_text(f'#!/bin/sh\nexec "{Path(sys.executable).as_posix()}" -I -S "$@"\n')
     bare.chmod(0o755)
     link = where / ".git" / "hooks" / "pre-commit"
     link.parent.mkdir(exist_ok=True)
-    link.symlink_to(HOOK)
+    shutil.copyfile(HOOK, link)
     code, said = check_wrapper(where, tmp_path, script=".git/hooks/pre-commit", python=str(bare),
                                notes="Ask Wren Halloway about the kiln.\n")
     assert code == 1, said
     assert "Wren Halloway" in said
     assert "presidio is not installed" in said
+
+
+def test_the_wrapper_prefers_the_current_checkout_to_an_installed_package(tmp_path):
+    where = repo(tmp_path, graph={"nodes": []})
+    source = where / "src" / "ml_stack" / "redact"
+    source.mkdir(parents=True)
+    (where / "src" / "ml_stack" / "__init__.py").write_text("")
+    (source / "__init__.py").write_text("")
+    (source / "hook.py").write_text(
+        "from pathlib import Path\n"
+        "def main(argv=None):\n"
+        "    print(Path(__file__).resolve())\n"
+        "    return 0\n"
+    )
+    stale = tmp_path / "installed" / "ml_stack" / "redact"
+    stale.mkdir(parents=True)
+    (tmp_path / "installed" / "ml_stack" / "__init__.py").write_text("")
+    (stale / "__init__.py").write_text("")
+    (stale / "hook.py").write_text("def main(argv=None):\n    return 1\n")
+
+    shell = shell_path()
+    done = subprocess.run(
+        [shell, str(HOOK)],
+        cwd=where,
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PYTHON": sys.executable,
+             "PYTHONPATH": str(tmp_path / "installed")},
+    )
+    assert done.returncode == 0, done.stderr
+    assert str(source / "hook.py") in done.stdout
 
 
 @pytest.mark.slow
@@ -339,13 +456,14 @@ def test_a_clean_commit_is_still_refused_without_presidio(tmp_path):
     unnoticed, so the hook refuses rather than passing silently."""
     where = repo(tmp_path, {"nodes": [], "messages": {}})
     bare = tmp_path / "bare-python"
-    bare.write_text(f'#!/bin/sh\nexec "{sys.executable}" -I -S "$@"\n')
+    bare.write_text(f'#!/bin/sh\nexec "{Path(sys.executable).as_posix()}" -I -S "$@"\n')
     bare.chmod(0o755)
     code, said = check_wrapper(where, tmp_path, python=str(bare),
                                notes="The kiln needs firing before the studio opens.\n")
     assert code == 1, said
     assert "presidio is not installed" in said
-    assert "pip install -e '.[privacy]'" in said
+    assert "Activate the project environment" in said
+    assert "python -m pip install '.[privacy]'" in said
     assert "python -m spacy download en_core_web_sm" in said
 
 
@@ -431,3 +549,83 @@ def test_why_names_the_rule_that_cleared_each_pair(tmp_path):
     said = io.StringIO()
     hook.main(["--why"], env=wiring(tmp_path), root=where, stdout=said)
     assert "events.py  shape rule off: shapes_off: marker" in said.getvalue()
+
+
+def test_only_the_lines_a_commit_adds_are_judged_not_what_the_file_already_said(tmp_path):
+    where = repo(tmp_path, PEOPLE)
+    commit(where, {"notes.txt": "Ask Wren Halloway about the kiln.\n"}, "old text, accepted then")
+    code, said = check(where, tmp_path, **{"notes.txt": "Ask Wren Halloway about the kiln.\nA clean new line.\n"})
+    assert code == 0, said
+    code, said = check(where, tmp_path, **{"notes.txt": "Ask Wren Halloway about the kiln.\nA clean new line.\n"
+                                                         "And Wren Halloway again.\n"})
+    assert code == 1 and "notes.txt:3" in said and "notes.txt:1" not in said
+
+
+def test_a_revision_that_is_an_option_is_refused_and_a_hostile_path_reaches_git_as_one_argument(tmp_path):
+    import subprocess
+
+    from ml_stack.redact.added import added_lines
+
+    def git(*args):
+        subprocess.run(["git", "-C", str(tmp_path), *args], check=True, capture_output=True)
+
+    git("init", "-q")
+    git("config", "user.email", "t@example.invalid")
+    git("config", "user.name", "t")
+    hostile = tmp_path / "a b;$(touch pwned)`x`.txt"
+    hostile.write_text("one\n")
+    git("add", "--all")
+    git("commit", "-q", "-m", "base")
+    hostile.write_text("one\ntwo\n")
+    git("add", "--all")
+    assert added_lines(str(tmp_path), hostile.name) == {2}
+    assert not (tmp_path / "pwned").exists()
+    with pytest.raises(ValueError):
+        added_lines(str(tmp_path), hostile.name, against="--output=" + str(tmp_path / "out"))
+    assert not (tmp_path / "out").exists()
+
+
+FRICTION_LINES = (
+    "App Attest keys live in the Secure Enclave.\n"
+    "Seal with NaCl Box before sending.\n"
+    "RunPod offers Community Cloud and Secure Cloud pods.\n"
+    "See 4.3 Disputes for the process.\n"
+    "The Earned tier unlocks after review.\n"
+    "Use the worktree path shown above, and the console metadata.\n"
+    "Serve qwen3-30b-a3b-2507-q4-1234567890-instruct and claude-sonnet-5-5-20260301.\n"
+    '<path d="M12.5 3-4.2 8.1 9.3-7.7 2 1.1-5.5 6.6z"/>\n'
+    '<path d="M1234-5678 9012-3456 L7890-1234"/>\n')
+
+
+def test_technical_phrases_model_ids_and_path_data_are_not_people(tmp_path):
+    """Phrases and numbers an agent writes in ordinary docs and markup. Mutation: drop the
+    `benign` calls in `hook` and each of these is refused again."""
+    where = repo(tmp_path, graph={"nodes": []})
+    code, said = check(where, tmp_path, **{"notes.md": FRICTION_LINES})
+    assert code == 0, said
+
+
+def test_real_contacts_are_still_refused_beside_the_friction_lines(tmp_path):
+    where = repo(tmp_path, graph={"nodes": []})
+    code, said = check(where, tmp_path, **{"notes.md": FRICTION_LINES
+                                           + "Write to bea.marlow@" + "gmail.com or +1 (415) " + "555-0134.\n"})
+    assert code == 1
+    assert "bea.marlow@" + "gmail.com" in said and "555-0134" in said
+
+
+def test_a_phrase_the_documents_already_carry_is_the_repositorys_vocabulary(tmp_path):
+    from ml_stack.redact.benign import documented
+    where = repo(tmp_path, graph={"nodes": []})
+    commit(where, {"glossary.md": "Quartz" + " Lantern is a term.\n"}, "chore: glossary")
+    assert documented(str(where), "Quartz" + " Lantern")
+    assert not documented(str(where), "Bea Marlow")
+    assert not documented(str(where), "quartz lantern")
+
+
+def test_a_phrase_shaped_like_a_git_option_or_a_pathspec_is_only_searched_for(tmp_path):
+    from ml_stack.redact.benign import documented
+    where = repo(tmp_path, graph={"nodes": []})
+    commit(where, {"glossary.md": "Quartz" + " Lantern is a term.\n"}, "chore: glossary")
+    for hostile in ("--output=leak.txt Of", "Quartz --open-files-in-pager=sh", "Quartz; touch leak"):
+        assert not documented(str(where), hostile)
+    assert not (where / "leak.txt").exists() and not (where / "leak").exists()

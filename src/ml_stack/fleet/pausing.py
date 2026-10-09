@@ -1,7 +1,7 @@
 """One pause, sent to every machine in the cluster, and what each of them said.
 
 There is no cluster-wide switch. `pause_fleet` asks each peer the same thing
-``ml-stack-fleet`` asks one -- ``POST /availability`` -- so every machine still owns its
+``ml-stack-cluster`` asks one -- ``POST /availability`` -- so every machine still owns its
 own answer. A machine that is off never receives the message; `seen` remembers the ones
 this machine has met so `pause_table` can name it.
 

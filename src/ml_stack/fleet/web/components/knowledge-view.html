@@ -1,0 +1,267 @@
+<style>
+knowledge-view { display:contents; }
+knowledge-view .workspace { padding:calc(28px * var(--ui-density,1)) calc(32px * var(--ui-density,1)); }
+knowledge-view .knowledge-heading { display:flex; align-items:center; justify-content:space-between; margin-bottom:22px; }
+knowledge-view .knowledge-heading h1 { margin:0 0 8px; }
+knowledge-view .knowledge-grid { display:grid; grid-template-columns:220px minmax(0,1fr); gap:20px; align-items:start; }
+knowledge-view .workspace-card { background:var(--bg-raised); border:1px solid var(--line); border-radius:16px; padding:calc(20px * var(--ui-density,1)); }
+knowledge-view .workspace-card h2 { margin-top:0; font-size:1.214rem; }
+knowledge-view #graph-panel { padding:0; overflow:hidden; }
+knowledge-view .graph-browser-heading { padding:calc(22px * var(--ui-density,1)); border-bottom:1px solid var(--line); }
+knowledge-view .graph-browser-heading h2 { margin:0 0 14px; }
+knowledge-view .knowledge-toolbar { display:flex; gap:10px; align-items:end; flex-wrap:wrap; }
+knowledge-view .knowledge-toolbar label { margin:0; font-size:0.857rem; }
+knowledge-view .knowledge-toolbar input { width:220px; }
+knowledge-view .knowledge-toolbar button { margin:0; }
+knowledge-view .graph-browser { display:grid; grid-template-columns:230px minmax(0,1fr); min-height:500px; }
+knowledge-view .graph-node-browser { padding:calc(16px * var(--ui-density,1)); background:var(--bg-sunken); border-right:1px solid var(--line); }
+knowledge-view .node-list { display:grid; gap:6px; max-height:560px; overflow:auto; }
+knowledge-view .node-list button { text-align:left; width:100%; font-size:0.857rem; background:var(--bg-raised); color:var(--text); border:1px solid var(--line); padding:calc(12px * var(--ui-density,1)); border-radius:8px; margin:0; overflow-wrap:anywhere; }
+knowledge-view #detail { padding:calc(24px * var(--ui-density,1)); min-width:0; }
+knowledge-view #detail > h2 { font-size:1.571rem; }
+knowledge-view #detail pre { max-height:240px; overflow:auto; }
+knowledge-view .graph-map { width:100%; height:300px; background:var(--bg-sunken); border-radius:12px; margin:16px 0; }
+knowledge-view .graph-map text { fill:var(--text); font:0.857rem system-ui; pointer-events:none; }
+knowledge-view .graph-map line { stroke:var(--muted); stroke-width:2; }
+knowledge-view .graph-map circle { fill:var(--poolside-yellow); stroke:var(--poolside-navy); stroke-width:2; }
+knowledge-view .graph-map .graph-node-caption { fill:var(--poolside-yellow); }
+knowledge-view .graph-map .graph-node-label { fill:var(--poolside-yellow-ink,#000); }
+knowledge-view .graph-map g { cursor:pointer; }
+knowledge-view .graph-map g:focus circle { stroke-width:5; }
+knowledge-view .relation-row { display:flex; align-items:center; gap:10px; padding:calc(10px * var(--ui-density,1)) 0; border-bottom:1px solid var(--line); flex-wrap:wrap; font-size:0.857rem; }
+knowledge-view #sources,knowledge-view #stores { display:grid; gap:6px; }
+knowledge-view #sources button,knowledge-view #stores button,knowledge-view #folders button { text-align:left; width:100%; margin:0 0 6px; background:var(--bg-sunken); color:var(--text); border:1px solid var(--line); padding:calc(10px * var(--ui-density,1)); border-radius:8px; font-size:0.857rem; }
+knowledge-view #stores button[aria-pressed=true] { border-color:var(--accent); }
+knowledge-view #counts { font-size:0.857rem; margin:12px 0 0; }
+@media(max-width:1100px) { knowledge-view .graph-browser { grid-template-columns:190px minmax(0,1fr); } }
+@media(max-width:850px) { knowledge-view .knowledge-grid,knowledge-view .graph-browser { grid-template-columns:1fr; } knowledge-view .workspace { padding:calc(20px * var(--ui-density,1)); } knowledge-view .graph-node-browser { border-right:0; border-bottom:1px solid var(--line); } knowledge-view .node-list { max-height:200px; } }
+</style>
+<template>
+<section class="workspace" hidden>
+  <header class="knowledge-heading"><div><h1>Graph inspector</h1></div></header>
+  <p class="status" role="status" aria-live="polite"></p>
+  <div class="knowledge-grid">
+    <aside class="workspace-card">
+      <h2>Graph stores</h2>
+      <p class="intro">Inspect application knowledge or browse graphs in your daemon files.</p>
+      <div id="sources"></div>
+      <div id="folders"></div>
+      <div id="stores"></div>
+    </aside>
+    <div class="workspace-card" id="graph-panel">
+      <header class="graph-browser-heading"><h2 id="graph-title">Choose a graph store</h2>
+      <form class="knowledge-toolbar">
+        <div><label for="knowledge-search">Search nodes</label><input id="knowledge-search" placeholder="Search label or ID" maxlength="200"></div>
+        <div><label for="knowledge-kind">Node kind</label><select id="knowledge-kind"><option value="">All kinds</option></select></div>
+        <button type="submit">Search</button>
+      </form>
+      <p id="counts" class="intro"></p></header><div class="graph-browser"><div class="graph-node-browser">
+      <div class="node-list" id="nodes"></div>
+      <div class="workspace-actions" id="pages"></div>
+      </div><article id="detail" aria-live="polite"><p class="intro">Choose a node to inspect its attributes and connected nodes.</p></article></div>
+    </div>
+  </div>
+</section>
+</template>
+<script>
+(function() {
+  const M = window.fleetModel, W = window.workspaceModel, E = M.el;
+  class KnowledgeView extends HTMLElement {
+    connectedCallback() {
+      if (this.wired) return;
+      this.wired = true;
+      this.host = this.querySelector('section');
+      this.note = this.querySelector('.status');
+      this.folder = '';
+      this.store = '';
+      this.offset = 0;
+      this.storeRequest = this.nodeRequest = this.detailRequest = 0;
+      this.search = this.querySelector('#knowledge-search');
+      this.kind = this.querySelector('#knowledge-kind');
+      this.querySelector('form').addEventListener('submit', event => {
+        event.preventDefault();
+        this.offset = 0;
+        this.loadNodes();
+      });
+      this.kind.addEventListener('change', () => { this.offset = 0; this.loadNodes(); });
+      W.route(this.host, 'knowledge', () => this.loadStores());
+    }
+    async loadStores() {
+      const request = ++this.storeRequest;
+      this.note.textContent = 'Loading graph stores…';
+      try {
+        const result = await W.api('/ui/knowledge/stores?path=' + encodeURIComponent(this.folder));
+        if (request !== this.storeRequest) return;
+        this.note.textContent = result.truncated ? 'This folder has more entries. Open a subfolder to narrow the list.' : '';
+        this.querySelector('#sources').replaceChildren(
+          E('h3', {}, 'Application graphs'),
+          ...result.sources.map(item => W.button(item.name, () => this.selectStore(item.path, item.name)))
+        );
+        if (!result.sources.length) this.querySelector('#sources').append(
+          E('p', {class:'intro'}, 'Application graphs appear after conversations or project tasks are saved.')
+        );
+        const folders = this.querySelector('#folders');
+        folders.replaceChildren();
+        if (result.files_available) {
+          folders.append(E('h3', {}, 'Dataset graphs'), W.button('Files root', () => {
+            this.folder = ''; this.loadStores();
+          }));
+          if (this.folder) folders.append(W.button('Parent folder', () => {
+            this.folder = this.folder.split('/').slice(0, -1).join('/'); this.loadStores();
+          }), E('p', {}, this.folder));
+        }
+        const stores = this.querySelector('#stores');
+        stores.replaceChildren(...result.entries.map(item => W.button(
+          (item.directory ? 'Folder · ' : 'Graph · ') + item.name, () => {
+            if (item.directory) { this.folder = item.path; this.loadStores(); }
+            else this.selectStore(item.path, item.name);
+          }
+        )));
+        if (result.files_available && !result.entries.length) stores.append(
+          E('p', {class:'intro'}, 'No dataset graphs here. Browse another folder or ingest a graph into the daemon files folder.')
+        );
+      } catch (error) {
+        if (request === this.storeRequest) W.status(this.note, error);
+      }
+    }
+    async selectStore(path, label = path) {
+      this.store = path;
+      this.detailRequest++;
+      this.querySelector('#detail').removeAttribute('aria-busy');
+      this.offset = 0;
+      this.search.value = '';
+      this.kind.replaceChildren(E('option', {value:''}, 'All kinds'));
+      this.querySelector('#graph-title').textContent = label;
+      this.querySelector('#nodes').replaceChildren();
+      this.querySelector('#pages').replaceChildren();
+      this.querySelector('#counts').textContent = '';
+      this.querySelector('#detail').replaceChildren(
+        E('p', {class:'intro'}, 'Choose a node to inspect its attributes and connected nodes.')
+      );
+      await this.loadNodes();
+    }
+    async loadNodes() {
+      const request = ++this.nodeRequest;
+      if (!this.store) { this.note.textContent = 'Choose a graph store first.'; return; }
+      const panel = this.querySelector('#graph-panel');
+      panel.setAttribute('aria-busy', 'true');
+      this.note.textContent = 'Loading nodes…';
+      try {
+        const result = await W.api('/ui/knowledge/nodes?' + new URLSearchParams({
+          store:this.store, q:this.search.value, kind:this.kind.value, offset:this.offset
+        }));
+        if (request !== this.nodeRequest) return;
+        this.note.textContent = '';
+        const selected = this.kind.value;
+        this.kind.replaceChildren(E('option', {value:''}, 'All kinds'), ...result.kinds.map(kind =>
+          E('option', {value:kind.kind}, `${kind.kind || 'Unspecified'} (${kind.count})`)
+        ));
+        this.kind.value = selected;
+        this.querySelector('#counts').textContent =
+          `${result.counts.nodes} nodes · ${result.counts.edges} relationships · ${result.counts.docs} documents`;
+        this.querySelector('#nodes').replaceChildren(...result.nodes.map(node =>
+          W.button(`${node.label || node.id} · ${node.kind || 'node'}`, () => this.inspect(node.id))
+        ));
+        if (!result.nodes.length) this.querySelector('#nodes').append(E('p', {}, 'No nodes match this search.'));
+        const pages = this.querySelector('#pages');
+        pages.replaceChildren();
+        if (this.offset) pages.append(W.button('Previous nodes', () => {
+          this.offset = Math.max(0, this.offset - 60); this.loadNodes();
+        }));
+        if (result.more) pages.append(W.button('Next nodes', () => { this.offset += 60; this.loadNodes(); }));
+      } catch (error) {
+        if (request === this.nodeRequest) W.status(this.note, error);
+      } finally {
+        if (request === this.nodeRequest) panel.removeAttribute('aria-busy');
+      }
+    }
+    async inspect(id) {
+      const request = ++this.detailRequest;
+      const detail = this.querySelector('#detail');
+      detail.setAttribute('aria-busy', 'true');
+      try {
+        const result = await W.api('/ui/knowledge/node?' + new URLSearchParams({store:this.store, id}));
+        if (request !== this.detailRequest) return;
+        this.note.textContent = '';
+        detail.replaceChildren(
+          E('h2', {}, result.node.label || result.node.id),
+          E('p', {class:'intro'}, `${result.node.kind || 'node'} · ${result.node.id}`),
+          this.map(result), E('h3', {}, 'Relationships')
+        );
+        if (!result.relations.length) detail.append(E('p', {}, 'This node has no relationships.'));
+        for (const edge of result.relations) {
+          const outgoing = edge.source === id;
+          const other = outgoing ? edge.target : edge.source;
+          detail.append(E('div', {class:'relation-row'},
+            E('span', {}, outgoing ? 'Outgoing →' : 'Incoming ←'),
+            E('span', {class:'badge'}, edge.rel || 'related to'),
+            W.button((outgoing ? edge.target_label : edge.source_label) || other, () => this.inspect(other)),
+            E('small', {}, `weight ${edge.weight}`)
+          ));
+        }
+        if (result.truncated) detail.append(E('p', {}, 'Showing the first 200 relationships.'));
+        detail.append(E('h3', {}, 'Attributes'), E('pre', {}, W.json(result.node.attrs)));
+        detail.append(E('details', {'data-advanced':''},
+          E('summary', {}, 'Advanced · stored evidence and details'), E('pre', {}, W.json(result.node.details))
+        ));
+        M.applyAdvanced?.(detail);
+      } catch (error) {
+        if (request === this.detailRequest) W.status(this.note, error);
+      } finally {
+        if (request === this.detailRequest) detail.removeAttribute('aria-busy');
+      }
+    }
+    map(result) {
+      const ns = 'http://www.w3.org/2000/svg', svg = document.createElementNS(ns, 'svg');
+      svg.setAttribute('viewBox', '0 0 650 300');
+      svg.setAttribute('class', 'graph-map');
+      svg.setAttribute('role', 'group');
+      svg.setAttribute('aria-label', 'Relationships around ' + (result.node.label || result.node.id));
+      const seen = new Map();
+      for (const edge of result.relations) {
+        const id = edge.source === result.node.id ? edge.target : edge.source;
+        if (id !== result.node.id && !seen.has(id)) seen.set(id,
+          edge.source === result.node.id ? edge.target_label : edge.source_label
+        );
+      }
+      const nodes = [...seen].slice(0, 12);
+      if (seen.size > 12) {
+        const caption = document.createElementNS(ns, 'text');
+        caption.setAttribute('x', '12'); caption.setAttribute('y', '20');
+        caption.textContent = 'Map: first 12 neighbors. Browse all relationships below.';
+        svg.append(caption);
+      }
+      nodes.forEach(([id, label], index) => {
+        const angle = index / nodes.length * Math.PI * 2;
+        const x = 325 + 235 * Math.cos(angle), y = 150 + 105 * Math.sin(angle);
+        const line = document.createElementNS(ns, 'line');
+        Object.entries({x1:325, y1:150, x2:x, y2:y}).forEach(([key, value]) => line.setAttribute(key, value));
+        svg.append(line);
+        this.mapNode(svg, id, label, x, y);
+      });
+      this.mapNode(svg, result.node.id, result.node.label, 325, 150);
+      return svg;
+    }
+    mapNode(svg, id, label, x, y) {
+      const ns = 'http://www.w3.org/2000/svg';
+      const group = document.createElementNS(ns, 'g');
+      const circle = document.createElementNS(ns, 'circle'), text = document.createElementNS(ns, 'text');
+      const caption = document.createElementNS(ns, 'rect');
+      caption.setAttribute('class', 'graph-node-caption');
+      Object.entries({x:x-88, y:y+19, width:176, height:22, rx:5}).forEach(([key, value]) => caption.setAttribute(key, value));
+      text.setAttribute('class', 'graph-node-label');
+      group.setAttribute('tabindex', '0'); group.setAttribute('role', 'button');
+      group.setAttribute('aria-label', 'Inspect ' + (label || id));
+      group.addEventListener('click', () => this.inspect(id));
+      group.addEventListener('keydown', event => {
+        if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); this.inspect(id); }
+      });
+      Object.entries({cx:x, cy:y, r:16}).forEach(([key, value]) => circle.setAttribute(key, value));
+      text.setAttribute('x', x); text.setAttribute('y', y + 32); text.setAttribute('text-anchor', 'middle');
+      text.textContent = (label || id).slice(0, 24);
+      group.append(circle, caption, text); svg.append(group);
+    }
+  }
+  customElements.define('knowledge-view', KnowledgeView);
+})();
+</script>

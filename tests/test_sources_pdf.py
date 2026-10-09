@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-pymupdf = pytest.importorskip("pymupdf", reason="ml-stack[pdf]")
+pymupdf = pytest.importorskip("pymupdf", reason="pymupdf is the test-only PDF writer here (AGPL, opt-in): pip install pymupdf")
 
 from ml_stack.sources import pdf  # noqa: E402
 
@@ -208,7 +208,7 @@ def test_a_long_section_is_split_on_paragraph_boundaries_and_never_inside_one(tm
     assert len(parts) == len(paragraphs)
     assert [u.part for u in parts] == list(range(1, len(parts) + 1))
     assert all(u.parts == len(parts) for u in parts)
-    for unit, paragraph in zip(parts, paragraphs):
+    for unit, paragraph in zip(parts, paragraphs, strict=False):
         assert unit.text == paragraph
     assert len({u.id for u in units}) == len(units)
 

@@ -10,19 +10,23 @@ import json
 import os
 import secrets
 import socket
+import ssl
 import struct
 import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from hashlib import sha256
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict, Unpack
 
-from ml_stack import home
+from ml_stack import home, http, macauth, sealing
 from ml_stack.files import write_json
 from ml_stack.log import warn
 from ml_stack.platform import private_file
+
+from . import tls, wsl_network
+from .cluster_modes import validate
+from .membership import Roster, fingerprint_of, roster
 
 #: Link-local scope in the administratively-scoped block. TTL 1 keeps it there.
 DEFAULT_GROUP = "239.255.77.70"
@@ -33,8 +37,7 @@ DEFAULT_PORT = 8771
 #: traind's own port, repeated here so the firewall rule can name it without importing
 #: the daemon.
 DEFAULT_HTTP_PORT = 8770
-#: What a cluster is called when nobody names one. Two machines that type the same
-#: passphrase derive the same key only if they also agree on this.
+#: What a cluster is called when nobody names one.
 DEFAULT_CLUSTER = "ml-stack"
 
 
@@ -47,14 +50,17 @@ def default_port() -> int:
     raw = os.environ.get("ML_STACK_DISCOVERY_PORT")
     return int(raw) if raw else DEFAULT_PORT
 
-PROTOCOL = 1
+PROTOCOL = 3
+"""3 sealed every datagram under a key derived from the cluster key. A peer speaking 2 is not heard."""
 MAX_SKEW_S = 60.0
+MAGIC = b"MLD3"
 #: The most one UDP datagram carries.
 MAX_DATAGRAM = 65507
 #: What a beacon body may take. macOS refuses a datagram over ``net.inet.udp.maxdgram``
 #: -- 9216 by default -- with EMSGSIZE, well below what IP allows.
 BEACON_BUDGET = 8000
-_TOKEN_INFO = b"ml-stack-traind-api-token-v1"
+RETRY_S = 0.3
+"""Seconds between the questions `discover` asks while it waits for answers."""
 
 
 class DiscoveryError(RuntimeError):
@@ -62,6 +68,13 @@ class DiscoveryError(RuntimeError):
 
 
 # -- the key -------------------------------------------------------------
+def require_name(value: object) -> str:
+    """A nonempty cluster name without control characters, at most 64 characters."""
+    if not isinstance(value, str) or not value.strip():
+        raise DiscoveryError("cluster name is required")
+    return check_name(value)
+
+
 def key_path(path: Path | str | None = None) -> Path:
     """Where the cluster key lives. ``$ML_STACK_CLUSTER_KEY`` wins if set."""
     if path is not None:
@@ -70,50 +83,62 @@ def key_path(path: Path | str | None = None) -> Path:
     return home.expand(env) if env else home.state("cluster.key")
 
 
+def mint_cluster(group: str, path: Path | str | None = None, *, join: str = "", mode: str = "dev",
+                 selection: str = "manual") -> Membership:
+    """Make a cluster of a fresh random 256-bit key, replacing one of the same name."""
+    group = require_name(group)
+    key = base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=")
+    return adopt(Membership(group=group, key=key, join=join, mode=mode, selection=selection), path)
+
+
 def create_cluster_key(path: Path | str | None = None, *,
-                       overwrite: bool = False) -> str:
-    """Mint a cluster key with no passphrase behind it, or return the one here."""
+                       overwrite: bool = False, group: str = "") -> str:
+    """Mint a cluster key that no passphrase protects, or return the one here."""
     joined = memberships(path)
     if joined and not overwrite:
         return joined[0].key.decode()
-    key = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip("=")
-    rows = [Membership(group=DEFAULT_CLUSTER, key=key.encode())]
-    rows += [m for m in joined if m.group != DEFAULT_CLUSTER]
-    _write_memberships(rows, path)
-    return key
+    return mint_cluster(require_name(group), path).key.decode()
 
 
-# -- joining by password -------------------------------------------------
-MIN_PASSPHRASE = 5
-"""Shortest passphrase accepted. Low, because a refusal people work around by typing"""
-
-SCRYPT_N = 1 << 16
-SCRYPT_R = 8
-SCRYPT_P = 1
-"""~80ms and 64MB on a laptop, a second or two on a Pi. Paid once, at join time: the"""
+def adopt(member: Membership, path: Path | str | None = None) -> Membership:
+    """Record ``member`` as a cluster this machine is in, replacing one of the same name."""
+    require_name(member.group)
+    _write_memberships([member, *[m for m in memberships(path) if m.group != member.group]], path)
+    return member
 
 
-def _salt_for(group: str) -> bytes:
-    """Deterministic, because both machines have to derive the same key from the same"""
-    return sha256(b"ml-stack-cluster-v1:" + group.encode()).digest()
+# -- the passphrase ------------------------------------------------------
+MIN_JOIN_LENGTH = 5
+"""Shortest passphrase accepted. It only ever goes through the join handshake, which a
+listener cannot test a guess against and which locks out a source that keeps failing."""
 
 
-def key_from_passphrase(passphrase: str, *, group: str = DEFAULT_CLUSTER) -> bytes:
-    """The cluster key two machines derive from the same words."""
+def check_length(passphrase: str) -> str:
+    """``passphrase`` stripped, or `DiscoveryError` when it is too short."""
     passphrase = passphrase.strip()
-    if len(passphrase) < MIN_PASSPHRASE:
-        raise DiscoveryError(
-            f"passphrase must be at least {MIN_PASSPHRASE} characters -- everyone on "
-            "this network can hear the beacons and grind guesses against them offline")
-    raw = hashlib.scrypt(passphrase.encode("utf-8"), salt=_salt_for(group),
-                         n=SCRYPT_N, r=SCRYPT_R, p=SCRYPT_P, dklen=32,
-                         maxmem=2 * 128 * SCRYPT_N * SCRYPT_R)
-    return base64.urlsafe_b64encode(raw).rstrip(b"=")
+    if len(passphrase) < MIN_JOIN_LENGTH:
+        raise DiscoveryError(f"The passphrase needs at least {MIN_JOIN_LENGTH} characters.")
+    return passphrase
 
 
-def group_path(path: Path | str | None = None) -> Path:
-    """Where the group name is recorded, beside the key."""
-    return key_path(path).with_suffix(".group")
+MOST_GROUP_NAME = 64
+REFUSED_IN_NAME = "/\\"
+
+
+def check_name(name: str) -> str:
+    """``name`` trimmed, or `DiscoveryError` saying which rule it breaks."""
+    name = name.strip()
+    if not name:
+        raise DiscoveryError("A cluster name cannot be empty.")
+    if len(name) > MOST_GROUP_NAME:
+        raise DiscoveryError(f"A cluster name is at most {MOST_GROUP_NAME} characters; this one is {len(name)}.")
+    bad = sorted({c for c in name if c in REFUSED_IN_NAME or not c.isprintable()})
+    if bad:
+        shown = ", ".join(repr(c) for c in bad)
+        raise DiscoveryError(f"A cluster name cannot contain {shown}: the join handshake uses "
+                                  "slashes as separators and the memberships file cannot carry "
+                                  "control characters.")
+    return name
 
 
 def cluster_group(path: Path | str | None = None) -> str | None:
@@ -122,42 +147,33 @@ def cluster_group(path: Path | str | None = None) -> str | None:
     return rows[0].group if rows else None
 
 
-def join_cluster(passphrase: str, *, group: str = DEFAULT_CLUSTER,
-                 path: Path | str | None = None, overwrite: bool = True) -> bytes:
-    """Join, and answer as this cluster from now on. Returns the key."""
-    key = key_from_passphrase(passphrase, group=group)
-    joined = memberships(path)
-    if joined and not overwrite:
-        return joined[0].key
-    rows = [Membership(group=group, key=key)]
-    rows += [m for m in joined if m.group != group]
-    _write_memberships(rows, path)
-    return key
-
-
-def check_passphrase(passphrase: str, *, group: str | None = None,
-                     path: Path | str | None = None) -> bool:
-    """Whether these words derive the key this machine already holds."""
-    key = load_cluster_key(path)
-    if key is None:
-        return False
-    group = group if group is not None else (cluster_group(path) or DEFAULT_CLUSTER)
-    try:
-        candidate = key_from_passphrase(passphrase, group=group)
-    except DiscoveryError:
-        return False
-    return hmac.compare_digest(candidate, key)
-
-
 @dataclass(frozen=True, slots=True)
 class Membership:
     """One cluster this machine belongs to."""
 
     group: str
     key: bytes
+    """The cluster's random 256-bit key, urlsafe base64."""
+    join: str = ""
+    """What the join handshake takes as the passphrase (`onboard.joining.join_secret`); empty
+    on a machine that does not know the passphrase."""
+
+    mode: str = "dev"
+    selection: str = "automatic"
+
+    def __post_init__(self) -> None:
+        require_name(self.group)
+        validate(self.mode)
+        if self.selection not in {"automatic", "manual"}:
+            raise ValueError("cluster selection must be automatic or manual")
+        if not isinstance(self.key, bytes) or len(self.key) != 43 or len(base64.b64decode(
+                self.key + b"=" * (-len(self.key) % 4), altchars=b"-_", validate=True)) != 32:
+            raise ValueError("cluster key must contain 256 bits")
+        if not isinstance(self.join, str):
+            raise ValueError("cluster join secret must be text")
 
     def public(self) -> dict[str, Any]:
-        return {"group": self.group}
+        return {"group": self.group, "mode": self.mode, "selection": self.selection}
 
 
 def clusters_path(path: Path | str | None = None) -> Path:
@@ -176,59 +192,37 @@ def memberships(path: Path | str | None = None) -> list[Membership]:
     try:
         raw = json.loads(clusters_path(path).read_text())
     except (OSError, ValueError):
-        return _adopt_single(path)
+        return []
     for row in raw if isinstance(raw, list) else []:
         try:
-            group, key = str(row["group"]), str(row["key"]).encode()
-        except (KeyError, TypeError, AttributeError):
+            group, key, join = row["group"], row["key"].encode("ascii"), row.get("join", "")
+            member = Membership(group=group, key=key, join=join, mode=row["mode"],
+                                selection=row.get("selection", "automatic"))
+        except (KeyError, TypeError, AttributeError, ValueError, DiscoveryError):
             continue
         if key and group not in seen:
             seen.add(group)
-            out.append(Membership(group=group, key=key))
+            out.append(member)
     return out
-
-
-def _adopt_single(path: Path | str | None = None) -> list[Membership]:
-    """The one cluster written before the list existed, moved into the list."""
-    try:
-        key = key_path(path).read_text().strip()
-    except OSError:
-        return []
-    if not key:
-        return []
-    try:
-        group = group_path(path).read_text().strip()
-    except OSError:
-        group = ""
-    rows = [Membership(group=group or DEFAULT_CLUSTER, key=key.encode())]
-    with contextlib.suppress(OSError):
-        _write_memberships(rows, path)
-    return rows
 
 
 def _write_memberships(rows: list[Membership],
                        path: Path | str | None = None) -> None:
     """Record the list this machine belongs to."""
     listed = clusters_path(path)
-    write_json(listed, [{"group": m.group, "key": m.key.decode()} for m in rows])
+    write_json(listed, [{"group": m.group, "key": m.key.decode(), "join": m.join, "mode": m.mode,
+                          "selection": m.selection} for m in rows])
     private_file(listed)
-
-
-def join(passphrase: str, *, group: str = "", path: Path | str | None = None
-         ) -> list[Membership]:
-    """Add a cluster. Joining one already joined replaces its key."""
-    group = group.strip() or DEFAULT_CLUSTER
-    key = key_from_passphrase(passphrase, group=group)
-    rows = [m for m in memberships(path) if m.group != group]
-    rows.append(Membership(group=group, key=key))
-    _write_memberships(rows, path)
-    return rows
 
 
 def leave(group: str, path: Path | str | None = None) -> list[Membership]:
     """Drop a cluster. The machine stops answering to it at once."""
-    rows = [m for m in memberships(path) if m.group != group]
+    held = memberships(path)
+    rows = [m for m in held if m.group != group]
     _write_memberships(rows, path)
+    for gone in held:
+        if gone.group == group and not any(m.key == gone.key for m in rows):
+            roster(gone.key).forget()
     return rows
 
 
@@ -244,13 +238,12 @@ def load_cluster_key(path: Path | str | None = None) -> bytes | None:
 
 
 def derive_token(key: bytes) -> str:
-    """The traind bearer token both ends compute independently."""
-    mac = hmac.new(key, _TOKEN_INFO, sha256).digest()
-    return base64.urlsafe_b64encode(mac).decode().rstrip("=")
+    """The secret requests are signed with, which both ends compute independently."""
+    return macauth.derive(key)
 
 
 # -- the wire ------------------------------------------------------------
-def _canonical(payload: dict[str, Any]) -> bytes:
+def _encoded(payload: dict[str, Any]) -> bytes:
     return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
 
 
@@ -261,7 +254,7 @@ def fit_beacon(body: dict[str, Any], budget: int = BEACON_BUDGET) -> dict[str, A
     the beacon is shorter; a peer reads the rest from the daemon's ``/models``.
     """
     def over(device: dict[str, Any]) -> bool:
-        return len(_canonical({**body, "device": device})) > budget
+        return len(_encoded({**body, "device": device})) > budget
 
     device = dict(body.get("device") or {})
     if not over(device):
@@ -277,27 +270,31 @@ def fit_beacon(body: dict[str, Any], budget: int = BEACON_BUDGET) -> dict[str, A
     return {**body, "device": device}
 
 
-def _sign(key: bytes, payload: dict[str, Any]) -> bytes:
-    body = {k: v for k, v in payload.items() if k != "mac"}
-    mac = hmac.new(key, _canonical(body), sha256).hexdigest()
-    return _canonical({**body, "mac": mac})
+def _box_key(key: bytes) -> bytes:
+    return sealing.box_key(macauth.derive(key))
+
+
+def _pack(key: bytes, payload: dict[str, Any]) -> bytes:
+    """``payload`` as a datagram: sealed under the key derived from the cluster key, with the
+    kind as associated data."""
+    return MAGIC + sealing.seal(_box_key(key), _encoded(payload),
+                                _data(str(payload.get("kind", ""))))
+
+
+def _data(kind: str) -> bytes:
+    return f"ml-stack-discovery/{kind}".encode()
 
 
 def _verify(key: bytes, raw: bytes, *, kind: str,
             nonce: str | None = None) -> dict[str, Any] | None:
-    """Parse and authenticate a packet, or return None."""
+    """Open and authenticate a datagram, or return None."""
+    if not raw.startswith(MAGIC):
+        return None
     try:
-        msg = json.loads(raw)
-    except (json.JSONDecodeError, UnicodeDecodeError):
+        msg = json.loads(sealing.open_(_box_key(key), raw[len(MAGIC):], _data(kind)))
+    except (sealing.SealError, ValueError):
         return None
     if not isinstance(msg, dict) or msg.get("v") != PROTOCOL or msg.get("kind") != kind:
-        return None
-    got = msg.get("mac")
-    if not isinstance(got, str):
-        return None
-    body = {k: v for k, v in msg.items() if k != "mac"}
-    want = hmac.new(key, _canonical(body), sha256).hexdigest()
-    if not hmac.compare_digest(got, want):
         return None
     ts = msg.get("t")
     if not isinstance(ts, (int, float)) or abs(time.time() - ts) > MAX_SKEW_S:
@@ -325,17 +322,19 @@ class Beacon:
     """Minted per advertiser: tells one daemon's answers from another's in one listen."""
     machine: str = ""
     """`home.machine_id` of the machine it runs on: kept across restarts."""
+    cert: str = ""
+    """The daemon's certificate, base64 DER, which peers pin; empty when it serves signed-only."""
 
     @property
     def base_url(self) -> str:
-        return f"http://{self.host or self.hostname}:{self.port}"
+        return f"{'https' if self.cert else 'http'}://{self.host or self.hostname}:{self.port}"
 
     def public(self) -> dict[str, Any]:
         return {"name": self.name, "port": self.port, "device": self.device,
                 "busy": self.busy, "queued": self.queued,
                 "slots": self.slots, "free": self.free,
                 "hostname": self.hostname, "instance": self.instance,
-                "machine": self.machine}
+                "machine": self.machine, "cert": self.cert}
 
     @property
     def identity(self) -> str:
@@ -392,7 +391,7 @@ def _destinations(group: str, port: int) -> list[tuple[tuple[str, int], str]]:
             (("255.255.255.255", port), ""), ((LOOPBACK, port), "")]
 
 
-def _say(sock: socket.socket, data: bytes, group: str,
+def _say(sock: socket.socket | wsl_network.DiscoverySocket, data: bytes, group: str,
          port: int) -> list[tuple[tuple[str, int], OSError]]:
     """Send ``data`` every way `_destinations` names; returns the ones refused."""
     lan = primary_ip()
@@ -443,8 +442,17 @@ def windows_firewall_line(http_port: int = DEFAULT_HTTP_PORT,
 
 
 def _socket(*, broadcast: bool = False, bind: tuple[str, int] | None = None,
-            group: str | None = None) -> socket.socket:
+            group: str | None = None) -> socket.socket | wsl_network.DiscoverySocket:
+    if wsl_network.wsl_registration.configuration() is not None:
+        return wsl_network.DiscoverySocket({"broadcast": broadcast, "bind": bind, "group": group})
+    return _native_socket(broadcast=broadcast, bind=bind, group=group)
+
+
+def _native_socket(*, broadcast: bool = False, bind: tuple[str, int] | None = None,
+                   group: str | None = None) -> socket.socket:
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    if os.name == "nt":
+        wsl_network.disable_udp_reset(s)
     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     if hasattr(socket, "SO_REUSEPORT"):
         with contextlib.suppress(OSError):
@@ -466,23 +474,31 @@ def _socket(*, broadcast: bool = False, bind: tuple[str, int] | None = None,
     return s
 
 
+class AdvertiserOptions(TypedDict, total=False):
+    group: str | None
+    port: int | None
+    interval_s: float
+    cluster: str
+    refresh: Callable[[Beacon], None] | None
+
+
 class Advertiser:
     """Answers 'who is out there' on behalf of one daemon."""
 
-    def __init__(self, beacon: Beacon, key: bytes, *,
-                 group: str | None = None, port: int | None = None,
-                 interval_s: float = 10.0,
-                 refresh: Callable[[Beacon], None] | None = None) -> None:
+    def __init__(self, beacon: Beacon, key: bytes, **options: Unpack[AdvertiserOptions]) -> None:
+        if extra := options.keys() - AdvertiserOptions.__annotations__.keys():
+            raise TypeError(f"unknown advertiser options: {', '.join(sorted(extra))}")
         beacon.instance = beacon.instance or secrets.token_hex(8)
         self.beacon = beacon
         self.key = key
-        self.refresh = refresh
-        self.group = group or default_group()
+        self.refresh = options.get("refresh")
+        self.group = options.get("group") or default_group()
+        port = options.get("port")
         self.port = port if port is not None else default_port()
-        self.interval_s = interval_s
+        self.interval_s = options.get("interval_s", 10.0)
         self._stop = threading.Event()
         self._threads: list[threading.Thread] = []
-        self._sock: socket.socket | None = None
+        self._sock: socket.socket | wsl_network.DiscoverySocket | None = None
         self._ready = threading.Event()
         self._error: BaseException | None = None
         self._asked = threading.Event()
@@ -490,6 +506,10 @@ class Advertiser:
         self.undelivered = 0
         self.last_error = ""
         self._said: set[str] = set()
+        self.cluster = options.get("cluster", "")
+        self.joinable = False
+        self.mode = "dev"
+        """The cluster's name; a machine that asks to join it is told where to shake hands."""
 
     # -- lifecycle --
     def start(self, *, wait_s: float = 2.0) -> Advertiser:
@@ -538,9 +558,8 @@ class Advertiser:
         if reason in self._said:
             return
         self._said.add(reason)
-        warn(f"a {size}-byte beacon did not reach {addr[0]}:{addr[1]} ({reason}). "
-             f"Until one does, {self.beacon.name} is not in the fleet: the other "
-             "machines do not list it.")
+        warn(f"a {size}-byte beacon from {self.beacon.name} could not be sent to "
+             f"{addr[0]}:{addr[1]} ({reason}). Other discovery routes may still work.")
 
     def _sample(self) -> None:
         """Run ``refresh`` and keep what it produced as the beacon to send."""
@@ -556,7 +575,7 @@ class Advertiser:
             self._asked.clear()
 
     def _payload(self, kind: str, nonce: str = "") -> bytes:
-        return _sign(self.key, {"v": PROTOCOL, "kind": kind, "t": time.time(),
+        return _pack(self.key, {"v": PROTOCOL, "kind": kind, "t": time.time(),
                                 "nonce": nonce, "beacon": self._state or self._body()})
 
     def _serve(self) -> None:
@@ -576,6 +595,9 @@ class Advertiser:
                 continue
             except OSError:
                 break
+            if self.cluster and (nonce := _join_nonce(raw, self.cluster)) is not None:
+                self._tell_join(sock, nonce, addr)
+                continue
             msg = _verify(self.key, raw, kind="who")
             if msg is None:
                 continue
@@ -586,6 +608,17 @@ class Advertiser:
                 self._undelivered(addr, exc, len(reply))
                 continue
             self._asked.set()
+
+    def _tell_join(self, sock: socket.socket | wsl_network.DiscoverySocket,
+                   nonce: str, addr: tuple[str, int]) -> None:
+        """Answer a machine asking to join this cluster: the port and scheme to shake hands on."""
+        reply = _encoded({"v": PROTOCOL, "kind": "join", "group": self.cluster, "nonce": nonce,
+                            "name": self.beacon.name, "port": self.beacon.port, "tls": bool(self.beacon.cert),
+                            "method": "automatic" if self.mode == "dev" else "passphrase" if self.joinable else "recovery",
+                            "mode": self.mode, "cluster_id": hashlib.sha256(self.key).hexdigest(),
+                            "fingerprint": hashlib.sha256(base64.b64decode(self.beacon.cert)).hexdigest() if self.beacon.cert else ""})
+        with contextlib.suppress(OSError):
+            sock.sendto(reply, addr)
 
     def _announce_loop(self) -> None:
         while not self._stop.wait(self.interval_s):
@@ -600,26 +633,44 @@ class Advertiser:
             self._undelivered(*refused[0], len(data))
 
 
+def _join_nonce(raw: bytes, group: str) -> str | None:
+    """The nonce of a plain datagram asking to join ``group``, or None for anything else."""
+    if len(raw) > 2048:
+        return None
+    try:
+        msg = json.loads(raw)
+    except (ValueError, UnicodeDecodeError):
+        return None
+    if isinstance(msg, dict) and msg.get("v") == PROTOCOL and msg.get("kind") == "join?" \
+            and msg.get("group") in (group, ""):
+        nonce = msg.get("nonce")
+        return nonce if isinstance(nonce, str) and 1 <= len(nonce) <= 64 else None
+    return None
+
+
 def discover(key: bytes, *, timeout_s: float = 2.0, group: str | None = None,
-             port: int | None = None, retry_s: float = 0.3) -> list[Beacon]:
-    """Ask the LAN who is running a daemon, and return everyone who proves it."""
+             port: int | None = None, enrolled: bool = True) -> list[Beacon]:
+    """Ask the LAN who is running a daemon, and return everyone who proves it with the cluster key
+    and is a device of the cluster (`membership`): a beacon whose certificate was never enrolled,
+    or was revoked, is not pinned and not returned. ``enrolled=False`` is for a person choosing
+    which devices to enrol, who compares the fingerprints themselves."""
+    devices = roster(key) if enrolled else None
     group = group or default_group()
     port = port if port is not None else default_port()
     nonce = secrets.token_hex(16)
-    query = _sign(key, {"v": PROTOCOL, "kind": "who", "t": time.time(),
-                        "nonce": nonce})
+    query = _pack(key, {"v": PROTOCOL, "kind": "who", "t": time.time(), "nonce": nonce})
     found: dict[str, Beacon] = {}
     with _socket(broadcast=True, bind=("", 0)) as sock:
         _say(sock, query, group, port)
         deadline = time.time() + timeout_s
-        next_query = time.time() + retry_s
+        next_query = time.time() + RETRY_S
         while True:
             now = time.time()
             if now >= deadline:
                 break
             if now >= next_query:
                 _say(sock, query, group, port)
-                next_query = now + retry_s
+                next_query = now + RETRY_S
             sock.settimeout(max(0.0, min(deadline, next_query) - time.time()))
             try:
                 raw, addr = sock.recvfrom(65535)
@@ -645,10 +696,43 @@ def discover(key: bytes, *, timeout_s: float = 2.0, group: str | None = None,
                                 host=addr[0],
                                 hostname=str(body.get("hostname", "")),
                                 instance=str(body.get("instance", "")),
-                                machine=str(body.get("machine", "")))
+                                machine=str(body.get("machine", "")),
+                                cert=str(body.get("cert", "")))
             except (TypeError, ValueError):
+                continue
+            if not _trusted(beacon, devices):
                 continue
             key_id = beacon.identity
             prior = found.get(key_id)
             found[key_id] = beacon if prior is None else _prefer(prior, beacon)
     return sorted(found.values(), key=lambda b: (b.name, b.host))
+
+
+_WARNED: set[str] = set()
+
+
+def _trusted(beacon: Beacon, devices: Roster | None = None) -> bool:
+    """Whether this machine may be talked to, and if it offers a certificate, pin it.
+
+    With ``devices`` the certificate must belong to an active device of the cluster, else it is
+    dropped and any pin to its address forgotten.
+
+    A beacon with no certificate is a daemon that is not listening beyond its own machine,
+    which is ignored unless it is on this machine: nothing off this machine is spoken to
+    without TLS."""
+    if beacon.cert:
+        try:
+            context = tls.pinned_context(beacon.cert) if devices is None or devices.is_active(
+                fingerprint_of(beacon.cert)) else None
+        except (ValueError, ssl.SSLError):
+            return False
+        for name in {beacon.host, beacon.hostname}:
+            if name:
+                http.pin(f"{name}:{beacon.port}", context)
+        return context is not None
+    if beacon.host.startswith("127."):
+        return True
+    if beacon.identity not in _WARNED:
+        _WARNED.add(beacon.identity)
+        warn(f"{beacon.name} at {beacon.host} offers no TLS, so it is ignored")
+    return False

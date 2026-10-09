@@ -36,7 +36,7 @@ def topological_order(num_nodes: int, src: Tensor, dst: Tensor) -> list[int] | N
 
     indegree = [0] * n
     outgoing: list[list[int]] = [[] for _ in range(n)]
-    for u, v in zip(sources, targets):
+    for u, v in zip(sources, targets, strict=False):
         indegree[v] += 1
         outgoing[u].append(v)
 
@@ -80,7 +80,7 @@ def resolvent_sweep(
 
     parents: list[list[tuple[int, float]]] = [[] for _ in range(int(graph.num_nodes))]
     weights = _to_list(graph.w) if graph.w is not None else None
-    for edge, (u, v) in enumerate(zip(_to_list(graph.src), _to_list(graph.dst))):
+    for edge, (u, v) in enumerate(zip(_to_list(graph.src), _to_list(graph.dst), strict=False)):
         parents[int(v)].append((int(u), float(weights[edge]) if weights else 1.0))
 
     rows: list[Tensor] = [x[i] for i in range(int(graph.num_nodes))]
@@ -113,7 +113,7 @@ def decompose_to_dags(
         return [(list(a), list(b)) for a, b in _DECOMPOSITION_CACHE[key]]
 
     adjacency: list[set[int]] = [set() for _ in range(n)]
-    for u, v in zip(sources, targets):
+    for u, v in zip(sources, targets, strict=False):
         adjacency[u].add(v)
         adjacency[v].add(u)
 

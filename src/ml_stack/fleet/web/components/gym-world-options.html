@@ -1,0 +1,71 @@
+<script>
+(function(){
+ const W=window.workspaceModel,E=window.fleetModel.el;
+ class GymWorldOptions extends HTMLElement {
+  connect(view,advanced){
+   if(this.view)return;this.view=view;this.advanced=advanced;
+   this.mode=W.field(this,'Simulation mode','select');
+   this.mode.append(E('option',{value:'world'},'Live world'),E('option',{value:'episode'},'Training / evaluation episode'));
+   this.source=W.field(this,'World source','select');
+   this.source.append(E('option',{value:'procedural'},'Procedurally generated'),E('option',{value:'manual'},'Manual world'));
+   this.learning=W.field(this,'Policy learning','select');
+   this.learning.append(E('option',{value:'frozen'},'Frozen — evaluate without learning'),E('option',{value:'online'},'Online — learn while the world runs'));
+   this.hint=E('p',{class:'intro'});this.append(this.hint);this.manual=E('div');this.append(this.manual);
+   this.generated=E('div');advanced.append(this.generated);this.fields={};
+   this.apply=W.button('Apply learning mode',()=>this.applyLearning());this.append(this.apply);this.apply.disabled=true;
+   for(const input of [this.mode,this.source,this.learning])input.addEventListener('change',()=>this.refresh());
+  }
+  describe(env){
+   if(this.environment===env?.id)return;
+   if(this.environment)this.saved??={},this.saved[this.environment]=this.value();
+   this.environment=env?.id;this.manual.replaceChildren();this.generated.replaceChildren();this.fields={};
+   const schema=env?.world_schema;
+   const fields=schema?.fields||(env?.id==='car'?{map_file:{type:'file',mode:'manual',format:'MetaDrive PGMap JSON'}}:{});
+   for(const [key,spec]of Object.entries(fields)){
+    if(key==='map'&&this.view.nativeFields?.map){this.fields[key]={input:this.view.nativeFields.map,spec};continue;}
+    const label=({map_file:'Map file',net_file:'Road network file',route_file:'Vehicle routes file',layout:'Warehouse layout',arm_length:'Intersection arm length (metres)',lanes:'Lanes per direction',vehicle_period:'Vehicle arrival interval (seconds)',demand_seconds:'Generated traffic duration (seconds)',shelf_columns:'Shelf columns',shelf_rows:'Shelf rows',column_height:'Shelf height (cells)',n_agents:'Number of robots'})[key]||key.replaceAll('_',' ');
+    const host=spec.mode==='manual'?this.manual:this.generated;
+    const tag=spec.choices?'select':spec.type==='textarea'?'textarea':'input';
+    const input=W.field(host,label,tag,{type:['integer','number'].includes(spec.type)?'number':'text',min:spec.min,max:spec.max,step:spec.type==='integer'?'1':'any',placeholder:spec.type==='file'?'Relative path in Data files':spec.format||'',value:spec.default??''});
+    if(spec.choices){input.append(...spec.choices.map(value=>E('option',{value},String(value))));if(spec.default!==undefined)input.value=spec.default;}
+    this.fields[key]={input,spec};
+   }
+   if(schema?.constraint)this.generated.append(E('p',{class:'intro'},schema.constraint));
+   this.restore(this.saved?.[this.environment]||{});this.refresh();
+  }
+  restore(config){
+   this.mode.value=config.simulation_mode||'world';this.source.value=config.world?.mode||'procedural';this.learning.value=config.learning_mode||'frozen';
+   for(const [key,{input}]of Object.entries(this.fields)){const value=config.world?.[key];if(value===undefined)continue;if(input.tagName==='SELECT'&&![...input.options].some(option=>option.value===String(value)))input.append(E('option',{value},String(value)));input.value=value;}
+   this.refresh();
+  }
+  refresh(){
+   const view=this.view,world=this.mode.value==='world';
+   W.visible(this.learning,world);if(view.nativeFields?.map)W.visible(view.nativeFields.map,this.source.value==='procedural');this.manual.hidden=this.source.value!=='manual';this.generated.hidden=this.source.value!=='procedural';
+   this.hint.textContent=world?'The world keeps its clock and agents when you pause or change a policy.':'Episodes end at their configured limit. Start the next episode explicitly.';
+   const option=view.controller.querySelector('option[value="native-idm"]');
+   if(option)option.hidden=!(world&&view.environment.value==='car');
+   if(view.controller.value==='native-idm'&&option?.hidden)view.controller.value='manual';
+   this.learning.querySelector('option[value="online"]').disabled=view.controller.value!=='ppo';
+   if(this.learning.value==='online'&&view.controller.value!=='ppo')this.learning.value='frozen';
+   this.apply.hidden=!world;this.apply.disabled=!view.session;
+   view.controllerChanged?.();
+  }
+  value(){
+   const world={mode:this.source.value};
+   for(const [key,{input,spec}]of Object.entries(this.fields)){
+    if((spec.mode==='manual')!==(world.mode==='manual')||input.value==='')continue;
+    world[key]=['integer','number'].includes(spec.type)||(key==='map'&&/^\d+$/.test(input.value))?Number(input.value):input.value;
+   }
+   return {simulation_mode:this.mode.value,learning_mode:this.mode.value==='world'?this.learning.value:'frozen',world};
+  }
+  validate(){
+   if(this.source.value==='manual')for(const {input,spec}of Object.values(this.fields))if(spec.mode==='manual'&&!input.value.trim())throw Error('Choose the manual world files or layout before starting.');
+   if(this.view.controller.value==='ppo'&&this.learning.value!=='online'&&!this.view.checkpoint.value.trim())throw Error('Choose a PPO checkpoint for a frozen policy, or enable online learning to create one.');
+  }
+  async applyLearning(){
+   this.validate();await this.view.control('learning',{mode:this.learning.value});
+  }
+ }
+ customElements.define('gym-world-options',GymWorldOptions);
+})();
+</script>

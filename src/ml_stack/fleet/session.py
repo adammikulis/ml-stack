@@ -2,16 +2,21 @@
 
 from __future__ import annotations
 
+import hmac
 import secrets
 import threading
 import time
 from dataclasses import dataclass, field
 
-__all__ = ["COOKIE", "Sessions", "Throttle", "parse_cookie"]
+__all__ = ["COOKIE", "CREDENTIALED", "Sessions", "Throttle", "parse_cookie", "same"]
 
 COOKIE = "ml_stack_ui"
 TTL_S = 12 * 3600
 TICKET_TTL_S = 60.0
+MAX_TICKETS = 8
+CREDENTIALED = frozenset({"launch-ticket", "passphrase", "recovery-file", "invite"})
+"""Session origins that rest on a credential the server checked: a spent launch ticket, a cluster
+passphrase, a verified recovery file or a redeemed invitation."""
 
 
 def parse_cookie(header: str, name: str = COOKIE) -> str:
@@ -23,12 +28,23 @@ def parse_cookie(header: str, name: str = COOKIE) -> str:
     return ""
 
 
+def same(a: str, b: str) -> bool:
+    """Constant-time equality of two strings, whatever characters they hold."""
+    return hmac.compare_digest(a.encode("utf-8", "surrogatepass"), b.encode("utf-8", "surrogatepass"))
+
+
 @dataclass
 class Session:
     sid: str
     created_at: float
     expires_at: float
     who: str = ""
+    origin: str = ""
+
+    @property
+    def credentialed(self) -> bool:
+        """Whether the server checked a credential when it opened this session."""
+        return self.origin in CREDENTIALED
 
 
 class Sessions:
@@ -37,20 +53,20 @@ class Sessions:
     def __init__(self, *, ttl_s: float = TTL_S) -> None:
         self.ttl_s = ttl_s
         self._sessions: dict[str, Session] = {}
-        self._tickets: dict[str, float] = {}
+        self._tickets: dict[str, tuple[float, str]] = {}
         self._lock = threading.Lock()
 
     def _reap(self) -> None:
         now = time.time()
         for sid in [s for s, v in self._sessions.items() if v.expires_at <= now]:
             self._sessions.pop(sid, None)
-        for t in [t for t, exp in self._tickets.items() if exp <= now]:
+        for t in [t for t, (exp, _) in self._tickets.items() if exp <= now]:
             self._tickets.pop(t, None)
 
-    def open(self, who: str = "") -> Session:
+    def open(self, who: str = "", origin: str = "") -> Session:
         now = time.time()
         session = Session(sid=secrets.token_urlsafe(32), created_at=now,
-                          expires_at=now + self.ttl_s, who=who)
+                          expires_at=now + self.ttl_s, who=who, origin=origin)
         with self._lock:
             self._reap()
             self._sessions[session.sid] = session
@@ -67,20 +83,25 @@ class Sessions:
         with self._lock:
             return self._sessions.pop(sid, None) is not None
 
-    def mint_ticket(self) -> tuple[str, float]:
-        """A one-shot credential for handing a browser a session without typing."""
+    def mint_ticket(self, kind: str = "session") -> tuple[str, float]:
+        """A one-shot credential for handing a browser a session without typing; ``kind``
+        says what vouched for it."""
         ticket = secrets.token_urlsafe(24)
         expires = time.time() + TICKET_TTL_S
         with self._lock:
             self._reap()
-            self._tickets[ticket] = expires
+            if len(self._tickets) >= MAX_TICKETS:
+                raise ValueError("too many launch tickets are waiting; use one or wait a minute")
+            self._tickets[ticket] = (expires, kind)
         return ticket, expires
 
-    def spend_ticket(self, ticket: str) -> bool:
+    def spend_ticket(self, ticket: str) -> str:
+        """The kind of ``ticket`` if it was live, else an empty string; it is gone after this call."""
         with self._lock:
             self._reap()
-            expires = self._tickets.pop(ticket, None)
-        return bool(expires and expires > time.time())
+            held = next((t for t in self._tickets if same(t, ticket)), None)
+            expires, kind = self._tickets.pop(held, (0.0, "")) if held is not None else (0.0, "")
+        return kind if expires > time.time() else ""
 
     def cookie_header(self, session: Session, *, secure: bool = False) -> str:
         parts = [f"{COOKIE}={session.sid}", "HttpOnly", "SameSite=Strict", "Path=/ui",

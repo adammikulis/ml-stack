@@ -47,13 +47,14 @@ from ml_stack.fleet.sweeps import (
     wait,
 )
 from ml_stack.http import Server
+from tests.cluster_support import any_command
 
 G = 2**30
 COMMIT = "ab12cd3"
 
 
 # -- a bench that is a script --------------------------------------------------------
-def scripted_launch(*, seconds: float = 0.4, says: str = "kept as bench:tried:20260902T101010",
+def scripted_launch(*, seconds: float = 1.5, says: str = "kept as bench:tried:20260902T101010",
                     fails: bool = False):
     """A `BenchHost.launch`: starts a child in its own session that writes ``says`` to a
     log under ``home/logs`` after ``seconds`` -- or ``error: ...`` and exit 1 -- and
@@ -113,7 +114,8 @@ def _box(tmp_path: Path, name: str, *, room: int, launch=None, busy: bool = Fals
         return {"cpus": 8, **host.report()}
 
     httpd = Server(("127.0.0.1", 0),
-                                make_handler(Daemon(runner, files, token, name, report, bench=host)))
+                                make_handler(Daemon(runner, files, token, name, report, bench=host,
+                                         command=any_command)))
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     peer = Peer(f"http://127.0.0.1:{httpd.server_address[1]}", token)
     box = Box(name=name, peer=peer, host=host, runner=runner, home=home, httpd=httpd)
@@ -477,36 +479,6 @@ def _wheel(where: Path, name: str, version: str, extras: tuple[str, ...],
     return made
 
 
-def _slow_index(wheel: Path, *, delay_s: float):
-    """A package index on loopback that serves ``wheel`` after ``delay_s``: (url, server)."""
-    from http.server import BaseHTTPRequestHandler
-
-    class Index(BaseHTTPRequestHandler):
-        def do_GET(self):
-            if self.path.rstrip("/").endswith("/simple/ml-stack"):
-                body = f'<a href="/files/{wheel.name}">{wheel.name}</a>'.encode()
-                kind = "text/html"
-            elif self.path == f"/files/{wheel.name}":
-                time.sleep(delay_s)
-                body, kind = wheel.read_bytes(), "application/octet-stream"
-            else:
-                self.send_response(404)
-                self.end_headers()
-                return
-            self.send_response(200)
-            self.send_header("Content-Type", kind)
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-
-        def log_message(self, *a):
-            pass
-
-    server = Server(("127.0.0.1", 0), Index)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    return f"http://127.0.0.1:{server.server_address[1]}/simple", server
-
-
 @pytest.mark.slow
 def test_a_frozen_peer_installs_the_bench_after_accepting_the_job(boxes, tmp_path, monkeypatch):
     """The install runs after ``POST /bench`` has answered, so an install slower than the
@@ -517,10 +489,18 @@ def test_a_frozen_peer_installs_the_bench_after_accepting_the_job(boxes, tmp_pat
     environment = Environment(tmp_path / "managed")
     environment.create()
     # what `_measures` imports: the bench's store reader, and the store itself
-    stand_in = _wheel(tmp_path, "ml-stack", "0.0.1", ("graph", "store", "serve", "hub"),
-                      ("ml_stack/bench/__init__.py", "ml_stack/bench/peer_runs.py", "ladybug.py"))
-    index, server = _slow_index(stand_in, delay_s=4.0)
-    monkeypatch.setenv("PIP_INDEX_URL", index)
+    bundled = tmp_path / "bundle" / "wheels"
+    bundled.mkdir(parents=True)
+    _wheel(bundled, "ml-stack", "0.0.1", ("graph", "store", "serve", "hub"),
+           ("ml_stack/bench/__init__.py", "ml_stack/bench/peer_runs.py", "ladybug.py"))
+    real_pip = Environment.pip
+
+    def slow_pip(self, args, **kw):
+        time.sleep(4.0)
+        return real_pip(self, args, **kw)
+
+    monkeypatch.setattr(Environment, "pip", slow_pip)
+    monkeypatch.delenv("PYTHONPATH", raising=False)  # the managed interpreter must not import this checkout
     monkeypatch.setenv("PIP_NO_CACHE_DIR", "1")
     monkeypatch.setenv("PIP_DISABLE_PIP_VERSION_CHECK", "1")
     monkeypatch.setattr(sys, "frozen", True, raising=False)
@@ -528,13 +508,10 @@ def test_a_frozen_peer_installs_the_bench_after_accepting_the_job(boxes, tmp_pat
     roomy.runner.environment = environment
     impatient = Peer(roomy.peer.base_url, roomy.peer.token, timeout=2.0)
     said: list[str] = []
-    try:
-        began = time.monotonic()
-        (handle,) = dispatch({impatient: _job("big.gguf")}, log=said.append)
-        assert handle.state == "preparing" and time.monotonic() - began < 2.0
-        (done,) = wait([handle], poll_s=0.2, timeout_s=120, log=said.append)
-    finally:
-        server.shutdown()
+    began = time.monotonic()
+    (handle,) = dispatch({impatient: _job("big.gguf")}, log=said.append)
+    assert handle.state == "preparing" and time.monotonic() - began < 2.0
+    (done,) = wait([handle], poll_s=0.2, timeout_s=120, log=said.append)
     assert done.state == "done", "\n".join(said)
     assert time.monotonic() - began > 4.0, "the install was slower than the peer timeout"
     assert roomy.host.launch.pythons == [environment.python]
@@ -1035,12 +1012,12 @@ _FLEET_LLAMA_META = {
 
 def _free_port(kind: int = socket.SOCK_STREAM) -> int:
     with socket.socket(socket.AF_INET, kind) as s:
-        s.bind(("127.0.0.1" if kind == socket.SOCK_STREAM else "", 0))
+        s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
 
 
 def _boot_daemon(tmp_path: Path, name: str, *, keyfile: Path, disco_port: int):
-    """A real ``ml-stack-fleet`` daemon in a subprocess, once it answers /health: (proc,
+    """A real ``ml-stack-cluster`` daemon in a subprocess, once it answers /health: (proc,
     log, open log handle)."""
     from ml_stack.fleet.discovery import derive_token, load_cluster_key
 
@@ -1083,7 +1060,7 @@ def _own_graph(where: Path) -> list[str]:
 
 @pytest.mark.slow
 def test_sweep_fleet_discovers_a_real_daemon_and_measures_on_it_for_real(tmp_path, monkeypatch):
-    """Nothing here is mocked: a real ``ml-stack-fleet`` daemon booted as a subprocess, found
+    """Nothing here is mocked: a real ``ml-stack-cluster`` daemon booted as a subprocess, found
     by real UDP discovery, given a real HTTP job that runs the real ``ml-stack-bench`` over a
     graph that is not the shipped community, on a llama-server-shaped process instead of a
     GPU; the run it keeps comes home. The graph and questions are gone from the
@@ -1100,7 +1077,7 @@ def test_sweep_fleet_discovers_a_real_daemon_and_measures_on_it_for_real(tmp_pat
     from ml_stack.testing.fakes import fake_llama_binary
 
     keyfile = tmp_path / "cluster.key"
-    create_cluster_key(keyfile)
+    create_cluster_key(keyfile, group="ml-stack")
     disco_port = _free_port(socket.SOCK_DGRAM)
     booted = [_boot_daemon(tmp_path, name, keyfile=keyfile, disco_port=disco_port)
               for name in ("quill", "lantern")]
@@ -1144,3 +1121,56 @@ def test_sweep_fleet_discovers_a_real_daemon_and_measures_on_it_for_real(tmp_pat
             except subprocess.TimeoutExpired:
                 proc.kill()
             fh.close()
+
+
+def _one_machine(boxes, tmp_path, monkeypatch, *, models):
+    """A dispatcher whose own daemon is the only peer and shares its bench home."""
+    import ml_stack.bench as bench
+    import ml_stack.fleet.sweeps as sweeps_module
+    from ml_stack.bench import ops
+
+    roomy, _ = boxes
+    monkeypatch.setattr(ops, "_commit", lambda root=None: COMMIT)
+    _discovery_stub(monkeypatch, {"roomy": roomy.peer})
+    monkeypatch.setattr(bench, "home_dir", lambda: roomy.home)
+    real_wait = sweeps_module.wait
+    monkeypatch.setattr(sweeps_module, "wait",
+                        lambda handles: real_wait(handles, poll_s=0.1, timeout_s=20))
+    kept = tmp_path / "home.ladybug"
+    line = ["sweep", "--fleet", "--plain-only", "--kept", str(kept), "--no-selfcheck",
+            "--no-prefetch"]
+    for m in models:
+        line += ["--serve", m]
+    return roomy, kept, line
+
+
+def test_sweep_fleet_places_a_job_on_the_dispatchers_own_daemon(boxes, tmp_path, monkeypatch,
+                                                               capsys):
+    from ml_stack.bench import run, runs
+
+    roomy, kept, line = _one_machine(boxes, tmp_path, monkeypatch, models=["big.gguf"])
+    _kept(roomy.store, "big-plain", _later(30))
+
+    code = run.main(line)
+
+    out = capsys.readouterr()
+    assert code == 0, out.out + out.err
+    assert "big.gguf -> roomy" in out.out and "unplaced" not in out.out
+    assert [r["label"] for r in runs(kept)] == ["big-plain"]
+
+
+def test_sweep_fleet_exits_non_zero_when_nothing_is_placed(boxes, tmp_path, monkeypatch,
+                                                         capsys):
+    from ml_stack.bench import run
+
+    roomy, _, line = _one_machine(boxes, tmp_path, monkeypatch, models=["huge.gguf"])
+    monkeypatch.setattr("ml_stack.fleet.sweeps.estimate", lambda *a, **k: 500 * G)
+    _kept(roomy.store, "old-plain", _later(30))
+
+    code = run.main(line)
+
+    out = capsys.readouterr()
+    assert code == 1
+    assert "huge.gguf -> unplaced" in out.out
+    assert "error: not measured: huge.gguf" in out.err
+    assert "old-plain" not in out.out, "no table of runs this command did not make"

@@ -1,12 +1,11 @@
-"""``ml-stack-do`` -- a task in words, done by a served model with the commands as tools.
+"""The tools `ml-stack-chat` offers: every command as a tool, the lookups, and the person.
 
 The tools are `ml_stack.mcp`'s (every command, long ones detached with a log and a pid),
 plus the bench subcommands that follow the CLI, the jobs a detached command records, two
-lookups (the GGUFs on this machine, the models Ollama holds), and three of the loop's own:
-``ask_user`` puts one question to the person and waits, ``plan`` prints the steps and asks
-"go?", ``done`` ends the loop. The model is asked with the tools offered, thinking off,
-and a high ceiling; each tool's description carries worked examples, which is what
-measured as making a small model call tools right.
+lookups (the GGUFs on this machine, the models Ollama holds), and three of the loop's own
+on `Person`: ``ask_user`` puts one question to the person and waits, ``plan`` prints the
+steps and asks "go?", ``done`` ends a task. Each tool's description carries worked examples,
+which is what measured as making a small model call tools right.
 """
 
 from __future__ import annotations
@@ -17,66 +16,29 @@ import inspect
 import json
 import os
 import re
+import select
 import sys
 import textwrap
-import time
-from collections.abc import Callable, Iterable, Sequence
-from dataclasses import dataclass, field
+from collections.abc import Callable, Sequence
 from functools import partial
 from pathlib import Path
 from typing import Any, TextIO
 
-from ml_stack import hub, mcp
+from ml_stack import activity, hub, mcp, person, requests
 from ml_stack.client import ollama
+from ml_stack.command_capture import captured
+from ml_stack.interventions import Call, Confirm
 from ml_stack.log import say
+from ml_stack.rules import Rules, describe
 
-__all__ = ["ROUNDS", "SYSTEM", "Outcome", "Person", "bench_cli", "client_for",
-           "command_tools", "main", "models_on_disk", "ollama_models", "own_tools", "run",
-           "system_for"]
+__all__ = ["Person", "bench_cli", "client_for", "command_tools", "models_on_disk",
+           "ollama_models", "own_tools"]
 
-ROUNDS = 40
-"""Tool-calling turns one task may spend before the loop ends with the transcript."""
+HOUR_S = 3600.0
 N_PREDICT = 16384
-CUT = 6000
-"""Characters of one tool result the model is shown."""
+NONE: list[str] = []
+"""The default of a list argument the tools only read."""
 OLLAMA_URL = os.environ.get("OLLAMA_HOST") or "http://127.0.0.1:11434"
-
-SYSTEM = (
-    "You are operating ml-stack for a person at a terminal: you serve models, measure "
-    "them, compare and animate the results, and read what this machine holds, all through "
-    "the tools you have been given. You cannot run anything except by calling a tool.\n\n"
-    "Ask before assuming. When the task leaves a choice open -- which model or which "
-    "file, how many questions, a sample or the full set, with or without a draft head, "
-    "where to write -- call ask_user rather than guessing, one question per call, and "
-    "wait for the answer before asking the next. Look things up first so the question "
-    "names what was found: a task that names a model is answered with models_on_disk "
-    "and, when it names Ollama or two backends, ollama_models too, and the person is "
-    "asked to confirm the exact files before anything starts. Do not start a measurement "
-    "the person has not confirmed.\n\n"
-    "Then call plan with the steps in order; it asks the person \"go?\". Only when the "
-    "person passed --yes is that skipped, and even then a task naming more than one "
-    "backend still confirms the models found. Then act: call the tools in the order "
-    "planned. A long command detaches and returns a log and a pid; call jobs_wait to "
-    "wait for it rather than calling status again and again.\n\n"
-    "Last, call done with what was measured and where it is -- the labels, the numbers if "
-    "any came back, the files written. Say plainly when something failed and what the "
-    "error said. Never claim a result a tool did not return."
-)
-
-YES = ("The person passed --yes: plan prints the steps and does not ask go. Still ask what "
-       "the task leaves open, and still confirm the models found when more than one backend "
-       "is named.")
-
-
-def system_for(yes: bool = False) -> str:
-    """The system prompt, with what the person passed on the command line."""
-    return SYSTEM + ("\n\n" + YES if yes else "")
-
-
-NUDGE = ("You replied in words and called nothing. If the task is finished, call done with "
-         "a summary of what was measured and where it is; if you need something from the "
-         "person, call ask_user; otherwise call the next tool.")
-
 
 # -- worked examples ---------------------------------------------------------------------
 def worked(*pairs: tuple[str, str]) -> str:
@@ -136,8 +98,6 @@ EXAMPLES: dict[str, tuple[tuple[str, str], ...]] = {
                    ("what did the last three runs score?", "bench_show(last=3)")),
     "fleet_peers": (("who else is on the network?", "fleet_peers()"),
                     ("is the studio serving anything?", "fleet_peers(timeout_s=4)")),
-    "fleet_join": (("make this machine a peer", 'fleet_join(passphrase="...")'),
-                   ("join at logon too", 'fleet_join(passphrase="...", persist=True)')),
     "world_make": (("invent a small company", 'world_make(kind="company", size="small")'),
                    ("a medium university, seed 3",
                     'world_make(kind="university", size="medium", seed=3)')),
@@ -209,11 +169,15 @@ EXAMPLES: dict[str, tuple[tuple[str, str], ...]] = {
               'plan(steps=["bench_run sweep flash-next with its draft head, a sample of 10, '
               'kept as Qwen3.8-Flash--plain", "jobs_wait bench", "bench_show"])'),
              (ACCEPTANCE,
-              'plan(steps=["bench_run sweep with the head -> Qwen3.8-Flash--plain", '
-              '"jobs_wait bench", "bench_run sweep without the head, --label-suffix -nodraft '
-              '-> Qwen3.8-Flash--nodraft-plain", "jobs_wait bench", "bench_run run '
-              'Qwen3.8-Flash--ollama-plain --base-url http://127.0.0.1:11434", "jobs_wait '
-              'bench", "bench_compare --export compare.json", "bench_animate compare.json"])')),
+              'plan(steps=[\'bench_run ["sweep", "--serve", "Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf", '
+              '"--serve-draft", "auto", "--plain-only", "--sample", "10"]\', "jobs_wait bench", '
+              '\'bench_run ["sweep", "--serve", "Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf", '
+              '"--serve-draft", "", "--label-suffix", "-nodraft", "--plain-only", "--sample", '
+              '"10"]\', "jobs_wait bench", \'bench_run ["run", "Qwen3.8-Flash--ollama-plain", '
+              '"--base-url", "http://127.0.0.1:11434", "--sample", "10"]\', "jobs_wait bench", '
+              '\'bench_compare ["Qwen3.8-Flash--plain", "Qwen3.8-Flash--nodraft-plain", '
+              '"Qwen3.8-Flash--ollama-plain", "--export", "compare.json"]\', '
+              '\'bench_animate ["compare.json", "--out", "compare.mp4"]\'])')),
     "done": (("run benchmarks with qwen3.8-flash-next",
               'done(summary="Measured 10 questions as Qwen3.8-Flash--plain: 83% F1 at 44 s a '
               'question; the runs are under the bench home, `bench_show` reads them back.")'),
@@ -264,11 +228,11 @@ def bench_cli(sub: str, args: Sequence[str], detach: bool) -> dict[str, Any]:
         return {"log": str(log), "pid": record.get("pid"), "argv": [sub, *args]}
     from ml_stack.bench.run import _main
 
-    return mcp._captured(lambda: _main([sub, *list(args)]))
+    return captured(lambda: _main([sub, *list(args)]))
 
 
 def _bench_tool(sub: str, detach: bool) -> mcp.Tool:
-    def fn(args: list[str] = []) -> dict[str, Any]:
+    def fn(args: list[str] = NONE) -> dict[str, Any]:
         return bench_cli(sub, list(args), detach)
 
     fn.__name__ = f"bench_{sub}"
@@ -368,6 +332,11 @@ def models_on_disk(words: str = "", files: Sequence[Path] | None = None) -> list
     return out
 
 
+def on_disk_ids() -> list[str]:
+    """The names and paths of the weights on this machine."""
+    return [str(row[key]) for row in models_on_disk() for key in ("model", "path")]
+
+
 def ollama_models(words: str = "",
                   fetch: Callable[..., dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     """The models Ollama holds whose name has every word of ``words``, each with its
@@ -438,11 +407,15 @@ def command_tools(registry: Sequence[mcp.Tool] | None = None, *,
 class Person:
     """The three tools that reach the person at the terminal, and what they said."""
 
-    def __init__(self, stdin: TextIO, stdout: TextIO, *, yes: bool = False) -> None:
-        self.stdin, self.stdout, self.yes = stdin, stdout, yes
+    def __init__(self, stdin: TextIO, stdout: TextIO, *, rules: Rules | None = None) -> None:
+        self.stdin, self.stdout, self.rules = stdin, stdout, rules
+        self.asked = 0
+        self.answer = ""
         self.left = False
         self.finished = False
         self.summary = ""
+        self.settled: requests.Outcome | None = None
+        self.origin = requests.Origin("ml-stack-chat")
 
     def say(self, text: str = "") -> None:
         self.stdout.write(text + "\n")
@@ -458,7 +431,7 @@ class Person:
             return None
         return line.strip()
 
-    def ask_user(self, question: str, choices: list[str] = []) -> dict[str, Any]:
+    def ask_user(self, question: str, choices: list[str] = NONE) -> dict[str, Any]:
         """Put one question to the person and wait for one line; numbered ``choices`` are
         answered by number or in words. Exactly one question per call."""
         self.say(f"\n? {question}")
@@ -472,19 +445,164 @@ class Person:
         return {"answer": got}
 
     def plan(self, steps: list[str]) -> dict[str, Any]:
-        """Print the steps in order and ask the person \"go?\" once; with --yes the plan is
-        printed and taken as agreed."""
+        """Print the steps in order and ask the person \"go?\" once; each step names a tool and
+        the arguments it will get, and the go covers those values."""
         self.say("\nplan:")
         for n, step in enumerate(steps or [], start=1):
             self.say(f"  {n}. {step}")
-        if self.yes:
-            return {"go": True, "said": "--yes: the plan is agreed, act on it"}
         got = self._read("go? [y/N] ")
         if got is None:
             return {"go": False, "said": "input ended: the person has left; stop here"}
         if got.lower() in ("y", "yes", "go", "ok"):
             return {"go": True, "said": "go"}
         return {"go": False, "said": f"The person said: {got!r}. Change the plan or ask."}
+
+    def _terminal(self) -> requests.Context:
+        """Where this person's answers are made: the process's own terminal when the streams are
+        the process's, else the streams the caller handed in."""
+        if self.stdin is sys.stdin:
+            return requests.Context()
+        return requests.Context(terminal=(True, True), env={})
+
+    def _ready(self) -> bool:
+        try:
+            return bool(select.select([self.stdin], [], [], 0.3)[0]) if self.stdin.isatty() else True
+        except (OSError, ValueError, AttributeError):
+            return True
+
+    def _read_for(self, prompt: str, handle: requests.Handle) -> str | None:
+        """One line from the person, or None when input ended or the request was answered
+        somewhere else first (then ``self.settled`` says how it ended)."""
+        self.stdout.write(prompt)
+        self.stdout.flush()
+        self.settled = None
+        while not self._ready():
+            got = handle.outcome()
+            if got.state != "pending":
+                self.settled = got
+                self.say(f"\n(answered in the {got.via or 'another place'}: {got.choice or got.state})")
+                return None
+        line = self.stdin.readline()
+        if line == "":
+            self.left = True
+            self.say("\n(input ended; the person has left)")
+            return None
+        return line.strip()
+
+    def _answered(self, handle: requests.Handle, pick: str) -> requests.Outcome:
+        """Record the person's ``pick`` at this terminal; when another answer got there first, or
+        the person cannot answer here, how the request ended."""
+        try:
+            requests.answer(handle.id, pick, handle.fingerprint, "terminal", self._terminal())
+        except requests.Refused as exc:
+            self.say(f"  ({exc})")
+        except person.HumanRequired as exc:
+            self.say(f"  ({exc}; not allowed)")
+            handle.withdraw()
+        except requests.Unavailable as exc:
+            self.say(f"  ({exc}; not allowed)")
+        return handle.outcome()
+
+    def _raise(self, kind: str, subject: str, reason: str, choices: Sequence[str]) -> requests.Handle:
+        return requests.raise_request(requests.Ask(kind, subject, reason, tuple(choices), self.origin,
+                                                   ttl=HOUR_S))
+
+    def choose(self, question: str, options: Sequence[str]) -> int | None:
+        """Show ``question`` with numbered ``options`` and return the index of the one the person
+        typed (a number, or yes for the first), else None. A request carries the question; the
+        person answers it here, in the UI or in the dialog."""
+        self.asked += 1
+        picks = ("approve", "approve-other")[:len(options)]
+        handle = self._raise("memory_remember", question, "The agent offered a fact to remember.",
+                             (*picks, "deny"))
+        self.say(f"\n! {question}")
+        menu = "  ".join(f"{n}) {each}" for n, each in enumerate(options, start=1))
+        got = self._read_for(f"{menu}  [Enter = no] > ", handle)
+        if self.settled is not None:
+            out = self.settled
+        elif got is None:
+            handle.withdraw()
+            return None
+        else:
+            pick = picks[int(got) - 1] if got.isdigit() and 1 <= int(got) <= len(picks) \
+                else picks[0] if got.lower() in ("y", "yes") and picks else "deny"
+            out = self._answered(handle, pick)
+        return picks.index(out.choice) if out.approved and out.choice in picks else None
+
+    def confirm(self, ask: Confirm, call: Call | None = None) -> bool:
+        """Put an intervention's question to the person: allow this time, always allow, never
+        allow, or (anything else) no. A rule is saved only on the person's own answer."""
+        name, role = (call.name if call else ""), str(ask.details.get("role") or "")
+        activity.record("approval.asked", subject=name, refs={"role": role})
+        self.answer = "no"
+        allowed = self._confirm(ask, call)
+        activity.record("approval.answered", actor="person", subject=name, outcome=self.answer,
+                        refs={"role": role})
+        return allowed
+
+    def _confirm(self, ask: Confirm, call: Call | None) -> bool:
+        what = f"{call.name}({_compact(call.arguments or {})}): " if call is not None else ""
+        self.asked += 1
+        can = self.rules is not None and call is not None
+        label = str((ask.details.get("classifier") or {}).get("label", ""))
+        hard = bool(ask.details.get("always_blocked")) and label in ("destructive", "unsure")
+        always = can and bool(ask.details.get("always_ok")) and not hard
+        picks = ["allow-once", *(["allow-always"] if always else []),
+                 *(["never"] if can else []), "deny"]
+        handle = self._raise("tool_call_destructive" if hard else "tool_call", what.rstrip(": ") or "a call",
+                             ask.question, picks)
+        self.say(f"\n! {what}{ask.question}")
+        if can and not always and ask.details.get("always_blocked"):
+            self.say(f"  (no 'always allow' here: {ask.details['always_blocked']})")
+        menu = "1) allow this time" + ("  2) always allow" if always else "") \
+            + ("  3) never allow" if can else "") + "  [Enter = no]"
+        got = self._read_for(f"allow it? {menu} > ", handle)
+        if self.settled is not None:
+            out = self.settled
+        elif got is None:
+            handle.withdraw()
+            return False
+        else:
+            got = got.lower()
+            pick = ("allow-once" if got in ("y", "yes", "1") else
+                    "never" if can and got in ("3", "never") else
+                    "allow-always" if always and got in ("2", "a", "always") else
+                    "deny")
+            out = self._answered(handle, pick)
+        return self._settle(out, call, ask)
+
+    def _settle(self, out: requests.Outcome, call: Call | None, ask: Confirm) -> bool:
+        """Act on how the request ended: run once, save and apply a rule, or refuse."""
+        if out.choice == "never" and call is not None and self.rules is not None:
+            self.answer = "never"
+            return self._save(call, "never", ask)
+        if not out.approved:
+            return False
+        if out.choice == "allow-always" and call is not None and self.rules is not None:
+            if out.via == "terminal":
+                self.answer = "always"
+                return self._save(call, "always", ask)
+            self.say("  (a rule is saved only from the terminal; allowed this time)")
+        self.answer = "allow_once"
+        return True
+
+    def _save(self, call: Call, verdict: str, ask: Confirm) -> bool:
+        """Say in words what the rule for ``call`` covers and save it (an always rule only
+        after a yes); true to go ahead with this call."""
+        role = str(ask.details.get("role") or "")
+        try:
+            rule = self.rules.make(call.name, call.arguments or {}, verdict, role)
+            self.say(f"  this rule: {describe(rule)}")
+            if verdict == "always" and (self._read("  save it? [y/N] > ") or "").lower() \
+                    not in ("y", "yes"):
+                self.say("  not saved; allowed this time")
+                return True
+            self.rules.add(call.name, call.arguments or {}, verdict, role)
+        except (ValueError, OSError) as exc:
+            self.say(f"  no rule saved: {exc}")
+            return verdict == "always"
+        self.say("  saved. /rules lists and edits the rules.")
+        return verdict == "always"
 
     def done(self, summary: str) -> dict[str, Any]:
         """End the task: ``summary`` is what was measured and where it is."""
@@ -498,138 +616,15 @@ class Person:
                                  ("done", self.done))]
 
 
-OWN = ("ask_user", "plan", "done")
-
-
-def own_tools(*, stdin: TextIO, stdout: TextIO,
-              yes: bool = False) -> list[tuple[dict[str, Any], Callable[..., Any]]]:
+def own_tools(*, stdin: TextIO, stdout: TextIO) -> list[tuple[dict[str, Any], Callable[..., Any]]]:
     """The loop's own three tools, bound to a person on ``stdin``/``stdout``."""
-    return Person(stdin, stdout, yes=yes).tools()
-
-
-# -- the loop ---------------------------------------------------------------------------
-@dataclass
-class Outcome:
-    done: bool = False
-    summary: str = ""
-    rounds: int = 0
-    seconds: float = 0.0
-    calls: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
-    messages: list[dict[str, Any]] = field(default_factory=list)
+    return Person(stdin, stdout).tools()
 
 
 def _compact(args: dict[str, Any], most: int = 160) -> str:
     text = ", ".join(f"{k}={json.dumps(v, ensure_ascii=False)}" for k, v in args.items())
     return text if len(text) <= most else text[: most - 3] + "..."
 
-
-def transcript(messages: Iterable[dict[str, Any]]) -> str:
-    """The conversation as lines a person reads: role, then what was said or called."""
-    lines: list[str] = []
-    for m in messages:
-        role = m.get("role", "")
-        if role == "system":
-            continue
-        calls = m.get("tool_calls") or []
-        if calls:
-            for call in calls:
-                fn = call.get("function") or {}
-                lines.append(f"{role}: -> {fn.get('name')}({fn.get('arguments', '')})")
-        text = _prose(m.get("content"))
-        if text:
-            name = f" {m['name']}" if role == "tool" and m.get("name") else ""
-            lines.append(f"{role}{name}: {text[:300]}")
-    return "\n".join(lines)
-
-
-def run(task: str, client: Any, *,
-        tools: Sequence[tuple[dict[str, Any], Callable[..., Any]]] | None = None,
-        stdin: TextIO | None = None, stdout: TextIO | None = None, yes: bool = False,
-        rounds: int = ROUNDS, messages: list[dict[str, Any]] | None = None) -> Outcome:
-    """One task through the loop: the model is offered every tool, each call is run and
-    answered, ``ask_user`` and ``plan`` reach the person, ``done`` ends it. ``messages``
-    carries a conversation across tasks; a new one is started when none is given."""
-    person = Person(stdin or sys.stdin, stdout or sys.stdout, yes=yes)
-    offered = [*(command_tools() if tools is None else tools), *person.tools()]
-    schemas = [schema for schema, _ in offered]
-    run_by = {schema["function"]["name"]: fn for schema, fn in offered}
-    if messages is None:
-        messages = [{"role": "system", "content": system_for(yes)}]
-    messages.append({"role": "user", "content": task})
-    out = Outcome(messages=messages)
-    began = time.monotonic()
-    nudged = False
-    exhausted = True
-    for _ in range(rounds):
-        reply = client.chat(messages, think=False, tools=schemas)
-        calls = list(getattr(reply, "tool_calls", None) or [])
-        content = getattr(reply, "content", "") or ""
-        if not calls:
-            if content.strip():
-                person.say(content.strip())
-            messages.append({"role": "assistant", "content": content})
-            if nudged:
-                exhausted = False
-                break
-            nudged = True
-            messages.append({"role": "user", "content": NUDGE})
-            continue
-        out.rounds += 1
-        messages.append({"role": "assistant", "content": content, "tool_calls": calls})
-        for call in calls:
-            fn = call.get("function") or {}
-            name = str(fn.get("name") or "")
-            try:
-                args = json.loads(fn.get("arguments") or "{}")
-            except ValueError:
-                args = {}
-            if not isinstance(args, dict):
-                args = {}
-            if name not in OWN:
-                person.say(f"-> {name}({_compact(args)})")
-            do = run_by.get(name)
-            if do is None:
-                result: Any = {"error": f"no such tool: {name}"}
-            else:
-                try:
-                    result = do(**args)
-                except Exception as exc:  # noqa: BLE001 - the error is the answer
-                    result = {"error": f"{type(exc).__name__}: {exc}"}
-            out.calls.append((name, args))
-            text = json.dumps(mcp._plain(result), ensure_ascii=False, default=str)
-            if name not in OWN:
-                person.say("   " + (text if len(text) <= 300 else text[:297] + "..."))
-            messages.append({"role": "tool", "tool_call_id": call.get("id") or name,
-                             "name": name, "content": text[:CUT]})
-            if person.finished or person.left:
-                break
-        if person.finished or person.left:
-            exhausted = False
-            break
-    out.seconds = round(time.monotonic() - began, 2)
-    out.done, out.summary = person.finished, person.summary
-    if exhausted:
-        person.say(f"\nran out of {rounds} rounds without done; the transcript:")
-        person.say(transcript(messages))
-    return out
-
-
-# -- the command ------------------------------------------------------------------------
-def best_on_disk() -> tuple[Any, str] | None:
-    """The model that measured best among those whose weights are on this machine: the
-    profile with the highest F1 over at least twenty questions whose file `hub.located`
-    can put a path to. What `ml-stack-do` serves when nobody named one. None when no
-    measured model is here."""
-    from pathlib import Path
-
-    from ml_stack.serve.profile import profiles
-
-    ranked = sorted((p for p in profiles() if p.questions >= 20), key=lambda p: -p.right)
-    for record in ranked:
-        path = str(hub.located(record.model, loose=True) or record.model)
-        if path != record.model and Path(path).exists():
-            return record, path
-    return None
 
 
 def client_for(args: argparse.Namespace) -> Any:
@@ -640,8 +635,6 @@ def client_for(args: argparse.Namespace) -> Any:
 
         return Client(args.url, request=Request(n_predict=args.n_predict),
                       transport=Transport(timeout=args.timeout))
-    from pathlib import Path
-
     from ml_stack.client import Client, Request, Transport
     from ml_stack.serve.leases import already_up
     from ml_stack.serve.profile import profile_for, said
@@ -649,7 +642,7 @@ def client_for(args: argparse.Namespace) -> Any:
     from ml_stack.serve.serving import Config, Serving, drafted, slot
 
     found = str(hub.located(args.model, loose=True) or args.model)
-    note(found, by="do")
+    note(found, by="chat")
     up = already_up(found, args.port)
     if up is not None:
         # the weights are up already, whatever the settings: use them rather than reload them
@@ -671,37 +664,6 @@ def client_for(args: argparse.Namespace) -> Any:
     return slot(config, index=0)
 
 
-def parser() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(
-        prog="ml-stack-do", allow_abbrev=False,
-        description="A task in words, done by a served model with the ml-stack commands as "
-                    "tools: it asks what the task leaves open, one question at a time, "
-                    "plans, asks go, acts, and reports what was measured and where it is. "
-                    "With no TASK, tasks are read from stdin until EOF.")
-    ap.add_argument("task", nargs="?", default="", metavar="TASK")
-    which = ap.add_mutually_exclusive_group()
-    which.add_argument("--model", default="", help="a model to lease in the settings it scored best with")
-    which.add_argument("--url", default="", help="a server already up, e.g. "
-                                                 "http://127.0.0.1:8080")
-    ap.add_argument("--port", type=int, default=8080, help="where --model is served")
-    ap.add_argument("--draft", default="auto", metavar="HEAD",
-                    help="the draft head that guesses tokens ahead for the model to check "
-                         "in one pass: 'auto' takes the smallest one on this machine, "
-                         "'none' serves without one, or name a head shipped with the "
-                         "model (default: %(default)s)")
-    ap.add_argument("--yes", action="store_true",
-                    help="the plan runs without asking go; the questions still come")
-    ap.add_argument("--dry-run", action="store_true",
-                    help="print the system prompt and the tools as the model sees them")
-    ap.add_argument("--rounds", type=int, default=ROUNDS,
-                    help="tool-calling turns a task may spend (default: %(default)s)")
-    ap.add_argument("--n-predict", type=int, default=N_PREDICT,
-                    help="the ceiling on one reply (default: %(default)s)")
-    ap.add_argument("--timeout", type=float, default=900.0,
-                    help="seconds to wait for one reply (default: %(default)s)")
-    return ap
-
-
 def _print_offer(tools: Sequence[tuple[dict[str, Any], Any]], out: TextIO) -> None:
     for schema, _ in tools:
         fn = schema["function"]
@@ -711,51 +673,3 @@ def _print_offer(tools: Sequence[tuple[dict[str, Any], Any]], out: TextIO) -> No
         out.write(f"{fn['name']}({shown})\n")
         out.write(textwrap.fill(fn["description"], width=96, initial_indent="    ",
                                 subsequent_indent="    ") + "\n")
-
-
-def main(argv: Sequence[str] | None = None, *, stdin: TextIO | None = None,
-         stdout: TextIO | None = None) -> int:
-    args = parser().parse_args(list(sys.argv[1:] if argv is None else argv))
-    stdin, stdout = stdin or sys.stdin, stdout or sys.stdout
-    tools = command_tools()
-    if args.dry_run:
-        stdout.write(system_for(args.yes) + "\n\n")
-        _print_offer([*tools, *own_tools(stdin=stdin, stdout=stdout, yes=args.yes)], stdout)
-        stdout.write(f"\n{len(tools) + len(OWN)} tools offered\n")
-        return 0
-    if not args.model and not args.url:
-        # a task without a model gets the best one measured that is on this disk, said out
-        # loud, so `ml-stack-do "task"` alone serves what the ranking chose (Adam, 2026-09-03:
-        # "can I just run ml-stack-do and it handles the rest?")
-        best = best_on_disk()
-        if best is None:
-            parser().error("one of --model or --url is needed to reach a model: no measured "
-                           "model is on this disk (ml-stack-serve profile lists them)")
-        record, args.model = best
-        stdout.write(f"no --model given: {record.model}, the best measured on this machine "
-                     f"({record.right:.0%} F1 over {record.questions} questions)\n")
-    client = client_for(args)
-    messages: list[dict[str, Any]] = [{"role": "system", "content": system_for(args.yes)}]
-    if args.task:
-        got = run(args.task, client, tools=tools, stdin=stdin, stdout=stdout, yes=args.yes,
-                  rounds=args.rounds, messages=messages)
-        return 0 if got.done else 1
-    code = 0
-    stdout.write("a task per line; EOF ends the session\n")
-    while True:
-        stdout.write("task> ")
-        stdout.flush()
-        line = stdin.readline()
-        if line == "":
-            break
-        if not line.strip():
-            continue
-        got = run(line.strip(), client, tools=tools, stdin=stdin, stdout=stdout,
-                  yes=args.yes, rounds=args.rounds, messages=messages)
-        if not got.done:
-            code = 1
-    return code
-
-
-if __name__ == "__main__":  # pragma: no cover - the entry point is `ml-stack-do`
-    raise SystemExit(main())

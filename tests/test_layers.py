@@ -1,6 +1,7 @@
 """Which package may import which.
 
-The layers are core, model, graph, machine, tools. A package may import a package in a
+The layers are core, model, graph, machine, tools, and dev (the red-team harness, which drives
+the rest). A package may import a package in a
 lower layer, and one in its own layer as long as the other does not import it back.
 ``KNOWN`` lists the edges that break that today; it may only shrink.
 """
@@ -17,17 +18,22 @@ REPO = Path(__file__).resolve().parents[1]
 ROOT = REPO / "src" / "ml_stack"
 
 LAYERS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("core", ("asking", "backend", "checks", "command", "contracts", "data", "entities",
-              "extraction", "files", "geo",
-              "home", "http", "installed", "jobs", "jsonl", "limits", "lock", "log",
-              "markup",
-              "media", "messages", "paths", "platform", "redact", "scrape", "records",
-              "telemetry", "ui", "units")),
-    ("model", ("client", "gguf", "hub", "spec", "speech", "vision")),
-    ("graph", ("graph", "ingest", "sources", "world")),
-    ("machine", ("doctor", "fleet", "serve", "setup")),
-    ("tools", ("bench", "claude", "cli", "do", "draft", "harness", "mcp", "surface",
-               "testing", "train", "walk", "web")),
+    ("core", ("activity", "agent_dependency", "agent_hooks", "asking", "authority", "backend", "briefing", "checks", "command", "command_capture", "contracts", "credentials", "data",
+              "entities", "extraction", "files", "files_windows", "gate", "geo",
+              "home", "hook_bootstrap", "hook_diagnostics", "hookcheck", "http", "http_cancel", "httpguard", "installed", "interventions", "jobs", "jsonl", "keystore", "keystore_guard", "limits",
+              "runtime", "runtime_launchers",
+              "lock", "log", "macauth", "sealing",
+              "markup", "sandbox",
+              "deciders", "desktop", "media", "messages", "net", "paths", "platform", "safenames", "redact", "scrape", "sentinel",
+              "records", "requests", "person", "private_path", "safetext", "serverkeys",
+              "subscribers", "taint", "tar_libraries", "telemetry", "tool_schema", "ui", "units", "windows_private", "worktreerules")),
+    ("model", ("client", "decide", "gguf", "hub", "spec", "speech", "vision")),
+    ("graph", ("board_names", "graph", "ingest", "sources", "world")),
+    ("machine", ("doctor", "fleet", "gym", "serve", "setup")),
+    ("tools", ("agent", "bench", "chat", "chatpolicy", "claude", "cli", "codex", "coding", "datasheet", "decide_cli",
+               "do", "draft", "guard", "harness", "harness_claims", "harnessid", "harnessing", "harnesshook", "harnesspolicy", "mcp", "memory", "reputation", "inbox", "roles", "rules",
+               "surface", "testing", "train", "walk", "web", "workspace", "pi", "runtime_board", "runtime_cli", "runtime_coalesce", "runtime_deploy", "runtime_host", "runtime_store", "runtime_trust")),
+    ("dev", ("redteam",)),
 )
 
 RANK = {package: height for height, (_, packages) in enumerate(LAYERS)
@@ -64,9 +70,11 @@ def _imports() -> dict[tuple[str, str], set[str]]:
     """Every ``ml_stack`` import in the tree, keyed by (importer, imported) package."""
     found: dict[tuple[str, str], set[str]] = {}
     for path in sorted(ROOT.rglob("*.py")):
+        if path == ROOT / "__init__.py":
+            continue
         source = _package_of_file(path)
         where = str(path.relative_to(REPO))
-        for node in ast.walk(ast.parse(path.read_text(), str(path))):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"), str(path))):
             named: list[str] = []
             if isinstance(node, ast.Import):
                 named = [alias.name for alias in node.names]
@@ -85,7 +93,7 @@ def _imports() -> dict[tuple[str, str], set[str]]:
 
 
 def _packages() -> set[str]:
-    return {_package_of_file(path) for path in ROOT.rglob("*.py")}
+    return {_package_of_file(path) for path in ROOT.rglob("*.py") if path != ROOT / "__init__.py"}
 
 
 def _violations(edges: dict[tuple[str, str], set[str]]) -> set[tuple[str, str]]:

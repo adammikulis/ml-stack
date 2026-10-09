@@ -1,0 +1,43 @@
+<style>
+data-view, training-view, tools-view, benchmarks-view, gym-view { display: contents; }
+.workspace { width:100%; max-width:1500px; margin:0 auto; padding:24px; }
+.workspace h1 { font-size:28px; margin:0 0 8px; }
+.workspace .intro { color:var(--muted,#a1a1aa); margin:0 0 24px; }
+.workspace-grid { display:grid; grid-template-columns:minmax(240px,320px) minmax(0,1fr); gap:20px; }
+.workspace-card { background:var(--bg-raised,#191b22); border:1px solid var(--line,#343640); border-radius:14px; padding:20px; min-width:0; }
+.workspace-card h2 { margin:0 0 16px; font-size:18px; }
+.workspace label { display:block; font-size:13px; margin:14px 0 6px; }
+.workspace input,.workspace select,.workspace input[type=checkbox] { width:auto; accent-color:var(--accent); }
+.workspace textarea { width:100%; box-sizing:border-box; background:var(--bg,#101116); color:inherit; border:1px solid var(--line,#343640); border-radius:8px; padding:10px; }
+.workspace input[type=checkbox] { width:auto; accent-color:var(--accent); }
+.workspace textarea { min-height:130px; font-family:monospace; }
+.workspace-actions > button { width:auto; margin:0; padding:8px 12px; font-size:13px; }
+.workspace button { width:auto; margin:0; min-height:34px; padding:8px 12px; }
+.workspace-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:16px; align-items:center; }
+.workspace pre { white-space:pre-wrap; overflow-wrap:anywhere; max-height:420px; overflow:auto; background:var(--bg,#101116); padding:14px; border-radius:8px; }
+.workspace .status { min-height:24px; color:var(--muted,#a1a1aa); margin:12px 0; }
+.workspace table { width:100%; border-collapse:collapse; }
+.workspace td,.workspace th { text-align:left; padding:10px 6px; border-bottom:1px solid var(--line,#343640); }
+.workspace .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:16px; }
+.workspace .badge { display:inline-block; font-size:12px; padding:3px 8px; border:1px solid var(--line,#343640); border-radius:20px; margin:0 6px 6px 0; }
+@media(max-width:900px){.workspace-grid{grid-template-columns:1fr}.workspace{padding:16px}}
+</style>
+<script>
+(function(){
+ const M=window.fleetModel,E=M.el;
+ const W=window.workspaceModel={};
+ W.api=async(path,opts={})=>{const r=await M.api(path,opts);
+  if(!r.ok)throw Object.assign(Error(M.refused(r)?'Sign in to continue.':r.error||`Request failed (${r.status})`),
+    {status:r.status,personSetupRequired:r.person_setup_required===true});
+  return r;};
+ W.button=(text,fn)=>E('button',{type:'button',onclick:async(e)=>{try{await fn(e);}catch(error){const note=e.currentTarget.closest('.workspace')?.querySelector('.status');if(note)W.status(note,error);}}},text);
+ W.field=(host,label,tag='input',attrs={})=>{const id='field-'+Math.random().toString(36).slice(2);const n=E(tag,{id,...attrs});host.append(E('label',{for:id},label),n);return n;};
+ W.visible=(input,visible)=>{input.hidden=!visible;if(input.previousElementSibling?.tagName==='LABEL')input.previousElementSibling.hidden=!visible;};
+ W.json=(value)=>JSON.stringify(value,null,2);
+ W.post=(path,body)=>W.api(path,{method:'POST',body:JSON.stringify(body)});
+ W.route=(host,key,enter)=>{M.onRoute(name=>{host.hidden=name!==key;if(name===key)enter();});};
+ W.status=(node,error)=>{node.textContent=error.message||String(error);node.setAttribute('role','status');};
+ W.launch=async(command,args,name)=>W.post('/ui/workspace/jobs',{command,args,name});
+
+})();
+</script>

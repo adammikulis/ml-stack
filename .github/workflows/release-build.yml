@@ -1,0 +1,197 @@
+name: release build
+
+# The wheels, the SBOM and the three bundles, read-only. release.yml publishes what this
+# builds; release-dry-run.yml and release-please.yml build without publishing.
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: the release the bundles are named for; empty names them for the commit
+        required: false
+        type: string
+        default: ""
+    outputs:
+      wheels:
+        description: the result of the wheels job
+        value: ${{ jobs.report.outputs.wheels }}
+      bundle:
+        description: the result of the bundle job
+        value: ${{ jobs.report.outputs.bundle }}
+
+permissions:
+  contents: read
+
+jobs:
+  wheels:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.13"
+      - run: python -m pip install --upgrade pip build
+      - run: python packaging/build.py
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: wheels
+          path: dist/*.whl
+          retention-days: 7
+
+      # A CycloneDX SBOM (scripts/sbom.py, no network): the wheel's extras as installed in a clean venv, and the
+      # Rust crates of app/src-tauri/Cargo.lock. The publish job attaches it to the release.
+      - name: SBOM
+        run: |
+          python -m venv "$RUNNER_TEMP/sbom-env"
+          wheel=$(find dist -name 'ml_stack-*.whl' -print -quit)
+          "$RUNNER_TEMP/sbom-env/bin/pip" install "${wheel}[store,hub,web,plot,graph,serve]" packaging
+          "$RUNNER_TEMP/sbom-env/bin/python" scripts/sbom.py --out sbom.cdx.json
+          "$RUNNER_TEMP/sbom-env/bin/python" scripts/sbom.py --check sbom.cdx.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sbom
+          path: sbom.cdx.json
+          retention-days: 7
+
+  bundle:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            asset: ml-stack-macos-arm64
+          - os: ubuntu-latest
+            asset: ml-stack-linux-x86_64
+          - os: windows-latest
+            asset: ml-stack-windows-x86_64
+    runs-on: ${{ matrix.os }}
+    # The Linux job spent 17 minutes in apt on a slow mirror and another 4 fetching the browser's
+    # system packages; 25 minutes cancelled it before the first test.
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+      - name: what the window needs on Linux
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libappindicator3-dev \
+            librsvg2-dev patchelf
+      - run: python -m pip install --upgrade pip build
+      - run: python packaging/build.py --bundle
+
+      # The headless binary is the daemon and page the window runs as its sidecar.
+      - name: a browser to drive the page
+        run: |
+          python -m pip install playwright
+          python -m playwright install --with-deps chromium
+      - name: it starts and serves the interface
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          BIN=$(find dist/bundle -maxdepth 3 -name 'ml-stack-headless*' -type f | head -1)
+          echo "starting $BIN"
+          "$BIN" --port 8899 --no-browser &
+          for _ in $(seq 1 40); do
+            if curl -sf http://127.0.0.1:8899/health >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:8899/health
+      - name: a person sets it up and opens every screen
+        if: runner.os != 'Windows'
+        run: >-
+          python packaging/smoke.py http://127.0.0.1:8899
+          --passphrase "correct horse battery staple" --group ci
+          --screenshot dist/smoke.png
+      # The Windows application runs its daemon inside an Ubuntu WSL distribution (docs/windows-runtime.md)
+      # and a hosted runner has none, so there is no page to drive. What a runner can show is that the
+      # frozen launcher starts, reaches the WSL check and refuses in its own words.
+      - name: it starts and says what Windows needs
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          BIN=$(find dist/bundle -maxdepth 3 -name 'ml-stack-headless*' -type f | head -1)
+          echo "starting $BIN"
+          if "$BIN" --port 8899 --no-browser > "$RUNNER_TEMP/launch.txt" 2>&1; then
+            cat "$RUNNER_TEMP/launch.txt"; echo "the launcher started a daemon without WSL"; exit 1
+          fi
+          cat "$RUNNER_TEMP/launch.txt"
+          grep -qi "WSL" "$RUNNER_TEMP/launch.txt" \
+            || { echo "the launcher failed for a reason other than the missing WSL distribution"; exit 1; }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always() && runner.os != 'Windows'
+        with:
+          name: ${{ matrix.asset }}-smoke
+          path: dist/smoke.png
+          if-no-files-found: ignore
+          retention-days: 7
+
+      # The screens, not just the assets. ml_stack.serve is reached through a lazy
+      # import, so nothing static points at it and only a running bundle says whether
+      # PyInstaller carried it.
+      - name: the screens answer
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          U='X-ML-Stack-UI: 1'; J='Content-Type: application/json'
+          B=http://127.0.0.1:8899
+          # A page is signed in only by a one-use ticket from the daemon's own launch secret
+          # (what `ml-stack peers open` presents), never by headers a client writes.
+          SECRET=$(python -c "import json,pathlib; print(json.loads((pathlib.Path.home()/'.ml-stack'/'traind'/'launch'/'secret.json').read_text())['secret'])")
+          TICKET=$(curl -sf -H "$J" -H "$U" -H "X-ML-Stack-Launch: $SECRET" -X POST -d '{}' \
+            $B/ui/launch/ticket | python -c "import json,sys; print(json.load(sys.stdin)['ticket'])")
+          C=$(curl -s -D- -o /dev/null -H "$J" -H "$U" -X POST \
+            -d "{\"ticket\":\"$TICKET\"}" \
+            $B/ui/session | tr -d '\r' | awk 'tolower($1)=="set-cookie:"{print $2}' \
+            | cut -d';' -f1)
+          test -n "$C" || { echo "no session cookie"; exit 1; }
+          for p in /ui/chat /ui/models /ui/serving /ui/conversations /ui/uninstall; do
+            code=$(curl -s -o /tmp/body -w '%{http_code}' -H "$U" -H "Cookie: $C" "$B$p")
+            echo "$p -> $code $(head -c 120 /tmp/body)"
+            test "$code" = "200" || { echo "$p did not answer"; exit 1; }
+          done
+          curl -sf -o /tmp/serving -H "$U" -H "Cookie: $C" $B/ui/serving
+          grep -q '"can_serve": true' /tmp/serving \
+            || { echo "the bundle cannot run a model: ml_stack.serve is missing"; exit 1; }
+
+      # Python rather than zip(1): Windows runners have no zip in bash.
+      # The name carries the tag, or the commit for a build off a branch, so two
+      # downloads in one folder are two files and it is clear which is which. It
+      # stays a suffix: install.sh, install.ps1 and the updater all look for
+      # "ml-stack-<os>-<arch>" inside the name, including the copies already out there.
+      - name: package it
+        shell: bash
+        env:
+          TAG: ${{ inputs.tag || (startsWith(github.ref, 'refs/tags/') && github.ref_name) || '' }}
+        run: |
+          stamp="$TAG"
+          [ -n "$stamp" ] || stamp=$(git rev-parse --short HEAD)
+          python packaging/pack.py dist/bundle "dist/${{ matrix.asset }}-$stamp.zip"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ matrix.asset }}
+          path: dist/${{ matrix.asset }}-*.zip
+          retention-days: 7
+
+  report:
+    needs: [wheels, bundle]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      wheels: ${{ needs.wheels.result }}
+      bundle: ${{ needs.bundle.result }}
+    steps:
+      - run: echo "wheels ${{ needs.wheels.result }}, bundle ${{ needs.bundle.result }}"

@@ -13,14 +13,16 @@ raises before ``Popen`` when it fails.
 
 from __future__ import annotations
 
+import logging
 import re
 import struct
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from ml_stack import home
+from ml_stack.hub.modelfile import scan_gguf
 from ml_stack.units import human_bytes
 
 __all__ = ["Check", "Preflight", "PreflightFailed", "Report", "read_gguf_header",
@@ -63,52 +65,13 @@ class Report:
 
 # ---------------------------------------------------------------- a GGUF's own header
 
-_GGUF_MAGIC = b"GGUF"
-# The scalar value kinds the GGUF format defines, and the struct code that reads one.
-# 8 is a string and 9 is an array, handled separately below; the rest are fixed-width.
-_SCALAR_FMT = {0: "B", 1: "b", 2: "H", 3: "h", 4: "I", 5: "i", 6: "f", 7: "?",
-               10: "Q", 11: "q", 12: "d"}
-
-
 def read_gguf_header(path: Path | str) -> dict[str, object]:
     """Every key/value metadata pair in a GGUF file: strings, ints, floats, bools, arrays.
 
-    Reads the magic, the version, the tensor count, and then each of the key/value pairs
-    that follow -- and stops there. The tensor *list* that comes after names every tensor's
-    shape and file offset, and reading it costs nothing measurable for a small model and a
-    real pause for an 87G one; nothing a preflight needs is in it, so nothing here reads it.
-
-    A minimal reader rather than the ``gguf`` package's own, on purpose: that reader is
-    built to open a file for inference and walks the tensor table as part of doing so. This
-    one is built to answer one question cheaply before any inference is intended.
+    The tensor table after the pairs is not read. A header that claims more than the file
+    holds raises `NotAModelFile`, a `ValueError`.
     """
-    out: dict[str, object] = {}
-    with Path(path).expanduser().open("rb") as f:
-        if f.read(4) != _GGUF_MAGIC:
-            raise ValueError(f"{path}: not a GGUF file (no GGUF magic at the start)")
-        struct.unpack("<I", f.read(4))                       # version -- unused here
-        struct.unpack("<Q", f.read(8))                        # tensor count -- unread
-        (kv_count,) = struct.unpack("<Q", f.read(8))
-
-        def text() -> str:
-            (n,) = struct.unpack("<Q", f.read(8))
-            return f.read(n).decode("utf-8", "replace")
-
-        def value(kind: int) -> object:
-            if kind == 8:
-                return text()
-            if kind == 9:
-                (item_kind,) = struct.unpack("<I", f.read(4))
-                (count,) = struct.unpack("<Q", f.read(8))
-                return [value(item_kind) for _ in range(count)]
-            code = _SCALAR_FMT[kind]
-            return struct.unpack("<" + code, f.read(struct.calcsize(code)))[0]
-
-        for _ in range(kv_count):
-            name = text()
-            (kind,) = struct.unpack("<I", f.read(4))
-            out[name] = value(kind)
-    return out
+    return scan_gguf(path).values
 
 
 # ---------------------------------------------------------------- sharded models
@@ -295,8 +258,8 @@ def known_architectures(binary: str | Path) -> set[str]:
         from ml_stack.serve.build_platform import arches_from_source
 
         found |= arches_from_source(Path(source_dir()))
-    except Exception:  # noqa: BLE001 - no source checkout, or a table that moved
-        pass
+    except Exception as exc:  # noqa: BLE001 - no source checkout, or a table that moved
+        logging.getLogger(__name__).debug("Managed architecture table unavailable: %s", exc)
     found |= _arches(binary)
     return found
 
@@ -307,8 +270,6 @@ def source_dir() -> Path:
 
     return Path(src_dir())
 
-
-# ---------------------------------------------------------------- fit (weights + kv + runtime)
 
 # Bytes per cached element for the K/V cache types llama.cpp accepts on --cache-type-k/-v.
 # Block-quantised types carry a scale per 32 elements, so the average is not the nominal
@@ -364,6 +325,27 @@ def _recurrent_layers(key: Callable[[str], object], n_layer: int) -> list[bool]:
     return [(il + 1) % every != 0 for il in range(n_layer)]
 
 
+def recurrent_state_bytes(found: Mapping[str, object]) -> int:
+    """Bytes one sequence keeps in its recurrent layers (state-space and delta-rule layers)."""
+    arch = str(found.get("general.architecture") or "")
+    n_layer = int(found.get(f"{arch}.block_count") or 0)
+    if not n_layer:
+        return 0
+
+    def key(suffix: str) -> object:
+        return found.get(f"{arch}.{suffix}")
+
+    steps = sum(_recurrent_layers(key, n_layer))
+    if not steps:
+        return 0
+    conv, inner = int(key("ssm.conv_kernel") or 0), int(key("ssm.inner_size") or 0)  # type: ignore[call-overload]
+    state, groups = int(key("ssm.state_size") or 0), int(key("ssm.group_count") or 0)  # type: ignore[call-overload]
+    if not (conv and inner and state):
+        return 0
+    per_layer = (max(conv - 1, 0) * (inner + 2 * max(groups, 1) * state) + state * inner) * 4
+    return steps * per_layer
+
+
 def _sliding_layers(key: Callable[[str], object], n_layer: int) -> list[bool]:
     """Which layers see only a window, read the way `llama_hparams::set_swa_pattern` writes it.
 
@@ -389,7 +371,7 @@ def _sliding_layers(key: Callable[[str], object], n_layer: int) -> list[bool]:
 
 
 def _kv_estimate_bytes(meta: dict[str, object], context: int,
-                       cache_type_k: str, cache_type_v: str) -> int:
+                       cache_type_k: str, cache_type_v: str, batch: int = 0) -> int:
     """``sum over the layers that hold one of n_kv_heads * head_dim * span * bytes`` -- 0
     when the GGUF does not carry the keys this needs, which is a real answer, not a failure
     to read. Never raises: an estimate that cannot be made is unknown, and a preflight that
@@ -463,7 +445,8 @@ def _kv_estimate_bytes(meta: dict[str, object], context: int,
             if recurrent[il] or il >= holds_kv:
                 continue
             swa = sliding[il] and window > 0
-            span = min(context, window) if swa else context
+            held = -(-(window + batch) // 256) * 256 if batch else window
+            span = min(context, held) if swa else context
             k_dim = key_swa[il] if swa else key_dim[il]
             v_dim = value_swa[il] if swa else value_dim[il]
             total += kv_heads[il] * (k_dim * bytes_k + v_dim * bytes_v) * span * caches
@@ -507,7 +490,7 @@ def draft_kv_estimate_bytes(
     if not ref:
         return 0
     path = home.expand(ref)
-    if not path.is_file():
+    if read_header is None and not path.is_file():
         found = _local_index().get(ref.replace("\\", "/").rsplit("/", 1)[-1])
         if found is None:
             return 0
@@ -522,7 +505,8 @@ def draft_kv_estimate_bytes(
     per_token = _head_kv_per_token(meta, type_k, type_v)
     if per_token:
         return per_token * max(0, context)
-    return _kv_estimate_bytes(meta, context, type_k, type_v)
+    return (_kv_estimate_bytes(meta, context, type_k, type_v)
+            + recurrent_state_bytes(meta) * max(1, int(getattr(spec, "parallel", 1))))
 
 
 def _fit_check(weights_bytes: int, draft_bytes: int, mmproj_bytes: int, kv_bytes: int,
@@ -690,10 +674,12 @@ def Preflight(spec, *, binary: str | Path, limit_bytes: int = 0,
 
     kv_bytes = _kv_estimate_bytes(meta, spec.context, spec.cache_type_k, spec.cache_type_v)
     report.kv_estimate_bytes = kv_bytes
+    state_and_draft = (recurrent_state_bytes(meta) * max(1, spec.parallel)
+                       + draft_kv_estimate_bytes(spec, read_header=read_header))
     sized = ref_bytes or _ref_bytes
     draft_bytes = sized(spec.draft)
     mmproj_bytes = sized(spec.mmproj)
-    estimate = _fit_check(weights_bytes, draft_bytes, mmproj_bytes, kv_bytes, limit_bytes)
+    estimate = _fit_check(weights_bytes, draft_bytes, mmproj_bytes, kv_bytes + state_and_draft, limit_bytes)
     measured = _measured_fit_check(spec, limit_bytes, fits=fits)
     if measured is not None and "no measured record" not in measured.detail:
         # the record decides; the estimate is kept for the reader, never the verdict

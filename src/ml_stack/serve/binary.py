@@ -8,7 +8,9 @@ import platform
 import shutil
 from pathlib import Path
 
-from ml_stack import home
+from ml_stack import credentials, home
+from ml_stack.credentials import child_environment
+from ml_stack.serve import llamacpp_trust
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +48,10 @@ _LOGIN_SHELL_DIRS = (
 
 class BinaryNotFound(RuntimeError):
     """No ``llama-server`` could be located, and none could be fetched."""
+
+
+class BinaryTampered(BinaryNotFound):
+    """The managed build is not the one that was pinned, or sentinel holds it."""
 
 
 def is_windows() -> bool:
@@ -103,8 +109,11 @@ def find_binary(
         # both handled above.
         for candidate in candidates:
             path = managed_current() / candidate
-            if path.is_file():
-                return path.resolve()
+            real = Path(os.path.realpath(path))
+            if path.is_file() or llamacpp_trust.held(real):
+                if why := llamacpp_trust.problem(real):
+                    raise BinaryTampered(why)
+                return real
 
     for directory in (vendor_dir, home.cache()):
         if directory is None:
@@ -229,9 +238,17 @@ def named_builds(name: str = "llama-server") -> list[tuple[str, Path]]:
     return out
 
 
+def hub_environment() -> dict[str, str]:
+    """The environment for a server that downloads its own weights: this process's less its
+    secrets, plus the Hugging Face token the credentials resolve to."""
+    token = credentials.get("HF_TOKEN")
+    return child_environment({"HF_TOKEN": str(token)} if token else None)
+
+
 def child_env(binary: Path | str, extra: dict[str, str] | None = None) -> dict[str, str]:
-    """The environment to launch ``binary`` with, with its own directory on PATH."""
-    env = dict(os.environ)
+    """The environment to launch ``binary`` with, with its own directory on PATH and none of
+    this process's tokens or keys; ``extra`` is what the child is meant to have."""
+    env = child_environment()
     bindir = str(Path(binary).resolve().parent)
     env["PATH"] = bindir + os.pathsep + env.get("PATH", "")
     if extra:

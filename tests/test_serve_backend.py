@@ -19,13 +19,13 @@ from ml_stack.serve.backend import (
     LlamaServerBackend,
     ServerSpec,
     UnknownFlag,
-    emitted_flags,
     flags_of,
     parse_context,
     trained_context,
     unknown_flags,
     values_of,
 )
+from ml_stack.serve.emitted import emitted_flags
 from ml_stack.testing.fakes import fake_binary
 from tests.conftest import leased, write_gguf
 
@@ -35,6 +35,7 @@ usage: llama-server [options]
 common params:
 
 -h,    --help, --usage                  print usage and exit
+--api-key KEY                           API key to use for authentication
 -c,    --ctx-size N                     size of the prompt context (default: 4096, -1 = auto)
 -m,    --model FNAME                    model path (default: models/7B/ggml-model-f16.gguf)
 -ngl,  --gpu-layers, --n-gpu-layers N   number of layers to store in VRAM
@@ -457,6 +458,7 @@ class TestResolvedContext:
 
 class TestLaunchRefusal:
     def test_it_refuses_before_anything_is_started(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("ml_stack.hub.machine_room", lambda: 1 << 40)
         """A refusal that comes after the load costs the load. Nothing may be started."""
         gguf = tmp_path / "model.gguf"
         gguf.write_bytes(b"GGUF" + b"\x00" * 64)
@@ -500,6 +502,7 @@ class TestLaunchRefusal:
         assert not issubclass(UnknownFlag, ServerFailed)
 
     def test_the_check_can_be_skipped_for_a_stand_in_binary(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("ml_stack.hub.machine_room", lambda: 1 << 40)
         reached: list[str] = []
 
         def popen(argv, *a, **k):
@@ -510,10 +513,10 @@ class TestLaunchRefusal:
         monkeypatch.setattr(subprocess, "Popen", popen)
         gguf = tmp_path / "model.gguf"
         gguf.write_bytes(b"GGUF" + b"\x00" * 64)
-        spec = ServerSpec(model=gguf, extra_args=("--draft-max", "3"))
+        spec = ServerSpec(model=gguf, extra_args=("--draft-max", "3"), mtp=False)
         with pytest.raises(OSError, match="stop here"):
-            leased(LlamaServerBackend(binary=binary), 
-                spec, timeout=1.0, check_flags=False, preflight=False)
+            leased(LlamaServerBackend(binary=binary),
+                   spec, timeout=1.0, check_flags=False, preflight=False)
         assert reached == ["popen"]
 
     def test_a_build_that_prints_no_help_is_not_refused(self, tmp_path, monkeypatch):
@@ -568,7 +571,8 @@ def test_a_draft_named_by_file_is_fetched_and_served_by_path(monkeypatch, tmp_pa
 
 
 def test_a_model_named_by_file_is_fetched_and_served_by_path(monkeypatch, tmp_path):
-    """Mutation: drop resolved_model() from start, or return the spec unchanged."""
+    """Mutation: drop resolved_model() from start, or return the spec unchanged. A repository
+    alone is pulled too, so llama-server is never given a reference to download."""
     binary = tmp_path / "llama-server"
     binary.write_text("#!/bin/sh\necho usage: llama-server\n")
     binary.chmod(0o755)
@@ -584,9 +588,14 @@ def test_a_model_named_by_file_is_fetched_and_served_by_path(monkeypatch, tmp_pa
     argv = be.LlamaServerBackend(binary=binary).command(resolved)
     assert argv[argv.index("-m") + 1] == str(weights)
     assert "--hf-repo" not in argv
+    pulled = []
+    monkeypatch.setattr("ml_stack.hub.pull", lambda ref: pulled.append(ref) or weights)
     repo_only = be.ServerSpec(model="hf:owner/thing-GGUF")
-    assert be.LlamaServerBackend.resolved_model(repo_only) == repo_only
+    served = be.LlamaServerBackend.resolved_model(repo_only)
+    assert pulled == ["hf:owner/thing-GGUF"] and served.model == str(weights)
     assert asked == ["hf:owner/thing-GGUF/thing-Q4_K_M.gguf"]
+    argv = be.LlamaServerBackend(binary=binary).command(served)
+    assert "--hf-repo" not in argv and "-hf" not in argv
 
 
 def test_start_fetches_the_model_before_preflight(monkeypatch, tmp_path):
@@ -679,3 +688,51 @@ class TestDraftCacheType:
                           cache_type_k="q8_0", cache_type_v="q8_0",
                           spec_draft_type_k="q4_0", spec_draft_type_v="q4_0")
         assert wrong_cache_types(spec, fake_binary(tmp_path, help_text=HELP), values=values_of) == []
+
+
+def test_start_fetches_the_projector_and_the_server_gets_a_path(monkeypatch, tmp_path):
+    """Mutation: drop the mmproj fetch from start -- llama-server is given a URL to download."""
+    from ml_stack.serve import backend as be
+
+    weights = tmp_path / "thing-Q4_K_M.gguf"
+    weights.write_bytes(b"GGUF")
+    projector = tmp_path / "mmproj-thing-F16.gguf"
+    projector.write_bytes(b"GGUF")
+    fetched = []
+    monkeypatch.setattr("ml_stack.hub.fetch",
+                        lambda ref: fetched.append(ref) or (projector if "mmproj" in ref else weights))
+    monkeypatch.setattr(be, "claim_port", lambda spec, lease: None)
+    seen = []
+
+    def stop(self, spec):
+        seen.append(spec)
+        raise be.ServerFailed("stop here")
+
+    monkeypatch.setattr(be.LlamaServerBackend, "command", stop)
+    binary = tmp_path / "llama-server"
+    binary.write_text("#!/bin/sh\necho usage: llama-server\n")
+    binary.chmod(0o755)
+    with pytest.raises(be.ServerFailed, match="stop here"):
+        be.LlamaServerBackend(binary=binary).start(
+            be.ServerSpec(model="hf:owner/thing-GGUF/thing-Q4_K_M.gguf",
+                          mmproj="hf:owner/thing-GGUF/mmproj-thing-F16.gguf"),
+            lease=None, check_flags=False)
+    assert seen[0].mmproj == str(projector) and seen[0].model == str(weights)
+    assert fetched == ["hf:owner/thing-GGUF/thing-Q4_K_M.gguf",
+                       "hf:owner/thing-GGUF/mmproj-thing-F16.gguf"]
+
+@pytest.mark.parametrize("overrides", [(), ("--chat-template-kwargs", '{"reasoning_effort":"medium"}'), ("--chat-template-kwargs={\"reasoning_effort\":\"low\"}",)])
+def test_thinkingcap_launch_native_effort_defaults(tmp_path, overrides):
+    spec = ServerSpec(model="ThinkingCap-Qwen3.8-27B-IQ4_XS.gguf", context=131072,
+                      reasoning_budget=512, extra_args=overrides)
+    server = LlamaServerBackend(binary=fake_binary(tmp_path, help_text=HELP))
+    argv = server.command(spec)
+    assert argv[argv.index("-c") + 1] == "131072"
+    assert argv[argv.index("--reasoning-budget") + 1] == "512"
+    if overrides:
+        assert argv[-len(overrides):] == list(overrides)
+        assert sum(arg.split("=", 1)[0] == "--chat-template-kwargs" for arg in argv) == 1
+    else:
+        assert argv[argv.index("--chat-template-kwargs") + 1] == '{"enable_thinking":true,"reasoning_effort":"xhigh"}'
+    ordinary = server.command(ServerSpec(model="Qwen3.8-27B.gguf"))
+    assert "--chat-template-kwargs" not in ordinary

@@ -3,9 +3,12 @@
 import json
 import urllib.parse
 
+import pytest
 from conftest import json_reply
 
 from ml_stack.geo import CACHE_VERSION, LANGUAGE, best, expand, geocode_all
+
+pytestmark = pytest.mark.usefixtures("loopback_net")
 
 
 def row(name, rank, kind="administrative", category="boundary", importance=0.5, short=None):

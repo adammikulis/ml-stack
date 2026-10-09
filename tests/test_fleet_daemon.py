@@ -18,6 +18,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
@@ -28,7 +29,9 @@ from ml_stack.fleet.device import device_report, resolve_report, stdlib_device_r
 from ml_stack.fleet.files import DIGEST_HEADER, safe_relpath
 from ml_stack.fleet.jobs import DaemonError, JobRunner
 from ml_stack.fleet.remote import Peer, PeerError
-from ml_stack.http import Server
+from ml_stack.fleet.settings import Settings
+from ml_stack.http import Server, ServerError, request_bytes
+from tests.cluster_support import any_command, join_cluster
 
 
 def _free_port() -> int:
@@ -46,7 +49,7 @@ def daemon(tmp_path):
     runner = JobRunner(root)
     port = _free_port()
     httpd = Server(("127.0.0.1", port),
-                                make_handler(Daemon(runner, files, token)))
+                                make_handler(Daemon(runner, files, token, command=any_command)))
     t = threading.Thread(target=httpd.serve_forever, daemon=True)
     t.start()
     client = Peer(f"http://127.0.0.1:{port}", token)
@@ -84,10 +87,20 @@ def test_ordinary_nested_paths_are_allowed(tmp_path):
     assert got == (tmp_path / "data" / "packed" / "train.npy").resolve()
 
 
+def test_a_dot_names_the_root_itself(tmp_path):
+    assert safe_relpath(tmp_path, ".") == tmp_path.resolve()
+
+
 # -- auth ----------------------------------------------------------------
 def test_health_needs_no_token(daemon):
     client, *_ = daemon
-    assert client.health()["ok"] is True
+    assert Peer(client.base_url, "").health()["ok"] is True
+
+
+def test_health_rejects_a_supplied_invalid_credential(daemon):
+    client, *_ = daemon
+    with pytest.raises(PeerError, match="401"):
+        Peer(client.base_url, "forged-token").health()
 
 
 def test_the_favicon_is_a_204_without_a_token(daemon):
@@ -111,7 +124,7 @@ def test_everything_else_requires_the_token(daemon):
 
 # -- jobs ----------------------------------------------------------------
 def test_job_runs_and_reports_success(daemon):
-    client, root, files, _ = daemon
+    client, _root, _files, _ = daemon
     job = client.submit([sys.executable, "-c", "print('hello from the gpu box')"])
     done = client.wait(job["id"], poll_s=0.2, timeout_s=30)
     assert done["state"] == "done"
@@ -133,14 +146,6 @@ def test_a_job_that_cannot_start_is_failed_with_why(daemon, tmp_path):
     done = client.wait(job["id"], poll_s=0.2, timeout_s=30)
     assert done["state"] == "failed" and done["returncode"] == -1
     assert client.log(job["id"]).startswith("failed to start:")
-
-
-def test_an_environment_value_that_is_not_a_string_reaches_the_job(daemon):
-    client, *_ = daemon
-    job = client.submit([sys.executable, "-c", "import os; print(os.environ['ANSWER'])"],
-                        env={"ANSWER": 42})
-    done = client.wait(job["id"], poll_s=0.2, timeout_s=30)
-    assert done["state"] == "done" and client.log(job["id"]).strip() == "42"
 
 
 @pytest.mark.slow
@@ -303,7 +308,7 @@ def test_downloading_does_not_load_the_file_into_memory(daemon, tmp_path):
     extra slice made it twice the file size, on the same box that was running
     the training job the checkpoint came from.
     """
-    client, root, files, _ = daemon
+    client, _root, files, _ = daemon
     big = files / "big.bin"
     big.write_bytes(os.urandom(1 << 20) * BIG_MB)
 
@@ -314,7 +319,7 @@ def test_downloading_does_not_load_the_file_into_memory(daemon, tmp_path):
 
 
 def test_a_resumed_download_does_not_cost_twice_the_file(daemon, tmp_path):
-    client, root, files, _ = daemon
+    client, _root, files, _ = daemon
     big = files / "big.bin"
     payload = os.urandom(1 << 20) * BIG_MB
     big.write_bytes(payload)
@@ -331,7 +336,7 @@ def test_a_resumed_download_does_not_cost_twice_the_file(daemon, tmp_path):
 
 def test_progress_is_reported_while_downloading_not_after(daemon, tmp_path):
     """A callback that fires once, at the end, is not progress."""
-    client, root, files, _ = daemon
+    client, _root, files, _ = daemon
     (files / "big.bin").write_bytes(os.urandom(1 << 20) * 32)
     seen: list[tuple[int, int]] = []
     client.pull("big.bin", tmp_path / "out.bin", on_progress=lambda d, t: seen.append((d, t)))
@@ -342,7 +347,7 @@ def test_progress_is_reported_while_downloading_not_after(daemon, tmp_path):
 
 def test_a_stale_oversized_part_is_refused_not_spliced(daemon, tmp_path):
     """A .part bigger than the remote file belongs to a different file."""
-    client, root, files, _ = daemon
+    client, _root, files, _ = daemon
     (files / "small.bin").write_bytes(b"x" * 1000)
     out = tmp_path / "small.bin"
     out.with_suffix(".bin.part").write_bytes(b"y" * 5000)
@@ -352,7 +357,7 @@ def test_a_stale_oversized_part_is_refused_not_spliced(daemon, tmp_path):
 
 
 def test_a_part_that_is_already_complete_finishes_without_redownloading(daemon, tmp_path):
-    client, root, files, _ = daemon
+    client, _root, files, _ = daemon
     payload = b"z" * 4096
     (files / "done.bin").write_bytes(payload)
     out = tmp_path / "done.bin"
@@ -363,7 +368,7 @@ def test_a_part_that_is_already_complete_finishes_without_redownloading(daemon, 
 
 def test_an_explicit_range_end_is_honoured(daemon, tmp_path):
     """bytes=start-end must return that window, not everything after start."""
-    client, root, files, _ = daemon
+    client, _root, files, _ = daemon
     (files / "r.bin").write_bytes(bytes(range(256)))
     status, body, _ = client._request("GET", "/files/r.bin",
                                       headers={"Range": "bytes=10-19"})
@@ -372,7 +377,7 @@ def test_an_explicit_range_end_is_honoured(daemon, tmp_path):
 
 
 def test_a_suffix_range_is_refused_rather_than_mis_served(daemon):
-    client, root, files, _ = daemon
+    client, _root, files, _ = daemon
     (files / "s.bin").write_bytes(b"abcdefghij")
     with pytest.raises(PeerError, match="suffix ranges"):
         client._request("GET", "/files/s.bin", headers={"Range": "bytes=-5"})
@@ -380,7 +385,7 @@ def test_a_suffix_range_is_refused_rather_than_mis_served(daemon):
 
 # -- integrity -----------------------------------------------------------
 def test_a_round_trip_declares_and_confirms_a_digest(daemon, tmp_path):
-    client, root, files, _ = daemon
+    client, _root, _files, _ = daemon
     src = tmp_path / "data.npy"
     src.write_bytes(os.urandom(1 << 20))
     reply = client.push(src, "data.npy")
@@ -391,7 +396,7 @@ def test_a_round_trip_declares_and_confirms_a_digest(daemon, tmp_path):
 
 def test_an_upload_that_does_not_match_its_digest_is_discarded(daemon, tmp_path):
     """The bytes arrived intact by luck or not at all -- either way, refuse."""
-    client, root, files, _ = daemon
+    client, _root, files, _ = daemon
     payload = b"the real payload" * 64
     with pytest.raises(PeerError, match="checksum mismatch"):
         client._request("PUT", "/files/bad.bin", data=payload, headers={
@@ -405,7 +410,7 @@ def test_an_upload_that_does_not_match_its_digest_is_discarded(daemon, tmp_path)
 
 
 def test_a_correct_digest_on_upload_is_accepted(daemon, tmp_path):
-    client, root, files, _ = daemon
+    client, _root, files, _ = daemon
     payload = b"the real payload" * 64
     status, body, _ = client._request("PUT", "/files/good.bin", data=payload, headers={
         "Content-Range": f"bytes 0-{len(payload)-1}/{len(payload)}",
@@ -423,7 +428,7 @@ def test_a_download_whose_bytes_do_not_match_the_digest_is_discarded(daemon, tmp
     advertises the digest of the original -- which is exactly the shape of a
     file that rotted on disk, or of bytes mangled in transit.
     """
-    client, root, files, _ = daemon
+    client, _root, files, _ = daemon
     target = files / "ckpt.bin"
     original = os.urandom(4096)
     target.write_bytes(original)
@@ -444,7 +449,7 @@ def test_a_download_whose_bytes_do_not_match_the_digest_is_discarded(daemon, tmp
 
 def test_a_resumed_download_verifies_the_bytes_it_did_not_fetch(daemon, tmp_path):
     """The prefix came from an earlier call; no single response vouches for it."""
-    client, root, files, _ = daemon
+    client, _root, files, _ = daemon
     payload = os.urandom(8192)
     (files / "resume.bin").write_bytes(payload)
     out = tmp_path / "resume.bin"
@@ -456,7 +461,7 @@ def test_a_resumed_download_verifies_the_bytes_it_did_not_fetch(daemon, tmp_path
 
 
 def test_the_digest_cache_notices_a_rewritten_file(daemon, tmp_path):
-    client, root, files, _ = daemon
+    client, _root, files, _ = daemon
     target = files / "moving.bin"
     target.write_bytes(b"a" * 100)
     assert client.pull("moving.bin", tmp_path / "a.bin").read_bytes() == b"a" * 100
@@ -476,7 +481,7 @@ def multi_daemon(tmp_path):
     runner = JobRunner(root, slots=3)
     port = _free_port()
     httpd = Server(("127.0.0.1", port),
-                                make_handler(Daemon(runner, files, token)))
+                                make_handler(Daemon(runner, files, token, command=any_command)))
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     client = Peer(f"http://127.0.0.1:{port}", token)
     try:
@@ -705,7 +710,8 @@ def test_the_daemon_advertises_what_the_probe_reports(tmp_path):
     httpd = Server(
         ("127.0.0.1", port),
         make_handler(Daemon(runner, root / "files", token, "rtx",
-                     lambda: device_report(lambda: {"cuda": True, "gpu": "RTX 3090 Ti"}))))
+                     lambda: device_report(lambda: {"cuda": True, "gpu": "RTX 3090 Ti"}),
+                     command=any_command)))
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     try:
         health = Peer(f"http://127.0.0.1:{port}", token).health()
@@ -742,7 +748,8 @@ def test_health_answers_with_the_name_the_machine_has_now(tmp_path):
     called = ["hollowbrook"]
     httpd = Server(
         ("127.0.0.1", port),
-        make_handler(Daemon(runner, root / "files", token, lambda: called[0])))
+        make_handler(Daemon(runner, root / "files", token, lambda: called[0],
+                                         command=any_command)))
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     client = Peer(f"http://127.0.0.1:{port}", token)
     try:
@@ -760,14 +767,12 @@ def test_health_answers_with_the_name_the_machine_has_now(tmp_path):
 
 @pytest.mark.slow
 def test_serve_forever_prefers_the_settings_name_over_the_hostname(tmp_path):
-    """A real `ml-stack-traind` process, started with no --name, reads the name a
-    machine was given through settings.json rather than falling back to the hostname --
-    the path the rename wizard relies on, which no `make_handler`-only test can see."""
-    from ml_stack.fleet.settings import Settings
+    """A daemon started without --name serves the name stored in settings."""
 
     root = tmp_path / "traind"
     (root / "files").mkdir(parents=True)
     Settings(name="briarcombe-loop").save(root / "settings.json")
+    join_cluster("copper willow river", group="default")
     port = _free_port()
     repo = Path(__file__).resolve().parent.parent
     env = {**os.environ, "PYTHONPATH": str(repo / "src"), "PYTHONUNBUFFERED": "1"}
@@ -778,7 +783,7 @@ def test_serve_forever_prefers_the_settings_name_over_the_hostname(tmp_path):
          "--root", str(root), "--host", "127.0.0.1", "--port", str(port),
          "--no-web", "--no-announce"],
         env=env, stdout=fh, stderr=subprocess.STDOUT)
-    client = Peer(f"http://127.0.0.1:{port}", "unused")
+    client = Peer(f"http://127.0.0.1:{port}", "")
     deadline = time.time() + 20
     health = None
     try:
@@ -802,6 +807,7 @@ def test_serve_forever_prefers_the_settings_name_over_the_hostname(tmp_path):
 
     assert health is not None and health["name"] == "briarcombe-loop"
     assert health["name"] != socket.gethostname()
+    assert "  cluster default" in log.read_text(errors="replace")
 
 
 def test_a_job_can_write_something_the_coordinator_can_actually_pull(daemon):
@@ -892,7 +898,7 @@ class TestWhatAMachineIsDoing:
         assert second == 0.0, "after priming it should be psutil's own number"
 
     def test_it_still_answers_without_psutil(self, monkeypatch):
-        """ml-stack-fleet does not ask for psutil; it is a bonus."""
+        """ml-stack-cluster does not ask for psutil; it is a bonus."""
         import builtins
 
         import ml_stack.fleet.device as mod
@@ -1002,7 +1008,7 @@ class TestSpeechOverTheNetwork:
 
         class Ears:
             name = "fake"
-            heard: list[int] = []
+            heard: ClassVar[list[int]] = []
 
             def probe(self):
                 return ProviderHealth.ok("fake")
@@ -1068,3 +1074,33 @@ class TestSpeechOverTheNetwork:
         client, *_ = daemon
         with pytest.raises(PeerError, match="503"):
             client.transcribe(self.a_clip())
+
+
+def test_a_job_does_not_inherit_the_daemons_tokens_and_keys(daemon, monkeypatch):
+    client, *_ = daemon
+    monkeypatch.setenv("SOME_SERVICE_API_KEY", "daemon-secret")
+    monkeypatch.setenv("ORDINARY_SETTING", "kept")
+    job = client.submit([sys.executable, "-c",
+                         "import os; print(os.environ.get('SOME_SERVICE_API_KEY'),"
+                         " os.environ.get('ORDINARY_SETTING'))"])
+    client.wait(job["id"], poll_s=0.2, timeout_s=30)
+    assert "None kept" in client.log(job["id"])
+
+
+
+
+@pytest.mark.redteam
+@pytest.mark.parametrize("path", ["/jobs/..", "/jobs/%2e%2e", "/jobs/../private.txt",
+                                      "/jobs/unknown/log", "/jobs/unknown/metrics",
+                                      "/jobs/unknown/log?tail=not-a-number"])
+def test_job_reads_refuse_unknown_or_traversing_identifiers(daemon, path):
+    client, root, _files, token = daemon
+    secret = b"private-job-boundary-fixture"
+    (root.parent / "private.txt").write_bytes(secret)
+    with pytest.raises(ServerError) as refused:
+        request_bytes(client.base_url + path, token=token, timeout=2)
+    assert refused.value.status in (400, 403, 404)
+    assert secret.decode() not in refused.value.body
+    with pytest.raises(ServerError) as unsigned:
+        request_bytes(client.base_url + path, timeout=2)
+    assert unsigned.value.status == 401

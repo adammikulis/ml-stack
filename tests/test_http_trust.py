@@ -47,7 +47,7 @@ def _self_signed(directory) -> tuple[str, str]:
 
 
 class _Handler(http.server.BaseHTTPRequestHandler):
-    def do_GET(self) -> None:  # noqa: N802 - the name http.server dispatches on
+    def do_GET(self) -> None:
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.end_headers()
@@ -60,6 +60,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 def test_a_server_signing_its_own_certificate_is_reachable_once_it_is_trusted(tmp_path):
     cert, key = _self_signed(tmp_path)
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.load_cert_chain(cert, key)
     httpd = Server(("127.0.0.1", 0), _Handler)
     httpd.socket = context.wrap_socket(httpd.socket, server_side=True)

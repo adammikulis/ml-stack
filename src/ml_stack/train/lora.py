@@ -1,6 +1,6 @@
 """LoRA over the ``tool-calls`` recipe: what makes an 8B tool caller trainable here.
 
-The recipe's full fine-tune is right for a 270m base and impossible for an 8B one: bf16
+The recipe's full fine-tune is right for a small base and impossible for an 8B one: bf16
 weights, gradients and two Adam moments for eight billion parameters is ~128G of state
 before a single activation. A LoRA trains ~0.5% of that -- two small matrices on each
 attention and MLP projection -- with the base frozen in bf16, which is 16G of weights and
@@ -55,7 +55,7 @@ DEFAULT_TARGETS = ("q_proj", "k_proj", "v_proj", "o_proj",
 PEFT_MISSING = (
     "a LoRA needs peft, which is not installed: pip install 'ml-stack[train-lora]' "
     "(or pip install peft). Without it the tool-calls recipe is a full fine-tune, which "
-    "works for the 270m base and needs ~128G of optimizer state for an 8B one."
+    "works for a small base and needs ~128G of optimizer state for an 8B one."
 )
 
 # Over this many minutes a training run is refused unless --yes. The same rule and the same

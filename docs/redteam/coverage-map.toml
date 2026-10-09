@@ -1,0 +1,1318 @@
+# Which red-team test covers each surface `scripts/redteam_coverage.py` finds.
+#
+# A surface id is `kind:name`. A group matches ids with fnmatch patterns and the first group
+# that matches wins, so exact rows go above the globs. `count` pins how many surfaces the
+# patterns match: the gate fails when it moves, so a new surface under a glob is looked at.
+#
+# status   covered    a test feeds hostile input to the real component and checks the outcome
+#          partial    some of the hostile inputs are tested; the note says which are not
+#          uncovered  no test attacks it; the note says what the attacker wants there
+#          n/a        nothing untrusted reaches it; the note says why
+# tests    `path` or `path::test_name`; the gate fails when either is gone.
+
+[ratchet]
+uncovered = 53
+partial = 197
+
+[[group]]
+match = ["human:fleet/autostart_apply.py:install", "human:fleet/autostart_apply.py:rollback"]
+status = "covered"
+count = 2
+tests = ["tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+         "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+         "tests/test_redteam_human_floor.py::test_no_tool_an_agent_is_offered_is_a_human_only_action",
+         "tests/test_autostart_apply.py::test_an_agent_is_refused_install_and_rollback_before_anything_is_read",
+         "tests/test_autostart_apply.py::test_no_terminal_means_no_install",
+         "tests/test_autostart_apply.py::test_the_person_must_type_the_manifest_id",
+         "tests/test_autostart_apply.py::test_an_expired_manifest_is_refused_and_nothing_is_written",
+         "tests/test_autostart_apply.py::test_a_manifest_prepared_on_another_device_is_refused",
+         "tests/test_autostart_apply.py::test_replaying_an_installed_manifest_is_refused",
+         "tests/test_autostart_apply.py::test_changing_a_staged_unit_between_prepare_and_install_is_refused",
+         "tests/test_autostart_apply.py::test_a_unit_and_manifest_edited_together_still_differ_from_what_prepare_renders",
+         "tests/test_autostart_apply.py::test_a_destination_outside_the_allowed_set_is_refused",
+         "tests/test_autostart_apply.py::test_a_symlinked_unit_directory_is_refused",
+         "tests/test_autostart_apply.py::test_a_symlinked_destination_file_is_refused",
+         "tests/test_autostart_apply.py::test_a_manifest_edited_to_run_something_else_is_refused",
+         "tests/test_autostart_apply.py::test_a_missing_or_replaced_exec_target_is_refused_at_install"]
+note = "install and rollback refuse any agent marker or missing terminal before reading the manifest; an expired, replayed, other-device, tampered or redirected manifest writes nothing"
+
+[[group]]
+match = ["spawn:redact/benign.py:documented"]
+status = "covered"
+count = 1
+tests = ["tests/test_no_real_names.py::test_a_phrase_shaped_like_a_git_option_or_a_pathspec_is_only_searched_for"]
+note = "the phrase is one fixed-string argv element after -e with no shell; option-shaped or shell-shaped text only fails to match and writes nothing"
+
+[[group]]
+match = ["spawn:fleet/autostart_backends.py:run"]
+status = "covered"
+count = 1
+tests = ["tests/test_autostart_hostile.py::test_run_hands_every_argument_to_the_program_unchanged",
+         "tests/test_autostart_hostile.py::test_run_reports_a_program_that_cannot_start_as_a_failure",
+         "tests/test_autostart_hostile.py::test_run_bounds_a_program_that_never_exits",
+         "tests/test_autostart_prepare.py::test_arguments_with_spaces_quotes_and_percent_stay_single_argv_elements"]
+note = "service-manager commands are argument lists with no shell; hostile characters in an argument reach the program as one literal element, and a program that hangs or cannot start is a failure"
+
+[[group]]
+match = ["egress:fleet/autostart_apply.py:healthy"]
+status = "covered"
+count = 1
+tests = ["tests/test_autostart_hostile.py::test_an_error_or_a_non_json_answer_is_not_healthy",
+         "tests/test_autostart_hostile.py::test_a_slow_answer_is_not_healthy",
+         "tests/test_autostart_hostile.py::test_nothing_listening_is_not_healthy"]
+note = "the health probe reads one loopback URL from the verified manifest; an error status, non-JSON body, slow answer or closed port is an unhealthy unit, never an exception"
+
+[[group]]
+match = ["parser:workspace/person_transcript.py"]
+status = "covered"
+count = 1
+tests = ["tests/test_redteam_person_statement.py::test_no_typed_phrasing_becomes_an_authorization",
+         "tests/test_person_hooks.py::test_a_prompt_the_person_did_not_type_leaves_no_record",
+         "tests/test_person_hooks.py::test_a_missing_transcript_entry_fails_closed_after_a_bounded_wait",
+         "tests/test_person_hooks.py::test_an_unreadable_transcript_and_a_mismatched_text_fail_closed",
+         "tests/test_person_hooks.py::test_a_transcript_the_calling_agent_wrote_elsewhere_records_nothing",
+         "tests/test_person_hooks.py::test_a_hundred_megabyte_transcript_is_read_from_its_tail_within_the_hook_budget"]
+note = "a transcript entry that is not a typed human prompt on a pinned Claude Code version, is missing, unreadable or differs from the hook prompt records nothing; a forged line by a same-user process is the documented threat-model limit"
+
+[[group]]
+match = ["spawn:workspace/person_targets.py:_run"]
+status = "covered"
+count = 1
+tests = ["tests/test_person_hooks.py::test_another_commit_another_repository_or_another_remote_does_not_match",
+         "tests/test_person_guards.py::test_an_approval_covers_exactly_one_fast_forward_to_the_approved_commit"]
+note = "fixed git argument vectors with a timeout; the repository, remote, commit and tree an authorization binds are read from git, never from prompt or model text"
+
+[[group]]
+match = ["spawn:fleet/projects.py:local_root"]
+status = "covered"
+count = 1
+tests = ["tests/test_project_registration.py::test_windows_registration_in_wsl_uses_literal_argv_and_verified_git_root",
+         "tests/test_project_registration.py::test_registration_refuses_invalid_path_without_spawning",
+         "tests/test_project_registration.py::test_registration_refuses_invalid_wsl_translation",
+         "tests/test_project_registration.py::test_windows_drive_path_is_not_translated_outside_wsl",
+         "tests/test_project_registration.py::test_registration_rejects_unauthenticated_caller_before_path_translation",
+         "tests/test_project_registration.py::test_sealed_wsl_registration_checks_identity_before_persisting"]
+note = "WSL drive paths reach a fixed literal argument vector; bounded absolute paths and authenticated local Dev admission are checked before translation, and mismatched Git identities cannot persist"
+
+[[group]]
+match = ["spawn:workspace/backlog.py:repository"]
+status = "covered"
+count = 1
+tests = ["tests/test_workspace_backlog.py::test_repository_infers_github_origin_as_argument_vector",
+         "tests/test_workspace_backlog.py::test_repository_rejects_traversal_owner_in_origin"]
+note = "Origin URLs are read with a fixed argv, timeout and checkout directory; hostile URL syntax does not become a repository"
+
+
+[[group]]
+match = ["egress:fleet/project_client.py:register_local"]
+status = "covered"
+count = 1
+tests = ["tests/test_automatic_project_connection.py::test_local_registration_refuses_hostile_response"]
+note = "bounded loopback registration rejects foreign redirects, oversized replies, absent or tampered seals, malformed JSON and another project identity"
+
+[[group]]
+match = ["route:fleet/projects.py:/workspace/v1/local-project"]
+status = "covered"
+count = 1
+tests = ["tests/test_project_enrollment_admission.py::test_local_project_route_refuses_unauthorized_registration",
+         "tests/test_project_enrollment_admission.py::test_native_registration_requires_local_active_dev_proof",
+         "tests/test_project_board_metadata.py::test_native_registration_refuses_identity_mismatch_before_mutation",
+         "tests/test_project_board_metadata.py::test_native_registration_refuses_unbounded_or_relative_path"]
+note = "native registration requires loopback sealed active Dev admission and an exact bounded local Git identity; rejected requests do not register or expose a path"
+
+[[group]]
+match = ["route:fleet/api.py:/jobs/*"]
+status = "covered"
+count = 1
+tests = ["tests/test_fleet_daemon.py::test_job_reads_refuse_unknown_or_traversing_identifiers",
+         "tests/test_fleet_daemon.py::test_job_runs_and_reports_success",
+         "tests/test_fleet_daemon.py::test_unknown_job_is_404"]
+note = "job reads require authentication and select existing job identifiers; unknown, traversing and malformed paths cannot return outside-file contents"
+
+
+[[group]]
+match = ["route:fleet/invite_routes.py:/join/invite/challenge", "route:fleet/invite_routes.py:/join/invite/redeem"]
+status = "covered"
+count = 2
+tests = ["tests/test_fleet_invites.py::test_public_exchange_refuses_plain_http",
+         "tests/test_fleet_invites.py::test_atomic_single_use_and_no_key_in_invite",
+         "tests/test_fleet_invites.py::test_wrong_proof_and_changed_fields_cannot_redeem",
+         "tests/test_fleet_invites.py::test_rate_limits_and_challenge_bound"]
+note = "TLS is required; wrong proofs, altered fields, expiry, rotation, rate excess and simultaneous replay cannot redeem a second grant"
+
+[[group]]
+match = ["route:fleet/invite_routes.py:/ui/fleet/invites", "route:fleet/invite_routes.py:/ui/fleet/join-invite"]
+status = "covered"
+count = 2
+tests = ["tests/test_fleet_invites.py::test_ui_mint_requires_local_authenticated_owner",
+         "tests/test_fleet_invites.py::test_owner_mint_refuses_hostname_rebinding",
+         "tests/test_fleet_invites.py::test_join_invitation_passes_owner_and_setup_router_guards"]
+note = "Owner router guards reject missing UI headers, unauthenticated joined hosts and foreign addressed setup; local owner actions return noncacheable invitations and sessions"
+
+[[group]]
+match = ["egress:fleet/invite_client.py:_post"]
+status = "covered"
+count = 1
+tests = ["tests/test_fleet_invite_client.py::test_every_resolved_address_must_be_a_remote_lan_device",
+         "tests/test_fleet_invite_client.py::test_wrong_certificate_is_refused_before_any_http",
+         "tests/test_fleet_invite_client.py::test_modified_grant_is_rejected"]
+note = "Every DNS result is checked before a frozen sockaddr connection; the exact TLS leaf is pinned before HTTP; modified raw grants fail authentication"
+
+[[group]]
+match = ["egress:workspace/coordinator_client.py:_device_peer"]
+status = "covered"
+count = 1
+tests = ["tests/test_redteam_device_transport.py::test_coordinator_peer_rejects_untrusted_pairing_before_transport",
+         "tests/test_workspace_coordinator.py::test_hostile_saved_coordinator_origin_is_refused_before_transport",
+         "tests/test_workspace_coordinator.py::test_remote_mcp_never_falls_back_to_local_workspace"]
+note = "Saved origins reject plaintext, credentials and foreign URL components; revoked, missing, ambiguous, unpaired and certificate-mismatched device rows cannot install a pin or open transport; remote clients refuse local fallback"
+
+[[group]]
+match = ["route:fleet/launch_routes.py:/ui/launch-ticket", "route:fleet/launch_routes.py:/ui/launch/ticket"]
+status = "covered"
+tests = ["tests/test_fleet_ui.py::TestSignIn::test_launch_ticket_requires_session_and_is_consumed_once",
+         "tests/test_redteam_person_session.py::test_a_ticket_is_asked_for_only_by_the_machine_itself_with_its_secret",
+         "tests/test_redteam_person_session.py::test_guessing_the_secret_is_held_off_even_for_the_right_secret",
+         "tests/test_redteam_person_session.py::test_only_a_few_tickets_wait_at_once",
+         "tests/test_redteam_person_session.py::test_an_uncredentialed_session_cannot_hand_out_a_ticket"]
+count = 2
+note = "Actual Fleet sockets give a ticket only to a request carrying the daemon's launch secret with no browser Origin, or to a credentialed session; wrong secrets back off, tickets are capped, spent once, expire, and an uncredentialed session cannot hand one out"
+
+[[group]]
+match = ["egress:fleet/launch_open.py:ticket_url"]
+status = "covered"
+tests = ["tests/test_launch_secret.py::test_a_daemon_that_answers_badly_gives_the_window_the_bare_page",
+         "tests/test_launch_secret.py::test_a_redirected_or_shared_secret_is_never_read_or_written"]
+count = 1
+note = "The loopback ticket request reads the recorded port and secret only from an owner-only, non-symlink record; a daemon that answers with errors, non-JSON or no ticket yields the bare page"
+
+[[group]]
+match = ["human:fleet/peers.py:cmd_open"]
+status = "covered"
+tests = ["tests/test_redteam_person_session.py::test_the_open_command_hands_an_agent_or_a_pipe_nothing",
+         "tests/test_redteam_person_session.py::test_the_open_command_hands_a_person_at_a_terminal_a_one_use_address",
+         "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent"]
+count = 1
+note = "A process an agent started and a process with no terminal get no ticket from a live daemon; a person at a terminal gets an address that signs in once"
+
+[[group]]
+match = ["human:workspace/backlog.py:resume"]
+status = "covered"
+tests = ["tests/test_workspace_backlog.py::test_parent_resume_preserves_failed_attempt_and_consumes_one_retry",
+         "tests/test_workspace_backlog.py::test_issue_resume_refuses_unblocked_foreign_and_child_requests",
+         "tests/test_workspace_backlog.py::test_issue_resume_cannot_bypass_task_retry_budget"]
+count = 1
+note = "Authenticated person or actual parent recovery preserves the failed projection and grants one intake attempt; child, foreign parent, unblocked projections and budget bypasses are refused"
+
+[[group]]
+match = ["human:workspace/backlog.py:supersede"]
+status = "covered"
+tests = ["tests/test_workspace_backlog.py::test_parent_superseded_issue_stays_excluded_after_revision_change",
+         "tests/test_workspace_backlog.py::test_child_and_foreign_parent_cannot_supersede_repository_tasks",
+         "tests/test_workspace_backlog.py::test_maintained_cli_records_parent_decision_without_person_impersonation"]
+count = 1
+note = "Only the person or actual registered worker parent records an obsolete-issue decision; child and foreign-parent tokens mutate no decision, and later issue revisions preserve the authenticated exclusion"
+
+[[group]]
+match = ["route:fleet/routes.py:/ui/setup", "route:fleet/routes.py:/ui/setup/join"]
+status = "covered"
+tests = ["tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_setup_is_refused_from_another_machine",
+         "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_a_request_addressed_to_a_hostname_is_refused",
+         "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_the_api_is_unreachable_without_the_ui_header",
+         "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_rejoining_needs_a_session_once_the_box_is_in_a_cluster"]
+note = "Native Fleet sockets reject remote first-run ownership, DNS-rebinding Host values, missing UI headers and joined setup mutation without an authenticated session"
+
+[[group]]
+match = ["human:workspace/taskboard.py:TaskBoard._reviewer", "human:workspace/taskboard.py:TaskBoard._scope", "human:workspace/taskboard.py:TaskBoard.create", "human:workspace/task_actions.py:block", "human:workspace/task_routes.py:route", "parser:workspace/task_routes.py"]
+status = "covered"
+tests = ["tests/test_fleet_task_routes.py::test_foreign_page_cannot_create_tasks",
+         "tests/test_fleet_task_routes.py::test_joined_unsigned_and_browser_claims_are_refused",
+         "tests/test_fleet_task_routes.py::test_malformed_requests_and_identity_overrides_do_not_mutate",
+         "tests/test_taskboard.py::test_designated_reviewer_without_read_capability_cannot_grade_task",
+         "tests/test_taskboard.py::test_changed_task_specification_cannot_be_claimed",
+         "tests/test_task_credit.py::test_same_device_parent_cannot_review_through_another_worker_seat",
+         "tests/test_task_credit.py::test_review_and_proposal_tampering_cannot_mint_credits"]
+note = "Native coordinator graphs and Fleet sockets reject self-review, same-device economic review, missing read/project authority, altered task/proposal/review hashes, browser identity overrides and foreign-page mutations"
+
+[[group]]
+match = ["mcp-tool:workspace_reputation"]
+status = "covered"
+tests = ["tests/test_work_reputation.py::test_reputation_read_requires_valid_token_and_read_capability",
+         "tests/test_work_reputation.py::test_local_and_mcp_tools_read_reputation_and_task_frame_contains_team_awareness"]
+note = "Reputation reads use the authenticated caller token and delegated read capability; local and MCP tools expose evidence without any self-award operation"
+
+[[group]]
+match = ["route:workspace/work_reputation.py:/ui/work-reputation/standings"]
+status = "covered"
+tests = ["tests/test_work_reputation.py::test_person_reputation_route_is_read_only_and_session_guarded"]
+note = "Verified-work standings are read-only and require the maintained Fleet UI header, session and server-side person owner identity; tokens are never returned"
+
+[[group]]
+match = ["route:activity/fleet_routes.py:/ui/history/events"]
+status = "covered"
+tests = ["tests/test_activity_fleet_history.py::test_history_requires_ui_header_and_joined_session"]
+note = "The installed read-only History extension runs after custom UI-header and signed-in-session authorization; native socket tests reject unauthenticated reads before exposing encrypted activity metadata"
+
+[[group]]
+match = ["spawn:fleet/environment.py:Environment.host_python"]
+status = "n/a"
+note = "The interpreter comes from the fixed library catalog or the running Python; the probe uses a fixed -c program and an argv list, without model, peer or browser text"
+
+[[group]]
+match = ["spawn:fleet/environment.py:Environment.require_current_runtime"]
+status = "covered"
+count = 1
+tests = ["tests/test_fleet_environment.py::test_runtime_revision_probe_rejects_stale_literal_hostile_interpreter",
+         "tests/test_fleet_environment.py::test_frozen_runtime_requires_exact_bundled_commit_before_work"]
+note = "Real interpreter paths containing shell punctuation remain literal argv; unstamped and mismatched revisions cannot start work, and probing has an explicit timeout and no shell"
+
+[[group]]
+match = ["spawn:fleet/managed_compute.py:report"]
+status = "covered"
+count = 1
+tests = ["tests/test_fleet_managed_compute.py::test_managed_probe_uses_literal_hostile_path_and_redacts_real_child_environment",
+         "tests/test_fleet_managed_compute.py::test_managed_compute_does_not_advertise_unverified_capabilities",
+         "tests/test_fleet_managed_compute.py::test_frozen_report_probes_the_job_interpreter_and_keeps_provenance"]
+note = "A real child receives a literal hostile interpreter path and a credential-redacted environment; malformed output, missing provenance, missing executables, timeout and failing exits cannot advertise capabilities"
+
+[[group]]
+match = ["route:fleet/routes.py:/ui/session"]
+status = "covered"
+tests = ["tests/test_fleet_ui.py::TestSignIn::test_the_wrong_passphrase_does_not",
+         "tests/test_fleet_ui.py::TestSignIn::test_persistent_guessing_is_slowed_down"]
+note = "Real sign-in requests reject hostile passphrases and rate-limit repeated guesses"
+
+# -- named LAN setup and recovery uploads ---------------------------------------------------
+[[group]]
+match = ["route:fleet/routes.py:/ui/setup/clusters",
+         "route:fleet/setup_recovery_routes.py:/ui/setup/recovery",
+         "parser:fleet/lan_clusters.py", "parser:fleet/recovery.py"]
+status = "covered"
+tests = [
+  "tests/test_fleet_named_lan.py::test_prejoin_discovery_obeys_setup_boundary",
+  "tests/test_fleet_named_lan.py::test_malformed_stale_and_oversized_hints_are_ignored",
+  "tests/test_fleet_named_lan.py::test_random_key_hint_and_upload_authenticate_without_keystore",
+  "tests/test_fleet_named_lan.py::test_hostile_recovery_upload_never_writes_membership",
+  "tests/test_fleet_named_lan.py::test_wrong_name_wrong_key_and_cross_origin_cannot_import",
+  "tests/test_fleet_named_lan.py::test_authenticated_pake_answer_must_contain_selected_name_and_valid_key",
+]
+note = "LAN hints are bounded nonce-matching metadata; local setup or a signed-in person selects a named recovery file, validates its bounded shape, and authenticates a native encrypted protocol-3 beacon before any membership write; scans and recovery joins never access the keystore"
+
+[[group]]
+match = ["egress:fleet/serving.py:_identity"]
+status = "covered"
+tests = [
+  "tests/test_fleet_serving.py::TestRegistry::test_recycled_port_reports_its_actual_model_and_prunes_dead_rows",
+  "tests/test_fleet_serving.py::TestRegistry::test_invalid_persisted_ports_are_never_probed",
+  "tests/test_fleet_serving.py::TestRegistry::test_malformed_metadata_does_not_advertise_registration_claims",
+  "tests/test_fleet_serving.py::TestRegistry::test_metadata_redirect_cannot_borrow_another_endpoints_identity",
+]
+note = "Persisted registrations are claims: identity comes from the bounded local endpoint, invalid ports never probe, malformed bodies never advertise, and redirects cannot move metadata to another endpoint"
+
+# -- the person's Board behind the Fleet UI ---------------------------------------------------
+[[group]]
+match = ["route:workspace/fleet_routes.py:/ui/board/*"]
+status = "covered"
+tests = [
+  "tests/test_fleet_board_routes.py::test_foreign_browser_cannot_send_as_person",
+  "tests/test_fleet_board_routes.py::test_malformed_or_impersonating_post_does_not_deliver",
+  "tests/test_fleet_board_routes.py::test_oversized_post_and_unsupported_methods_do_not_mutate",
+  "tests/test_fleet_board_routes.py::test_joined_session_is_required_before_owner_identity_is_used",
+]
+note = "A foreign origin, a forged identity, a malformed or oversized body and an unjoined session never post as the person"
+
+# -- saved Coding conversations -------------------------------------------------------------
+[[group]]
+match = ["route:workspace/coding_routes.py:/ui/coding/*", "parser:workspace/coding_routes.py",
+         "parser:workspace/coding_turns.py", "parser:workspace/coding_events.py",
+         "spawn:workspace/coding_turns.py:*", "human:workspace/harness_seat.py:*",
+         "egress:workspace/harness_seat.py:Seat.record_model"]
+status = "covered"
+tests = [
+  "tests/test_coding_routes.py::test_client_cannot_supply_identity_or_unsupported_fields",
+  "tests/test_coding_routes.py::test_coding_start_requires_person_page_origin_and_ui_header",
+  "tests/test_coding_routes.py::test_joined_coding_session_is_required_before_starting_a_worker",
+  "tests/test_coding_routes.py::test_native_turns_resume_and_revoke_only_their_agent",
+  "tests/test_coding_routes.py::test_cancel_stops_native_process_and_the_next_turn_can_start",
+  "tests/test_coding_routes.py::test_launcher_refusal_is_failed_instead_of_a_completed_empty_turn",
+  "tests/test_harness_rails.py::TestHook::test_no_environment_variable_or_argument_lifts_the_policy",
+  "tests/test_harness_rails.py::TestSeat::test_a_fake_endpoint_cannot_verify_a_delegated_agents_model",
+]
+note = "Coding is a declared authenticated Fleet extension; only same-origin person UI can start turns, browser bodies cannot set identity or policy, native argv/session resume retains maintained role hooks, cancellation revokes the temporary agent"
+
+# -- coding harnesses on a local model -----------------------------------------------------
+[[group]]
+match = ["spawn:claude.py:launch", "spawn:codex.py:launch", "spawn:harnesshook.py:nudge",
+         "spawn:harnessid.py:announce"]
+status = "covered"
+tests = [
+  "tests/test_harness_rails.py::TestWorkspaceCommands::test_a_hostile_label_is_one_argument_and_never_a_shell_line",
+  "tests/test_harness_rails.py::TestHook::test_no_environment_variable_or_argument_lifts_the_policy",
+  "tests/test_harness_rails.py::TestHook::test_a_call_that_asks_with_no_keystore_is_denied_at_once",
+  "tests/test_harness_rails.py::TestHook::test_a_hook_that_fails_blocks_the_call",
+  "tests/test_harness_rails.py::TestSessionFiles::test_the_settings_are_outside_the_tree_read_only_and_hold_no_secret",
+  "tests/test_harness_rails.py::TestPolicy::test_text_naming_the_launchers_files_or_a_person_only_action_is_denied_in_every_role",
+]
+note = "the harness is spawned with argv only; its hook sits in a settings file the model cannot write, decides from the classifier and a role fixed on the command line, denies when the request store or the hook fails, and a hostile label is one argument"
+
+# -- files on the board ---------------------------------------------------------------------
+[[group]]
+match = ["human:workspace/files.py:*"]
+status = "covered"
+tests = [
+  "tests/test_workspace_files.py::test_only_a_person_deletes_and_the_content_is_shredded",
+  "tests/test_workspace_files.py::test_injection_text_is_held_until_a_person_releases_it",
+  "tests/test_workspace_files.py::test_the_person_downloads_text_as_an_attachment_and_never_sees_it_rendered",
+]
+count = 3
+note = "an agent tries to delete a file, read a held file or fetch one unfenced"
+
+[[group]]
+match = ["mcp-tool:workspace_attach", "mcp-tool:workspace_file", "mcp-tool:workspace_file_save",
+         "mcp-tool:workspace_file_search"]
+status = "covered"
+tests = [
+  "tests/test_workspace_files.py::test_a_file_is_read_only_by_those_who_may_read_its_message",
+  "tests/test_workspace_files.py::test_a_direct_message_file_is_private_to_the_pair_and_the_person",
+  "tests/test_workspace_files.py::test_search_never_returns_what_the_caller_may_not_read",
+  "tests/test_workspace_files.py::test_executables_archives_and_pickles_are_refused",
+  "tests/test_workspace_files.py::test_hostile_names_are_cleaned_to_one_plain_name",
+  "tests/test_workspace_files.py::test_out_refuses_paths_that_leave_the_worktree",
+  "tests/test_workspace_files.py::test_out_refuses_symlinks_and_never_overwrites",
+  "tests/test_workspace_files.py::test_injection_text_is_held_until_a_person_releases_it",
+  "tests/test_workspace_files.py::test_an_unreadable_keystore_posts_nothing_and_reads_nothing",
+]
+count = 4
+note = "file names, notes, text and snippets are agent text: fenced, bounded, access-checked, never executed"
+
+[[group]]
+match = ["parser:workspace/filestore.py"]
+status = "covered"
+tests = [
+  "tests/test_workspace_files.py::test_a_wrong_key_cannot_read_the_content",
+  "tests/test_workspace_files.py::test_the_graph_snapshot_carries_a_schema_version",
+  "tests/test_workspace_files.py::test_the_content_is_never_plaintext_on_disk_and_the_message_carries_only_the_handle",
+]
+count = 1
+note = "the sealed snapshot and blobs: a wrong key or a tampered file refuses"
+
+# -- the local agent ----------------------------------------------------------------------
+[[group]]
+match = ["parser:workspace/localroute.py"]
+status = "covered"
+tests = [
+  "tests/test_task_coding.py::test_native_turn_and_output_limits_preserve_authority",
+  "tests/test_workspace_local_agent.py::test_stopping_a_delegated_worker_preserves_its_private_identity",
+  "tests/test_workspace_local_agent.py::test_stop_never_releases_a_foreign_holder",
+  "tests/test_workspace_local_agent.py::test_start_and_stop_refuse_a_process_an_agent_started",
+  "tests/test_workspace_local_agent.py::test_paused_coding_worker_keeps_tasks_queued_until_resume",
+  "tests/test_workspace_local_agent.py::test_start_and_stop_need_the_persons_session_origin_and_json",
+  "tests/test_workspace_local_agent.py::test_a_token_in_a_header_starts_nothing",
+  "tests/test_workspace_local_agent.py::test_the_page_start_list_and_stop_round_trip_with_hostile_input_refused",
+  "tests/test_redteam_local_agent.py::test_an_injection_from_a_sender_the_agent_does_not_obey_reaches_no_model",
+  "tests/test_redteam_local_agent.py::test_an_injection_in_a_persons_task_gets_a_model_that_obeys_it_nothing_beyond_its_role",
+  "tests/test_redteam_local_agent.py::test_no_tool_the_model_is_offered_starts_stops_or_widens_an_agent",
+  "tests/test_redteam_local_agent.py::test_start_and_stop_refuse_an_agent_process_and_leave_the_state_alone",
+]
+note = "start and stop need the person's session, a loopback origin and JSON; hostile names, projects, roles and efforts are refused; injections in task text and a model that obeys them gain nothing beyond the role"
+
+[[group]]
+match = ["route:fleet/conversation_routes.py:/ui/conversations*"]
+status = "covered"
+count = 2
+tests = ["tests/test_fleet_conversation_settings_routes.py::test_defaults_endpoint_exposes_the_persisted_settings_source",
+         "tests/test_fleet_conversation_settings_routes.py::test_conversation_mutations_require_ui_authority",
+         "tests/test_fleet_conversation_settings_routes.py::test_invalid_updates_return_400_without_changing_the_chat"]
+note = "socket requests reject missing UI authority and foreign origins; invalid settings and unknown fields preserve persisted history"
+
+[[group]]
+match = ["spawn:fleet/environment.py:Environment.build_environment"]
+status = "covered"
+count = 1
+tests = ["tests/test_gym_managed_interpreters.py::test_macos_bullet_build_selects_sdk_without_shell"]
+note = "SDK discovery uses a fixed literal executable and argument without shell evaluation"
+
+[[group]]
+match = ["parser:gym/drone_definition.py"]
+status = "covered"
+count = 1
+tests = ["tests/test_gym_drone.py::test_manual_forest_rejects_invalid_shapes"]
+note = "manual forest JSON rejects unsupported versions, nonfinite dimensions, invalid shapes and excessive actor counts"
+
+[[group]]
+match = ["spawn:sandbox/bubblewrap.py:_probe"]
+status = "covered"
+count = 1
+tests = ["tests/test_redteam_bubblewrap.py"]
+note = "actual executable paths containing shell syntax remain literal, control characters cannot execute, probes are single-flight and invalidate on binary changes, stalled probes are killed"
+
+[[group]]
+match = ["context:gym/vision_process.py:image_request"]
+status = "covered"
+count = 1
+tests = ["tests/test_gym_models.py"]
+note = "compatible HTTP server receives only captured RGB and explicitly synthetic thermal image pixels, not simulator detection labels or hidden actor coordinates; unregistered and unsupported model selections are refused; superseded actor results are rejected"
+
+[[group]]
+match = ["spawn:gym/decision_process.py:DecisionProcess.__init__"]
+status = "covered"
+count = 1
+tests = ["tests/test_gym_decision_process.py"]
+note = "actual model child keeps hostile checkpoint and interpreter text literal; stalled inference admits one request and closes within a bounded grace period"
+
+[[group]]
+match = ["spawn:platform.py:start_process"]
+status = "covered"
+count = 1
+tests = ["tests/test_redteam_gym_worker.py::test_worker_spawn_keeps_hostile_configuration_inside_json"]
+note = "actual worker launch through the process wrapper receives hostile configuration as one JSON argument without a shell"
+
+[[group]]
+match = ["spawn:gym/catalog.py:probe", "spawn:gym/traffic_world.py:generate"]
+status = "covered"
+count = 2
+tests = ["tests/test_redteam_gym_worker.py::test_catalogue_probe_executes_hostile_interpreter_path_without_shell",
+         "tests/test_redteam_gym_worker.py::test_native_traffic_generator_keeps_hostile_home_path_in_argv"]
+note = "actual native generators and installed interpreter probes receive shell syntax as literal executable paths"
+
+[[group]]
+match = ["spawn:gym/transport.py:Process.start"]
+status = "covered"
+count = 1
+tests = ["tests/test_redteam_gym_worker.py"]
+note = "actual subprocess receives hostile arguments only inside JSON and closes malformed native control streams"
+
+[[group]]
+match = ["desktop:app/src-tauri/capabilities/main.json"]
+status = "covered"
+count = 1
+tests = ["tests/test_redteam_desktop_capabilities.py"]
+note = "compiled Tauri authority grants only the daemon's own origin and port, rejects foreign origins, ports and windows, shell execution and filesystem reads; the window stays on its own origin; the daemon is recognised only by a proof from a secret its user alone can read"
+
+[[group]]
+match = ["route:fleet/runtime_repair_routes.py:/ui/agent-runtime/install", "route:fleet/runtime_repair_routes.py:/ui/agent-runtime/repair"]
+status = "covered"
+count = 2
+tests = ["tests/test_runtime_repair.py::test_install_requires_authenticated_local_browser", "tests/test_runtime_repair.py::test_install_never_accepts_browser_artifact_or_commands", "tests/test_runtime_repair.py::test_install_queues_fixed_action_with_server_person_provenance"]
+note = "Fixed actions require the authenticated local same-origin person browser; hostile headers, sources and caller-selected artifacts or commands are rejected before queueing."
+
+[[group]]
+match = ["route:fleet/runtime_repair_routes.py:/ui/agent-runtime/status"]
+status = "covered"
+count = 1
+tests = ["tests/test_runtime_repair.py::test_status_refuses_hostile_browser_before_resuming_jobs", "tests/test_runtime_repair.py::test_install_never_accepts_browser_artifact_or_commands", "tests/test_runtime_repair.py::test_status_does_not_expose_artifact_paths_or_person_provenance", "tests/test_runtime_repair.py::test_public_errors_redact_environment_credentials"]
+note = "Hostile browser requests cannot resume jobs; public status omits artifact paths and person provenance and redacts credential-bearing failures."
+
+[[group]]
+match = ["spawn:fleet/runtime_candidates.py:_verify"]
+status = "covered"
+count = 1
+tests = ["tests/test_runtime_candidates.py::test_registration_checks_expected_digest_before_execution", "tests/test_runtime_candidates.py::test_candidate_requires_full_hex_identity", "tests/test_runtime_candidates.py::test_signature_failure_never_executes_candidate", "tests/test_runtime_candidates.py::test_candidate_probe_refuses_unready_or_wrong_source", "tests/test_runtime_candidates.py::test_candidate_retains_exact_identity_and_rechecks_artifact"]
+note = "Both candidate verification subprocesses use fixed arguments after full reviewed digest and source validation; failed signature prevents probing, wrong-source or unready probes are rejected and changed artifacts fail revalidation. Actual signed hardware proof remains a deployment requirement."
+
+[[group]]
+match = ["spawn:fleet/runtime_repair.py:install"]
+status = "covered"
+count = 1
+tests = ["tests/test_runtime_repair.py::test_repair_rechecks_selected_artifact_before_admission", "tests/test_runtime_repair.py::test_permanent_control_denial_does_not_retry", "tests/test_runtime_repair.py::test_replacement_requires_exact_full_health_commit_and_preserves_recovery", "tests/test_runtime_repair.py::test_replacement_launch_uses_literal_paths_and_secret_free_environment", "tests/test_runtime_repair.py::test_central_daemon_protocol_rejects_hostile_job_ids_before_execution"]
+note = "Final artifact revalidation and exact-generation admission precede fixed readiness verification; denied admission is terminal, failed replacement restores the previous app, and hostile job identifiers or paths do not become commands."
+
+[[group]]
+match = ["spawn:scripts/test-on-linux"]
+status = "covered"
+count = 1
+tests = ["tests/test_redteam_linux_runner.py", "tests/test_running_on_linux.py::test_a_machine_without_docker_is_refused_before_anything_starts"]
+note = "hostile pytest text remains literal argv; source mount is read-only, no privileged or host-network flags, temporary config and staging are removed"
+
+# -- the human-only floor ------------------------------------------------------------------
+[[group]]
+match = ["human:workspace/person_session.py:SessionWorkspace._person", "human:workspace/person_session.py:SessionWorkspace.connect"]
+status = "covered"
+count = 2
+tests = [
+  "tests/test_person_session.py::test_actor_rechecks_live_session_project_and_person",
+  "tests/test_person_session.py::test_connect_refuses_get_collision_and_revoked_person",
+  "tests/test_person_session.py::test_explicit_connect_creates_hashless_person_without_token",
+  "tests/test_person_session.py::test_session_person_preserves_existing_capability_restrictions",
+]
+note = "request-bound sessions recheck project authority and live person permissions; explicit POST binds a hashless principal"
+
+[[group]]
+match = ["human:workspace/coordinator_routes.py:_change"]
+status = "covered"
+count = 1
+tests = [
+  "tests/test_standing_device_policy.py::test_an_agent_token_cannot_choose_host_mode_for_itself_a_subagent_or_a_forged_parent",
+  "tests/test_standing_device_policy.py::test_only_protected_own_local_identity_selects_authority",
+  "tests/test_standing_device_policy.py::test_a_person_cannot_host_over_a_followed_coordinator",
+]
+note = "an agent, subagent or forged token cannot choose host mode; only a person selects what the device hosts"
+
+[[group]]
+match = ["parser:workspace/mesh_sync.py", "human:workspace/mesh_fold.py:*"]
+status = "covered"
+tests = [
+  "tests/test_journal.py::test_a_relay_cannot_append_rows_under_a_replayed_head",
+  "tests/test_journal.py::test_a_head_must_sign_the_row_directly_before_it",
+  "tests/test_journal.py::test_an_origin_that_is_not_32_lower_case_hex_never_reaches_the_file_system",
+  "tests/test_journal.py::test_the_upper_case_form_of_this_devices_origin_cannot_reach_its_journal",
+  "tests/test_journal.py::test_a_forged_copy_marks_an_origin_damaged_only_when_its_owner_presented_it",
+  "tests/test_journal.py::test_an_origin_bound_by_a_relay_is_rebound_to_the_key_its_owner_presents",
+  "tests/test_journal.py::test_a_device_holds_no_more_journals_than_the_origin_cap",
+  "tests/test_mesh_attacks.py::test_a_person_role_or_any_other_role_string_is_stored_as_an_agent",
+  "tests/test_mesh_attacks.py::test_a_foreign_post_may_only_target_general_or_announcements",
+  "tests/test_mesh_attacks.py::test_unknown_fields_of_a_foreign_message_reject_it",
+  "tests/test_mesh_attacks.py::test_a_note_body_cannot_choose_the_operation_that_is_appended",
+  "tests/test_mesh_attacks.py::test_newlines_and_unusable_names_are_rejected",
+  "tests/test_mesh_attacks.py::test_a_sender_named_like_a_local_agent_is_rejected",
+  "tests/test_mesh_attacks.py::test_flagged_text_from_another_device_is_quarantined_not_shown",
+  "tests/test_mesh_attacks.py::test_one_malformed_row_does_not_block_the_rows_after_it",
+  "tests/test_mesh_attacks.py::test_acknowledgements_count_only_for_a_row_whose_hash_matches",
+  "tests/test_mesh.py::test_a_person_role_in_a_row_from_another_device_is_stored_as_an_agent",
+  "tests/test_mesh.py::test_a_peer_serving_a_head_under_another_key_is_refused_and_nothing_of_it_is_folded",
+  "tests/test_mesh.py::test_an_agent_token_cannot_start_a_sync",
+]
+note = "journal rows from a paired device are stored only after the chain, a head over the row before it and an origin id of 32 lower-case hex characters verify, then folded as an agent under a local device name through the local size, screen and quarantine checks"
+
+[[group]]
+match = ["human:*"]
+status = "covered"
+tests = [
+  "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+  "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+  "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+  "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item",
+  "tests/test_requests_floor.py::test_the_request_commands_refuse_a_process_an_agent_started",
+  "tests/test_redteam_requests.py::test_a_model_cannot_answer_its_own_request_by_any_tool_name_or_command_text",
+  "tests/test_workspace_model.py::test_only_a_person_or_launcher_process_records_a_verified_model",
+  "tests/test_workspace_model.py::test_an_agent_cannot_verify_itself_or_overwrite_a_verified_model_or_set_anothers",
+  "tests/test_workspace_model.py::test_a_claimed_model_changes_no_right",
+]
+note = "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+
+# -- the wiring limit ---------------------------------------------------------------------
+[[group]]
+match = ["route:fleet/room_routes.py:*", "spawn:serve/wired.py:*", "spawn:serve/wired_apply.py:*"]
+status = "covered"
+tests = [
+  "tests/test_redteam_wired.py::test_no_model_tool_chat_tool_or_slash_command_touches_the_wiring_limit",
+  "tests/test_redteam_wired.py::test_a_command_run_by_an_agent_is_refused_before_anything_is_written",
+  "tests/test_redteam_wired.py::test_a_model_name_is_a_lookup_and_never_a_command",
+  "tests/test_redteam_wired.py::test_a_hostile_number_never_reaches_the_runner",
+  "tests/test_redteam_wired.py::test_a_token_or_a_foreign_page_cannot_reach_any_changing_route",
+]
+note = "raising the GPU wiring limit is person-only: agent processes, tokens, foreign pages, hostile numbers and model names are refused and the privileged call is never reached"
+
+# -- the Board ------------------------------------------------------------------------------
+[[group]]
+match = ["parser:workspace/boardroute.py"]
+status = "covered"
+count = 1
+tests = [
+  "tests/test_fleet_board_routes.py::test_local_person_posts_dm_and_thread_without_exposing_credentials",
+  "tests/test_fleet_board_routes.py::test_joined_session_is_required_before_owner_identity_is_used",
+  "tests/test_fleet_board_routes.py::test_foreign_browser_cannot_send_as_person",
+  "tests/test_fleet_board_routes.py::test_malformed_or_impersonating_post_does_not_deliver",
+  "tests/test_fleet_board_routes.py::test_page_cannot_post_announcements_or_use_agent_owner_file",
+  "tests/test_fleet_board_routes.py::test_oversized_post_and_unsupported_methods_do_not_mutate",
+  "tests/test_fleet_board_routes.py::test_ack_marks_only_an_existing_visible_message_in_its_scope",
+  "tests/test_project_board_ui.py::test_selected_project_messages_and_person_post",
+  "tests/test_project_board_ui.py::test_person_board_rejects_foreign_requests",
+  "tests/test_project_board_ui.py::test_missing_remote_or_unconfigured_project_never_falls_back",
+  "tests/test_project_board_ui.py::test_person_identity_is_required_and_never_created",
+  "tests/test_project_board_ui.py::test_person_board_refuses_unsupported_methods",
+  "tests/test_project_board_ui.py::test_person_threads_direct_messages_and_ack",
+  "tests/test_project_board_ui.py::test_person_post_accepts_exact_browser_origin",
+  "tests/test_project_board_ui.py::test_person_post_rejects_different_browser_origin",
+  "tests/test_redteam_board.py::test_the_route_never_writes_and_refuses_other_hosts_sites_and_traversal",
+  "tests/test_redteam_board.py::test_an_agent_cannot_read_another_board_or_pair_through_any_command",
+  "tests/test_redteam_board.py::test_boards_and_subscriptions_cannot_be_made_without_limit",
+  "tests/test_workspace_board.py::test_the_route_reads_only_and_checks_host_origin_and_fetch_site",
+  "tests/test_redteam_board.py::test_the_one_write_route_refuses_every_way_a_hostile_page_could_reach_it",
+  "tests/test_redteam_board.py::test_a_post_cannot_borrow_another_identity_or_smuggle_options",
+  "tests/test_workspace_quiet.py::test_a_new_agent_has_no_subscriptions_and_its_inbox_holds_no_board_traffic",
+  "tests/test_workspace_quiet.py::test_the_lead_and_the_person_cannot_leave_announcements_and_an_agent_can_only_mute",
+  "tests/test_workspace_quiet.py::test_message_text_never_changes_a_subscription",
+  "tests/test_workspace_model.py::test_a_hostile_model_or_harness_is_refused_everywhere",
+  "tests/test_redteam_board.py::test_following_and_the_live_route_give_an_agent_nothing_it_could_not_already_read",
+]
+note = "Fleet and exact registered local projects delegate to the maintained person-only Board parser; HTTP and HTTPS exact browser origins, membership, visible acknowledgements, malformed and oversized bodies, missing UI authority, foreign projects and agent owner credentials are exercised without identity creation"
+
+[[group]]
+match = ["route:fleet/api.py:/companion/*", "route:fleet/companion_routes.py:/companion/*",
+         "route:fleet/companion_routes.py:/companion/v1/chat", "route:fleet/companion_routes.py:/companion/v1/status"]
+status = "covered"
+count = 4
+tests = ["tests/test_fleet_android.py::test_real_tls_dispatcher_refuses_phone_credentials_on_computer_routes",
+         "tests/test_fleet_android.py::test_route_authentication_refuses_inappropriate_authority",
+         "tests/test_fleet_android.py::test_chat_rejects_extra_authority_and_unavailable_targets",
+         "tests/test_fleet_android.py::test_revocation_closes_stream_before_more_output",
+         "tests/test_fleet_android.py::test_status_omits_computer_capabilities_paths_and_secrets",
+         "tests/test_fleet_android.py::test_session_invalidates_with_authority"]
+note = "TLS daemon requests attack missing phone authority, wrong methods, unknown routes, malformed/oversized bodies and computer-route escalation; direct route attacks cover plaintext/public sources, revoked sessions, model and role injection, redaction and stream revocation"
+
+[[group]]
+match = ["route:fleet/callers.py:/workspace/v1/*"]
+status = "covered"
+count = 1
+tests = ["tests/test_redteam_device_transport.py::test_daemon_project_dispatch_refuses_invalid_device_requests",
+         "tests/test_device_agent_bootstrap.py::test_project_bootstrap_has_same_device_boundary",
+         "tests/test_device_agent_bootstrap.py::test_http_device_session_recovery_and_revocation",
+         "tests/test_workspace_remote.py::test_signed_sealed_fleet_and_agent_capabilities_both_required"]
+note = "Real daemon project requests reject missing, revoked and cluster-only device proof, unsealed bodies and malformed JSON before host dispatch; project operations require both paired-device and agent authority"
+
+[[group]]
+match = ["route:fleet/invite_routes.py:/ui/fleet/android-devices"]
+status = "covered"
+count = 1
+tests = ["tests/test_fleet_android.py::test_android_device_controls_reject_foreign_authority_without_revocation",
+         "tests/test_fleet_android.py::test_owner_controls_android_enrollment_and_revocation"]
+note = "Foreign source/host, machine-token browser authority, oversized bodies, wrong methods and unauthenticated revocation are refused while the existing phone session remains valid"
+# -- HTTP routes and handlers --------------------------------------------------------------
+[[group]]
+match = ["route:fleet/gym_routes.py:*", "route:fleet/gym_recording_routes.py:*", "route:fleet/workspace_routes.py:*"]
+status = "covered"
+count = 10
+tests = ["tests/test_redteam_gym_http.py", "tests/test_fleet_gym_boundaries.py",
+         "tests/test_fleet_workspace_routes.py"]
+note = "actual daemon sockets reject malformed bodies before dispatch, unauthenticated controls, coerced fields, command injection, private-path traversal, symlinked reviews and camera files"
+
+[[group]]
+match = ["route:fleet/project_client.py:*"]
+status = "covered"
+tests = ["tests/test_project_ui_access.py", "tests/test_project_source.py", "tests/test_remote_transport_attacks.py"]
+note = "source publication and checkout require a browser session; hostile candidate paths, peer schema, redirects and source archives are rejected before checkout"
+
+[[group]]
+match = ["spawn:net/git.py:blobs", "spawn:net/git.py:source_index"]
+status = "covered"
+tests = ["tests/test_project_source.py"]
+note = "snapshot paths use verified Git object IDs and bounded index/blob output; options, oversized objects and checkout filters are refused"
+
+[[group]]
+match = ["route:fleet/api.py:*", "handler:fleet/api.py:*"]
+status = "partial"
+tests = [
+  "tests/test_redteam_fleet.py::test_no_protected_route_answers_without_the_right_token",
+  "tests/test_redteam_fleet.py::test_no_path_reaches_a_file_outside_the_files_directory",
+  "tests/test_fleet_framing.py",
+  "tests/test_fleet_commands.py",
+  "tests/test_fleet_handshake.py",
+]
+note = "authentication, traversal, framing, body sealing, the /jobs allowlist and the join handshake are attacked; the JSON bodies of /models/get, /serve, /fetch, /decide, /bench and /availability are not"
+
+[[group]]
+match = ["route:fleet/framing.py:*"]
+status = "covered"
+tests = ["tests/test_fleet_framing.py"]
+
+[[group]]
+match = ["route:fleet/routes.py:/ui/models/startup"]
+status = "covered"
+tests = ["tests/test_startup_models.py::StartupModelTests::test_startup_route_refuses_untrusted_requests_and_ignores_query_paths"]
+
+[[group]]
+match = ["route:fleet/routes.py:/ui/setup/clusters", "route:fleet/routes.py:/ui/clusters/found"]
+status = "covered"
+tests = [
+  "tests/test_fleet_found_route.py::test_first_run_refuses_the_list_from_another_machine",
+  "tests/test_fleet_found_route.py::test_a_machine_in_a_cluster_asks_for_the_list_behind_its_sign_in",
+]
+
+[[group]]
+match = ["spawn:pi.py:launch"]
+status = "covered"
+count = 1
+tests = ["tests/test_pi_harness.py::test_pi_launch_is_offline_and_uses_the_policy_extension"]
+note = "Pi runs offline with ml-stack's tool-policy extension and an explicit local model endpoint"
+
+[[group]]
+match = ["route:fleet/routes.py:/ui/credentials"]
+status = "covered"
+count = 1
+tests = ["tests/test_fleet_credentials.py::test_ui_saves_multiple_named_credentials_without_returning_values",
+         "tests/test_fleet_credentials.py::test_joined_credential_management_requires_a_signed_in_session"]
+note = "credential values are saved without being returned; joined credential management requires a signed-in session"
+
+[[group]]
+match = ["route:fleet/initial_setup_routes.py:/ui/setup/initial"]
+status = "covered"
+tests = [
+  "tests/test_fleet_initial_setup.py::test_owner_admission_refuses_foreign_and_agent_requests_even_with_a_launch_session",
+  "tests/test_fleet_initial_setup.py::test_owner_admission_refuses_lan_and_missing_ui_header",
+  "tests/test_fleet_initial_setup.py::test_initial_rejects_hostile_body_without_identity_or_membership_changes",
+  "tests/test_fleet_initial_setup.py::test_completed_prod_hands_no_launch_session_and_refuses_initial",
+  "tests/test_fleet_initial_setup.py::test_initial_never_drops_manual_dev_membership",
+  "tests/test_redteam_person_session.py::test_forged_page_headers_without_a_ticket_open_no_session_and_make_no_person",
+]
+note = "Real sockets refuse a request with no launch-ticket session however its Host, Origin and Sec-Fetch-Site are forged, and refuse foreign origins, DNS rebinding, LAN ownership, missing UI headers and agent credentials; malformed or oversized setup bodies cannot mutate names or memberships, token sessions cannot mint person sessions, and a Production machine hands out no launch session"
+
+[[group]]
+match = ["route:fleet/routes.py:/ui/setup/jobs"]
+status = "covered"
+tests = ["tests/test_fleet_initial_setup.py::test_setup_jobs_refuses_untrusted_readers_and_ignores_external_paths"]
+note = "Joined job history refuses anonymous and forged cookies, missing UI headers and rebound hosts; authenticated hostile path queries cannot read an external job store"
+
+[[group]]
+match = ["route:fleet/routes.py:*", "route:fleet/chat_routes.py:*", "handler:fleet/ui.py:*"]
+status = "partial"
+tests = [
+  "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_the_api_is_unreachable_without_the_ui_header",
+  "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_a_request_addressed_to_a_hostname_is_refused",
+  "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_setup_is_refused_from_another_machine",
+  "tests/test_fleet_ui.py::TestSignIn::test_the_cluster_cannot_be_browsed_without_signing_in",
+]
+note = "session, header and host checks are attacked; the query and body of each /ui screen route are not"
+
+[[group]]
+match = ["route:fleet/onboard/pairing.py:*", "handler:fleet/onboard/pairing.py:*"]
+status = "covered"
+tests = [
+  "tests/test_peer_pairing.py::test_an_offer_whose_tag_is_not_the_exchanges_is_refused_and_nothing_is_learned",
+  "tests/test_onboard_pairing.py",
+]
+
+[[group]]
+match = ["route:fleet/onboard/bootstrap.py:*", "handler:fleet/onboard/bootstrap.py:*",
+         "handler:fleet/onboard/transfer.py:*"]
+status = "covered"
+tests = ["tests/test_onboard_bootstrap.py", "tests/test_onboard_transfer.py"]
+
+[[group]]
+match = ["route:fleet/onboard/signing_cli.py:*"]
+status = "covered"
+tests = ["tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent"]
+
+[[group]]
+match = ["route:fleet/onboard/peers_cli.py:*"]
+status = "partial"
+tests = ["tests/test_peer_first.py"]
+note = "peer-book verbs add, remove, on, off and limit take a name and an address typed by the person; hostile names are tested only through the dialog"
+
+[[group]]
+match = ["route:graph/*", "handler:graph/serve.py:*"]
+status = "covered"
+tests = [
+  "tests/test_redteam_graph_serve.py::test_the_page_server_answers_hostile_requests_without_failing_or_leaking",
+  "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404",
+  "tests/test_redteam_graph_serve.py::test_a_request_addressed_to_another_host_name_is_refused",
+  "tests/test_redteam_graph_serve.py::test_a_post_needs_a_json_content_type_and_a_loopback_origin",
+  "tests/test_redteam_graph_serve.py::test_a_content_length_that_is_not_a_length_is_a_400_and_nothing_hangs",
+]
+
+[[group]]
+match = ["route:sentinel/*"]
+status = "partial"
+tests = ["tests/test_sentinel_wiring_serve.py"]
+note = "the catch-all that holds a served request; its hold decision is tested, hostile framing is not"
+
+[[group]]
+match = ["handler:net/pdfchild.py:*"]
+status = "covered"
+tests = ["tests/test_pdf_engine.py"]
+
+# -- tools an agent can call ---------------------------------------------------------------
+[[group]]
+match = ["mcp-tool:workspace_*"]
+status = "covered"
+tests = [
+  "tests/test_workspace_surface.py::test_mcp_returns_injected_text_fenced_and_never_raw",
+  "tests/test_workspace_surface.py::test_mcp_writes_need_the_senders_token_and_reads_do_not_need_a_write",
+  "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader",
+  "tests/test_workspace_quiet.py::test_an_announcement_is_one_short_line_and_the_sender_is_rate_limited",
+  "tests/test_workspace_quiet.py::test_repeated_reads_are_byte_identical_and_tool_descriptions_are_static",
+]
+
+[[group]]
+match = ["mcp-tool:speech_say"]
+status = "covered"
+tests = [
+  "tests/test_redteam_mcp.py::test_speech_say_writes_only_inside_the_state_directory",
+  "tests/test_redteam_mcp.py::test_speech_say_names_its_own_file_under_the_state_directory",
+]
+
+[[group]]
+match = ["mcp-tool:serve_up"]
+status = "partial"
+tests = [
+  "tests/test_redteam_iq_override.py::test_the_mcp_serve_up_tool_reports_a_strict_refusal_and_starts_nothing",
+  "tests/test_redteam_iq_override.py::test_the_extra_argument_of_serve_up_cannot_carry_the_mode",
+  "tests/test_redteam_mcp.py::test_a_hostile_model_name_is_one_argument_never_a_shell_line",
+  "tests/test_redteam_mcp.py::test_a_value_that_starts_with_a_dash_is_refused_where_a_command_would_read_it",
+]
+note = "the IQ-on-Apple-silicon mode cannot be changed through the tool or its extra flags; the model path itself is a person-visible reference and is not otherwise vetted here"
+
+[[group]]
+match = ["mcp-tool:*"]
+status = "partial"
+tests = [
+  "tests/test_mcp.py::test_workspace_subset_rejects_server_admin_tools",
+  "tests/test_harness_rails.py::test_bound_workspace_mcp_obeys_role",
+  "tests/test_redteam_mcp.py::test_hostile_json_rpc_gets_an_error_and_runs_nothing",
+  "tests/test_redteam_mcp.py::test_a_tool_called_with_the_wrong_types_is_refused_before_it_runs",
+  "tests/test_redteam_mcp.py::test_a_hostile_model_name_is_one_argument_never_a_shell_line",
+  "tests/test_redteam_mcp.py::test_every_tool_that_changes_something_says_so_in_its_hints",
+  "tests/test_redteam_mcp.py::test_the_tool_arguments_are_checked_against_the_declared_types",
+  "tests/test_redteam_mcp.py::test_a_value_that_starts_with_a_dash_is_refused_where_a_command_would_read_it",
+  "tests/test_redteam_human_floor.py::test_no_mcp_tool_takes_a_secret_or_joins_a_fleet",
+]
+note = "the protocol edge, argument types, flag smuggling and honest hints are attacked for every tool; the semantic arguments of each tool (decide state text, doctor repos) are not"
+
+[[group]]
+match = ["chat-tool:*"]
+status = "covered"
+tests = [
+  "tests/test_roles.py::test_every_role_by_every_tool_never_includes_the_person_only_floor",
+  "tests/test_redteam_chat.py",
+  "tests/test_roles.py::test_a_tainted_acting_call_asks_once_and_the_question_names_the_taint",
+]
+
+[[group]]
+match = ["slash-command:*"]
+status = "covered"
+tests = [
+  "tests/test_roles.py::test_an_answer_to_a_question_is_not_a_slash_command",
+  "tests/test_roles.py::test_text_from_the_model_or_a_tool_cannot_raise_the_role",
+  "tests/test_roles.py::test_a_rule_is_never_created_by_text_the_model_or_a_tool_produced",
+]
+
+# -- command line --------------------------------------------------------------------------
+[[group]]
+match = ["cli:ml-stack-security", "cli:ml-stack-memory", "cli:ml-stack-workspace"]
+status = "covered"
+tests = [
+  "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+  "tests/test_sentinel_redteam.py::test_the_command_line_refuses_release_under_an_agent_even_with_a_terminal",
+  "tests/test_redteam_human_floor.py::test_no_tool_an_agent_is_offered_sets_up_joins_delegates_or_names_the_token_directory",
+  "tests/test_redteam_human_floor.py::test_a_hostile_message_cannot_widen_a_delegate_or_leak_a_token_path",
+  "tests/test_workspace_quickstart.py::test_person_only_commands_refuse_an_agent_and_no_terminal",
+  "tests/test_workspace_quickstart.py::test_failed_redemptions_lock_every_code_out",
+  "tests/test_redteam_human_floor.py::test_the_one_thing_an_agent_may_mint_is_a_bounded_child_invite_and_never_a_person_grant",
+  "tests/test_workspace_agent_invites.py::test_message_text_cannot_make_an_invite_or_change_the_policy",
+  "tests/test_workspace_agent_invites.py::test_a_read_only_session_is_refused_and_the_env_can_only_tighten_the_policy",
+  "tests/test_workspace_agent_invites.py::test_approve_first_raises_a_request_the_person_answers",
+  "tests/test_workspace_agent_invites.py::test_the_code_cannot_be_written_into_a_message_or_a_note",
+  "tests/test_workspace_agent_invites.py::test_a_claimed_name_or_model_cannot_make_the_child_lead_human_or_owner",
+  "tests/test_workspace_agent_invites.py::test_the_person_revokes_a_whole_subtree_and_its_outstanding_invites",
+]
+
+[[group]]
+match = ["cli:ml-stack-mcp"]
+status = "covered"
+tests = ["tests/test_redteam_mcp.py::test_hostile_json_rpc_gets_an_error_and_runs_nothing"]
+
+[[group]]
+match = ["cli:ml-stack-graph"]
+status = "covered"
+tests = ["tests/test_redteam_graph_serve.py::test_the_page_server_answers_hostile_requests_without_failing_or_leaking"]
+
+[[group]]
+match = ["cli:ml-stack-chat", "cli:ml-stack-agent"]
+status = "partial"
+tests = ["tests/test_roles.py", "tests/test_redteam_chat.py"]
+note = "roles, rules and the taint rail are attacked; hostile --resume session files are tested only for shape in tests/test_chat.py"
+
+[[group]]
+match = ["cli:ml-stack-traind", "cli:ml-stack-cluster", "cli:ml-stack-peers"]
+status = "partial"
+tests = ["tests/test_redteam_fleet.py", "tests/test_peer_pairing.py"]
+note = "the daemon's handler and the pairing exchange are attacked; the join and peer-book argument parsing are not"
+
+[[group]]
+match = ["cli:ml-stack-credentials"]
+status = "covered"
+tests = ["tests/test_credentials.py::test_a_name_that_is_not_a_name_is_refused",
+         "tests/test_credentials.py::test_a_symlink_out_of_the_config_directory_is_refused"]
+
+[[group]]
+match = ["cli:ml-stack-log"]
+status = "covered"
+tests = ["tests/test_redteam_activity.py::test_text_recorded_in_the_log_reaches_an_agent_only_fenced_and_inert",
+         "tests/test_redteam_activity.py::test_a_model_that_obeys_everything_cannot_read_edit_truncate_or_disable_the_log",
+         "tests/test_activity_viewer.py::test_an_agent_cannot_export"]
+note = "the viewer is read-only; an agent's process sees records only fenced and inert, and cannot export or switch the log off"
+
+[[group]]
+match = ["cli:*"]
+status = "n/a"
+note = "run by the person with the person's own arguments; an agent reaches these commands only through an mcp-tool or chat-tool row, which carry the hostile-argument tests"
+
+# -- processes -----------------------------------------------------------------------------
+[[group]]
+match = ["spawn:sandbox/*", "spawn:net/*"]
+status = "covered"
+tests = ["tests/test_sandbox_redteam.py", "tests/test_pdf_engine.py", "tests/test_net_scan.py"]
+
+[[group]]
+match = ["spawn:checks.py:ask"]
+status = "covered"
+tests = ["tests/test_redteam_spawn.py::test_the_only_shell_line_is_one_the_person_was_shown_and_confirmed"]
+
+[[group]]
+match = ["spawn:jobs.py:detach", "spawn:serve/backend.py:launch", "spawn:bench/queue.py:*",
+         "spawn:fleet/measuring.py:detach_bench"]
+status = "covered"
+tests = [
+  "tests/test_redteam_spawn.py::test_a_hostile_argument_is_one_argv_item_and_never_reaches_a_shell",
+  "tests/test_redteam_mcp.py::test_a_hostile_model_name_is_one_argument_never_a_shell_line",
+]
+
+[[group]]
+match = ["spawn:worktreerules.py:*"]
+status = "covered"
+tests = ["tests/test_worktree_rules.py::test_a_hostile_path_is_one_argv_item_and_never_reaches_a_shell"]
+note = "git is run with argv only; the paths come from a tool call and are one argument each"
+
+[[group]]
+match = ["spawn:workspace/guide.py:clipboard"]
+status = "covered"
+tests = ["tests/test_workspace_quickstart.py::test_the_clipboard_gets_the_text_on_stdin_and_never_through_a_shell"]
+note = "a constant argv per tool; the pasted text goes on stdin"
+
+[[group]]
+match = ["spawn:activity/gate.py:tree_hash"]
+status = "n/a"
+note = "fixed git argv over the checkout scripts/test is run in, in a throwaway index; no model, peer or file name reaches it"
+
+[[group]]
+match = ["spawn:platform.py:launch", "spawn:fleet/wsl.py:_read", "spawn:fleet/wsl.py:prepare"]
+status = "covered"
+tests = [
+  "tests/test_wsl_backend.py::test_owned_process_preserves_hostile_arguments_without_a_shell",
+  "tests/test_wsl_backend.py::test_wsl_read_preserves_hostile_text_and_unicode",
+  "tests/test_wsl_backend.py::test_wsl_installer_uses_cached_wheel_without_source_checkout",
+]
+note = "shell metacharacters remain argv values; the WSL installer wheel path is one pip argument"
+
+[[group]]
+match = ["spawn:workspace/integration_git.py:git", "spawn:workspace/integration_git.py:ancestor",
+         "spawn:workspace/integration_git.py:gates"]
+status = "covered"
+tests = [
+  "tests/test_task_integration.py::test_reviewed_artifact_names_stay_literal_git_arguments_and_cannot_escape",
+  "tests/test_task_integration.py::test_stale_sources_and_release_target_are_refused_before_gates",
+  "tests/test_task_integration.py::test_failed_merge_or_gate_preserves_candidate_and_never_publishes",
+  "tests/test_task_integration.py::test_maintained_push_hook_preserves_foreign_merged_worktrees_and_reports_the_block",
+]
+note = "real isolated repositories exercise literal hostile paths, exact reviewed ancestry, gate failure and the maintained publication hook; only fixed gate command forms run"
+
+[[group]]
+match = ["spawn:fleet/autostart.py:_windows_owner"]
+status = "covered"
+tests = ["tests/test_wsl_autostart.py::test_hostile_request_refused",
+         "tests/test_wsl_autostart.py::test_invalid_wire_never_mutates_tasks",
+         "tests/test_wsl_autostart.py::test_windows_owner_preserves_running_launcher"]
+note = "hostile startup fields refuse before task mutation; validated requests use fixed task commands and preserve the running launcher"
+
+[[group]]
+match = ["spawn:fleet/wsl.py:start", "spawn:fleet/wsl_startup.py:call", "spawn:serve/backend.py:_binary_info"]
+status = "covered"
+tests = ["tests/test_redteam_startup_arguments.py"]
+note = "hostile executable and label text stays in literal argv or JSON fields; service commands and information flags remain fixed without a shell"
+
+[[group]]
+match = ["spawn:runtime_trust.py:_git", "spawn:hookcheck.py:_git", "spawn:hookcheck.py:_entries"]
+status = "covered"
+count = 3
+tests = ["tests/test_runtime_trust.py::test_a_checkout_path_with_shell_punctuation_reaches_git_as_one_argument",
+         "tests/test_runtime_trust.py::test_a_ref_that_is_an_option_or_a_command_names_no_commit",
+         "tests/test_runtime_trust.py::test_a_forged_state_root_naming_a_hostile_clone_is_ignored_by_an_agent",
+         "tests/test_runtime_trust.py::test_an_agent_cannot_name_another_repository",
+         "tests/test_hookcheck.py::test_a_malformed_repository_config_is_a_problem_and_not_a_crash",
+         "tests/test_hookcheck.py::test_a_config_value_with_a_newline_and_shell_punctuation_is_reported_and_its_repair_is_inert",
+         "tests/test_hookcheck.py::test_a_repository_path_with_shell_punctuation_is_inspected_and_repaired_as_one_argument"]
+note = "git runs with an argument list; hostile paths, refs and settings stay one argument or inert data, and no repair or fix goes through a shell"
+
+[[group]]
+match = ["spawn:fleet/runtime_wheel.py:_run", "spawn:runtime.py:forward", "spawn:runtime.py:verify",
+         "spawn:runtime_deploy.py:git", "spawn:runtime_deploy.py:smoke", "spawn:runtime_launchers.py:install",
+         "spawn:fleet/updates.py:pip_install"]
+status = "covered"
+count = 7
+tests = ["tests/test_redteam_runtime_deploy.py::test_a_checkout_path_with_shell_punctuation_reaches_git_as_one_argument",
+         "tests/test_redteam_runtime_deploy.py::test_a_ref_that_looks_like_an_option_or_a_command_names_no_commit",
+         "tests/test_redteam_runtime_deploy.py::test_forward_hands_hostile_arguments_to_the_selected_interpreter_unchanged",
+         "tests/test_redteam_runtime_deploy.py::test_a_state_root_with_shell_punctuation_still_builds_verifies_and_installs_launchers",
+         "tests/test_redteam_runtime_deploy.py::test_the_smoke_runs_hooks_from_a_source_path_with_punctuation_as_one_argument",
+         "tests/test_redteam_runtime_deploy.py::test_the_launcher_directory_with_shell_punctuation_is_one_path",
+         "tests/test_redteam_runtime_deploy.py::test_the_tracker_hands_a_hostile_checkout_path_to_the_runtime_command_as_one_argument"]
+note = "Checkout paths, refs, state roots, launcher directories and forwarded arguments are single argv items with no shell; a ref starting with a dash names no commit; module and function names in launchers are matched against a pattern"
+
+[[group]]
+match = ["spawn:redact/added.py:added_lines"]
+status = "covered"
+tests = ["tests/test_no_real_names.py::test_a_revision_that_is_an_option_is_refused_and_a_hostile_path_reaches_git_as_one_argument"]
+note = "a hostile path stays one literal git argument and a revision that is an option is refused before git runs"
+
+[[group]]
+match = ["spawn:*"]
+status = "partial"
+tests = ["tests/test_redteam_spawn.py::test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line"]
+note = "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
+
+# -- listeners -----------------------------------------------------------------------------
+[[group]]
+match = ["listener:fleet/wsl_network.py:NetworkBridge._listen"]
+status = "covered"
+tests = ["tests/test_wsl_network.py::test_bridge_refuses_authentication_and_socket_scope",
+         "tests/test_wsl_network.py::test_bridge_caps_messages_and_datagrams",
+         "tests/test_wsl_network.py::test_lan_relay_preserves_stream_half_close_and_releases_ports",
+         "tests/test_wsl_ui.py::test_local_ui_relay_preserves_bytes_and_actual_loopback_peer",
+         "tests/test_wsl_ui.py::test_local_ui_queues_connections_over_admission_limit",
+         "tests/test_wsl_ui.py::test_local_ui_close_terminates_idle_helper_and_releases_slot",
+         "tests/test_wsl_network.py::test_gateway_relay_preserves_raw_transport_and_nonloopback_scope"]
+note = "the discovery control listener rejects bad capabilities, destinations and oversized frames; the TCP listener relays opaque bytes to the fixed daemon target"
+
+[[group]]
+match = ["listener:fleet/daemon.py:*", "listener:fleet/discovery.py:*",
+         "listener:fleet/onboard/nearby.py:*"]
+status = "partial"
+tests = ["tests/test_redteam_fleet.py", "tests/test_onboard_tailnet.py"]
+note = "the daemon handler is attacked; forged UDP beacons are attacked in tests/test_fleet_discovery.py only for the signature"
+
+[[group]]
+match = ["listener:graph/serve.py:*"]
+status = "covered"
+tests = ["tests/test_redteam_graph_serve.py::test_the_page_server_listens_on_loopback_only"]
+
+[[group]]
+match = ["listener:serve/broker_wire.py:*"]
+status = "partial"
+tests = [
+  "tests/test_guard_native.py",
+  "tests/test_redteam_iq_override.py::test_the_broker_wire_cannot_lower_a_strict_broker_on_a_start",
+  "tests/test_redteam_iq_override.py::test_a_lease_ask_through_the_broker_is_refused_whatever_the_options_say",
+]
+note = "the lease broker on loopback: its wire is exercised by the guard tests and by hostile start and lease frames that try to lower the IQ mode; other hostile frames are not sent"
+
+[[group]]
+match = ["listener:serve/socket_relay.py:supervise"]
+status = "covered"
+tests = ["tests/test_wsl_backend.py::test_relay_preserves_stream_and_releases_port_on_child_exit",
+         "tests/test_serverkeys.py"]
+note = "loopback relays opaque hostile HTTP and binary bytes through the private Unix socket; the managed model command includes its API key"
+
+[[group]]
+match = ["listener:http_cancel.py:*"]
+status = "n/a"
+note = "outbound HTTP sockets bind an optional source address; they never listen or accept connections"
+
+[[group]]
+match = ["listener:*"]
+status = "n/a"
+note = "binds only to probe whether a port is free, to serve a local fit page on loopback, or to run the sandbox self-test; no request is read from a client"
+
+# -- network egress ------------------------------------------------------------------------
+[[group]]
+match = ["egress:fleet/daemon_control.py:_acknowledge"]
+status = "covered"
+tests = ["tests/test_daemon_control.py::test_owned_idle_replacement_retains_admission_and_rejects_new_work",
+         "tests/test_daemon_control.py::test_other_control_instance_never_requests_shutdown",
+         "tests/test_daemon_control.py::test_control_record_rejects_symlink_and_public_mode",
+         "tests/test_daemon_control.py::test_launcher_replacement_refuses_redirect_before_second_endpoint",
+         "tests/test_daemon_control.py::test_launcher_replacement_refuses_forged_acknowledgment"]
+note = "owned private records bind a fixed loopback instance; redirects cannot move launcher authentication to another endpoint and forged replacement acknowledgments refuse"
+
+[[group]]
+match = ["egress:fleet/launch.py:port_held"]
+status = "covered"
+tests = ["tests/test_fleet_launch.py::test_launcher_waits_for_tcp_close_when_health_is_unavailable"]
+note = "a fixed loopback TCP probe treats timeouts and unhealthy listeners as live; only connection refusal authorizes starting the replacement"
+
+[[group]]
+match = ["egress:fleet/wsl_ui.py:stdio"]
+status = "covered"
+tests = ["tests/test_wsl_ui.py::test_local_ui_relay_preserves_bytes_and_actual_loopback_peer",
+         "tests/test_wsl_ui.py::test_local_ui_transport_keeps_silent_connections_unbounded",
+         "tests/test_wsl_ui.py::test_stdio_helper_exits_cleanly_after_http_response_with_input_open",
+         "tests/test_wsl_ui.py::test_local_ui_close_terminates_idle_helper_and_releases_slot"]
+note = "the helper connects only to Linux loopback with a launcher-selected port, preserves opaque bytes and releases owned sockets and processes on cancellation"
+
+[[group]]
+match = ["egress:fleet/project_client.py:read"]
+status = "covered"
+tests = ["tests/test_remote_transport_attacks.py", "tests/test_project_source.py"]
+note = "signed source replies stay on the exact LAN authority endpoint; wire and plaintext bounds include authenticated sealing overhead"
+
+[[group]]
+match = ["egress:fleet/wsl_network.py:DiscoverySocket.__init__", "egress:fleet/wsl_network.py:_forward"]
+status = "covered"
+tests = ["tests/test_remote_transport_attacks.py::test_wsl_control_replies_reject_oversized_and_malformed_frames",
+         "tests/test_wsl_network.py::test_udp_bridge_refuses_non_discovery_destinations",
+         "tests/test_wsl_network.py::test_udp_bridge_preserves_timeout",
+         "tests/test_wsl_network.py::test_discovery_reply_cache_retains_recent_peers_and_fixed_destinations",
+         "tests/test_wsl_network.py::test_lan_relay_preserves_stream_half_close_and_releases_ports"]
+note = "launcher-selected control and fixed daemon destinations cannot be redirected by relay bytes; control frames and discovery datagrams have bounded reads and deadlines"
+
+[[group]]
+match = ["egress:workspace/remote.py:RemoteWorkspace._request"]
+status = "covered"
+tests = ["tests/test_remote_transport_attacks.py", "tests/test_workspace_remote.py"]
+note = "project credentials stay on the exact LAN authority endpoint; redirects, oversized or malformed replies, and slow responses are refused"
+
+[[group]]
+match = ["egress:net/*", "egress:httpguard.py:*", "egress:http.py:*", "egress:web.py:*",
+         "egress:fleet/models.py:*", "egress:ingest/run.py:*"]
+status = "covered"
+tests = ["tests/test_net_no_bypass.py", "tests/test_httpguard.py", "tests/test_net_download.py",
+         "tests/test_net_untrusted.py"]
+
+[[group]]
+match = ["egress:fleet/onboard/*"]
+status = "covered"
+tests = ["tests/test_onboard_tailnet.py", "tests/test_onboard_transfer.py"]
+
+[[group]]
+match = ["egress:client/rerank.py:*"]
+status = "covered"
+count = 2
+tests = ["tests/test_rerank.py::test_a_hostile_reranker_answer_raises_rerank_error",
+         "tests/test_rerank.py::test_an_oversized_answer_is_refused_without_reading_it_all",
+         "tests/test_rerank.py::test_a_server_that_never_answers_hits_the_timeout",
+         "tests/test_rerank.py::test_a_server_that_drips_its_answer_cannot_outlast_the_deadline",
+         "tests/test_rerank.py::test_a_server_error_status_is_a_rerank_error_that_keeps_the_status"]
+note = "a real hostile socket server: oversized, slow or dripping replies, non-JSON, wrong shapes, bool, negative, out-of-range or non-int indexes, null, string, NaN or infinite scores all raise RerankError"
+
+[[group]]
+match = ["egress:*"]
+status = "partial"
+tests = ["tests/test_net_no_bypass.py"]
+note = "loopback and LAN calls to servers the person configured; the net-no-bypass scan keeps public hosts out, answers from a hostile server (oversized, slow, malformed JSON) are not sent"
+
+# -- desktop and key stores ----------------------------------------------------------------
+[[group]]
+match = ["desktop:desktop.py:*", "desktop:fleet/onboard/notify.py:*"]
+status = "covered"
+tests = ["tests/test_redteam_dialog.py", "tests/test_onboard_notify.py"]
+
+[[group]]
+match = ["desktop:*"]
+status = "n/a"
+note = "fixed scripts that read the battery, focus or login item; no text from outside"
+
+[[group]]
+match = ["keystore:keystore.py:*"]
+status = "covered"
+tests = ["tests/test_keystore.py",
+         "tests/test_keystore_gate.py",
+         "tests/test_redteam_keystore.py",
+         "tests/test_memory_vault.py::test_no_keystore_fails_closed_without_writing_a_key",
+         "tests/test_memory_vault.py::test_the_key_is_never_written_beside_the_data",
+         "tests/test_credentials.py",
+         "tests/test_no_real_keychain.py"]
+note = "refusal, rate ceiling, background process, other-purpose key, label collision, master in no file or log"
+
+[[group]]
+match = ["keystore:fleet/onboard/signing.py:*"]
+status = "covered"
+tests = ["tests/test_keystore.py::test_the_fleet_signing_key_moves_into_a_wrapped_file_and_the_old_item_goes",
+         "tests/test_keystore.py::test_a_signing_key_move_cut_off_after_the_wrap_is_finished_by_the_next_call",
+         "tests/test_keystore.py::test_a_signing_key_move_cut_off_after_the_old_item_went_still_signs",
+         "tests/test_onboard_signing.py",
+         "tests/test_redteam_human_floor.py::test_building_the_signing_keys_never_asks_the_keystore",
+         "tests/test_no_real_keychain.py"]
+note = "the wrapped key unwraps only for its purpose and directory; a refusing keystore leaves the old item and the record unchanged"
+
+# -- text that reaches a model -------------------------------------------------------------
+[[group]]
+match = ["context:chat.py", "context:agent/loop.py", "context:agent/compact.py",
+         "context:agent/summarise.py"]
+status = "covered"
+tests = ["tests/test_redteam_chat.py", "tests/test_redteam_loop.py", "tests/test_taint_flows.py"]
+
+[[group]]
+match = ["context:decide/logprob.py", "context:vision/*"]
+status = "covered"
+tests = ["tests/test_redteam_judge.py", "tests/test_decide_questions.py"]
+
+[[group]]
+match = ["context:graph/*", "context:ingest/extract.py"]
+status = "uncovered"
+note = "a note, page or document the graph or ingest reads is put in the model's prompt; no test plants an instruction in a source and checks what the model's reply can do"
+
+[[group]]
+match = ["context:*"]
+status = "n/a"
+note = "prompts built from the person's own benchmark questions, canaries and fixed smoke checks"
+
+[[group]]
+match = ["parser:gym/world_files.py", "parser:gym/car_definition.py", "parser:gym/traffic_world.py",
+         "parser:fleet/request_fields.py", "parser:fleet/gym_recording_routes.py", "parser:fleet/workspace_routes.py"]
+status = "covered"
+count = 6
+tests = ["tests/test_redteam_gym_http.py", "tests/test_fleet_gym_boundaries.py"]
+note = "planted files cannot escape the import root; invalid native JSON, XML entities and include paths are rejected; malformed browser JSON and review/frame symlinks are refused"
+
+# -- parsers and readers of files, pages and messages --------------------------------------
+[[group]]
+match = ["parser:workspace/project_connection.py"]
+status = "covered"
+tests = ["tests/test_project_connection.py"]
+note = "corrupt connection records and conflicting checkout authorities refuse device-local fallback and privileged operations"
+
+[[group]]
+match = ["parser:workspace/remote.py"]
+status = "covered"
+tests = ["tests/test_remote_transport_attacks.py", "tests/test_workspace_remote.py"]
+note = "sealed replies must be bounded JSON objects and project capabilities cannot cross authorities or projects"
+
+[[group]]
+match = ["parser:net/*", "parser:web.py", "parser:sources/html.py", "parser:taint/*",
+         "parser:guard/*", "parser:hub/modelfile.py", "parser:hub/capabilities.py"]
+status = "covered"
+tests = ["tests/test_net_untrusted.py", "tests/test_pdf_engine.py",
+         "tests/test_hub_modelfile.py::test_every_hostile_header_is_refused_quickly",
+         "tests/test_redteam_judge.py",
+         "tests/test_model_capabilities.py::test_hostile_model_metadata_is_refused_without_a_crash"]
+
+[[group]]
+match = ["parser:workspace/remote_host.py"]
+status = "covered"
+count = 1
+tests = [
+  "tests/test_project_board_ui.py::test_person_connect_rejects_invalid_content_length_without_registry_mutation",
+  "tests/test_project_board_ui.py::test_person_connect_rejects_invalid_json_without_registry_mutation",
+  "tests/test_project_board_ui.py::test_person_board_rejects_foreign_requests",
+  "tests/test_project_board_ui.py::test_person_post_rejects_different_browser_origin",
+]
+note = "person joins reject hostile length and JSON bodies without registry mutation; browser session and origin remain checked"
+
+[[group]]
+match = ["parser:workspace/*"]
+status = "covered"
+tests = ["tests/test_workspace_bus.py", "tests/test_workspace_rules.py"]
+
+[[group]]
+match = ["parser:sentinel/*", "parser:memory/*"]
+status = "covered"
+tests = ["tests/test_sentinel_store.py", "tests/test_redteam_memory.py",
+         "tests/test_memory_vault.py::test_flipping_any_byte_of_the_ciphertext_or_header_is_detected"]
+
+[[group]]
+match = ["parser:fleet/onboard/*"]
+status = "covered"
+tests = ["tests/test_onboard_manifest.py", "tests/test_peer_pairing.py", "tests/test_onboard_pairing.py"]
+
+[[group]]
+match = ["parser:hub/*", "parser:ingest/*", "parser:sources/*", "parser:media/*",
+         "parser:speech/*", "parser:scrape/*", "parser:vision/*"]
+status = "uncovered"
+note = "a crafted model-repository listing, card, document, mailbox, WAV or archive reaches the reader; only tests/test_hub_modelfile.py attacks one"
+
+[[group]]
+match = ["parser:*"]
+status = "uncovered"
+note = "files the product wrote for itself (stores, caches, snapshots, case files) are read back; a hand-edited or planted file is not tried"
+
+[[group]]
+match = ["route:fleet/component_routes.py:/ui/models/addons"]
+status = "covered"
+tests = ["tests/test_model_components.py::test_addon_route_refuses_untrusted_requests_before_component_lookup",
+         "tests/test_model_components.py::test_component_flags_refuse_untyped_selection_before_source_lookup"]
+note = "unauthenticated and forged UI requests refuse before lookup; malformed component flags refuse before source lookup"
+
+[[group]]
+match = ["route:fleet/knowledge_routes.py:*"]
+status = "covered"
+tests = ["tests/test_fleet_knowledge.py::test_inspector_authorization_path_bounds_and_read_only", "tests/test_fleet_knowledge.py::test_registered_project_graph_requires_local_person", "tests/test_fleet_knowledge.py::test_large_fields_and_directory_discovery_are_bounded", "tests/test_fleet_knowledge.py::test_kind_identity_bounds_refuse_oversized_values"]
+note = "UI authorization, registered project scope, read-only access, traversal, symlinks and bounded graph fields are exercised"

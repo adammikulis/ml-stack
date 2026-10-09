@@ -9,192 +9,114 @@ on:
         required: false
         type: string
         default: ""
-      ref:
-        description: what to check out; the caller's own ref when empty
-        type: string
-        required: false
-        default: ""
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
-  group: release-${{ github.ref }}-${{ inputs.ref }}
+  group: release-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  wheels:
+  build:
+    uses: ./.github/workflows/release-build.yml
+    with:
+      tag: ${{ inputs.tag }}
+
+  # The tag must name the checked-out commit, and that commit must be reachable from main.
+  guard:
+    if: inputs.tag != '' || startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          ref: ${{ inputs.ref }}
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-      - run: python -m pip install --upgrade pip build
-      - run: python packaging/build.py
-      - uses: actions/upload-artifact@v4
-        with:
-          name: wheels
-          path: dist/*.whl
-          retention-days: 7
-
-  bundle:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: macos-14
-            asset: ml-stack-macos-arm64
-          - os: ubuntu-latest
-            asset: ml-stack-linux-x86_64
-          - os: windows-latest
-            asset: ml-stack-windows-x86_64
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.ref }}
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: app/src-tauri
-      - name: what the window needs on Linux
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
-            librsvg2-dev patchelf
-      - run: python -m pip install --upgrade pip build
-      - run: python packaging/build.py --bundle
-
-      # The headless binary is the daemon and page the window runs as its sidecar.
-      - name: a browser to drive the page
-        run: |
-          python -m pip install playwright
-          python -m playwright install --with-deps chromium
-      - name: it starts and serves the interface
-        shell: bash
-        run: |
-          BIN=$(find dist/bundle -maxdepth 3 -name 'ml-stack-headless*' -type f | head -1)
-          echo "starting $BIN"
-          "$BIN" --port 8899 --no-browser &
-          for _ in $(seq 1 40); do
-            if curl -sf http://127.0.0.1:8899/health >/dev/null; then
-              break
-            fi
-            sleep 1
-          done
-          curl -sf http://127.0.0.1:8899/health
-      - name: a person sets it up and opens every screen
-        run: >-
-          python packaging/smoke.py http://127.0.0.1:8899
-          --passphrase "correct horse battery staple" --group ci
-          --screenshot dist/smoke.png
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: ${{ matrix.asset }}-smoke
-          path: dist/smoke.png
-          if-no-files-found: ignore
-          retention-days: 7
-
-      # The screens, not just the assets. ml_stack.serve is reached through a lazy
-      # import, so nothing static points at it and only a running bundle says whether
-      # PyInstaller carried it.
-      - name: the screens answer
-        shell: bash
-        run: |
-          U='X-ML-Stack-UI: 1'; J='Content-Type: application/json'
-          B=http://127.0.0.1:8899
-          C=$(curl -s -D- -o /dev/null -H "$J" -H "$U" -X POST \
-            -d '{"passphrase":"correct horse battery staple"}' \
-            $B/ui/session | tr -d '\r' | awk 'tolower($1)=="set-cookie:"{print $2}' \
-            | cut -d';' -f1)
-          test -n "$C" || { echo "no session cookie"; exit 1; }
-          for p in /ui/chat /ui/models /ui/serving /ui/conversations /ui/uninstall; do
-            code=$(curl -s -o /tmp/body -w '%{http_code}' -H "$U" -H "Cookie: $C" "$B$p")
-            echo "$p -> $code $(head -c 120 /tmp/body)"
-            test "$code" = "200" || { echo "$p did not answer"; exit 1; }
-          done
-          curl -sf -o /tmp/serving -H "$U" -H "Cookie: $C" $B/ui/serving
-          grep -q '"can_serve": true' /tmp/serving \
-            || { echo "the bundle cannot run a model: ml_stack.serve is missing"; exit 1; }
-
-      # Python rather than zip(1): Windows runners have no zip in bash.
-      # The name carries the tag, or the commit for a build off a branch, so two
-      # downloads in one folder are two files and it is clear which is which. It
-      # stays a suffix: install.sh, install.ps1 and the updater all look for
-      # "ml-stack-<os>-<arch>" inside the name, including the copies already out there.
-      - name: package it
-        shell: bash
+          persist-credentials: false
+          fetch-depth: 0
+      - name: the tagged commit is on main
         env:
-          TAG: ${{ inputs.tag || (startsWith(github.ref, 'refs/tags/') && github.ref_name) || '' }}
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
-          stamp="$TAG"
-          [ -n "$stamp" ] || stamp=$(git rev-parse --short HEAD)
-          python packaging/pack.py dist/bundle "dist/${{ matrix.asset }}-$stamp.zip"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.asset }}
-          path: dist/${{ matrix.asset }}-*.zip
-          retention-days: 7
+          head=$(git rev-parse HEAD)
+          tagged=$(git rev-parse -q --verify "refs/tags/$TAG^{commit}" || true)
+          test "$tagged" = "$head" || { echo "tag $TAG is $tagged, not the checked-out $head"; exit 1; }
+          git merge-base --is-ancestor "$head" origin/main \
+            || { echo "$head is not an ancestor of main"; exit 1; }
 
   # Trusted publishing: the action mints an OIDC token from `id-token: write` and PyPI
-  # matches it against the publisher registered for this workflow filename. A `password:`
-  # here would be used instead of the token and the match would never be attempted.
+  # matches it against the publisher registered for this workflow filename and the
+  # `release` environment. A `password:` here would be used instead of the token and the
+  # match would never be attempted.
   pypi:
-    needs: wheels
+    needs: [build, guard]
     if: >-
-      needs.wheels.result == 'success'
+      !cancelled()
+      && needs.build.outputs.wheels == 'success'
+      && needs.guard.result == 'success'
       && (inputs.tag != '' || startsWith(github.ref, 'refs/tags/'))
       && vars.PYPI_ENABLED == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    environment: release
     permissions:
       id-token: write
     steps:
-      - uses: actions/download-artifact@v4
+      - name: the signing key is set before anything is published
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: test -n "$RELEASE_SIGNING_KEY" || { echo "RELEASE_SIGNING_KEY is not set in the release environment"; exit 1; }
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: wheels
           path: dist
-      - uses: pypa/gh-action-pypi-publish@release/v1
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           skip-existing: true
 
   publish:
-    needs: [wheels, bundle, pypi]
+    needs: [build, guard, pypi]
     # A platform whose runner was unavailable should not hold back the ones that are
     # ready, so a skipped or cancelled bundle still publishes. A bundle that ran and
     # failed does not: that is a broken zip on the release page. A pypi job that failed
     # does not hold it back either; the notes then leave the pip line out.
     if: >-
       !cancelled()
-      && needs.wheels.result == 'success'
-      && needs.bundle.result != 'failure'
+      && needs.build.outputs.wheels == 'success'
+      && needs.build.outputs.bundle != 'failure'
+      && needs.guard.result == 'success'
       && (inputs.tag != '' || startsWith(github.ref, 'refs/tags/'))
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    environment: release
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: artifacts
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          ref: ${{ inputs.ref }}
+          persist-credentials: false
           path: repo
           fetch-depth: 0
+      - name: leave the smoke screenshots out
+        run: rm -rf artifacts/*-smoke
       - name: collect the network installers
         run: cp repo/packaging/install.sh repo/packaging/install.ps1 artifacts/
+
+      - name: sign the downloads
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          test -n "$RELEASE_SIGNING_KEY" || { echo "RELEASE_SIGNING_KEY is not set"; exit 1; }
+          key="$RUNNER_TEMP/release_key"
+          (umask 077; printf '%s\n' "$RELEASE_SIGNING_KEY" > "$key")
+          find artifacts -name 'ml-stack-*.zip' -type f | while read -r zip; do
+            ssh-keygen -Y sign -f "$key" -n ml-stack-release "$zip"
+          done
+          rm -f "$key"
+          test -n "$(find artifacts -name 'ml-stack-*.zip.sig' -type f -print -quit)"
 
       - name: what to download
         id: downloads
@@ -233,7 +155,7 @@ jobs:
             fi
             if [ -n "$wheel" ] && [ "$PYPI" = "success" ]; then
               echo
-              echo "**If you write Python**: \`pip install $dist\`, and \`${dist}[train]\`, \`[serve]\` or \`[all]\` for what needs more than the standard library."
+              echo "**If you write Python**: \`pip install $dist\`, and \`${dist}[train]\`, or \`[all]\` for what needs more than the core."
             fi
             echo "DOWNLOADS_EOF"
           } >> "$GITHUB_OUTPUT"
@@ -290,7 +212,7 @@ jobs:
             echo "CHANGELOG_EOF"
           } >> "$GITHUB_OUTPUT"
 
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: ${{ inputs.tag || github.ref_name }}
           files: artifacts/**/*

@@ -435,7 +435,9 @@ def test_the_launcher_execs_python_app_on_a_framework_build(tmp_path, monkeypatc
     real = sysconfig.get_config_var
     monkeypatch.setattr(sysconfig, "get_config_var",
                         lambda name: "Python" if name == "PYTHONFRAMEWORK" else real(name))
-    assert repr(str(app)) in fake_llama_binary(tmp_path).read_text()
+    assert fakes._interpreter() == str(app)
+    if sys.platform != "win32":
+        assert repr(str(app)) in fake_llama_binary(tmp_path).read_text(encoding="utf-8")
     monkeypatch.setattr(sysconfig, "get_config_var",
                         lambda name: "" if name == "PYTHONFRAMEWORK" else real(name))
     assert fakes._interpreter() == sys.executable

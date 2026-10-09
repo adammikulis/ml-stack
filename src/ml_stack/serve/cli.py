@@ -2,19 +2,22 @@
 
 Every subcommand parses its arguments and prints; the work is in `ml_stack.serve.ops`, and
 each command group's own parsing lives beside it: `status_cli`, `lifecycle_cli` (up, down,
-escalate, build), `profile_cli`, `fit_cli`, `machine_cli` (memory, limits, reclaim),
-`broker_cli` (broker, queue).
+escalate, build), `slots_cli`, `profile_cli`, `fit_cli`, `machine_cli` (memory, limits, reclaim),
+`broker_cli` (broker, queue), `lease_cli` (leases, history).
 """
 
 from __future__ import annotations
 
-from ml_stack.command import Group
+from ml_stack.command import Group, flag
 from ml_stack.serve import (
     broker_cli,
     fit_cli,
+    lease_cli,
     lifecycle_cli,
+    llamacpp_cli,
     machine_cli,
     profile_cli,
+    slots_cli,
     status_cli,
 )
 
@@ -33,7 +36,12 @@ COMMANDS.add(
 COMMANDS.add(
     "up", lifecycle_cli.cmd_up,
     help="serve a model, or adopt the one already serving it",
-    options=lifecycle_cli.OPTIONS_UP)
+    options=lifecycle_cli.OPTIONS_UP, allow_abbrev=False)
+
+COMMANDS.add(
+    "hold", lifecycle_cli.cmd_hold,
+    help="the process `up` starts to hold its lease; not run by hand",
+    options=[flag("id", help="the lease id `up` wrote")])
 
 COMMANDS.add(
     "profile", profile_cli.cmd_profile,
@@ -72,10 +80,22 @@ COMMANDS.add(
     options=lifecycle_cli.OPTIONS_ESCALATE)
 
 COMMANDS.add(
+    "slots", slots_cli.cmd_slots,
+    help="save a running server's slot caches to disk, or restore them; a dump from a "
+         "different model, context, slot count or build is refused",
+    options=slots_cli.OPTIONS)
+
+COMMANDS.add(
     "build", lifecycle_cli.cmd_build,
     help="build llama-server from llama.cpp's own master (or download the newest "
          "release), and switch to it once it is verified",
     options=lifecycle_cli.OPTIONS_BUILD)
+
+COMMANDS.add(
+    "llama-cpp", llamacpp_cli.cmd_llama_cpp,
+    help="follow upstream llama.cpp: which llama-server is in use, build a newer one from "
+         "source in the sandbox, switch to it only after a smoke test, roll back, pin, prune",
+    options=llamacpp_cli.OPTIONS)
 
 COMMANDS.add(
     "broker", broker_cli.cmd_broker,
@@ -86,6 +106,16 @@ COMMANDS.add(
     "queue", broker_cli.cmd_queue,
     help="the servers the broker holds, who holds each, and who is waiting",
     options=broker_cli.OPTIONS_QUEUE)
+
+COMMANDS.add(
+    "leases", lease_cli.cmd_leases,
+    help="every server the broker holds, and for each holder why it was taken, by whom and from where",
+    options=lease_cli.OPTIONS_LEASES)
+
+COMMANDS.add(
+    "history", lease_cli.cmd_history,
+    help="the leases that have ended: model, reason, requester, branch, when and for how long",
+    options=lease_cli.OPTIONS_HISTORY)
 
 
 if __name__ == "__main__":

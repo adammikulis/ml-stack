@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import contextlib
 import json
+import threading
 import time
+from collections.abc import Callable, Iterator
+from dataclasses import replace
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any
@@ -12,23 +15,33 @@ from typing import Any
 from ml_stack.home import machine_id
 from ml_stack.http import Server, ServerError, open_stream
 
-from . import pausing
+from . import pausing, recovery
 from .discovery import (
     DiscoveryError,
-    check_passphrase,
     cluster_group,
     derive_token,
     discover,
-    in_cluster,
-    join_cluster,
+    leave,
     load_cluster_key,
     memberships,
     named_apart,
+    require_name,
 )
-from .join import default_root
+from .launch_secret import LaunchSecret
+from .onboard.joining import (
+    DEFAULT_JOIN_OPTIONS,
+    JoinOptions,
+    cluster_action,
+    join_by_passphrase,
+    join_existing,
+    matches,
+)
 from .page import FIT_ONLY
 from .routes import ASSETS, UI_HEADER, asset_bytes, routes, write, write_json
+from .runtime_paths import default_root
+from .serving import Hosting, ServeSettings
 from .session import Sessions, Throttle, parse_cookie
+from .settings import apply_preferences
 
 __all__ = ["ASSETS", "UI", "UI_HEADER", "asset_bytes", "routes", "serve_page"]
 
@@ -87,6 +100,8 @@ class UI:
         self.conversations: Any = None
         self.downloads: Any = None
         self.root: Any = None
+        self.projects: Any = None
+        self.workspaces: Any = None
         self.hosting: Any = None
         self.detach: Any = None
         """How a sweep is started: the bench's own `detach` unless a test hands in a fake."""
@@ -105,7 +120,16 @@ class UI:
         self.setup_token = setup_token
         self.sessions = Sessions()
         self.throttle = Throttle()
+        self.launch_throttle = Throttle()
+        self.redeem_throttle = Throttle()
+        self.launch: LaunchSecret | None = None
+        """The secret that lets this machine's own window or owner terminal ask for a ticket."""
+        self.audit: Callable[..., None] | None = None
+        """``(event, **fields)``: appends a row to the audit chain; the workspaces' audit when unset."""
+        self._join_lock = threading.Lock()
         self._peers: tuple[float, list[dict[str, Any]]] = (0.0, [])
+        self.setup_jobs = None
+        self._setup_jobs_lock = threading.Lock()
 
     # -- guards ----------------------------------------------------------
     def host_ok(self, host_header: str) -> bool:
@@ -130,14 +154,28 @@ class UI:
     def authed(self, cookie_header: str) -> bool:
         return self.sessions.get(parse_cookie(cookie_header)) is not None
 
+    def credentialed(self, cookie_header: str) -> bool:
+        """Whether the cookie names a session whose origin the server checked a credential for."""
+        session = self.sessions.get(parse_cookie(cookie_header))
+        return session is not None and session.credentialed
+
+    def record(self, event: str, **fields: Any) -> None:
+        """Append a session event to the audit chain; ticket and secret values are never passed."""
+        audit = self.audit or getattr(self.workspaces, "audit", None)
+        if audit is not None:
+            audit(event, **fields)
+
     # -- state -----------------------------------------------------------
     def state(self) -> dict[str, Any]:
-        joined = in_cluster(self.cluster_key_path)
+        selected = memberships(self.cluster_key_path)
+        joined = bool(selected)
+        mode = selected[0].mode if selected else getattr(self.settings, "cluster_mode", "") or "dev"
         done = bool(self.settings and self.settings.setup_done)
         return {"in_cluster": joined, "name": self.name,
                 "group": cluster_group(self.cluster_key_path) if joined else None,
-                "needs_password": joined,
-                "needs_setup": not (joined or done)}
+                "needs_password": joined, "cluster_mode": mode,
+                "selection": getattr(selected[0], "selection", "automatic") if selected else "automatic",
+                "needs_setup": not done}
 
     def setup_finished(self) -> dict[str, Any]:
         """Remember that the wizard was finished, so it is not shown again."""
@@ -146,6 +184,11 @@ class UI:
             if self.settings_path is not None:
                 self.settings.save(self.settings_path)
         return self.state()
+
+    def leave(self, group: str) -> list[Any]:
+        """Drop a cluster and its stored passphrase; the clusters left."""
+        recovery.forget(group, self.cluster_key_path)
+        return leave(group, self.cluster_key_path)
 
     def rejoined(self) -> None:
         """The set of clusters changed: advertise on the new one, drop the old."""
@@ -165,12 +208,11 @@ class UI:
                 "slots": slots, "free": int(status.get("free", slots)),
                 "host": "127.0.0.1", "hostname": "",
                 "base_url": f"http://127.0.0.1:{self.peer_port}",
+                "display_url": self.projects.host if self.projects is not None else "",
                 "is_self": True, "clusters": []}
 
     def peers(self, *, force: bool = False) -> list[dict[str, Any]]:
         """Everyone on the LAN, cached briefly. The browser cannot do this itself."""
-        from .discovery import memberships
-
         age, cached = self._peers
         if not force and time.time() - age < DISCOVER_CACHE_S:
             return cached
@@ -180,10 +222,13 @@ class UI:
         # One machine in two of your clusters is one machine, listed once, with the
         # clusters you share with it. Each cluster is advertised separately, so the
         # same daemon answers on each with a beacon of its own.
-        by_address: dict[str, dict[str, Any]] = {}
+        local = self.itself()
+        local["clusters"] = [member.group for member in joined]
+        by_address: dict[str, dict[str, Any]] = {local["machine"]: local}
         for member in joined:
             for beacon in discover(member.key, timeout_s=1.5, port=self.discovery_port):
-                row = by_address.get(beacon.base_url)
+                identity = beacon.machine or beacon.base_url
+                row = by_address.get(identity)
                 if row is None:
                     row = beacon.public()
                     row["host"] = beacon.host
@@ -191,7 +236,7 @@ class UI:
                     row["called"] = beacon.name
                     row["is_self"] = beacon.machine == machine_id()
                     row["clusters"] = []
-                    by_address[beacon.base_url] = row
+                    by_address[identity] = row
                 if member.group not in row["clusters"]:
                     row["clusters"].append(member.group)
         found = sorted(named_apart(list(by_address.values())),
@@ -200,24 +245,51 @@ class UI:
         return found
 
     # -- actions ---------------------------------------------------------
-    def join(self, passphrase: str, group: str, source: str) -> tuple[dict[str, Any], str]:
-        """Join a cluster, and sign the person in. Returns ``(state, session id)``."""
+    @contextlib.contextmanager
+    def join_guard(self) -> Iterator[None]:
+        """Serialize cluster membership changes without waiting on another handshake."""
+        if not self._join_lock.acquire(blocking=False):
+            raise DiscoveryError("another join is in progress; try again")
+        try:
+            yield
+        finally:
+            self._join_lock.release()
+
+    def join(self, passphrase: str, group: str, source: str, *,
+             options: JoinOptions = DEFAULT_JOIN_OPTIONS, origin: str = "") -> tuple[dict[str, Any], str]:
+        """Join a cluster and open a session carrying ``origin``. Returns ``(state, session id)``."""
+        group = require_name(group)
         held = self.throttle.blocked_for(source)
         if held:
             raise DiscoveryError(f"too many attempts -- wait {held:.0f}s")
-        if not self.throttle.acquire():
-            raise DiscoveryError("busy deriving another key; try again in a moment")
         try:
-            join_cluster(passphrase, group=group or "ml-stack",
-                         path=self.cluster_key_path)
-        finally:
-            self.throttle.release()
+            with self.join_guard():
+                if options.action is not None:
+                    cluster_action(options.action, passphrase, group, self.cluster_key_path,
+                                   options=replace(options, port=options.port if options.port is not None else self.discovery_port))
+                else:
+                    joiner = join_existing if options.existing else join_by_passphrase
+                    joiner(passphrase, group, self.cluster_key_path,
+                           options=replace(options, port=options.port if options.port is not None else self.discovery_port))
+                recovery.remember(passphrase, group, self.cluster_key_path)
+        except DiscoveryError:
+            self.throttle.failed(source)
+            raise
         self.throttle.succeeded(source)
         self._peers = (0.0, [])
         if self.on_join is not None:
             with contextlib.suppress(Exception):
                 self.on_join()
-        return self.state(), self.sessions.open("setup").sid
+        session = self.sessions.open("setup", origin)
+        self.record("session.open", who="setup", origin=origin, source=source)
+        return self.state(), session.sid
+
+    def set_name(self, name: str) -> str:
+        """Set the device name through the active advertiser."""
+        self.name = self.rename(name) if callable(self.rename) else name
+        if self.settings is not None:
+            self.settings.name = self.name
+        return self.name
 
     def apply_prefs(self, req: dict[str, Any]) -> dict[str, Any]:
         """Apply the wizard's preference step. Everything takes effect now."""
@@ -227,14 +299,15 @@ class UI:
         settings = self.settings
         if settings is None:
             return out
+        if error := apply_preferences(settings, req):
+            return {"error": error}
 
         if "slots" in req and self.runner is not None:
             settings.slots = self.runner.set_slots(1)
             out["applied"].append("one job at a time")
         if "name" in req and str(req["name"]).strip():
             called = str(req["name"]).strip()[:64]
-            settings.name = self.rename(called) if callable(self.rename) else called
-            self.name = settings.name
+            self.set_name(called)
             out["applied"].append(f"this machine is called {settings.name}")
         if "labels" in req:
             settings.labels = [str(s) for s in req["labels"] if str(s).strip()]
@@ -244,12 +317,9 @@ class UI:
             settings.on_paused = req["on_paused"]
         if "on_close" in req and req["on_close"] in ("", "background", "quit"):
             settings.on_close = req["on_close"]
-        if "auto_update" in req:
-            settings.auto_update = bool(req["auto_update"])
-        if "autodownload_models" in req:
-            settings.autodownload_models = bool(req["autodownload_models"])
-        if "context" in req:
-            settings.context = max(512, min(1 << 20, int(req["context"])))
+        for key in ("auto_update", "autodownload_models"):
+            if key in req:
+                setattr(settings, key, bool(req[key]))
 
         if req.get("work_hours") and self.schedule is not None:
             spec = str(req.get("work_hours_spec") or "mon-fri 09:00-17:00")
@@ -281,16 +351,14 @@ class UI:
 
     def _hosting(self) -> Any:
         if self.hosting is None:
-            from .serving import Hosting
-
             self.hosting = Hosting(self.root or default_root(), self.serving)
         return self.hosting
 
     def start_serving(self, model: Any) -> Any:
         """Run ``model`` on this machine and tell the network it is here."""
         return self._hosting().start(
-            model.path, name=model.name,
-            context=int(getattr(self.settings, "context", 0) or 8192))
+            model.path, ServeSettings(name=model.name,
+            context=int(getattr(self.settings, "context", 0) or 8192)))
 
     def stop_serving(self, port: int) -> None:
         """Stop a model server this machine started."""
@@ -313,6 +381,7 @@ class UI:
                             machine=str(row.get("machine") or ""))
             rows.append({**describe(beacon, clusters=row.get("clusters") or [],
                                     self_machine=machine_id()),
+                         "display_url": str(row.get("display_url") or ""),
                          "called": str(row.get("called") or row["name"])})
         models = sorted({m for r in rows for m in r["models"]})
         return {"peers": rows, "models": models, "self": self.name,
@@ -321,11 +390,10 @@ class UI:
     def join_fleet(self, *, passphrase: str = "", group: str = "", persist: bool = False,
                    name: str = "") -> dict[str, Any]:
         """The Join button: `join.join_machine`, with this daemon as the one already up."""
-        from .discovery import join as join_cluster
         from .join import join_machine
 
         def enrol(words: str, named: str) -> None:
-            join_cluster(words, group=named, path=self.cluster_key_path)
+            join_by_passphrase(words, named, self.cluster_key_path)
             self.rejoined()
 
         said: list[str] = []
@@ -516,7 +584,7 @@ class UI:
               token: str = "", ticket: str = "") -> str | None:
         """A session id, or None. Raises ``DiscoveryError`` when held off or overloaded."""
         if ticket:
-            return self.sessions.open("ticket").sid if self.sessions.spend_ticket(ticket) else None
+            return self._redeem(source, ticket)
 
         key = load_cluster_key(self.cluster_key_path)
         if key is None:
@@ -525,8 +593,10 @@ class UI:
         if token:
             if _same(token, derive_token(key)):
                 self.throttle.succeeded(source)
-                return self.sessions.open("token").sid
+                self.record("session.open", who="token", origin="token", source=source)
+                return self.sessions.open("token", "token").sid
             self.throttle.failed(source)
+            self.record("session.refused", reason="token", source=source)
             return None
 
         held = self.throttle.blocked_for(source)
@@ -535,15 +605,34 @@ class UI:
         if not self.throttle.acquire():
             raise DiscoveryError("busy checking another passphrase; try again")
         try:
-            ok = check_passphrase(passphrase, group=group or None,
-                                  path=self.cluster_key_path)
+            ok = matches(passphrase, group or cluster_group(self.cluster_key_path) or "",
+                         self.cluster_key_path)
         finally:
             self.throttle.release()
         if not ok:
             self.throttle.failed(source)
+            self.record("session.refused", reason="passphrase", source=source)
             return None
         self.throttle.succeeded(source)
-        return self.sessions.open("passphrase").sid
+        self.record("session.open", who="passphrase", origin="passphrase", source=source)
+        return self.sessions.open("passphrase", "passphrase").sid
+
+    def _redeem(self, source: str, ticket: str) -> str | None:
+        held = self.redeem_throttle.blocked_for(source)
+        if held:
+            raise DiscoveryError(f"too many attempts -- wait {held:.0f}s")
+        kind = self.sessions.spend_ticket(ticket)
+        if not kind:
+            self.redeem_throttle.failed(source)
+            self.record("session.refused", reason="ticket", source=source)
+            return None
+        state = self.state()
+        if kind == "launch-secret" and state["in_cluster"] and state["cluster_mode"] == "prod":
+            self.record("session.refused", reason="production-needs-passphrase", source=source)
+            return None
+        self.redeem_throttle.succeeded(source)
+        self.record("session.open", who="ticket", origin="launch-ticket", source=source)
+        return self.sessions.open("ticket", "launch-ticket").sid
 
 
 def _same(a: str, b: str) -> bool:

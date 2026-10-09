@@ -1,0 +1,151 @@
+"""Write THIRD_PARTY_NOTICES.md, or with --check fail on a disallowed licence.
+
+The Python side is the installed closure of the extras a bundle ships (`ml_stack.installed.extras`);
+the Rust side is `cargo metadata` over a copy of app/src-tauri, when cargo is on PATH.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+from importlib import metadata
+from pathlib import Path
+
+from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
+
+ROOT = Path(__file__).resolve().parent.parent
+STATIC = ROOT / "scripts" / "notices_static.md"
+OUT = ROOT / "THIRD_PARTY_NOTICES.md"
+EXTRAS = ("store", "hub", "web", "plot", "graph", "serve")
+
+DISALLOWED = re.compile(
+    r"\b(A?GPL|LGPL|GNU|SSPL|Commons[- ]Clause|CC-BY-NC|Non-?Commercial|Proprietary|UNKNOWN)", re.I
+)
+"""Terms that do not belong in a bundle distributed under Apache-2.0."""
+
+
+LICENSE_OVERRIDES: dict[tuple[str, str], tuple[str, str]] = {
+    ("socksio", "1.0.0"): (
+        "MIT",
+        "socksio-1.0.0.dist-info/LICENSE is the MIT License (Copyright (c) 2019, the socksio authors, "
+        "see the project's repository) and the METADATA classifier says 'License :: OSI Approved :: MIT "
+        "License'; only the legacy License: field is the literal 'UNKNOWN'",
+    ),
+}
+"""Packages whose metadata does not state a licence, keyed by (normalised name, exact version).
+
+Each entry names the licence and where the claim was verified. The exact version is part of the key so an upgrade
+has to be looked at again; this is not an allow-list of licences.
+"""
+
+
+def _license_of(dist: metadata.Distribution) -> str:
+    md = dist.metadata
+    override = LICENSE_OVERRIDES.get((canonicalize_name(md["Name"]), dist.version))
+    if override:
+        return override[0]
+    expr = md.get("License-Expression")
+    if expr:
+        return expr.strip()
+    classifiers = [
+        c.split("::")[-1].strip() for c in md.get_all("Classifier") or [] if c.startswith("License ::")
+    ]
+    text = (md.get("License") or "").strip()
+    if text and len(text) <= 80 and "\n" not in text:
+        return text
+    return "; ".join(c for c in classifiers if c != "OSI Approved") or "UNKNOWN"
+
+
+def python_closure() -> list[tuple[str, str, str]]:
+    seen: dict[str, metadata.Distribution] = {}
+    todo: list[tuple[str, tuple[str, ...]]] = [("ml-stack", EXTRAS)]
+    while todo:
+        name, extras = todo.pop()
+        key = canonicalize_name(name)
+        try:
+            dist = metadata.distribution(name)
+        except metadata.PackageNotFoundError:
+            continue
+        if key in seen and key != "ml-stack":
+            continue
+        seen[key] = dist
+        for raw in dist.requires or []:
+            req = Requirement(raw)
+            if req.marker is not None and not any(req.marker.evaluate({"extra": e}) for e in (*extras, "")):
+                continue
+            todo.append((req.name, tuple(req.extras)))
+    rows = [(d.metadata["Name"], d.version, _license_of(d)) for k, d in seen.items() if k != "ml-stack"]
+    return sorted(rows, key=lambda r: r[0].lower())
+
+
+def rust_crates() -> list[tuple[str, str, str]]:
+    if shutil.which("cargo") is None:
+        return []
+    with tempfile.TemporaryDirectory() as tmp:
+        work = Path(tmp) / "src-tauri"
+        shutil.copytree(ROOT / "app" / "src-tauri", work, ignore=shutil.ignore_patterns("target"))
+        done = subprocess.run(
+            ["cargo", "metadata", "--format-version", "1"], cwd=work, capture_output=True, text=True, check=False
+        )
+    if done.returncode != 0:
+        return []
+    packages = json.loads(done.stdout)["packages"]
+    rows = [(p["name"], p["version"], p.get("license") or "UNKNOWN") for p in packages if p.get("source")]
+    return sorted(rows, key=lambda r: r[0].lower())
+
+
+def is_allowed(lic: str) -> bool:
+    for alternative in re.split(r"\s+OR\s+|;|/", lic):
+        if all(not DISALLOWED.search(part) for part in re.split(r"\s+AND\s+", alternative)):
+            return True
+    return False
+
+
+def table(rows: list[tuple[str, str, str]]) -> str:
+    lines = ["| Package | Version | Licence |", "|---|---|---|"]
+    plain = re.compile(r"\b(MIT|BSD) License")
+    for name, version, lic in rows:
+        shown = plain.sub(r"\1", lic).replace("|", "/")
+        lines.append(f"| `{name}` | {version} | {shown} |")
+    return "\n".join(lines)
+
+
+def main(argv: list[str]) -> int:
+    py, rust = python_closure(), rust_crates()
+    bad = [(n, v, lic) for n, v, lic in py + rust if not is_allowed(lic)]
+    if "--check" in argv:
+        for n, v, lic in bad:
+            sys.stderr.write(f"disallowed licence: {n} {v}: {lic}\n")
+        sys.stdout.write(f"checked {len(py)} Python and {len(rust)} Rust packages, {len(bad)} disallowed\n")
+        return 1 if bad else 0
+    parts = [
+        "# Third-party notices",
+        "",
+        "ml-stack is licensed under the Apache License 2.0 (`LICENSE`, `NOTICE`). `NOTICE` carries the notices for code "
+        "ported into this repository. This file is generated by `scripts/notices.py`; do not edit the tables by hand.",
+        "",
+        STATIC.read_text(encoding="utf-8").rstrip(),
+        "",
+        "## Python packages in a bundle",
+        "",
+        f"Closure of the base requirements and the {', '.join(f'`{e}`' for e in EXTRAS)} extras at generation time.",
+        "",
+        table(py),
+        "",
+        "## Rust crates in the window (`app/src-tauri`)",
+        "",
+        table(rust) if rust else "cargo was not available when this file was generated.",
+        "",
+    ]
+    OUT.write_text("\n".join(parts), encoding="utf-8")
+    sys.stdout.write(f"wrote {OUT.name}: {len(py)} Python, {len(rust)} Rust, {len(bad)} flagged\n")
+    return 1 if bad else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

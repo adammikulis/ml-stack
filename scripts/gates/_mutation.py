@@ -17,6 +17,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from random import Random
 
+from ._perfile import each
+
 SOURCE_ROOT = "src/ml_stack"
 TEST_ROOT = "tests"
 COPY_SKIP = {".git", "__pycache__", ".pytest_cache", ".ruff_cache", "dist", "build",
@@ -162,20 +164,20 @@ def _parses(source: str) -> bool:
 
 def candidates(root: Path) -> list[Target]:
     """Every function under src/ml_stack that at least one mutation operator reaches."""
-    out: list[Target] = []
-    base = root / SOURCE_ROOT
-    for path in sorted(base.rglob("*.py")):
-        if any(part in COPY_SKIP for part in path.parts):
-            continue
+    paths = [p for p in sorted((root / SOURCE_ROOT).rglob("*.py"))
+             if not any(part in COPY_SKIP for part in p.parts)]
+
+    def reachable(path: Path) -> list[list]:
         try:
             tree = ast.parse(path.read_text(encoding="utf-8"))
         except (OSError, SyntaxError, UnicodeDecodeError):
-            continue
-        where = path.relative_to(root).as_posix()
-        for qualname, node in functions(tree):
-            if len(_sites(node)) > 1:
-                out.append(Target(where, qualname, node.lineno))
-    return out
+            return []
+        return [[qualname, node.lineno] for qualname, node in functions(tree)
+                if len(_sites(node)) > 1]
+
+    return [Target(path.relative_to(root).as_posix(), qualname, lineno)
+            for path, found in zip(paths, each(root, paths, reachable, owner=candidates), strict=True)
+            for qualname, lineno in found]
 
 
 def sample(targets: list[Target], count: int, seed: str) -> list[Target]:
@@ -248,13 +250,9 @@ class Tree:
             shutil.copyfile(source, target)
 
     def imports_the_copy(self) -> bool:
-        """True when a test run in the copy reads ml_stack out of the copy first.
-
-        ``ml_stack`` is a namespace package, so every path holding one is merged; only the
-        first of them answers for a module that exists in all of them.
-        """
+        """True when a test run resolves ml_stack to the copied source directory."""
         done = self.python("-c", "import ml_stack, sys; sys.stdout.write(ml_stack.__path__[0])")
-        return done.stdout.startswith(str(self.where))
+        return done.returncode == 0 and Path(done.stdout.strip()).resolve() == (self.where / "src" / "ml_stack").resolve()
 
     def python(self, *args: str, timeout: float = 120.0) -> subprocess.CompletedProcess[str]:
         """Run the interpreter in the copy with the copy's src first on the path."""

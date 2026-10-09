@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from ml_stack.http import ServerError, ServerUnreachable, open_stream
+from ml_stack.hub.capabilities import allows_chat, capabilities as model_capabilities
 
 __all__ = ["ChatError", "Target", "find", "reply_text", "stream", "targets"]
 
@@ -27,13 +29,21 @@ class Target:
     url: str
     token: str = ""
     peer: str = ""
+    alias: str = ""
+    capabilities: dict[str, Any] = field(default_factory=model_capabilities)
 
     @property
     def local(self) -> bool:
         return not self.peer
 
     def public(self) -> dict[str, Any]:
-        return {"model": self.model, "peer": self.peer, "local": self.local}
+        return {"model": self.model, "peer": self.peer, "local": self.local,
+                'capabilities': self.capabilities,
+                "path": self.alias if self.local and Path(self.alias).is_absolute() else ""}
+
+
+def _capabilities(value):
+    return value if isinstance(value, dict) and 'chat' in value else model_capabilities()
 
 
 def targets(peers: list[dict[str, Any]], serving: Any = None,
@@ -41,9 +51,13 @@ def targets(peers: list[dict[str, Any]], serving: Any = None,
     """Every model this machine can reach, its own and the ones on the network."""
     out: list[Target] = []
     for served in (serving.live() if serving is not None else []):
+        if not allows_chat(getattr(served, 'capabilities', None)):
+            continue
         for model in served.models:
             out.append(Target(model=model,
-                              url=f"http://127.0.0.1:{served.port}{CHAT_PATH}"))
+                              url=f"http://127.0.0.1:{served.port}{CHAT_PATH}",
+                              capabilities=_capabilities(getattr(served, 'capabilities', None)),
+                              alias=next((name for name in served.aliases if Path(name).name == model), model)))
     here = {t.model for t in out}
     for beacon in peers:
         if beacon.get("is_self"):
@@ -52,12 +66,15 @@ def targets(peers: list[dict[str, Any]], serving: Any = None,
         if not base:
             continue
         for served in (beacon.get("device", {}).get("serving") or []):
+            if not allows_chat(served.get('capabilities')):
+                continue
             for model in (served.get("models") or []):
                 if model in here:
                     continue
                 out.append(Target(model=str(model),
                                   url=f"{base}/infer{CHAT_PATH}",
                                   token=token,
+                                  capabilities=_capabilities(served.get('capabilities')),
                                   peer=str(beacon.get("name") or "")))
     out.sort(key=lambda t: (not t.local, t.peer, t.model))
     return out
@@ -68,7 +85,7 @@ def find(available: list[Target], model: str) -> Target | None:
     if not model:
         return available[0] if available else None
     for target in available:
-        if target.model == model:
+        if target.model == model or target.alias == model or target.model == Path(model).name:
             return target
     for target in available:
         if model.lower() in target.model.lower():
@@ -77,7 +94,7 @@ def find(available: list[Target], model: str) -> Target | None:
 
 
 def stream(target: Target, payload: dict[str, Any], *,
-           timeout: float = 600.0) -> Iterator[bytes]:
+           timeout: float | None = None, control: Any = None) -> Iterator[bytes]:
     """The model server's reply, in the pieces it arrives in."""
     data = json.dumps(payload).encode()
     try:
@@ -93,7 +110,11 @@ def stream(target: Target, payload: dict[str, Any], *,
             f"{target.peer or 'this machine'} answered {exc.status}: "
             f"{exc.body[:400]}", status=exc.status, body=exc.body) from None
     with response:
+        if control is not None:
+            control.bind(response)
         while True:
+            if control is not None and control.cancelled.is_set():
+                break
             # read1, not read: read(n) waits for n bytes and delivers a whole
             # completion at once.
             block = response.read1(CHUNK)
@@ -104,7 +125,13 @@ def stream(target: Target, payload: dict[str, Any], *,
 
 def reply_text(raw: bytes) -> str:
     """The assistant's words out of a stream of server-sent events."""
+    return reply_parts(raw)[0]
+
+
+def reply_parts(raw: bytes) -> tuple[str, str]:
+    """Return content and reasoning from streamed deltas."""
     out = []
+    reasoning = []
     for line in raw.decode(errors="replace").splitlines():
         if not line.startswith("data:"):
             continue
@@ -116,8 +143,12 @@ def reply_text(raw: bytes) -> str:
         except ValueError:
             continue
         for choice in parsed.get("choices") or []:
+            thought = ((choice.get("delta") or {}).get("reasoning_content")
+                       or (choice.get("message") or {}).get("reasoning_content"))
+            if thought:
+                reasoning.append(str(thought))
             piece = ((choice.get("delta") or {}).get("content")
                      or (choice.get("message") or {}).get("content"))
             if piece:
                 out.append(str(piece))
-    return "".join(out)
+    return "".join(out), "".join(reasoning)

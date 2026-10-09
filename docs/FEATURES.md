@@ -11,17 +11,17 @@ python docs/verify_release.py
 
 ## Setting up
 
-Install it on each machine and type the same passphrase. The key is derived from those
-words, so two machines that heard the same phrase agree on it without exchanging
-anything — there is no key to copy and no address to write down.
+Create a named cluster on one machine, then select it on another and enter its passphrase.
+Cluster keys are random. The maintained authenticated password exchange gives an existing
+member's key to a machine with the correct passphrase; it does not derive the key from words.
+Clusters created without a passphrase are joined through an authenticated recovery file.
 
-- Machines that derived their key from different words are invisible to each other, so
-  several groups share a network without any of them being configured to.
-- The group name separates two clusters that happened to choose the same passphrase.
-- The passphrase is stretched with scrypt before it becomes a key. Everyone on the
-  network can hear the beacons, so a weak phrase would otherwise be worth grinding
-  guesses against offline.
-- At least eight characters.
+- Nearby cluster names are discovery hints, not membership or execution authority.
+- Authenticated cluster traffic is separated by each cluster's independent key.
+- The group name scopes passphrase authentication, even when two groups choose the same words.
+- Passphrases are stretched with scrypt before the PAKE exchange. Failed joining attempts
+  are rate limited; a discovery hint never grants access.
+- At least five characters are required; use a stronger phrase for an actual cluster.
 
 Beacons are signed. A peer's address is taken from the packet it arrived in, never from
 anything the packet claims about itself.
@@ -299,9 +299,9 @@ memory — and says nothing about accelerators rather than guessing.
 
 ## Installing
 
-One package, `ml-stack`, pure Python over `packaging`: finding the other machines,
-passing work between them and moving files needs nothing beyond the standard library, so
-the daemon installs on a small board as fast as on a workstation. The extras
+One package, `ml-stack`, pure Python over `packaging` and `psutil` (process control and
+machine readings): finding the other machines, passing work between them and moving files
+needs nothing else, so the daemon installs on a small board as fast as on a workstation. The extras
 add what a part needs to do its own job — `train`, `serve`, `store`, `graph`, `scrape`,
 `vision`, `web`, `claude` and the rest — and `[all]` takes what a workstation can use.
 
@@ -448,6 +448,12 @@ The commands are also tools an agent can call.
   asks what the task leaves open, confirms the models it found on this disk, prints a plan,
   asks go, runs the tools, waits for what detached, and reports what was measured and
   where.
+- **`ml-stack-chat` is the agent command**, in a conversation or on a task, under a role
+  (`read-only`, `approve-first`, `plan-and-go`). A call that acts asks: allow this time, always allow or
+  never allow, and the saved rules are listed and edited with `/rules`. Releasing quarantine,
+  approving a host and changing roles or rules are the person's alone (`docs/agent-roles.md`).
+- **It remembers across sessions** in an encrypted graph of facts, per user and per project
+  (`ml-stack-memory`, `docs/memory.md`).
 - **Claude Code itself** runs on a model this machine serves, in the settings it scored best with, on a
   lease taken for it and dropped on the way out.
 
@@ -480,7 +486,7 @@ tomorrow. Only the selectors differ, so the selectors are data — `website`, `s
 
 ## Entities
 
-- **Resolving names.** Folding duplicates, canonical forms, and telling a handle from a name.
+- **Resolving names.** Folding duplicates, normalized names, and telling a handle from a name.
 - **Spelling.** Whether two words are one word typed twice. A doubled letter is its own case at
   any length, because it is the commonest way to write a name wrong; a substitution in a short
   word is not, because two four-letter names one letter apart are two people.

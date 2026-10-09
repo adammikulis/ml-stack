@@ -21,6 +21,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
+from packaging.requirements import Requirement
 
 from ml_stack.fleet.launch import already_running
 from ml_stack.installed import STANDARD, extras
@@ -28,7 +29,7 @@ from ml_stack.installed import STANDARD, extras
 REPO = Path(__file__).resolve().parent.parent
 SH = REPO / "packaging" / "install.sh"
 SCRIPTS = ("ml-stack", "ml-stack-serve", "ml-stack-models", "ml-stack-setup",
-           "ml-stack-doctor", "ml-stack-fleet", "ml-stack-traind")
+           "ml-stack-doctor", "ml-stack-cluster", "ml-stack-traind")
 
 pytestmark = pytest.mark.slow
 
@@ -86,7 +87,7 @@ def run_installer(root: Path, *args: str, **extra: str) -> subprocess.CompletedP
         "ML_STACK_OFFLINE_ZIP": str(wheel()),
         **extra,
     }
-    for keep in ("PYENV_ROOT", "SSL_CERT_FILE", "TMPDIR"):
+    for keep in ("PYENV_ROOT", "PYENV_VERSION", "SSL_CERT_FILE", "TMPDIR"):
         if keep in os.environ:
             env[keep] = os.environ[keep]
     return subprocess.run(["sh", str(SH), *args], stdout=subprocess.PIPE,
@@ -220,7 +221,7 @@ def test_the_windows_installer_falls_back_to_ml_stack_alone_without_the_wheels(t
     said = subprocess.run([str(python), "-m", "ml_stack.installed"],
                           capture_output=True, text=True, timeout=120)
     assert said.returncode == 1, "a fallback install reports nothing missing"
-    for one in STANDARD:
+    for one in optional_capabilities():
         assert f"{one.name}: not installed" in said.stdout, said.stdout
 
 
@@ -285,11 +286,34 @@ def wheelhouse(into: Path) -> Path:
     """A directory holding a wheel for every extra a full install has, and for the
     packaging the library itself asks for."""
     versions = {"ladybug": "0.20.4", "huggingface_hub": "1.32.0", "ddgs": "9.0.0",
-                "matplotlib": "3.11.2", "numpy": "1.26.0", "trafilatura": "2.0.0"}
+                "matplotlib": "3.11.2", "numpy": "1.26.0", "trafilatura": "2.0.0", "openai_agents": "0.23.1", "py_machineid": "0.8.0"}
     for module, version in versions.items():
-        stand_in_wheel(into, module.replace("_", "-"), version, module)
+        stand_in_wheel(into, module.replace("_", "-"), version, {"openai_agents": "agents", "py_machineid": "machineid"}.get(module, module))
     wheel_of_installed(into, "packaging")
+    # Whatever else the library asks for unconditionally must be on the disk too, or `--no-index`
+    # cannot resolve ml-stack itself (psutil became a core requirement after this was written, and
+    # the offline install then quietly fell back to ml-stack alone). Read from the wheel, not guessed.
+    for requirement in core_requirements(wheel()):
+        if requirement.name not in ("packaging", *(m.replace("_", "-") for m in versions)):
+            floor = next(iter(requirement.specifier)).version
+            stand_in_wheel(into, requirement.name, floor, requirement.name.replace("-", "_"))
     return into
+
+
+def core_requirements(built: Path) -> list[Requirement]:
+    """The requirements the built wheel has no extra for."""
+    with zipfile.ZipFile(built) as whl:
+        meta = next(n for n in whl.namelist() if n.endswith(".dist-info/METADATA"))
+        text = whl.read(meta).decode("utf-8")
+    found = [Requirement(line.split(":", 1)[1].strip())
+             for line in text.splitlines() if line.startswith("Requires-Dist:")]
+    return [r for r in found if r.marker is None]
+
+
+
+def optional_capabilities():
+    core = {requirement.name.lower().replace('_', '-') for requirement in core_requirements(wheel())}
+    return [capability for capability in STANDARD if capability.module.lower().replace('_', '-') not in core]
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="install.ps1 is the Windows installer")
@@ -300,7 +324,7 @@ def test_an_offline_install_says_which_parts_it_did_not_get(tmp_path):
     done = run_installer(tmp_path, "--headless")
     assert done.returncode == 0, done.stdout
     assert "== what came with it" in done.stdout, done.stdout
-    for one in STANDARD:
+    for one in optional_capabilities():
         assert f"{one.name}: not installed" in done.stdout, done.stdout
         assert one.fix in done.stdout, done.stdout
     assert "ML_STACK_OFFLINE_WHEELS" in done.stdout, done.stdout

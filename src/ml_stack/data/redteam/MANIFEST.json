@@ -1,0 +1,83 @@
+{
+ "files": {
+  "styles.json": {
+   "source": "ml-stack",
+   "licence": "Apache-2.0",
+   "rows": 4,
+   "sha256": "43aa5488fbbd6d97da1599e95415ac3ebcf3051833c9cf74e4354f621a23e60c",
+   "retrieved_from": "written for ml-stack"
+  },
+  "garak_sysprompt.json": {
+   "source": "https://github.com/NVIDIA/garak/blob/main/garak/data/sysprompt_extraction/attacks.json",
+   "licence": "Apache-2.0",
+   "rows": 28,
+   "sha256": "a1c0321776c354d940287807e53388d0bd6c4fe697fb0f06acdf280b17501a9a",
+   "retrieved_from": "pyrit 1.1.0"
+  },
+  "psfuzz_steal.json": {
+   "source": "https://github.com/prompt-security/ps-fuzz/blob/main/ps_fuzz/attacks/dynamic_test.py",
+   "licence": "MIT",
+   "rows": 5,
+   "sha256": "b5a8c267621b9b2e25937da13659d1cf2e42dd5d72a9b6b13a1c57225461f08e",
+   "retrieved_from": "pyrit 1.1.0"
+  }
+ },
+ "templates": [
+  {
+   "id": "aim",
+   "name": "AIM",
+   "source": "https://github.com/alexalbertt/jailbreakchat",
+   "licence": "not stated upstream; text is read from PyRIT, not copied here",
+   "sha256": "340ac88ef8e882da3b1c2674ac7ce40dcd45d0b21308c7be032a4ed3165abd3d"
+  },
+  {
+   "id": "dan_11",
+   "name": "DAN 11",
+   "source": "https://github.com/alexalbertt/jailbreakchat",
+   "licence": "not stated upstream; text is read from PyRIT, not copied here",
+   "sha256": "23fbb5a9461c1bd8f06b77c23f0f33ebc709762520ba380eed89d58fc9f7c07a"
+  },
+  {
+   "id": "dev_mode_compact",
+   "name": "Dev Mode Compact",
+   "source": "https://github.com/alexalbertt/jailbreakchat",
+   "licence": "not stated upstream; text is read from PyRIT, not copied here",
+   "sha256": "e0c2faee52ff65777ed16016284482cc0b60324f8fb84254ddf01788299f2b6c"
+  },
+  {
+   "id": "instructions",
+   "name": "instructions",
+   "source": "AI Red Team",
+   "licence": "not stated upstream; text is read from PyRIT, not copied here",
+   "sha256": "80f3c9901027e94bf12b08bf6f1c96b7a41ad01883e9da42bc3b2a3981897029"
+  },
+  {
+   "id": "prefix_injection",
+   "name": "prefix injection",
+   "source": "https://arxiv.org/abs/2307.02483 Jailbroken How Does LLM Safety Training Fail",
+   "licence": "not stated upstream; text is read from PyRIT, not copied here",
+   "sha256": "d88c6ce8ccf89dd1f8e2939599e5ec6a130666c12a52571a85b687f2cf277988"
+  },
+  {
+   "id": "refusal_suppression",
+   "name": "refusal suppression",
+   "source": "https://arxiv.org/abs/2307.02483 Jailbroken How Does LLM Safety Training Fail",
+   "licence": "not stated upstream; text is read from PyRIT, not copied here",
+   "sha256": "968ef1166c0c2b25f56470651e346c0a99d7b06c99e0f074bcdd9001b5f52d24"
+  },
+  {
+   "id": "role_play",
+   "name": "Role Play",
+   "source": "AI Red Team",
+   "licence": "not stated upstream; text is read from PyRIT, not copied here",
+   "sha256": "2218692124ab8ace644b1dcdffe4f108f5c93e8565dfeb6d416db0b794facafa"
+  },
+  {
+   "id": "text_continuation",
+   "name": "Text Continuation",
+   "source": "https://github.com/alexalbertt/jailbreakchat",
+   "licence": "not stated upstream; text is read from PyRIT, not copied here",
+   "sha256": "40258015d164300987705aee7ed84e351ba64de1f571d80fe033c754effa8d07"
+  }
+ ]
+}

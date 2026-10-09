@@ -18,6 +18,7 @@ import threading
 import time
 import urllib.request
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -110,14 +111,14 @@ def vendored():
     return files
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="module")
 def browser(playwright):
     try:
         # headless is the default, said out loud: a test must never take the screen
         b = playwright.chromium.launch(headless=True,
                                        args=["--use-gl=angle", "--use-angle=swiftshader",
                                              "--enable-unsafe-swiftshader"])
-    except Exception as exc:
+    except pw.Error as exc:
         pytest.skip(f"chromium did not launch: {exc}")
     yield b
     b.close()
@@ -162,7 +163,7 @@ def open_page(browser, vendored):
                 r.fulfill(body=json.dumps({"ok": True, "problems": []}
                                           if r.request.method == "POST" else review),
                           content_type="application/json")
-            elif "fonts.googleapis.com" in url:
+            elif urlsplit(url).hostname == "fonts.googleapis.com":
                 r.fulfill(body="", content_type="text/css")
             else:
                 r.abort()

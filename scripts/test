@@ -1,0 +1,603 @@
+#!/usr/bin/env python3
+"""Run the test suite one tier at a time.
+
+    scripts/test quick     only the tests a change reaches (needs pytest-testmon)
+    scripts/test fast      every test not marked slow or heavy
+    scripts/test full      every test not marked slow
+    scripts/test slow      only the tests marked slow
+    scripts/test all       everything, slow included: what CI runs
+    scripts/test gate      the structural checks a merge is gated on (budgets, red-team coverage,
+                           command reference, layers, human floors): a minute or two
+    scripts/test record    build this checkout's testmon map in the foreground (quick starts it
+                           in the background by itself the first time)
+    scripts/test ratchet   compare the last full run's wall and CPU time with tests/full-tier-time.json
+    scripts/test TIER --background   admit the run as background (full, slow, record, a bare all/fast and
+                           --redteam runs already are): interactive runs are admitted first
+    scripts/test heavy     rewrite tests/heavy-modules.txt from the recorded test durations
+    scripts/test submit TIER [PATH...]   start the same run in the background and print its job id
+    scripts/test status [JOB] | wait JOB [--timeout S] | result JOB | cancel JOB
+
+A tier run is a background job that the command follows; Ctrl-C cancels it. A run that names test
+files reuses an earlier pass of an unchanged file unless --no-reuse is given (docs/test-reuse.md).
+
+Every pytest run is admitted by the shared host broker (scripts/testslots_runner.py, see
+docs/test-execution.md): worker startup, collection and each test take CPU permits.
+
+Arguments after the tier go to pytest. ``quick`` runs the full tier in full, and says
+why, when it cannot tell what a change reaches.
+"""
+
+from __future__ import annotations
+
+import argparse
+import importlib.util
+import json
+import os
+import shutil
+import signal
+import subprocess
+import sys
+import tempfile
+import time
+from dataclasses import dataclass
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+
+import affected
+import gatescope
+import testhistory
+import testjobs
+import testprelude
+import testreuse_run
+import testreuse_store
+import testselectors
+import testslots_runner
+import testtime
+
+from ml_stack.activity import reuse
+from ml_stack.activity.gate import Run, record_run, tree_hash
+from ml_stack.workspace import testboard, testruns
+from ml_stack.workspace.taskboard import TaskBoard
+
+ROOT = Path(__file__).resolve().parent.parent
+BASE = "0.2dev"
+DATAFILE = ".testmondata"
+FAST = ["-m", "not slow and not heavy", *(f"--ignore=tests/{name}" for name in (
+    "test_spec_decode.py", "test_spec_qwen4.py", "test_spec_qwen4_load.py", "test_spec_serve.py"))]
+HEAVY_FILE = ROOT / "tests" / "heavy-modules.txt"
+FULL: list[str] = []
+RECORD_WORKERS = 3
+FOREGROUND = ("quick", "fast", "full", "slow", "all", "gate")
+BUSY_EXIT = 6
+JOB_COMMANDS = ("submit", "status", "wait", "result", "cancel", "subscribe", "_job")
+REUSE: dict = {"on": True, "seat": None, "agent": {"id": "", "source": "none"}, "events": testreuse_run.Events()}
+
+
+def pytest_command(workers: int, *rest: str) -> list[str]:
+    """The pytest invocation every tier shares."""
+    return [sys.executable, "-m", "pytest", "-q", "-rfE", "-n", str(workers), *rest]
+
+
+def run(command: list[str], env: dict[str, str] | None = None, tier: str = "", *, artifact_output: bool = False) -> int:
+    """Run pytest; named test files reuse earlier passes, and a tier or gate run refreshes the store."""
+    if env is not None or tier not in testreuse_run.TIERS:
+        return launch(command, env, tier, artifact_output=artifact_output)
+    files = testreuse_run.selectors(command, ROOT)
+    reuse = REUSE["on"] and files is not None and tier != "gate"
+    session = testreuse_run.Session(ROOT, command, files, reuse_store(), REUSE["events"])
+    report = session.run(lambda shown: launch(shown, env, tier, artifact_output=artifact_output), lambda: tree_hash(ROOT), reuse)
+    REUSE["report"] = report
+    print("\n".join(report.lines()), flush=True)
+    return report.status
+
+
+def reused_files(command: list[str]) -> set[str]:
+    """The named test files the reuse store would serve without running, for the run's estimate."""
+    files = testreuse_run.selectors(command, ROOT)
+    if not (REUSE["on"] and files):
+        return set()
+    session = testreuse_run.Session(ROOT, command, files, reuse_store())
+    try:
+        looks = {file: session.lookup(file) for file in files}
+        return {file for file, look in looks.items()
+                if not look.barred and session.store.hit(look.key, ROOT, session.closures)[0]}
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+        return set()
+
+
+def reuse_store() -> testreuse_store.Store:
+    """This project's reuse store."""
+    return testreuse_store.Store(reuse.reuse_base() / testruns.scope(ROOT))
+
+
+def jobs_store() -> testjobs.Jobs:
+    """This project's background jobs."""
+    return testjobs.Jobs(reuse_store().folder)
+
+
+@dataclass
+class OutputRecord:
+    junit: Path
+    artifacts: object = None
+    strict: bool = False
+    given: bool = False
+
+
+def report_run(record: OutputRecord, text: str) -> None:
+    if record.strict:
+        record.artifacts.sinks["console.log"].write((text + "\n").encode())
+    else:
+        print(text, file=sys.stderr)
+
+
+def confining(environment: dict[str, str]) -> bool:
+    """Whether this run asks for the macOS Seatbelt confinement kernel."""
+    return sys.platform == "darwin" and environment.get("DEV_TEST_CONFINE") == "1"
+
+
+def launch(command: list[str], env: dict[str, str] | None = None, tier: str = "", *, artifact_output: bool = False) -> int:
+    """Run pytest in the repository and record its local evidence artifacts."""
+    environment = dict(os.environ if env is None else env)
+    environment.pop("DEV_TEST_JOB", None)
+    given = next((a.split("=", 1)[1] for a in command if a.startswith("--junitxml=")), "")
+    artifacts = None
+    if confining(environment):
+        from test_kernel_outputs import ArtifactOutputs
+        artifacts = ArtifactOutputs(environment, strict=artifact_output)
+        junit = artifacts.directory / "junit.xml"
+    elif given:
+        junit = Path(given)
+    else:
+        if artifact_output:
+            raise RuntimeError("test: private artifact output requires --confine on macOS")
+        descriptor, name = tempfile.mkstemp(suffix=".xml")
+        os.close(descriptor)
+        junit = Path(name)
+    try:
+        if artifact_output:
+            artifacts.announce()
+        record = OutputRecord(junit, artifacts, artifact_output, bool(given) and artifacts is None)
+        if artifact_output:
+            with artifacts.redirect():
+                try:
+                    return execute_run(command, environment, tier, record)
+                finally:
+                    artifacts.observe()
+        return execute_run(command, environment, tier, record)
+    finally:
+        if artifacts is not None:
+            artifacts.close()
+
+
+def execute_run(command, environment, tier, record: OutputRecord):
+    junit, artifacts, artifact_output = record.junit, record.artifacts, record.strict
+    shown = list(command) if record.given else [*command, f"--junitxml={junit}"]
+    if not artifact_output:
+        print("+", " ".join(command), flush=True)
+    environment["PYTHONPATH"] = os.pathsep.join(
+        (str(ROOT / "src"), str(ROOT / "scripts"), environment.get("PYTHONPATH", "")))
+    index = shown.index("-n")
+    want = int(shown[index + 1])
+    shown[index + 1] = "{workers}"
+    shown.extend(["-p", "testslots_pytest", "-p", "testdurations"])
+    if environment.get("DEV_TEST_REUSE_RECORD"):
+        shown.extend(["-p", "testreuse_plugin"])
+    executed_tree = tree_hash(ROOT)
+    if not executed_tree:
+        raise RuntimeError("test: source identity is unavailable before launch")
+    began = time.monotonic()
+    load = os.getloadavg()[0] if hasattr(os, "getloadavg") else 0.0
+    failure = None
+    try:
+        status = (testslots_runner.run_artifact_pytest(shown, want, environment, artifacts) if artifact_output
+                  else testslots_runner.run_pytest(shown, want, env=environment))
+    except (OSError, RuntimeError, ValueError) as exc:
+        status, failure = 4, exc
+    if status == 5 and any("::" in value for value in command):
+        report_run(record, "test: the explicit node selector matched no tests")
+        status = 4
+    if tree_hash(ROOT) != executed_tree:
+        moved = subprocess.run(["git", "status", "--short", "--untracked-files=all"], cwd=ROOT,
+                               capture_output=True, text=True, check=False).stdout.split("\n")
+        report_run(record, "test: source tree changed during the run; the result does not describe the tree "
+                   "(changed now: " + ", ".join(line[3:] for line in moved[:5] if line) + ")")
+        status = 4
+    wall = time.monotonic() - began
+    if tier in ("full", "all") and not [a for a in command if a.startswith("tests/") or a == "-k"]:
+        measured(command, junit, wall, load)
+    kept = os.environ.get("DEV_TEST_JOB")
+    if kept and junit.is_file():
+        shutil.copy(junit, jobs_store().path(kept) / f"junit-{time.time_ns()}.xml")
+    save_evidence(Run(ROOT, tier, command, junit, status, wall, executed_tree), record)
+    if failure is not None:
+        raise failure
+    return status
+
+
+def save_evidence(result: Run, record: OutputRecord):
+    if record.artifacts is None:
+        descriptor, name = tempfile.mkstemp(suffix=".result.json")
+        os.close(descriptor)
+        artifact = Path(name)
+    else:
+        artifact = record.artifacts.directory / "evidence.result.json"
+    if record.strict:
+        record_run(result, artifact, destination=record.artifacts.sinks["evidence.result.json"],
+                   boundary=record.artifacts.boundary())
+        record.artifacts.validate()
+    else:
+        record_run(result, artifact)
+        print(f"test: evidence {artifact}", flush=True)
+        if not record.given:
+            record.junit.unlink(missing_ok=True)
+
+
+def measured(command: list[str], junit: Path, wall: float, load: float) -> None:
+    """Remember this full run's time for ``scripts/test ratchet``."""
+    try:
+        cpu, count = testtime.cpu_seconds(junit.read_text(encoding="utf-8"))
+        workers = int(command[command.index("-n") + 1])
+    except (OSError, ValueError, IndexError):
+        return
+    testtime.save(ROOT / testtime.LAST, testtime.Timing(wall, cpu, workers, count, load))
+
+
+def testmon_env() -> dict[str, str]:
+    """The environment a testmon run uses, with its data file inside this checkout."""
+    return {**os.environ, "TESTMON_DATAFILE": str(ROOT / DATAFILE)}
+
+
+def testmon_missing() -> bool:
+    """Whether pytest-testmon cannot be imported by the interpreter the tests run on."""
+    return importlib.util.find_spec("testmon") is None
+
+
+def capped(workers: int, most: int) -> int:
+    """``workers`` limited to ``most``, where 0 means auto and stays auto below the cap."""
+    return most if workers <= 0 else min(workers, most)
+
+
+def clean(status: int) -> int:
+    """A pytest exit status with "no tests were selected" counted as success."""
+    return 0 if status == 5 else status
+
+
+def quick(args: argparse.Namespace, rest: list[str]) -> int:
+    """Run the tests a change reaches: testmon's recorded map, plus the import graph.
+
+    Always under xdist: a map recorded with ``-n 0`` and one recorded with workers disagree
+    about the installed packages, and testmon reruns everything when they do.
+    """
+    tier = ["--slow"] if args.slow else FULL
+    try:
+        changed, deleted = affected.changed_since(ROOT, args.base)
+    except (RuntimeError, IndexError) as exc:
+        print(f"quick: cannot diff against {args.base} ({exc}); running the full tier")
+        return run(pytest_command(args.workers, *tier, *rest), tier="quick")
+    if not changed:
+        print(f"quick: nothing differs from {args.base}; running nothing")
+        return 0
+    picked = affected.select(ROOT, changed, deleted)
+    why = [f"{p}: {picked.reasons.get(p, 'nothing says which tests it affects')}" for p in picked.unmapped]
+    if testmon_missing():
+        why = ["pytest-testmon is not installed (pip install -e '.[test]')", *why]
+    elif not (ROOT / DATAFILE).exists() and not picked.unmapped:
+        return first_quick(args, picked, tier, rest)
+    elif not (ROOT / DATAFILE).exists():
+        why = [f"no {DATAFILE} in this checkout yet and a changed path maps to nothing", *why]
+    if why:
+        for line in why[:8]:
+            print(f"quick: {line}")
+        print("quick: running the full tier")
+        record = [] if testmon_missing() else ["--testmon-noselect"]
+        return run(pytest_command(args.workers, *record, *tier, *rest), testmon_env(), "quick")
+    if args.explain:
+        for test, reasons in sorted(picked.why.items()):
+            print(f"quick: {test}  <- {'; '.join(sorted(set(reasons))[:3])}")
+    direct = sorted(picked.files)
+    status = 0
+    if direct:
+        print(f"quick: {len(direct)} test file(s) importing or naming a changed module")
+        status = clean(run(pytest_command(capped(args.workers, len(direct)), "--testmon-noselect",
+                                          *tier, *direct, *rest), testmon_env(), "quick"))
+    print("quick: every other test whose recorded execution touches a changed line")
+    return max(status, clean(run(pytest_command(args.workers, "--testmon", *tier, *rest),
+                                 testmon_env(), "quick")))
+
+
+def first_quick(args: argparse.Namespace, picked: affected.Selection, tier: list[str],
+                rest: list[str]) -> int:
+    """The first quick run in a checkout: the test files the import graph reaches now, and the
+    testmon map built in the background so the second run is fast. Nothing waits on the map."""
+    direct = sorted(picked.files)
+    print(f"quick: no {DATAFILE} here yet; running the {len(direct)} test file(s) that import or "
+          "name a changed module, and building the map in the background")
+    start_recording()
+    if not direct:
+        return 0
+    return clean(run(pytest_command(capped(args.workers, len(direct)), *tier, *direct, *rest),
+                     tier="quick"))
+
+
+def start_recording() -> None:
+    """Start ``scripts/test record`` detached unless one is already running for this checkout."""
+    lock = ROOT / f"{DATAFILE}.building"
+    try:
+        pid = int(lock.read_text(encoding="utf-8").split()[0])
+        os.kill(pid, 0)
+        print(f"quick: the map is already being built (pid {pid})")
+        return
+    except (OSError, ValueError, IndexError):
+        pass
+    log = ROOT / f"{DATAFILE}.log"
+    child = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "record"], cwd=ROOT,
+                             stdin=subprocess.DEVNULL, stdout=log.open("ab"), stderr=subprocess.STDOUT,
+                             start_new_session=True)
+    lock.write_text(f"{child.pid}\n", encoding="utf-8")
+    print(f"quick: building the map in pid {child.pid}, log {log.name}")
+
+
+def record(args: argparse.Namespace) -> int:
+    """Run the full tier once under testmon into a scratch file and move it into place when done.
+
+    Never leaves a half-written map where ``quick`` looks for one: pytest writes to
+    ``.testmondata.new`` and the rename is the last step.
+    """
+    lock = ROOT / f"{DATAFILE}.building"
+    lock.write_text(f"{os.getpid()}\n", encoding="utf-8")
+    scratch = ROOT / f"{DATAFILE}.new"
+    for stale in ROOT.glob(f"{DATAFILE}.new*"):
+        stale.unlink(missing_ok=True)
+    env = {**os.environ, "TESTMON_DATAFILE": str(scratch)}
+    try:
+        # a few workers on purpose: the map is built behind the person's own quick runs; the broker
+        # admits its collection and every test like any other run's
+        ceiling = args.workers if args.workers > 0 else RECORD_WORKERS
+        status = run(pytest_command(ceiling, "--testmon-noselect", *FULL), env, "record")
+        if scratch.exists():
+            scratch.replace(ROOT / DATAFILE)
+            for extra in ROOT.glob(f"{DATAFILE}.new-*"):
+                extra.replace(ROOT / (DATAFILE + extra.name[len(scratch.name):]))
+        return status
+    finally:
+        lock.unlink(missing_ok=True)
+
+
+def gate_steps(workers: int, rest: list[str]) -> list[tuple[str, list[str]]]:
+    """The gate's steps, in order. Every step only reads the tree: a gate that rewrote a tracked file
+    would dirty the worktree it is judging and make the result cache refuse to store the run."""
+    return [
+        ("budgets", [sys.executable, "scripts/budgets"]),
+        ("redteam coverage", [sys.executable, "scripts/redteam_coverage.py", "--check"]),
+        ("command reference", [sys.executable, "scripts/reference", "--check"]),
+        ("structure tests", [*pytest_command(max(1, min(workers or 6, 6)),
+                                             "tests/test_layers.py", "tests/test_budgets.py",
+                                             "tests/test_budget_floors.py",
+                                             "tests/test_budget_ratchet.py",
+                                             "tests/test_redteam_human_floor.py",
+                                             "tests/test_requests_floor.py",
+                                             "tests/test_onboard_human.py",
+                                             "tests/test_cli_reference.py", *rest)]),
+    ]
+
+
+STALE_HINTS = {"command reference": "docs/commands.md is stale: run `scripts/reference --write` and commit it",
+               "redteam coverage": "docs/redteam/coverage.json is stale: run `scripts/redteam_coverage.py --write` and commit it"}
+
+
+def gate(args: argparse.Namespace, rest: list[str]) -> int:
+    """The structural checks a merge is gated on, in this order, all of them reported."""
+    failed = []
+    reason = "" if args.full else gatescope.unreached(ROOT, args.base)
+    if reason:
+        print(f"gate: skipped: {reason}; `--full` runs it anyway")
+        return 0
+    for name, command in gate_steps(args.workers, rest):
+        began = time.monotonic()
+        print(f"gate: {name}", flush=True)
+        status = (run(command, tier="gate", artifact_output=args.artifact_output) if "pytest" in command
+                  else subprocess.run(command, cwd=ROOT, check=False).returncode)
+        print(f"gate: {name} {'ok' if status == 0 else 'FAILED'} in {time.monotonic() - began:.0f} s")
+        if status:
+            failed.append(name)
+            if name in STALE_HINTS:
+                print(f"gate: {STALE_HINTS[name]}")
+    print("gate: " + ("every structural check passed" if not failed else "failed: " + ", ".join(failed)))
+    return 1 if failed else 0
+
+
+def heavy(over: float) -> int:
+    """Rewrite the heavy-module list with every module whose recorded tests take ``over`` seconds."""
+    totals: dict[str, float] = {}
+    for node, entry in testhistory.load(testhistory.history_path(ROOT)).items():
+        module = Path(node.split("::", 1)[0]).stem
+        totals[module] = totals.get(module, 0.0) + testhistory.seconds(entry)
+    names = sorted(f"{m}.py" for m, seconds in totals.items() if seconds >= over)
+    head = HEAVY_FILE.read_text(encoding="utf-8").split("test_")[0]
+    HEAVY_FILE.write_text(head + "\n".join(names) + "\n", encoding="utf-8")
+    print(f"{len(names)} modules took {over:g} s or more; wrote {HEAVY_FILE.relative_to(ROOT)}")
+    return 0
+
+
+def show(job: str, status: dict, spec: dict) -> str:
+    """One line describing a job."""
+    ran = status.get("summary", {})
+    counts = f" ran {ran['ran']} reused {ran['reused']}" if ran else ""
+    return (f"{job}  {status.get('state', '?'):9}  {' '.join(spec.get('argv', []))[:60]}  "
+            f"owner {spec.get('owner', {}).get('id') or '-'}{counts}"
+            + (f"  exit {status['exit']}" if "exit" in status else ""))
+
+
+def job_command(args: argparse.Namespace, rest: list[str], argv: list[str]) -> int:
+    """submit, status, wait, result, cancel and the detached runner."""
+    jobs, me = jobs_store(), REUSE["agent"].get("id", "")
+    try:
+        if args.tier == "submit":
+            inner = argv[argv.index("submit") + 1:]
+            if not inner or inner[0] not in FOREGROUND:
+                raise testjobs.Refused(f"submit takes a tier: {', '.join(FOREGROUND)}")
+            if inner[0] != "gate":
+                testselectors.validate(rest[1:], ROOT)
+            print(jobs.submit(inner, REUSE["agent"], ROOT, Path(__file__).resolve(),
+                              {"task": args.task}))
+            return 0
+        if args.tier == "_job":
+            return run_job(jobs, rest[0], args)
+        if args.tier == "subscribe":
+            return subscribe(jobs, rest, args)
+        if args.tier == "status" and not rest:
+            for job in jobs.ids():
+                print(show(job, jobs.state(job), jobs.read(job, "spec.json")))
+            return 0
+        job = rest[0] if rest else ""
+        if args.tier == "cancel":
+            print(jobs.cancel(job, me))
+            return 0
+        status = jobs.wait(job, args.timeout) if args.tier == "wait" else jobs.state(job)
+        if not status:
+            raise testjobs.Refused(f"no job {job}")
+        if args.tier == "result":
+            print(json.dumps(jobs.result(job, ROOT), indent=2))
+        else:
+            print(show(job, status, jobs.read(job, "spec.json")))
+        return int(status.get("exit", 3)) if args.tier == "wait" and status.get("state") in testjobs.TERMINAL else (
+            3 if args.tier == "wait" else 0)
+    except testjobs.Busy as error:
+        print(f"test: {error}", file=sys.stderr)
+        return BUSY_EXIT
+    except (testjobs.Refused, ValueError, OSError) as error:
+        print(f"test: {error}", file=sys.stderr)
+        return 4
+
+
+def subscribe(jobs: testjobs.Jobs, rest: list[str], args: argparse.Namespace) -> int:
+    """Follow a job, a reuse key or a task through the board's own subscriptions."""
+    seat = REUSE["seat"]
+    if seat is None:
+        raise testjobs.Refused("subscribe needs a workspace agent: run it as the identity the harness assigned")
+    if args.task:
+        print(TaskBoard(seat.ws).subscribe(seat.token, args.task))
+        return 0
+    thread = int(jobs.read(rest[0]).get("thread", 0)) if rest else 0
+    if args.key:
+        thread = testboard.thread_for_key(reuse_store().folder, args.key)
+    if not thread:
+        raise testjobs.Refused("that run has not opened a board thread yet")
+    print(testboard.follow_thread(seat, thread))
+    return 0
+
+
+def run_job(jobs: testjobs.Jobs, job: str, args: argparse.Namespace) -> int:
+    """Run a recorded job in this detached process and record how it ended."""
+    spec = jobs.read(job, "spec.json")
+    me = {"pid": os.getpid(), "started": testreuse_store.process_start(os.getpid())}
+    thread = REUSE["events"].job_started(job, spec)
+    jobs.write(job, "status.json", {"state": "running", "at": time.time(), "thread": thread, **me})
+    signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
+    state, code = "failed", 1
+    flags = ["--task", args.task] if args.task else []
+    try:
+        code = main([*spec["argv"], *flags])
+        state = "done"
+    except KeyboardInterrupt:
+        state, code = "cancelled", 130
+    except SystemExit as stop:
+        state, code = "done", stop.code if isinstance(stop.code, int) else 1
+    finally:
+        report = REUSE.get("report")
+        ran, reused = report.counts() if report else (0, 0)
+        status = {"state": state, "exit": code, "finished": time.time(), "thread": thread, **me,
+                  "summary": {"ran": ran, "reused": reused} if report else {}}
+        jobs.write(job, "status.json", status)
+        REUSE["events"].job_done(job, spec, status, thread)
+    return code
+
+
+def follow(argv: list[str], args: argparse.Namespace) -> int:
+    """Run a tier as a job and show its output until it ends; Ctrl-C cancels it."""
+    jobs, me = jobs_store(), REUSE["agent"].get("id", "")
+    try:
+        job = jobs.submit(argv, REUSE["agent"], ROOT, Path(__file__).resolve(),
+                          {"task": args.task, "exclusive": False})
+    except testjobs.Refused as error:
+        print(f"test: {error}", file=sys.stderr)
+        return 4
+    try:
+        status = jobs.wait(job, float("inf"), tail=True)
+    except KeyboardInterrupt:
+        print(f"\n{jobs.cancel(job, me, jobs.read(job, 'spec.json').get('secret', ''))}")
+        return 130
+    return int(status.get("exit", 1))
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Parse the tier and run it."""
+    argv = sys.argv[1:] if argv is None else argv
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("tier", choices=[*FOREGROUND, "heavy", "record", "ratchet", *JOB_COMMANDS])
+    parser.add_argument("--update", action="store_true", help="ratchet: record a lower time")
+    parser.add_argument("--allow-increase", action="store_true",
+                        help="ratchet --update: record a higher time (refused for an agent)")
+    parser.add_argument("--over", type=float, default=12.0, help="heavy: seconds per module")
+    parser.add_argument("-n", "--workers", type=int, default=0,
+                        help="xdist worker ceiling (default: 0 = automatic pool up to what the broker grants); -n 1 runs sequentially")
+    parser.add_argument("--background", action="store_true",
+                        help="admit this run as background: interactive runs go first and it runs at lower CPU priority")
+    parser.add_argument("--no-reuse", action="store_true", help="execute every named test file")
+    parser.add_argument("--timeout", type=float, default=3600.0, help="wait: seconds to wait")
+    parser.add_argument("--task", default="", help="submit/tier runs: the task whose watchers hear how the job ends")
+    parser.add_argument("--key", default="", help="subscribe: follow the run of this reuse key prefix")
+    parser.add_argument("--base", default=BASE, help="branch quick diffs against")
+    parser.add_argument("--slow", action="store_true", help="quick: include slow tests")
+    parser.add_argument("--full", action="store_true", help="gate: run every check even when the diff reaches none")
+    parser.add_argument("--explain", action="store_true", help="quick: say what selected what")
+    parser.add_argument("--artifact-output", action="store_true", help="macOS with --confine: keep test output in private inert artifacts")
+    parser.add_argument("--confine", action="store_true", help="macOS: run pytest under the Seatbelt confinement kernel")
+    args, rest = parser.parse_known_args(argv)
+    REUSE["on"] = not args.no_reuse
+    seat = testboard.acting()
+    REUSE["seat"] = seat
+    if seat is not None:
+        REUSE["agent"] = seat.identity
+        REUSE["events"] = testboard.BoardEvents(seat, (lambda: TaskBoard(seat.ws).watchers(args.task)) if args.task else None)
+        os.environ["DEV_TEST_AGENT"] = json.dumps({**seat.identity, "job": os.environ.get("DEV_TEST_JOB", "")})
+    else:
+        os.environ.pop("DEV_TEST_AGENT", None)
+    if args.confine:
+        os.environ["DEV_TEST_CONFINE"] = "1"
+    if args.artifact_output and args.tier not in ("gate", "all"):
+        parser.error("--artifact-output supports only reviewed gate or explicit all-tier selectors")
+    if args.tier in JOB_COMMANDS:
+        return job_command(args, rest, argv)
+    if args.tier == "heavy":
+        return heavy(args.over)
+    if args.tier == "ratchet":
+        if args.allow_increase and os.environ.get("CLAUDECODE"):
+            print("ratchet: --allow-increase is refused when CLAUDECODE is set; the owner raises it")
+            return 1
+        return testtime.check(ROOT, args.update, args.allow_increase)
+    if args.tier == "record":
+        testprelude.begin(args, rest, ROOT)
+        return record(args)          # takes its own lease: a nested one would wait on itself
+    if args.tier != "gate":
+        try:
+            testselectors.validate(rest, ROOT)
+        except (ValueError, OSError) as error:
+            print(f"test: {error}", file=sys.stderr)
+            return 4
+    if not os.environ.get("DEV_TEST_JOB"):
+        return follow(argv, args)
+    tiers = {"fast": FAST, "full": FULL, "slow": ["--slow", "-m", "slow"], "all": ["--slow"]}
+    testprelude.begin(args, rest, ROOT, reused_files(pytest_command(args.workers, *tiers.get(args.tier, []), *rest)))
+    if args.tier == "quick":
+        return quick(args, rest)
+    if args.tier == "gate":
+        return gate(args, rest)
+    return run(pytest_command(args.workers, *tiers[args.tier], *rest), tier=args.tier, artifact_output=args.artifact_output)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

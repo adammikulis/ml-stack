@@ -50,7 +50,7 @@ class VisionGate:
 
     def build_probe(self, *, size: int = 256) -> tuple[bytes, tuple[str, ...]]:
         """A probe image and the colours in it, in order."""
-        rng = random.Random(self.seed) if self.seed is not None else random.Random()
+        rng = random.Random(self.seed) if self.seed is not None else random.Random()  # noqa: S311 - a sample, not a secret
         names = rng.sample(sorted(PALETTE), k=min(self.bands, len(PALETTE)))
         colours = [PALETTE[n][0] for n in names]
         return probe_png(colours, size=size), tuple(names)
@@ -59,14 +59,14 @@ class VisionGate:
         """Pull colour names out of a reply, in order of first appearance."""
         lowered = text.lower()
         hits: list[tuple[int, str]] = []
-        for canonical, (_rgb, synonyms) in PALETTE.items():
+        for colour, (_rgb, synonyms) in PALETTE.items():
             positions = [
                 match.start()
                 for word in synonyms
                 if (match := re.search(rf"\b{re.escape(word)}\b", lowered))
             ]
             if positions:
-                hits.append((min(positions), canonical))
+                hits.append((min(positions), colour))
 
         ordered = [name for _pos, name in sorted(hits)]
         collapsed: list[str] = []

@@ -16,7 +16,7 @@ class Request:
     top_p: float | None = None
     top_k: int | None = None
     min_p: float | None = None
-    n_predict: int = 16384               # a ceiling, not a budget
+    n_predict: int | None = None
     spec_draft_max: int | None = None    # tokens the draft head guesses ahead
     slot: int | None = None
     context: int | None = None           # Ollama's num_ctx
@@ -36,5 +36,5 @@ class Transport:
 
     api: str | None = None
     api_key: str | None = None
-    timeout: float = 180.0
+    timeout: float | None = None
     tries: int = 1

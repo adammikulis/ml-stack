@@ -59,7 +59,7 @@ class Quiet:
         for one in self.servers:
             out.append(f"  :{one['port']} {one['model'] or '?'} "
                        f"{human_bytes(one['bytes'])} resident, pid {one['pid']}"
-                       + ("" if one["leased"] else ", not leased by ml-stack"))
+                       + ("" if one["leased"] else ", unmanaged (not leased by ml-stack)"))
         if not self.servers:
             out.append("  no model server is running")
         out.append(f"  measuring lock: {measurement_said(self.measuring)}"

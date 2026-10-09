@@ -4,18 +4,21 @@ from __future__ import annotations
 
 import json
 import socket
+import struct
 import threading
 import time
 import urllib.error
 import urllib.request
+from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler
 
 import pytest
 
 from ml_stack.fleet.api import Daemon, make_handler
 from ml_stack.fleet.daemon import load_or_create_token
 from ml_stack.fleet.jobs import JobRunner
-from ml_stack.fleet.serving import Endpoint, Serving, answers
-from ml_stack.http import Server
+from ml_stack.fleet.serving import Endpoint, ServeSettings, Serving, answers
+from ml_stack.http import Server, build_request
 from ml_stack.testing.fakes import FakeLlamaServer, Served, fake_llama_binary
 
 
@@ -39,12 +42,10 @@ class Running:
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
 
     def post(self, path, body=None, token=None, stream=False):
-        req = urllib.request.Request(
-            f"http://127.0.0.1:{self.port}{path}",
-            data=json.dumps(body or {}).encode(), method="POST")
-        req.add_header("Content-Type", "application/json")
-        if token is not False:
-            req.add_header("Authorization", f"Bearer {token or self.token}")
+        req = build_request(
+            f"http://127.0.0.1:{self.port}{path}", data=json.dumps(body or {}).encode(),
+            method="POST", headers={"Content-Type": "application/json"},
+            token="" if token is False else (token or self.token))
         return urllib.request.urlopen(req, timeout=30)
 
     def close(self):
@@ -56,7 +57,7 @@ class Running:
 @pytest.fixture
 def model():
     """A model server that streams a reply with real gaps between its pieces."""
-    m = FakeLlamaServer(Served(answer="hello", gap=0.25,
+    m = FakeLlamaServer(Served(model="qwen3-4b.gguf", answer="hello", gap=0.25,
                                pieces=tuple(f"tok{n}" for n in range(8))))
     try:
         yield m
@@ -75,7 +76,103 @@ def wired(tmp_path, model):
         d.close()
 
 
+def test_live_registry_records_embedding_mode_and_preserves_it(tmp_path, model, monkeypatch):
+    from ml_stack.fleet import serving as serving_module
+
+    registry = Serving(tmp_path / 'serving.json')
+    registry.register(model.port, ['qwen3-4b.gguf'])
+    monkeypatch.setattr(serving_module, 'every_server', lambda: [{'port': model.port, 'embedding': True}])
+    found = registry.live(force=True)
+    assert len(found) == 1 and found[0].capabilities['chat'] is False
+    assert found[0].public()['capabilities']['evidence'] == 'server embedding mode'
+    assert registry.all()[0].capabilities == found[0].capabilities
+
+
+@contextmanager
+def metadata_server(body, *, redirect=""):
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(302 if redirect else 200)
+            if redirect:
+                self.send_header("Location", redirect)
+            self.end_headers()
+            self.wfile.write(json.dumps(body).encode())
+
+        def log_message(self, *_):
+            pass
+
+    server = Server(("127.0.0.1", 0), Handler)
+    worker = threading.Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    try:
+        yield server.server_port
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join()
+
+
 class TestRegistry:
+    def test_verified_unchanged_reads_do_not_create_a_write_lock(self, tmp_path, model):
+        registry = Serving(tmp_path / "serving.json")
+        registry.register(model.port, ["qwen3-4b.gguf"])
+        expected = registry.live(force=True)
+        lock_path = registry.path.with_suffix(".lock")
+        lock_path.unlink()
+        assert registry.live(force=True) == expected
+        assert not lock_path.exists()
+
+    def test_reconciliation_preserves_registration_changed_after_probe(self, tmp_path, model, monkeypatch):
+        from dataclasses import replace
+
+        from ml_stack.fleet import serving as module
+
+        registry = Serving(tmp_path / "serving.json")
+        original = registry.register(model.port, ["stale-claim.gguf"])
+        current = replace(original, models=["concurrent-claim.gguf"])
+        take_lock = module.lock.only_one
+
+        @contextmanager
+        def concurrent_registration(*args, **kwargs):
+            with take_lock(*args, **kwargs) as held:
+                registry._write([current])
+                yield held
+
+        monkeypatch.setattr(module.lock, "only_one", concurrent_registration)
+        live = registry.live(force=True)
+        assert live[0].models == ["qwen3-4b.gguf"]
+        assert registry.all() == [current]
+
+    @pytest.mark.parametrize("port", [-1, 0, 65536, True, "8080", None])
+    def test_invalid_persisted_ports_are_never_probed(self, tmp_path, port):
+        path = tmp_path / "serving.json"
+        path.write_text(json.dumps([{"port": port, "models": ["claim.gguf"]}]))
+        registry = Serving(path)
+        assert registry.all() == registry.live(force=True) == []
+
+    @pytest.mark.parametrize("body", [[], {"data": None}, {"data": 3}, {"data": [None, {"id": 3}, {"id": ""}]}])
+    def test_malformed_metadata_does_not_advertise_registration_claims(self, tmp_path, body):
+        with metadata_server(body) as port:
+            registry = Serving(tmp_path / "serving.json")
+            registry.register(port, ["claim.gguf"])
+            assert registry.live(force=True) == []
+            assert registry.all()[0].models == ["claim.gguf"]
+
+    def test_metadata_redirect_cannot_borrow_another_endpoints_identity(self, tmp_path, model):
+        with metadata_server({}, redirect=f"http://127.0.0.1:{model.port}/v1/models") as port:
+            registry = Serving(tmp_path / "serving.json")
+            registry.register(port, ["claim.gguf"])
+            assert registry.live(force=True) == []
+            assert registry.all()[0].models == ["claim.gguf"]
+
+    def test_recycled_port_reports_its_actual_model_and_prunes_dead_rows(self, tmp_path, model):
+        registry = Serving(tmp_path / "serving.json")
+        registry.register(model.port, ["stale-claim.gguf"])
+        registry.register(free_port(), ["dead-claim.gguf"])
+        live = registry.live(force=True)
+        assert [(one.port, one.models) for one in live] == [(model.port, ["qwen3-4b.gguf"])]
+        assert [(one.port, one.models) for one in registry.all()] == [(model.port, ["qwen3-4b.gguf"])]
+
     def test_a_registered_server_that_died_is_not(self, tmp_path, model):
         """Registration is a claim. A beacon advertising a model nobody can reach
         sends work to a dead port."""
@@ -147,6 +244,23 @@ class TestProxy:
             daemon.post("/infer/v1/chat/completions", {}, token=False)
         assert exc.value.code == 401
 
+    def test_it_sends_the_leased_servers_key_upstream(self, wired):
+        from ml_stack import serverkeys
+
+        daemon, _, model = wired
+        model.api_key = serverkeys.issue(model.port)
+        with daemon.post("/infer/v1/chat/completions",
+                         {"messages": [{"role": "user", "content": "hi"}]}) as r:
+            assert json.loads(r.read())["choices"][0]["message"]["content"] == "hello"
+
+    def test_an_unauthenticated_model_identity_is_not_advertised(self, wired):
+        daemon, serving, model = wired
+        model.api_key = "not-in-the-key-file"
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            daemon.post("/infer/v1/chat/completions", {"messages": []})
+        assert exc.value.code == 503
+        assert serving.live(force=True) == []
+
     def test_a_plain_completion_comes_back(self, wired):
         daemon, _, _ = wired
         with daemon.post("/infer/v1/chat/completions",
@@ -204,6 +318,35 @@ class TestProxy:
                      "/infer/embedding"):
             with daemon.post(path, {}) as r:
                 assert r.status == 200, path
+
+    @pytest.mark.parametrize("path", [
+        "/infer/v1/../props", "/infer/v1/%2e%2e/slots", "/infer/admin", "/infer/", "/infer",
+        "/infer//etc/passwd", "/infer/v1/x%20y", "/infer/slots/0?action=erase",
+        "/infer/props", "/infer/models",
+    ])
+    def test_a_path_that_is_not_the_model_servers_to_give_is_refused(self, wired, path):
+        daemon, _, _ = wired
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            daemon.post(path, {})
+        assert exc.value.code == 403, path
+
+    def test_the_caches_and_properties_of_the_model_server_are_read_not_written(self, wired):
+        daemon, _, _ = wired
+        for path in ("/infer/slots", "/infer/props"):
+            with pytest.raises(urllib.error.HTTPError) as exc:
+                daemon.post(path, {})
+            assert exc.value.code == 403, path
+
+    def test_a_path_cannot_name_another_host(self, wired):
+        """`/infer@host:port/` would read as userinfo in front of a host the caller picked."""
+        daemon, _, _ = wired
+        other = FakeLlamaServer(Served(answer="elsewhere"))
+        try:
+            with pytest.raises(urllib.error.HTTPError) as exc:
+                daemon.post(f"/infer@127.0.0.1:{other.port}/v1/chat/completions", {})
+            assert exc.value.code == 404
+        finally:
+            other.close()
 
 
 class TestEndpoint:
@@ -263,11 +406,34 @@ def manager(tmp_path, llama_binary):
 @pytest.fixture
 def gguf(tmp_path):
     path = tmp_path / "Qwen3-4B-Q4_K_M.gguf"
-    path.write_bytes(b"GGUF" + b"\x00" * 64)
+    path.write_bytes(b"GGUF" + struct.pack("<IQQ", 3, 0, 0))
     return path
 
 
 class TestStartingAModelWithoutTheInterface:
+    @pytest.mark.parametrize('scenario', [(False, None, False), (True, None, True), (True, False, False)])
+    def test_escalation_defaults_and_explicit_opt_out(self, tmp_path, manager, gguf, monkeypatch, scenario):
+        from ml_stack.fleet.serving import Hosting, start_model, stop_model
+
+        observed = []
+        hosted, escalate, expected = scenario
+        lease = manager.lease
+
+        def tracked(spec, **kwargs):
+            observed.append(kwargs['escalate'])
+            return lease(spec, **kwargs)
+
+        monkeypatch.setattr(manager, 'lease', tracked)
+        settings = ServeSettings(escalate=escalate)
+        if hosted:
+            hosting = Hosting(tmp_path, Serving(tmp_path / 'serving.json'), manager=manager)
+            started = hosting.start(gguf, settings)
+            hosting.stop(started.port)
+        else:
+            started = start_model(tmp_path, gguf, settings=settings, manager=manager)
+            stop_model(started)
+        assert observed == [expected]
+
     def test_it_leases_a_server_that_answers(self, tmp_path, manager, gguf):
         from ml_stack.fleet.serving import start_model, stop_model
 
@@ -302,7 +468,7 @@ class TestStartingAModelWithoutTheInterface:
         from ml_stack.fleet.serving import start_model, stop_model
 
         registry = Serving(tmp_path / "serving.json")
-        started = start_model(tmp_path, gguf, name="something else.gguf",
+        started = start_model(tmp_path, gguf, settings=ServeSettings(name="something else.gguf"),
                               manager=manager, serving=registry)
         try:
             assert registry.all()[0].models == ["something else.gguf"]
@@ -312,7 +478,7 @@ class TestStartingAModelWithoutTheInterface:
     def test_the_context_length_reaches_the_server(self, tmp_path, manager, gguf):
         from ml_stack.fleet.serving import start_model, stop_model
 
-        started = start_model(tmp_path, gguf, context=2048, manager=manager)
+        started = start_model(tmp_path, gguf, settings=ServeSettings(context=2048), manager=manager)
         stop_model(started)
         argv = json.loads((tmp_path / "argv.json").read_text())
         assert argv[argv.index("-c") + 1] == "2048"
@@ -323,19 +489,19 @@ class TestStartingAModelWithoutTheInterface:
         from ml_stack.hub import DRAFT_MARK
 
         draft = gguf.with_suffix(DRAFT_MARK + gguf.suffix)
-        draft.write_bytes(b"GGUF" + b"\x00" * 64)
+        draft.write_bytes(b"GGUF" + struct.pack("<IQQ", 3, 0, 0))
 
         started = start_model(tmp_path, gguf, manager=manager)
         stop_model(started)
         argv = json.loads((tmp_path / "argv.json").read_text())
         assert argv[argv.index("-md") + 1] == str(draft)
-        assert argv[argv.index("-ngld") + 1] == "99"
+        assert argv[argv.index("--spec-draft-ngl") + 1] == "99"
 
     def test_a_given_port_is_the_one_used(self, tmp_path, manager, gguf):
         from ml_stack.fleet.serving import start_model, stop_model
 
         port = free_port()
-        started = start_model(tmp_path, gguf, manager=manager, port=port)
+        started = start_model(tmp_path, gguf, manager=manager, settings=ServeSettings(port=port))
         try:
             assert started.port == port
         finally:

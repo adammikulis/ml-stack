@@ -10,8 +10,8 @@ from http.server import BaseHTTPRequestHandler
 import pytest
 
 from ml_stack.fleet import autostart, launch
-from ml_stack.fleet.discovery import join_cluster
 from ml_stack.http import Server
+from tests.cluster_support import join_cluster
 
 
 class _Health(BaseHTTPRequestHandler):
@@ -48,10 +48,10 @@ def test_with_nothing_answering_it_says_how_to_start_the_page():
     text = "\n".join(lines)
     assert "  machine     box" in lines
     assert "  open" not in text
-    assert "cluster" not in text
+    assert not any(line.startswith("  cluster     ") for line in lines)
     assert f"ml-stack                        -- starts it and opens http://127.0.0.1:{port}/ui/" \
         in text
-    assert "ml-stack-fleet join --persist" in text
+    assert "ml-stack-cluster join --persist" in text
 
 
 def test_with_a_daemon_answering_it_names_the_page_and_the_cluster(daemon):
@@ -75,6 +75,42 @@ def test_the_installer_prints_it(capsys):
     assert "  machine     box" in capsys.readouterr().out
 
 
+def test_browser_waits_through_slow_startup(monkeypatch, capsys):
+    clock = iter([0.0, 21.0, 22.0])
+    answers = iter([None, None, {"name": "box"}])
+    opened = []
+    stopped = threading.Event()
+    monkeypatch.setattr(launch.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(launch, "_health", lambda port: next(answers))
+    monkeypatch.setattr(stopped, "wait", lambda seconds: False)
+    monkeypatch.setattr(launch.webbrowser, "open", opened.append)
+    launch._open_when_ready(8770, True, stopped)
+    assert opened == ["http://127.0.0.1:8770/ui/"]
+    text = capsys.readouterr().out
+    assert text.count("still starting") == 1
+    assert "did not start" not in text
+
+
+def test_browser_stops_waiting_when_daemon_exits(monkeypatch):
+    stopped = threading.Event()
+    opened = []
+
+    def health(port):
+        stopped.set()
+        return None
+
+    monkeypatch.setattr(launch, "_health", health)
+    monkeypatch.setattr(launch.webbrowser, "open", opened.append)
+    launch._open_when_ready(8770, True, stopped)
+    assert not opened
+
+
+def test_no_browser_still_waits_for_health(monkeypatch):
+    monkeypatch.setattr(launch, "_health", lambda port: {})
+    monkeypatch.setattr(launch.webbrowser, "open", lambda url: pytest.fail(url))
+    launch._open_when_ready(8770, False, threading.Event())
+
+
 def test_a_vcs_install_names_its_commit_on_the_done_screen(monkeypatch):
     from ml_stack.fleet import measuring, updates
 
@@ -91,3 +127,176 @@ def test_a_vcs_install_names_its_commit_on_the_done_screen(monkeypatch):
     running = next(line for line in launch.last_screen("box", port=_free_port())
                    if line.startswith("  running"))
     assert running.endswith("  0ce5bc5"), running
+
+
+def test_new_launcher_replaces_owned_older_idle_daemon_before_start(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(launch, "already_running", lambda _port: {"commit": "old", "launcher_control": "a" * 32})
+    monkeypatch.setattr(launch, "state", lambda: {"commit": "new"})
+    monkeypatch.setattr(launch, "request_replacement", lambda *args, **kwargs: calls.append(("replace", args)))
+    monkeypatch.setattr(launch, "_wait_for_exit", lambda _port: True)
+    monkeypatch.setattr(launch, "_open_when_ready", lambda *_args: None)
+    assert launch.main(["--no-browser", "--root", str(tmp_path)],
+                       daemon_main=lambda argv: calls.append(("start", argv)) or 0) == 0
+    assert [row[0] for row in calls] == ["replace", "start"]
+    assert calls[0][1][0] == tmp_path
+
+
+def test_new_launcher_keeps_busy_or_unowned_daemon_and_reports_retry(monkeypatch, capsys):
+    monkeypatch.setattr(launch, "already_running", lambda _port: {"commit": "old"})
+    monkeypatch.setattr(launch, "state", lambda: {"commit": "new"})
+    def refuse(*_args, **_kwargs):
+        raise launch.ControlError("Daemon has active work; retry when it is idle.")
+    monkeypatch.setattr(launch, "request_replacement", refuse)
+    assert launch.main(["--no-browser"], daemon_main=lambda _argv: pytest.fail("started over active daemon")) == 1
+    assert "retry" in capsys.readouterr().err
+
+
+def test_launcher_reuses_exact_running_commit_without_replacement(monkeypatch):
+    monkeypatch.setattr(launch, "already_running", lambda _port: {"name": "box", "commit": "a" * 40})
+    monkeypatch.setattr(launch, "state", lambda: {"commit": "a" * 40})
+    monkeypatch.setattr(launch, "request_replacement", lambda *_args: pytest.fail("replaced identical daemon"))
+    assert launch.main(["--no-browser"], daemon_main=lambda _argv: pytest.fail("started duplicate")) == 0
+
+
+def test_launcher_waits_for_tcp_close_when_health_is_unavailable(monkeypatch):
+    from contextlib import nullcontext
+    clock = iter([0.0, 1.0, 2.0, 3.0])
+    connections = []
+    def connect(*args, **kwargs):
+        connections.append(args)
+        if len(connections) == 1:
+            return nullcontext()
+        if len(connections) == 2:
+            raise TimeoutError("listener is still reachable but busy")
+        raise ConnectionRefusedError("listener is closed")
+    monkeypatch.setattr(launch.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(launch.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(launch.socket, "create_connection", connect)
+    monkeypatch.setattr(launch, "already_running", lambda _port: None)
+    monkeypatch.setattr(launch, "_can_bind", lambda _port: len(connections) > 2)
+    assert launch._wait_for_exit(8770)
+    assert len(connections) == 3
+
+
+def test_explicit_restart_replaces_same_commit_without_passing_flag_to_daemon(monkeypatch):
+    flag = '--restart'
+    calls = []
+    monkeypatch.setattr(launch, 'already_running', lambda _port: {'commit': 'a' * 40})
+    monkeypatch.setattr(launch, 'state', lambda: {'commit': 'a' * 40})
+    monkeypatch.setattr(launch, 'request_replacement', lambda *args, **kwargs: calls.append(kwargs) or {'preserved': {'queued': 1, 'running': 1}})
+    monkeypatch.setattr(launch, '_wait_for_exit', lambda _port: True)
+    monkeypatch.setattr(launch, '_open_when_ready', lambda *_args: None)
+    assert launch.main([flag, '--no-browser'], daemon_main=lambda args: calls.append(args) or 0) == 0
+    assert calls[0]['restart'] == 'preserve'
+    assert flag not in calls[1]
+
+
+def test_launcher_refuses_the_removed_force_restart_flag_as_a_daemon_option(monkeypatch):
+    known, rest = launch._arguments(['--restart', '--no-browser', '--force-restart'])
+    assert known.restart and rest == ['--force-restart']
+
+
+@pytest.fixture
+def silent_port():
+    """A port that accepts connections and never answers, as a daemon too loaded to reply."""
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(8)
+    yield listener.getsockname()[1]
+    listener.close()
+
+
+def test_a_held_port_whose_health_probe_missed_never_starts_a_second_daemon(monkeypatch, silent_port, capsys):
+    monkeypatch.setattr(launch, "already_running", lambda _port: None)
+    monkeypatch.setattr(launch, "SLOW_HEALTH_TIMEOUT_S", 0.2, raising=False)
+    monkeypatch.setattr(launch, "SLOW_HEALTH_TRIES", 2, raising=False)
+    assert launch.main(["--no-browser", "--port", str(silent_port)],
+                       daemon_main=lambda _argv: pytest.fail("started a daemon on a held port")) == 1
+    assert "holds port" in capsys.readouterr().err
+
+
+def test_a_held_port_that_answers_slowly_is_the_running_daemon(monkeypatch, capsys):
+    server = Server(("127.0.0.1", 0), _Health)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        calls = iter([None])
+        monkeypatch.setattr(launch, "already_running", lambda _port: next(calls, None))
+        monkeypatch.setattr(launch, "same_commit", lambda *_args: True)
+        monkeypatch.setattr(launch, "_open_when_ready", lambda *_args: None)
+        assert launch.main(["--no-browser", "--port", str(server.server_address[1])],
+                           daemon_main=lambda _argv: pytest.fail("started a duplicate")) == 0
+        assert "already running" in capsys.readouterr().out
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_a_port_nothing_listens_on_starts_the_daemon(monkeypatch):
+    calls = []
+    monkeypatch.setattr(launch, "already_running", lambda _port: None)
+    monkeypatch.setattr(launch, "_open_when_ready", lambda *_args: None)
+    assert launch.main(["--no-browser", "--port", str(_free_port())],
+                       daemon_main=lambda argv: calls.append(argv) or 0) == 0
+    assert calls
+
+
+def test_the_restart_the_autostart_path_builds_is_accepted_by_the_launcher_and_the_daemons_parser(monkeypatch):
+    import argparse
+    import sys
+    from types import SimpleNamespace
+
+    from ml_stack import jobs, runtime
+    from ml_stack.fleet import daemon
+
+    detached = []
+    monkeypatch.setattr(runtime, 'available', lambda: SimpleNamespace(prefix='/elsewhere'))
+    monkeypatch.setattr(sys, 'argv', ['ml-stack', '--port', '8770'])
+    monkeypatch.setattr(jobs, 'detach', lambda module, argv, **_kw: detached.append((module, argv)))
+    assert autostart.restart() == 'launcher'
+    module, argv = detached[0]
+    assert module == 'ml_stack.fleet.launch'
+
+    class Parsed(Exception):
+        pass
+
+    parse = argparse.ArgumentParser.parse_args
+
+    def parse_then_stop(self, args=None, namespace=None):
+        if self.prog != 'ml-stack-traind':
+            return parse(self, args, namespace)
+        raise Parsed(parse(self, args, namespace))
+
+    monkeypatch.setattr(argparse.ArgumentParser, 'parse_args', parse_then_stop)
+    monkeypatch.setattr(launch, 'already_running', lambda _port: {'commit': 'a' * 40})
+    monkeypatch.setattr(launch, 'state', lambda: {'commit': 'a' * 40})
+    monkeypatch.setattr(launch, 'request_replacement', lambda *_a, **_kw: {})
+    monkeypatch.setattr(launch, '_wait_for_exit', lambda _port: True)
+    monkeypatch.setattr(launch, '_open_when_ready', lambda *_args: None)
+    with pytest.raises(Parsed) as accepted:
+        launch.main(argv, daemon_main=daemon.run)
+    assert accepted.value.args[0].port == 8770
+
+
+def _timing_out(monkeypatch):
+    def slow(*_args, **_kwargs):
+        raise TimeoutError("timed out")
+
+    monkeypatch.setattr(launch.socket, "create_connection", slow)
+
+
+def test_a_free_port_that_times_out_is_not_held(monkeypatch):
+    """Windows retransmits to a closed loopback port for about two seconds before refusing."""
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    _timing_out(monkeypatch)
+    assert launch.port_held(port) is False
+
+
+def test_a_listening_port_that_times_out_is_held(monkeypatch):
+    with socket.socket() as holder:
+        holder.bind(("127.0.0.1", 0))
+        holder.listen()
+        _timing_out(monkeypatch)
+        assert launch.port_held(holder.getsockname()[1]) is True

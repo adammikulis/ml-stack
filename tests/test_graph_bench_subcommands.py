@@ -1,5 +1,5 @@
 """``ml-stack-bench standard`` and ``animate`` reach their own modules' `run`; the
-``compare`` and ``speed`` lines take the shapes ``ml-stack-do`` writes.
+``compare`` and ``speed`` lines take the shapes ``ml-stack-chat`` writes.
 
 Every fixture here is invented. Nothing reads a real store, a real graph, or a real server.
 """

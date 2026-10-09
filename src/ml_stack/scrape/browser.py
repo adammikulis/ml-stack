@@ -23,6 +23,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from ml_stack.net import browserguard
+from ml_stack.platform import applescript_quote
+
 
 class BrowserUnavailable(RuntimeError):
     """Playwright is not installed. `pip install ml-stack[scrape]`, then `playwright install`."""
@@ -39,6 +42,8 @@ class Window:
     channel: str = "chrome"
     timeout_ms: int = 60_000
     position: tuple[int, int] | None = None
+    guarded: bool = False
+    """Only public addresses may be requested and nothing is downloaded: for pages a model chose."""
 
     def args(self) -> list[str]:
         """The Chromium flags this window wants."""
@@ -71,7 +76,8 @@ def keeping_focus() -> Iterator[None]:
     finally:
         if front:
             with contextlib.suppress(Exception):
-                subprocess.run(["osascript", "-e", f'tell application "{front}" to activate'],
+                subprocess.run(["osascript", "-e",
+                                f'tell application "{applescript_quote(front)}" to activate'],
                                capture_output=True, timeout=10, check=False)
 
 
@@ -95,8 +101,10 @@ def _paged(play: Any, window: Window) -> Iterator[Any]:
     with keeping_focus():
         context = play.chromium.launch_persistent_context(
             str(profile), headless=window.headless, channel=window.channel,
-            args=window.args(),
+            args=window.args(), accept_downloads=not window.guarded,
             viewport={"width": window.width, "height": window.height})
+    if window.guarded:
+        browserguard.install(context)
     context.set_default_timeout(window.timeout_ms)
     page = context.pages[0] if context.pages else context.new_page()
     try:
@@ -172,6 +180,6 @@ def pace(least_s: float = 0.0, most_s: float = 0.0) -> float:
     """
     if most_s <= 0:
         return 0.0
-    spent = random.uniform(max(0.0, least_s), most_s)
+    spent = random.uniform(max(0.0, least_s), most_s)  # noqa: S311 - a sample, not a secret
     time.sleep(spent)
     return spent

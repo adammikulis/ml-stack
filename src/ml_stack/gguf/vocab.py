@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack.files import promote
+from ml_stack.hub.modelfile import scan_gguf
 
 ADD_SPACE_PREFIX = "tokenizer.ggml.add_space_prefix"
 
@@ -16,6 +17,13 @@ class VocabPatchError(RuntimeError):
     """The GGUF could not be rewritten."""
 
 
+def _checked(path: Path | str) -> str:
+    """``path`` once its header has been read within the file's size; the gguf package trusts
+    the counts the file claims."""
+    scan_gguf(path, want=lambda _key: False, tensors=True)
+    return str(path)
+
+
 def read_metadata(path: Path | str) -> dict[str, Any]:
     """Every metadata key in a GGUF, for inspection and for tests."""
     try:
@@ -23,7 +31,7 @@ def read_metadata(path: Path | str) -> dict[str, Any]:
     except ImportError as exc:  # pragma: no cover - dependency is declared
         raise VocabPatchError("the `gguf` package is required to read GGUF metadata") from exc
 
-    reader = GGUFReader(str(path))
+    reader = GGUFReader(_checked(path))
     out: dict[str, Any] = {}
     for name, field in reader.fields.items():
         if name.startswith(_HEADER_PREFIX):
@@ -43,7 +51,6 @@ def set_metadata(
     """Copy ``src`` to ``dst``, overriding the metadata keys in ``values``."""
     try:
         import numpy as np
-
         from gguf import GGUFReader, GGUFValueType, GGUFWriter
     except ImportError as exc:  # pragma: no cover
         raise VocabPatchError("the `gguf` and `numpy` packages are required") from exc
@@ -52,7 +59,7 @@ def set_metadata(
     if not src.is_file():
         raise VocabPatchError(f"no GGUF at {src}")
 
-    reader = GGUFReader(str(src))
+    reader = GGUFReader(_checked(src))
     arch_field = reader.fields.get("general.architecture")
     if arch_field is None:
         raise VocabPatchError(f"{src} has no general.architecture; is it a GGUF?")

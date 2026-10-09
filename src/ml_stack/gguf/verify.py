@@ -82,7 +82,7 @@ def verify_tokenizer_fidelity(gguf: Path | str, encode: Callable[[str], Sequence
     if client_cls is None:
         from ml_stack.client import Client as client_cls
 
-    with serve_fn(gguf, context=context) as server:
+    with serve_fn(gguf, context=context, reason="GGUF tokenizer check") as server:
         client = client_cls(server.base_url)
         for text in probes:
             want = list(encode(text))

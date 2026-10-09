@@ -57,7 +57,10 @@ def parser_of(command: str) -> argparse.ArgumentParser:
     def grab(self: argparse.ArgumentParser, *_: object, **__: object) -> None:
         raise _Captured(self)
 
-    with mock.patch.object(argparse.ArgumentParser, "parse_known_args", grab):
+    # A launcher forwards to the machine's selected runtime by exec, which on a machine that
+    # has one would replace the test process; reading a parser must never do that.
+    with (mock.patch.object(argparse.ArgumentParser, "parse_known_args", grab),
+          mock.patch("ml_stack.runtime.forward", return_value=False)):
         try:
             _main_of(command)([])
         except _Captured as caught:
@@ -108,7 +111,7 @@ def test_every_command_answers_help(command, capsys):
 
 @pytest.mark.parametrize("command", sorted(c for c in SCRIPTS if c.startswith("ml-stack-")))
 def test_the_umbrella_hands_back_the_same_help(command, capsys):
-    """``ml-stack do --help`` is ``ml-stack-do --help``; ``ml-stack train run`` joins the words."""
+    """``ml-stack chat --help`` is ``ml-stack-chat --help``; ``ml-stack train run`` joins the words."""
     words = command[len("ml-stack-"):].split("-")
     with pytest.raises(SystemExit) as left:
         _main_of(command)(["--help"])
@@ -140,10 +143,16 @@ def test_the_top_level_help_names_every_subcommand(command, capsys):
     with pytest.raises(SystemExit):
         _main_of(command)(["--help"])
     usage = capsys.readouterr().out.split("\n\n", 1)[0]
-    for path in parsers_of(PARSERS[command]):
-        if path:
-            assert re.search(rf"\b{re.escape(path)}\b", usage), \
-                f"the usage line of {command} --help does not name its subcommand {path!r}"
+    everything = parsers_of(PARSERS[command])
+    for path in everything:
+        if not path:
+            continue
+        # A nested subcommand ('members list') is named on its parent's usage line
+        # ('members --help'); a first-level one is named on the command's own.
+        parent, _, name = path.rpartition(" ")
+        shown = everything[parent].format_usage() if parent else usage
+        assert re.search(rf"\b{re.escape(name)}\b", shown), \
+            f"the usage line of {command} {parent} --help does not name its subcommand {name!r}".replace("  ", " ")
 
 
 # -- the docs ------------------------------------------------------------------------

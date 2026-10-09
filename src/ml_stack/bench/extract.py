@@ -586,7 +586,7 @@ def _served(read: _Reading) -> int:
     if leased is None:
         return 2
     lease, manager = leased
-    with serve(found, manager=manager, **lease) as up:
+    with serve(found, manager=manager, **lease, reason=f"bench extract on {Path(found).name}") as up:
         say(f"    up in {time.time() - began:.0f}s")
         client = Client(up.base_url, request=Request(**sampling_from(args)),
                         transport=Transport(timeout=args.per_message))

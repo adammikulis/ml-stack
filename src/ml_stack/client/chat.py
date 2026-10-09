@@ -13,6 +13,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from ml_stack.client import families
 from ml_stack.client.families import Family
@@ -56,7 +57,7 @@ def parse_url(base_url: str, api: str | None) -> tuple[str, str, str | None]:
         url = f"http://{host}"
         model = tag or None
         api = api or "ollama"
-    elif "api.openai.com" in url:
+    elif urlsplit(url).hostname == "api.openai.com":
         api = api or "openai"
     api = api or "llama"
     if api not in APIS:
@@ -82,6 +83,13 @@ _FAMILY_BY_URL: dict[str, Any] = {}
 def forget_families() -> None:
     """Forget which family each server was serving. Call after restarting one."""
     _FAMILY_BY_URL.clear()
+
+
+def forget_server(base_url: str) -> None:
+    """Forget what was learned about the server at ``base_url``: its family and whether it
+    took a per-request draft depth."""
+    _FAMILY_BY_URL.pop(base_url, None)
+    _NO_SPECULATIVE.discard(base_url)
 
 
 class GrammarBudgetError(ServerError):
@@ -148,7 +156,8 @@ class Client:
             known = _FAMILY_BY_URL.get(self.base_url)
             if known is None:
                 known = families.for_model_ids(
-                    reported_models(self.base_url, timeout=min(self.transport.timeout, 5.0)))
+                    reported_models(self.base_url, timeout=min(self.transport.timeout, 5.0)
+                    if self.transport.timeout is not None else 5.0))
                 _FAMILY_BY_URL[self.base_url] = known
             self._probed = known
         return self._probed
@@ -291,9 +300,19 @@ class Client:
                 body["chat_template_kwargs"] = {**(extra.pop("chat_template_kwargs", None) or {}),
                                                 **asked}
         body.update(extra)
+        defaults = families.thinkingcap_defaults(self.model)
+        if defaults:
+            template = {**defaults, **(body.get("chat_template_kwargs") or {})}
+            if body.get("reasoning_effort") is not None:
+                template["reasoning_effort"] = body["reasoning_effort"]
+            if template.get("enable_thinking") is False:
+                template.pop("reasoning_effort", None)
+            body["chat_template_kwargs"] = template
 
         if self._is_hosted_openai:
-            body["max_tokens"] = body.pop("n_predict", None)
+            limit = body.pop("n_predict", None)
+            if limit is not None:
+                body["max_tokens"] = limit
             # The hosted API has no template flags; harmony's `reasoning_effort` is the one
             # thinking switch it reads, so only that one survives.
             effort = (body.get("chat_template_kwargs") or {}).get("reasoning_effort")
@@ -302,6 +321,8 @@ class Client:
             if effort is not None:
                 body["reasoning_effort"] = effort
 
+        if not self._is_hosted_openai and body.get("n_predict") is None:
+            body["n_predict"] = -1
         return body
 
     # --------------------------------------------------------------- calls
@@ -379,7 +400,7 @@ class Client:
         body: dict[str, Any] = {
             "prompt": prompt,
             **self.sampling,
-            "n_predict": budget,
+            "n_predict": budget if budget is not None else -1,
             "stream": False,
         }
         body.update(self.speculative)
@@ -394,7 +415,7 @@ class Client:
         text = (payload.get("content") or "").strip()
 
         hit_ceiling = payload.get("stopped_limit") or payload.get("truncated")
-        if grammar and hit_ceiling and retry_on_budget:
+        if grammar and hit_ceiling and retry_on_budget and budget is not None:
             retry = dict(body, n_predict=budget * 2, seed=_fresh_seed(body.get("seed")))
             payload = self._completion(retry, timeout)
             text = (payload.get("content") or "").strip()
@@ -589,11 +610,13 @@ class Client:
 
         if self.api == "ollama":
             return ollama.served_by(self.base_url, self.model,
-                                    timeout=min(self.transport.timeout, 10.0))
-        props = request_json(f"{self.base_url}/props", timeout=min(self.transport.timeout, 10.0),
+                                    timeout=min(self.transport.timeout, 10.0)
+                                    if self.transport.timeout is not None else 10.0)
+        props = request_json(f"{self.base_url}/props", timeout=min(self.transport.timeout, 10.0)
+                             if self.transport.timeout is not None else 10.0,
                              method="GET", headers=self._headers()) or {}
         where = str(props.get("model_path") or "")
-        name = where.rsplit("/", 1)[-1] or self.model
+        name = where.replace("\\", "/").rsplit("/", 1)[-1] or self.model
         size: int | None = None
         if where:
             try:

@@ -1,4 +1,4 @@
-"""``ml-stack-fleet`` -- make this machine a peer in one command, and see what the fleet sees.
+"""``ml-stack-cluster`` -- make this machine a peer in one command, and see the devices in the cluster.
 
 ``join`` is the whole onboarding: the machine facts serving depends on (`ml_stack.setup.look`),
 a llama-server if there is none, a cluster passphrase, the daemon (started now, and at logon
@@ -26,26 +26,31 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack import home
+from ml_stack.checks import line as fix_line
 from ml_stack.files import UNVERSIONED, read_json, version_of, versioned, write_json
 from ml_stack.http import ServerError, ServerUnreachable, json_body, request_bytes
 from ml_stack.jobs import detach
 from ml_stack.log import say, warn
 from ml_stack.units import human_bytes
 
+from . import automatic_clusters, cluster_modes, recovery
+from .applying import apply_plan, serving_table
 from .discovery import (
-    DEFAULT_CLUSTER,
     Beacon,
     DiscoveryError,
     default_port,
     discover,
     in_cluster,
-    join as join_cluster,
     key_path,
     leave as leave_cluster,
     memberships,
     named_apart,
+    require_name,
 )
 from .launch import HTTP_PORT, already_running, wait_for_health
+from .onboard.cli import COMMANDS as ONBOARD_COMMANDS, add_commands, run as run_onboarding
+from .onboard.clusters import format_clusters, known_clusters, pick_cluster
+from .onboard.joining import JoinOptions, join_by_passphrase
 from .pausing import (
     Answer,
     Fanout,
@@ -55,7 +60,7 @@ from .pausing import (
     peer_clients,
     remember_seen,
 )
-from .remote import PeerError
+from .runtime_paths import default_root
 
 __all__ = [
     "STARTED_FILE",
@@ -64,9 +69,7 @@ __all__ = [
     "Fanout",
     "JoinError",
     "Joined",
-    "apply_plan",
     "checks",
-    "default_root",
     "describe",
     "join_machine",
     "leave_machine",
@@ -78,17 +81,11 @@ __all__ = [
     "remember_seen",
     "remember_track",
     "running_code",
-    "serving_table",
     "start_daemon",
     "sweep_argv",
     "table",
     "updating",
 ]
-
-
-def default_root() -> Path:
-    """The daemon's root: ``traind`` under the state root."""
-    return home.state("traind")
 
 
 STARTED_FILE = "fleet-daemon.json"
@@ -125,6 +122,7 @@ class Joined:
     port: int
     root: Path
     group: str
+    mode: str = ""
     checks: list[Check] = field(default_factory=list)
     started: bool = False
     daemon_pid: int | None = None
@@ -137,7 +135,7 @@ class Joined:
     def public(self) -> dict[str, Any]:
         return {"name": self.name, "machine": self.machine, "port": self.port,
                 "root": str(self.root),
-                "group": self.group, "checks": [c.public() for c in self.checks],
+                "group": self.group, "mode": self.mode, "checks": [c.public() for c in self.checks],
                 "started": self.started, "daemon_pid": self.daemon_pid,
                 "persisted": self.persisted, "persist_note": self.persist_note,
                 "tracking": self.tracking, "peers": self.peers}
@@ -176,7 +174,7 @@ def checks(root: Path | str, *, ensure: Callable[[Path], Path] | None = None,
     for one in _machine_findings():
         if one.name.startswith("memory") or one.name.startswith("architecture") \
                 or one.name.startswith("flags"):
-            out.append(Check(one.name, bool(one.good), one.said, one.fix))
+            out.append(Check(one.name, bool(one.good), one.said, fix_line(one.fix, one.cwd)))
     binary = _server_here()
     if binary:
         out.append(Check("llama-server", True, binary))
@@ -202,13 +200,18 @@ def started_file(root: Path | str) -> Path:
     return Path(root).expanduser() / STARTED_FILE
 
 
-def start_daemon(port: int, root: Path | str, name: str = "") -> int:
+def start_daemon(port: int, root: Path | str, name: str = "", *,
+                 cluster_key_path: Path | str | None = None, mode: str | None = None) -> int:
     """Start ``ml-stack-traind`` owned by no terminal, its log under ``root``; the pid,
     which is also written to `started_file` for ``leave``."""
     root = Path(root).expanduser()
     root.mkdir(parents=True, exist_ok=True)
     argv = ["--port", str(port), "--root", str(root)] + (["--name", name] if name else [])
-    ran = detach("ml_stack.fleet.daemon", argv, log=root / "traind.log")
+    if cluster_key_path is not None:
+        argv.extend(["--cluster-key", str(home.expand(cluster_key_path).resolve())])
+    if mode is not None:
+        argv.extend(["--mode", cluster_modes.validate(mode)])
+    ran = detach("ml_stack.cli.daemon", argv, log=root / "traind.log")
     write_json(started_file(root), versioned(
         {"pid": ran.pid, "argv": list(ran.command), "log": str(ran.log),
          "started": ran.started}, STARTED_VERSION), indent=1)
@@ -251,7 +254,7 @@ def _started_pid(root: Path | str) -> int | None:
         return None
 
 
-def _enrol_via_daemon(port: int, passphrase: str, group: str) -> None:
+def _enrol_via_daemon(port: int, passphrase: str, group: str, mode: str | None) -> None:
     """Add a cluster through the daemon already on ``port``, so it advertises at once.
 
     Writing the key file underneath a running daemon leaves it announcing on the clusters
@@ -278,13 +281,13 @@ def _enrol_via_daemon(port: int, passphrase: str, group: str) -> None:
     status, body, set_cookie = call("/ui/session", {"passphrase": passphrase, "group": group})
     if status == 200 and set_cookie:
         cookie = set_cookie.split(";")[0]
-    status, body, _ = call("/ui/clusters", {"passphrase": passphrase, "group": group}, cookie)
+    status, body, _ = call("/ui/clusters", {"passphrase": passphrase, "group": group, "cluster_mode": mode}, cookie)
     if status != 200:
         raise JoinError(f"the daemon on port {port} refused the cluster: "
                         f"{body.get('error', status)}")
 
 
-# -- what the fleet sees ---------------------------------------------------------------
+# -- the devices in the cluster ---------------------------------------------------------------
 def describe(beacon: Beacon, *, clusters: Iterable[str] = (),
              self_machine: str = "") -> dict[str, Any]:
     """One peer as a row: what it serves, its room, whether it is busy, its commit.
@@ -407,7 +410,7 @@ def table(rows: Sequence[dict[str, Any]]) -> str:
     """The listing, as text."""
     if not rows:
         return ("no peers answered.\n"
-                "  - is the daemon running there?  ml-stack-fleet join\n"
+                "  - is the daemon running there?  ml-stack-cluster join\n"
                 "  - same LAN, and the same passphrase?")
     lines = [f"{'NAME':<16} {'URL':<28} {'ROOM':<16} {'STATE':<12} {'COMMIT':<12} "
              f"{'UPDATES':<12} {'SPEECH':<12} SERVING"]
@@ -431,65 +434,55 @@ def table(rows: Sequence[dict[str, Any]]) -> str:
 
 
 # -- the join ---------------------------------------------------------------------------
-def join_machine(*, name: str = "", passphrase: str = "", group: str = DEFAULT_CLUSTER,
+def join_machine(*, name: str = "", passphrase: str = "", group: str = "",
+                 mode: str | None = None,
                  persist: bool = False, track: str = "", port: int = HTTP_PORT,
                  root: Path | str | None = None,
                  cluster_key_path: Path | str | None = None,
                  timeout_s: float = 2.0, wait_s: float = 20.0,
                  say: Callable[[str], None] = say,
-                 start: Callable[[int, Path, str], int] = start_daemon,
+                 start: Callable[[int, Path, str], int] | None = None,
                  enrol: Callable[[str, str], None] | None = None,
                  ensure: Callable[[Path], Path] | None = None,
                  persist_with: Callable[..., Any] | None = None,
                  finder: Callable[..., list[Beacon]] = discover,
                  discovery_port: int | None = None) -> Joined:
-    """Make this machine a peer, and return what the fleet now sees.
-
-    In order: the checks; the cluster (``passphrase`` joins ``group``; a machine already in
-    one keeps it); the daemon (reused if one answers on ``port``, else started detached --
-    ``enrol`` adds the cluster through a daemon that is already up); ``--persist`` installs
-    it at logon; then discovery on the beacon port. ``start``, ``enrol``, ``ensure``,
-    ``persist_with`` and ``finder`` are the four things a test replaces with a fake on
-    loopback; everything else is what the command does.
-    """
+    """Join a cluster, start the daemon and return the visible fleet."""
+    if mode is not None:
+        cluster_modes.validate(mode)
     root = home.expand(root) if root else default_root()
     root.mkdir(parents=True, exist_ok=True)
-    group = (group or "").strip() or DEFAULT_CLUSTER
+    group = require_name(group) if passphrase else group.strip()
     joined = Joined(name=name, port=port, root=root, group=group)
     if track:
         joined.tracking = remember_track(root, track)
         say(f"following '{joined.tracking}'" if joined.tracking
             else "following releases")
 
-    say("checking this machine")
-    joined.checks = checks(root, ensure=ensure, say=say)
-    for c in joined.checks:
-        say(f"  {'ok  ' if c.good else '  ! '}{c.name}: {c.said}")
-        if not c.good and c.fix:
-            say(f"        fix: {c.fix}")
+    joined.checks = _machine_checks(root, ensure, say)
 
     running = already_running(port)
     if passphrase:
         if running is not None:
-            (enrol or (lambda words, g: _enrol_via_daemon(port, words, g)))(passphrase, group)
+            (enrol or (lambda words, g: _enrol_via_daemon(
+                port, words, g, mode)))(passphrase, group)
         else:
-            join_cluster(passphrase, group=group, path=cluster_key_path)
+            join_by_passphrase(passphrase, group, cluster_key_path,
+                               options=JoinOptions(mode=mode, timeout_s=timeout_s, port=discovery_port))
+        enrolled = next((m for m in memberships(cluster_key_path) if m.group == group), None)
+        joined.mode = enrolled.mode if enrolled else mode or cluster_modes.PRODUCTION
         say(f"joined cluster '{group}'")
-    elif not in_cluster(cluster_key_path):
-        raise JoinError("this machine is in no cluster and no passphrase was given -- "
-                        "pass --passphrase WORDS (the same words on every machine)")
+        recovery.remember(passphrase, group, cluster_key_path, say=say)
     else:
-        current = memberships(cluster_key_path)[0].group
-        joined.group = current
-        say(f"already in cluster '{current}'")
+        member = automatic_clusters.ensure(cluster_key_path, mode=mode,
+                                           port=discovery_port or port + 1)
+        joined.group = member.group
+        joined.mode = member.mode
+        say(f"joined cluster '{member.group}'")
+    say(cluster_modes.notice(joined.mode))
 
     if running is not None:
-        joined.name = str(running.get("name") or name)
-        joined.machine = str(running.get("machine") or "")
-        say(f"the daemon is already running as '{joined.name}' on port {port}")
-        if joined.tracking:
-            say(f"  it reads '{joined.tracking}' at its next start; restart it to follow "
-                "the branch now")
+        _running_notice(joined, running, say)
     else:
         if persist:
             joined.persisted, joined.persist_note = _persist(persist_with, say)
@@ -498,7 +491,7 @@ def join_machine(*, name: str = "", passphrase: str = "", group: str = DEFAULT_C
                 if wait_for_health(port, seconds=wait_s) is not None:
                     running = already_running(port)
         if running is None:
-            joined.daemon_pid = start(port, root, name)
+            joined.daemon_pid = _start_selected(start, joined, cluster_key_path)
             joined.started = True
             say(f"started the daemon (pid {joined.daemon_pid}); waiting for it to answer")
             if wait_for_health(port, seconds=wait_s) is None:
@@ -515,6 +508,37 @@ def join_machine(*, name: str = "", passphrase: str = "", group: str = DEFAULT_C
                          port=discovery_port, self_machine=joined.machine, finder=finder)
     say(table(joined.peers))
     return joined
+
+
+def _start_selected(start: Callable[[int, Path, str], int] | None, joined: Joined,
+                    cluster_key_path: Path | str | None) -> int:
+    """Start the selected profile or call the injected launcher."""
+    if start is not None:
+        return start(joined.port, joined.root, joined.name)
+    return start_daemon(joined.port, joined.root, joined.name,
+                        cluster_key_path=cluster_key_path, mode=joined.mode)
+
+
+def _running_notice(joined: Joined, running: dict, say: Callable[[str], None]) -> None:
+    """Report the running daemon's identity and selected tracking branch."""
+    joined.name = str(running.get("name") or joined.name)
+    joined.machine = str(running.get("machine") or "")
+    say(f"the daemon is already running as '{joined.name}' on port {joined.port}")
+    if joined.tracking:
+        say(f"  it reads '{joined.tracking}' at its next start; restart it to follow "
+            "the branch now")
+
+
+def _machine_checks(root: Path, ensure: Callable[[Path], Path] | None,
+                    say: Callable[[str], None]) -> list[Check]:
+    """Report the machine checks for cluster onboarding."""
+    say("checking this machine")
+    found = checks(root, ensure=ensure, say=say)
+    for check in found:
+        say(f"  {'ok  ' if check.good else '  ! '}{check.name}: {check.said}")
+        if not check.good and check.fix:
+            say(f"        fix: {check.fix}")
+    return found
 
 
 def _persist(persist_with: Callable[..., Any] | None, say: Callable[[str], None]
@@ -543,6 +567,7 @@ def leave_machine(*, group: str = "", root: Path | str | None = None,
     left = [m.group for m in before if not group or m.group == group]
     for one in left:
         leave_cluster(one, cluster_key_path)
+        recovery.forget(one, cluster_key_path)
         say(f"left cluster '{one}'")
     if not left:
         say("in no cluster" if not before else f"not in a cluster called '{group}'")
@@ -596,38 +621,37 @@ def sweep_argv(models: Sequence[str], *, peers: Sequence[str] = (), sample: int 
 
 
 # -- the command -----------------------------------------------------------------------
-def _passphrase_from(args: argparse.Namespace, key: Path | str | None) -> str:
-    """The words, from the flag, the environment, a terminal, or standard input.
-
-    ``ML_STACK_PASSPHRASE`` is what makes an unattended install possible: a machine being
-    set up by a script has no terminal to type at, and prompting one that cannot answer
-    hangs the install rather than failing it. The order is deliberate -- an explicit flag
-    beats the environment, and both beat asking.
-    """
-    if args.passphrase:
-        return args.passphrase
-    told = os.environ.get("ML_STACK_PASSPHRASE", "").strip()
+def _cluster_and_words(args: argparse.Namespace, key: Path | str | None) -> tuple[str, str]:
+    """Read explicit cluster credentials or select automatic admission."""
+    group = args.group or os.environ.get("ML_STACK_CLUSTER", "").strip()
+    told = args.passphrase or os.environ.get("ML_STACK_PASSPHRASE", "").strip()
     if told:
-        return told
+        return require_name(group), told
     if in_cluster(key):
-        return ""
-    if sys.stdin.isatty():
+        return group, ""
+    if not group and getattr(args, "mode", None) != cluster_modes.PRODUCTION:
+        return "", ""
+    if sys.stdin.isatty() and not os.environ.get("ML_STACK_NONINTERACTIVE"):
         from .peers import _prompt_passphrase
 
-        say("This machine is in no cluster yet. Type the passphrase every machine shares.")
-        return _prompt_passphrase(confirm=True)
-    words = sys.stdin.readline().strip()
-    return words
+        say("This machine is in no cluster yet.")
+        if group:
+            return group, _prompt_passphrase(confirm=True)
+        say("Looking for clusters on this network...")
+        me = already_running(args.port) or {}
+        found = known_clusters(key, timeout_s=args.timeout, self_names=(str(me.get("name") or ""),))
+        choice = pick_cluster(found, default="")
+        say(f"Type the passphrase {'of' if choice.existing else 'for'} '{choice.name}'.")
+        return choice.name, _prompt_passphrase(confirm=not choice.existing)
+    return require_name(group), sys.stdin.readline().strip()
 
 
 def cmd_join(args: argparse.Namespace) -> int:
-    words = _passphrase_from(args, args.cluster_key)
+    group, words = _cluster_and_words(args, args.cluster_key)
     # An install script sets these rather than answering prompts it has no terminal for.
     name = args.name or os.environ.get("ML_STACK_NAME", "").strip()
-    group = args.group if args.group != DEFAULT_CLUSTER else (
-        os.environ.get("ML_STACK_CLUSTER", "").strip() or DEFAULT_CLUSTER)
     joined = join_machine(name=name, passphrase=words, group=group,
-                          persist=args.persist, track=args.track, port=args.port,
+                          mode=args.mode, persist=args.persist, track=args.track, port=args.port,
                           root=args.root,
                           cluster_key_path=args.cluster_key, timeout_s=args.timeout)
     if args.json:
@@ -638,15 +662,26 @@ def cmd_join(args: argparse.Namespace) -> int:
         + (", starting at logon" if joined.persisted else ""))
     if joined.tracking:
         say(f"  following {joined.tracking}: it updates itself when nothing is running")
-    say("  ml-stack-fleet status   -- who is in the fleet, what each serves")
-    say("  ml-stack-fleet leave    -- undo this")
+    say("  ml-stack-cluster status   -- devices in the cluster, what each serves")
+    say("  ml-stack-cluster leave    -- undo this")
     return 0
+
+
+def cmd_clusters(args: argparse.Namespace) -> int:
+    me = already_running(args.port) or {}
+    found = known_clusters(args.cluster_key, timeout_s=args.timeout,
+                           self_names=(str(me.get("name") or ""),))
+    if args.json:
+        say(json.dumps([c.public() for c in found], indent=1))
+    else:
+        say("\n".join(format_clusters(found)) or "no cluster on this machine or this network")
+    return 0 if found else 1
 
 
 def cmd_status(args: argparse.Namespace) -> int:
     if not memberships(args.cluster_key):
         warn(f"in no cluster (no key at {key_path(args.cluster_key)}); "
-             "run 'ml-stack-fleet join'")
+             "run 'ml-stack-cluster join'")
         return 1
     me = already_running(args.port)
     rows = peers(cluster_key_path=args.cluster_key, timeout_s=args.timeout,
@@ -658,67 +693,8 @@ def cmd_status(args: argparse.Namespace) -> int:
     say(table(rows))
     if me is None:
         say(f"\nthis machine's daemon is not running on port {args.port}; "
-            "'ml-stack-fleet join' starts it")
+            "'ml-stack-cluster join' starts it")
     return 0 if rows else 1
-
-
-def apply_plan(placement: Any, rows: Sequence[dict[str, Any]], *,
-               cluster_key_path: Path | str | None = None,
-               say: Callable[[str], None] = say) -> list[dict[str, Any]]:
-    """``POST /serve`` on each placed peer, and what each answered.
-
-    Each answer is ``{"peer", "model", "slots", "status", "served" | "error", "serving"}``;
-    ``serving`` is the peer's ``/health`` serving rows after the call.
-    """
-    clients = peer_clients(rows, cluster_key_path=cluster_key_path, timeout=600.0)
-    out: list[dict[str, Any]] = []
-    for row in placement.rows:
-        answer: dict[str, Any] = {"peer": row.peer, "model": row.model, "slots": row.slots}
-        peer = clients.get(row.peer)
-        if peer is None:
-            answer.update(status=0, error="no daemon answered for this peer")
-            out.append(answer)
-            say(f"{row.peer}: {row.model}: {answer['error']}")
-            continue
-        try:
-            served = peer._json("POST", "/serve", {"model": row.model, "context": row.context,
-                                                   "parallel": row.slots})
-            answer.update(status=201, served=served)
-            say(f"{row.peer}: {row.model}: {served.get('slots', row.slots)} slot(s) on "
-                f"port {served.get('port', '?')}")
-        except PeerError as exc:
-            status, body = _refusal(str(exc))
-            answer.update(status=status, error=body.get("error") or str(exc))
-            say(f"{row.peer}: {row.model}: {answer['error']}")
-        try:
-            answer["serving"] = list(peer.health().get("serving") or [])
-        except (PeerError, OSError, ValueError):
-            answer["serving"] = []
-        out.append(answer)
-    return out
-
-
-def serving_table(applied: Sequence[dict[str, Any]]) -> str:
-    """What each peer serves after an apply, as text."""
-    lines = [f"{'PEER':<16} SERVING"]
-    for answer in applied:
-        cells = [f"{m}:{one.get('port', '?')} ({int(one.get('slots') or 1)} slot(s))"
-                 for one in answer.get("serving") or [] for m in one.get("models") or []]
-        lines.append(f"{answer['peer']:<16} {', '.join(cells) or '-'}")
-    return "\n".join(lines)
-
-
-def _refusal(message: str) -> tuple[int, dict[str, Any]]:
-    """The status and JSON body out of a `PeerError`'s message; ``(0, {})`` for none."""
-    import re
-
-    found = re.search(r"-> (\d{3}): (\{.*\})", message, re.S)
-    if not found:
-        return 0, {}
-    try:
-        return int(found.group(1)), json.loads(found.group(2))
-    except ValueError:
-        return int(found.group(1)), {}
 
 
 def _measurements() -> tuple[list[Any], list[Any]]:
@@ -734,7 +710,7 @@ def cmd_plan(args: argparse.Namespace) -> int:
 
     if not memberships(args.cluster_key):
         warn(f"in no cluster (no key at {key_path(args.cluster_key)}); "
-             "run 'ml-stack-fleet join'")
+             "run 'ml-stack-cluster join'")
         return 1
     me = already_running(args.port)
     rows = peers(cluster_key_path=args.cluster_key, timeout_s=args.timeout,
@@ -761,7 +737,7 @@ def cmd_plan(args: argparse.Namespace) -> int:
 def cmd_pause(args: argparse.Namespace) -> int:
     if not memberships(args.cluster_key):
         warn(f"in no cluster (no key at {key_path(args.cluster_key)}); "
-             "run 'ml-stack-fleet join'")
+             "run 'ml-stack-cluster join'")
         return 1
     resume = args.cmd == "resume"
     span = str(getattr(args, "span", "") or "")
@@ -791,8 +767,8 @@ def main(argv: list[str] | None = None) -> int:
     from .plan import PREFERENCES
 
     ap = argparse.ArgumentParser(
-        prog="ml-stack-fleet",
-        description="Make this machine a peer in one command, and see what the fleet sees.")
+        prog="ml-stack-cluster",
+        description="Make this machine a peer in one command, and see the devices in the cluster.")
     ap.add_argument("--cluster-key", default=None,
                     help="path to the cluster key (default: ~/.ml-stack/cluster.key)")
     ap.add_argument("--root", default=str(default_root()),
@@ -803,17 +779,19 @@ def main(argv: list[str] | None = None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     join_p = sub.add_parser(
-        "join", help="check this machine, start the daemon, announce, and list the fleet")
+        "join", help="check this machine, start the daemon, announce, and list cluster devices")
     join_p.add_argument("--name", default="",
                         help="how this machine identifies itself (default: the hostname)")
     join_p.add_argument("--persist", action="store_true",
                         help="start the daemon at logon as well, so it comes back after "
                              "a restart")
+    join_p.add_argument("--mode", choices=cluster_modes.MODES, default=None,
+                        help="cluster admission: dev automatically joins nearby devices; "
+                             "prod requires explicit admission (default: existing mode or dev)")
     join_p.add_argument("--passphrase", default="",
-                        help="the words every machine shares; prompted for in a terminal "
-                             "when the machine is in no cluster yet")
-    join_p.add_argument("--group", default=DEFAULT_CLUSTER,
-                        help=f"which cluster the words belong to (default: {DEFAULT_CLUSTER})")
+                        help="join a named cluster with shared words (default mode: prod)")
+    join_p.add_argument("--group", default="",
+                        help="required cluster name when joining with a passphrase")
     join_p.add_argument("--track", default="",
                         help="follow a branch instead of releases, e.g. 'main': this "
                              "machine pulls, reinstalls if the packaging moved and "
@@ -829,11 +807,18 @@ def main(argv: list[str] | None = None) -> int:
     status_p.add_argument("--timeout", type=float, default=2.0)
     status_p.add_argument("--json", action="store_true")
 
+    clusters_p = sub.add_parser("clusters", help="the clusters this machine is in and the ones "
+                                                 "other machines on the network offer, with "
+                                                 "who holds each")
+    clusters_p.add_argument("--timeout", type=float, default=2.0,
+                            help="seconds to listen for peers (default: 2)")
+    clusters_p.add_argument("--json", action="store_true")
+
     plan_p = sub.add_parser("plan", help="which model each peer serves, and how many "
                                          "slots, for a number of users at one context; "
                                          "the best measured models go to the most users")
     plan_p.add_argument("--users", type=int, required=True,
-                        help="how many conversations at once, across the fleet")
+                        help="how many conversations at once, across the cluster")
     plan_p.add_argument("--context", type=int, default=16384,
                         help="tokens each conversation gets (default: 16384)")
     plan_p.add_argument("--prefer", choices=sorted(PREFERENCES), default="quality",
@@ -871,10 +856,18 @@ def main(argv: list[str] | None = None) -> int:
                          help="leave only this cluster (default: every one)")
     leave_p.add_argument("--keep-running", action="store_true",
                          help="leave the daemon up, just stop answering as a peer")
-
+    add_commands(sub)
+    recovery.add_commands(sub)
     args = ap.parse_args(argv)
-    fn = {"join": cmd_join, "status": cmd_status, "plan": cmd_plan,
-          "pause": cmd_pause, "resume": cmd_pause, "leave": cmd_leave}[args.cmd]
+    if args.cmd in ONBOARD_COMMANDS:
+        try:
+            return run_onboarding(args)
+        except (OSError, SystemExit) as exc:
+            warn(f"error: {exc}")
+            return 2
+    fn = {"join": cmd_join, "status": cmd_status, "clusters": cmd_clusters, "plan": cmd_plan,
+          "pause": cmd_pause, "resume": cmd_pause, "leave": cmd_leave,
+          "passphrase": recovery.run, "recovery": recovery.run}[args.cmd]
     try:
         return fn(args)
     except (JoinError, DiscoveryError, OSError) as exc:

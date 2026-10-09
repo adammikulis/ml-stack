@@ -1,0 +1,178 @@
+<script>
+(function () {
+  const M = window.fleetModel;
+  const el = M.el;
+  class ChatCoding {
+    constructor(chat) {
+      this.chat = chat;
+      this.mode = chat.querySelector("#chat-mode");
+      this.project = chat.querySelector("#chat-project");
+      this.harness = chat.querySelector("#chat-harness");
+      this.role = chat.querySelector("#chat-role");
+      this.context = chat.querySelector("#chat-context");
+      this.draft = chat.querySelector("#chat-draft");
+      this.activity = chat.querySelector("#chat-activity");
+      this.output = chat.querySelector("#chat-activity-output");
+      this.mode.onchange = async () => {
+        await this.catalogue();
+        this.render(this.active ? this.data?.default_model || "" : "");
+        chat.saveSettings();
+      };
+      for (const field of [this.project, this.harness, this.role, this.context, this.draft]) {
+        field.onchange = () => { this.readiness(); chat.saveSettings(); };
+      }
+    }
+    get active() { return this.mode.value === "coding"; }
+    settings() {
+      const defaults = this.chat.defaultSettings;
+      return { mode: this.mode.value || defaults.mode, project: this.project.value,
+        harness: this.harness.value || defaults.harness, role: this.role.value || defaults.role,
+        context: Number(this.context.value || defaults.context), draft: this.draft.value.trim() || defaults.draft };
+    }
+    async catalogue() {
+      if (this.data) return;
+      const data = await M.api("/ui/coding/catalogue");
+      if (!data.ok) {
+        if (this.active) this.chat.showError(data.error || "The Coding service is unavailable.");
+        return;
+      }
+      this.data = data;
+      this.harness.replaceChildren(...data.harnesses.map((one) => el("option", { value: one.name,
+        ...(one.available ? {} : { disabled: "" }) }, one.name === "claude" ? "Claude Code" : one.name === "pi" ? "Pi" : "Codex")));
+      this.role.replaceChildren(...data.roles.map((one) => el("option", { value: one.name, title: one.summary },
+        ({ "read-only": "Read only", "approve-first": "Ask before changes", "plan-and-go": "Follow approved plan" })[one.name] || one.name)));
+    }
+    async restore(settings, model) {
+      const defaults = this.chat.defaultSettings;
+      this.mode.value = settings.mode || defaults.mode;
+      if (this.active) await this.catalogue();
+      this.project.value = settings.project || "";
+      this.harness.value = settings.harness || defaults.harness;
+      this.role.value = settings.role || this.data?.default_role || defaults.role;
+      this.context.value = settings.context ?? defaults.context;
+      this.draft.value = settings.draft || defaults.draft;
+      this.render(model);
+    }
+    render(model) {
+      const chat = this.chat;
+      chat.querySelectorAll("[data-coding]").forEach((node) => { node.hidden = !this.active; });
+      chat.querySelectorAll("[data-chat]").forEach((node) => { node.hidden = this.active; });
+      chat.querySelector("#chat-status").textContent = this.active ? "Coding" : "Chat";
+      const models = this.active ? this.data?.models || [] : chat.chatModels || [];
+      const selected = model === undefined ? chat.picker.value : model;
+      chat.picker.replaceChildren(...models.map((one) => el("option", { value: this.active ? one.ref : one.model },
+        one.name || (one.local ? one.model : `${one.model} — on ${one.peer}`))));
+      if (selected && ![...chat.picker.options].some((option) => option.value === selected)) {
+        chat.picker.append(el("option", { value: selected, disabled: "" }, `${selected} — unavailable`));
+      }
+      if (selected) chat.picker.value = selected;
+      else if (this.active) {
+        chat.picker.prepend(el("option", { value: "" }, "Choose a coding model…"));
+        chat.picker.value = "";
+      }
+      chat.pickrow.hidden = false;
+      chat.askrow.hidden = !models.length && !selected;
+      chat.options.hidden = false;
+      chat.none.hidden = !!models.length;
+      chat.none.replaceChildren(document.createTextNode(this.active ? this.data?.model_problem || "Choose a downloaded model to start Coding. " : "No model is running. "),
+        el("a", {href:"#models"}, "Open Models"), document.createTextNode(" to prepare a model, then return here."));
+      chat.input.placeholder = this.active ? "Ask the coding agent to work in your project…" : "Message your model…";
+      chat.modelPicker?.render();
+      this.readiness();
+    }
+    readiness() {
+      if (!this.active) return;
+      const chat = this.chat;
+      const available = !!this.data?.harnesses.find((one) => one.name === this.harness.value)?.available;
+      chat.send.disabled = !chat.picker.value || chat.picker.selectedOptions[0]?.disabled || !this.project.value.trim() || !available || !this.context.checkValidity();
+      chat.send.title = !this.project.value.trim() ? "Enter a project directory to start Coding." : !available ? "Choose an installed coding agent." : "";
+    }
+    busy(value) {
+      for (const field of [this.mode, this.project, this.harness, this.role, this.context, this.draft]) field.disabled = value;
+      this.chat.modelPicker?.render();
+    }
+    async stop() {
+      if (!this.active) { this.chat.request?.abort(); return; }
+      if (!this.chat.open) return;
+      const stopped = await M.api(`/ui/coding/${this.chat.open}/cancel`, { method: "POST", body: "{}" });
+      if (!stopped.ok) this.chat.showError(stopped.error || "Could not stop the coding turn.");
+      else this.chat.note.textContent = "Stopping coding…";
+    }
+    async reattach() {
+      const chat = this.chat;
+      if (!this.active || !chat.open || chat.request) return;
+      const status = await M.api(`/ui/coding/${chat.open}/status`);
+      if (!status.ok || !["starting", "running", "cancelling"].includes(status.state)) return;
+      chat.request = new AbortController();
+      chat.list.setAttribute("aria-busy", "true");
+      chat.send.hidden = true; chat.stop.hidden = false;
+      chat.newChat.disabled = chat.picker.disabled = true;
+      this.busy(true);
+      this.activity.hidden = false;
+      this.output.textContent = "";
+      const reply = chat.say("assistant", "");
+      try { await this.follow(reply); }
+      catch (error) { if (error.name !== "AbortError") chat.showError(error.message); }
+      finally {
+        chat.request = null;
+        await chat.load(chat.open);
+        chat.list.removeAttribute("aria-busy");
+        chat.send.hidden = false; chat.stop.hidden = true;
+        chat.newChat.disabled = chat.picker.disabled = false;
+        this.busy(false);
+        chat.paintList();
+      }
+    }
+    async run(text, reply) {
+      const chat = this.chat;
+      this.output.textContent = "";
+      this.activity.hidden = false;
+      chat.note.textContent = "Starting the coding agent and acquiring its model…";
+      const started = await M.api(`/ui/coding/${chat.open}/start`, { method: "POST",
+        body: JSON.stringify({ message: text }), signal: chat.request.signal });
+      if (!started.ok) throw new Error(started.error || "Could not start the coding turn.");
+      this.accepted = true;
+      chat.messages.push({ role: "user", content: text });
+      await this.follow(reply);
+    }
+    async follow(reply, after = 0) {
+      const chat = this.chat;
+      const response = await fetch(`/ui/coding/${chat.open}/events?after=${after}`, { headers: M.headers, signal: chat.request.signal });
+      if (!response.ok) throw new Error("Could not follow the coding turn.");
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let pending = "", error = "";
+      const consume = (line) => {
+        if (!line.startsWith("data:")) return;
+        const event = JSON.parse(line.slice(5));
+        if (event.delta) {
+          reply.dataset.text += event.delta;
+          reply.textContent = reply.dataset.text;
+          reply.classList.remove("markdown");
+          chat.list.scrollTop = chat.list.scrollHeight;
+        }
+        if (event.status) chat.note.textContent = event.status;
+        if (event.state) chat.querySelector("#chat-status").textContent = `Coding · ${event.state}`;
+        if (event.activity || event.usage || event.session) {
+          const shown = event.activity || (event.usage ? { usage: event.usage } : { session: event.session });
+          this.output.textContent += JSON.stringify(shown, null, 2) + "\n";
+        }
+        if (event.error) error = event.error;
+        if (event.done) chat.note.textContent = event.state === "cancelled" ? "Coding stopped." : event.state === "completed" ? "Coding turn complete." : error;
+      };
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          pending += decoder.decode(value, { stream: true });
+          const lines = pending.split("\n"); pending = lines.pop();
+          lines.forEach(consume);
+        }
+        if (pending.trim()) consume(pending);
+      } finally { reader.releaseLock(); }
+      if (error) throw new Error(error);
+    }
+  }
+  window.ChatCoding = ChatCoding;
+})();
+</script>

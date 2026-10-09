@@ -40,17 +40,31 @@ def cmd_queue(args: argparse.Namespace) -> int:
     if args.json:
         say(json.dumps(snapshot, indent=2))
         return 0
+    runtime = snapshot.get('runtime') or {}
+    environment = runtime.get('environment') or {}
+    say(f"broker runtime: {runtime.get('compatibility', 'unknown')}, "
+        f"protocol {runtime.get('protocol') or 'unknown'}, "
+        f"source {runtime.get('source_commit') or 'unknown'}, "
+        f"interpreter {environment.get('interpreter') or 'unknown'}")
     for held in snapshot["servers"]:
-        holders = ", ".join(f"pid {h['pid']}" + (f" ({h['label']})" if h["label"] else "")
+        holders = ", ".join(f"pid {h['pid']} ({h['requester']}: {h['reason']})"
                             for h in held["holders"]) or "nobody"
-        state = "loading" if held["loading"] else ("ours" if held["ours"] else "not ours")
-        say(f":{held['port']}  {held['purpose'] or '-':<10} {held['model']}  [{state}]  "
+        state = ("loading" if held["loading"] else "unmanaged" if held["unmanaged"]
+                 else "ours" if held["ours"] else "adopted, not ours")
+        say(f":{held['port']}  {held['purpose'] or '-':<10} {held['model']}  [{held['device'] or '-'}, {state}]  "
             f"held by {holders}")
     for at, waiting in enumerate(snapshot["queue"], start=1):
-        say(f"waiting #{at}: {waiting['purpose']} {waiting['model']} for pid {waiting['pid']}, "
+        say(f"waiting #{at}: {waiting['purpose']} {waiting['model']} for pid {waiting['pid']} "
+            f"({waiting['requester']}: {waiting['reason']}), "
             f"{waiting['waited_s']}s -- {waiting['blocked_by'] or 'queued'}")
+    for device, line in snapshot.get("requests", {}).items():
+        for at, request in enumerate(line):
+            say(f"requests {device} #{at}: pid {request.get('pid')} "
+                f"({request.get('label') or '-'}) {request.get('url')}"
+                + (" -- running" if request.get("running") else " -- waiting"))
     for name, held in snapshot["claims"].items():
         say(f"claim {name}: pid {held['pid']} {json.dumps(held['info'])}")
-    if not (snapshot["servers"] or snapshot["queue"] or snapshot["claims"]):
+    if not (snapshot["servers"] or snapshot["queue"] or snapshot["claims"]
+            or snapshot.get("requests")):
         say("the broker holds nothing")
     return 0

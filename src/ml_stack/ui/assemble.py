@@ -20,9 +20,9 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-_STYLE = re.compile(r"<style>(.*?)</style>", re.S)
+_STYLE = re.compile(r"<style>(.*?)</style>", re.S | re.I)
 _TEMPLATE = re.compile(r'<template(?:\s+mount="([^"]+)")?>(.*?)</template>', re.S)
-_SCRIPT = re.compile(r"<script>(.*?)</script>", re.S)
+_SCRIPT = re.compile(r"<script>(.*?)</script>", re.S | re.I)
 _TAG = re.compile(r"<([a-z][a-z0-9]*-[a-z0-9-]+)></\1>")
 _MOUNT = re.compile(r"<!--mount:([a-z0-9-]+)-->")
 

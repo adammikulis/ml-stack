@@ -2,28 +2,36 @@
 //! A native window on the ml-stack interface, and the daemon that serves it.
 
 mod daemon;
+mod identity;
+mod launch;
+mod origin;
 mod settings;
+#[cfg(test)]
+mod security_tests;
 
 use std::path::PathBuf;
 use std::sync::Mutex;
 
 use tauri::utils::config::Color;
 use tauri::PhysicalPosition;
+use tauri::webview::NewWindowResponse;
 use tauri::{AppHandle, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_shell::process::CommandChild;
 
-const TITLE: &str = "ml-stack";
-const WIDTH: f64 = 1180.0;
-const HEIGHT: f64 = 820.0;
-const MIN_WIDTH: f64 = 900.0;
+const TITLE: &str = "Poolside";
+const WIDTH: f64 = 1360.0;
+const HEIGHT: f64 = 900.0;
+const MIN_WIDTH: f64 = 760.0;
 const MIN_HEIGHT: f64 = 640.0;
-const BACKGROUND: Color = Color(11, 15, 20, 255);
+const BACKGROUND: Color = Color(13, 19, 27, 255);
 const PORT: u16 = 8770;
 const ROOT: &str = ".ml-stack/traind";
 
 /// What the window holds: where the settings are, and the daemon it started.
 struct Shell {
     settings: PathBuf,
+    root: PathBuf,
+    port: u16,
     daemon: Mutex<Option<CommandChild>>,
     quitting: Mutex<bool>,
 }
@@ -46,6 +54,18 @@ fn close_choice(
     }
     act(&app, &state, &mode);
     serde_json::json!({ "ok": true, "mode": mode, "remembered": remember })
+}
+
+/// Reloads the window with a fresh sign-in ticket from its own daemon.
+#[tauri::command]
+fn reopen_page(app: AppHandle, state: State<'_, Shell>) -> bool {
+    let Some(window) = app.get_webview_window("main") else {
+        return false;
+    };
+    let Ok(target) = serde_json::to_string(&launch::page_url(&state.root, state.port)) else {
+        return false;
+    };
+    window.eval(&format!("location.replace({target})")).is_ok()
 }
 
 /// Whether the window may close now, raising the question when nothing is saved.
@@ -107,29 +127,41 @@ fn told_where() -> Option<PhysicalPosition<i32>> {
     ))
 }
 
+fn app_context() -> tauri::Context<tauri::Wry> {
+    tauri::generate_context!()
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_shell::init())
-        .invoke_handler(tauri::generate_handler![close_choice, on_closing])
+        .invoke_handler(tauri::generate_handler![close_choice, on_closing, reopen_page])
         .setup(|app| {
             let handle = app.handle().clone();
             let home = app.path().home_dir()?;
             let (port, root) = asked(&home);
 
-            let started = if daemon::healthy(port) {
+            if port != PORT {
+                app.add_capability(origin::capability(port))?;
+            }
+            let started = if daemon::healthy(port, &root) {
                 None
             } else {
                 Some(daemon::start(&handle, port, &root.to_string_lossy())?)
             };
             app.manage(Shell {
                 settings: settings::path(&root),
+                root: root.clone(),
+                port,
                 daemon: Mutex::new(started),
                 quitting: Mutex::new(false),
             });
 
-            let url = format!("http://127.0.0.1:{port}/ui/");
+            let url = launch::page_url(&root, port);
             let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url.parse()?))
+                // what a model or a message writes into the page can ask to go elsewhere; it stays here
+                .on_navigation(move |to| origin::is_own(to, port))
+                .on_new_window(|_, _| NewWindowResponse::Deny)
                 .title(TITLE)
                 .inner_size(WIDTH, HEIGHT)
                 .min_inner_size(MIN_WIDTH, MIN_HEIGHT)
@@ -150,7 +182,7 @@ fn main() {
                 }
             }
         })
-        .build(tauri::generate_context!())
+        .build(app_context())
         .expect("the window could not be built")
         .run(|app, event| match event {
             #[cfg(target_os = "macos")]

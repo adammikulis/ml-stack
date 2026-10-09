@@ -96,15 +96,16 @@ class Serving:
     draft: str = ""
     draft_n_max: int | None = None      # tokens guessed ahead; None leaves the default
     draft_p_min: float | None = None    # the draft's confidence floor; None leaves the default
-    # How the draft's own KV cache is stored. It is a second cache, not the target's, and
-    # llama.cpp stores it as f16 whatever `cache_type` says. One value sets both halves;
-    # `K/V` sets them apart; "" leaves the build's own.
-    draft_cache_type: str = ""
+    # One cache type sets both draft halves; K/V sets them separately.
+    draft_cache_type: str = "q8_0"
     # Which method the head implements. "" reads it off the head's own name, which is right
     # whenever the name says so; a profile that measured one says it outright, and a head
     # that lives inside the weights -- `--spec-type draft-mtp` with no `-md` -- can only be
     # asked for this way.
     spec_type: str = ""
+    # False serves without multi-token prediction; None leaves it to `serve.mtp`, which
+    # serves a model's own MTP head whenever one is found, trusted and loadable.
+    mtp: bool | None = None
     mmproj: str = ""                    # the vision projector, so the model can see
     reasoning_budget: int | None = None  # tokens a turn may think for; 0 turns it off
     mlock: bool = False                 # hold the weights in memory rather than let them page
@@ -156,6 +157,8 @@ class Serving:
         if (self.draft or self.spec_type) and self.draft_cache_type:
             out["spec_draft_type_k"], out["spec_draft_type_v"] = \
                 split_cache_type(self.draft_cache_type)
+        if self.mtp is False:
+            out["mtp"] = False
         if self.mmproj:
             out["mmproj"] = self.mmproj
         if self.reasoning_budget is not None:
@@ -190,8 +193,8 @@ class Talking:
     :meth:`request` nor :meth:`transport`. ``spec_draft_max`` rides on each request.
     """
 
-    n_predict: int = 16384               # a ceiling, not a budget
-    timeout: float = 300.0
+    n_predict: int | None = None
+    timeout: float | None = None
     sampling: Mapping[str, Any] = field(default_factory=dict)
     think: bool | None = None
     spec_draft_max: int | None = None    # tokens guessed ahead
@@ -200,12 +203,12 @@ class Talking:
         """The :class:`~ml_stack.client.Request` a client on ``slot`` sends."""
         sampling = {k: v for k, v in dict(self.sampling).items() if v is not None}
         depth = None if self.spec_draft_max is None else int(self.spec_draft_max)
-        return Request(n_predict=int(self.n_predict), spec_draft_max=depth, slot=slot,
+        return Request(n_predict=self.n_predict, spec_draft_max=depth, slot=slot,
                        **sampling)
 
     def transport(self) -> Transport:
         """The :class:`~ml_stack.client.Transport` a client reaches its server with."""
-        return Transport(timeout=float(self.timeout))
+        return Transport(timeout=self.timeout)
 
 
 @dataclass(frozen=True)
@@ -312,7 +315,8 @@ def slot(serving: Serving | Config, *, index: int, n_predict: int | None = None,
 
             stack = contextlib.ExitStack()
             server = stack.enter_context(
-                serve(config.model, manager=config.serving.manager(), **config.lease()))
+                serve(config.model, manager=config.serving.manager(), **config.lease(),
+                      reason=f"a shared client on {Path(config.model).name}"))
             _STACKS[config.port], _URLS[config.port] = stack, server.base_url
         where = _URLS[config.port]
     return config.client(where, index=index)
@@ -364,27 +368,23 @@ def serving_said(base_url: str) -> str:
 
 
 @contextlib.contextmanager
-def served(config: Config, *, say: Callable[[str], None] | None = None,
+def served(config: Config, *, say: Callable[[str], None] | None = None, reason: str = "",
            **over: Any) -> Iterator[str]:
     """The base URL of a server holding ``config``'s model, for the duration of the block.
 
-    The server already up on ``config``'s port serving those weights is used as it stands
-    and left up; otherwise ``config`` is leased and the lease goes when the block ends. ``over``
+    A compatible managed server on any port is leased and left running for its other
+    holders; otherwise the broker admits a new server. The lease ends with this block. ``over``
     goes to :func:`ml_stack.serve.serve`.
     """
-    from ml_stack.serve.leases import already_up
     from ml_stack.serve.manager import serve
 
-    told = say or (lambda _line: None)
-    up = already_up(config.model, config.port)
-    if up is not None:
-        base_url = str(up["base_url"])
-        told(f"using the server already up on {config.port} ({serving_said(base_url)}); "
-             f"it is left running")
-        yield base_url
-        return
-    with serve(config.model, manager=config.serving.manager(), **config.lease(), **over) as server:
+    with serve(config.model, manager=config.serving.manager(),
+               **{**config.lease(), **over},
+               reason=reason or f"{Path(config.model).name} for this run") as server:
+        if say and server.adopted:
+            say(f"using the compatible server already up on {server.port} ({serving_said(server.base_url)}); it is left running")
         yield server.base_url
+
 
 
 def draft_for(model: str, asked: str, *, build: str = "",

@@ -1,0 +1,13 @@
+#!/bin/sh
+# After a merge or pull, start a detached runtime build when the installed runtime is behind HEAD.
+self=$0
+while [ -L "$self" ]; do
+    link=$(readlink "$self")
+    case "$link" in
+        /*) self=$link ;;
+        *) self=$(dirname "$self")/$link ;;
+    esac
+done
+here=$(cd "$(dirname "$self")" && pwd)
+"${PYTHON:-python3}" "$here/runtime-refresh" post-merge || true
+exit 0

@@ -5,6 +5,7 @@ build/
 dist/
 .venv/
 .pytest_cache/
+.testmondata*
 *.part
 .build-venv/
 .build-work/
@@ -17,3 +18,11 @@ node_modules/
 *.spec.bak
 tests/support/vendor/
 tests/_generated_*/
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.claude/settings.local.json
+.claude/worktrees/
+.full-tier-last.json

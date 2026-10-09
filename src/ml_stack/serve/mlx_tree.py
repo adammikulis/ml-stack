@@ -9,12 +9,12 @@ head, ``ngram``, or nothing -- and ``spec_draft_max`` the most tree nodes a pass
 from __future__ import annotations
 
 import json
-import os
 import sys
 from pathlib import Path
 
-from ml_stack import home
+from ml_stack import home, hub
 from ml_stack.hub import room
+from ml_stack.hub.modelfile import safetensors_header
 from ml_stack.serve.backend import (
     Lease,
     ServerBackend,
@@ -25,6 +25,7 @@ from ml_stack.serve.backend import (
     launch,
     server_log,
 )
+from ml_stack.serve.binary import hub_environment
 from ml_stack.serve.preflight import Check, Report
 from ml_stack.spec import LAYOUTS
 
@@ -51,15 +52,7 @@ def located(model: str | Path) -> Path | None:
     where = home.expand(text)
     if where.is_dir():
         return where
-    try:
-        from huggingface_hub import snapshot_download
-        from huggingface_hub.errors import LocalEntryNotFoundError
-    except ImportError:
-        return None
-    try:
-        return Path(snapshot_download(text, local_files_only=True))
-    except (LocalEntryNotFoundError, ValueError, OSError):
-        return None
+    return hub.held_snapshot(text)
 
 
 def drafter_of(draft: str | Path | None) -> str:
@@ -88,8 +81,7 @@ def resident_bytes(where: Path | None) -> int:
         return 0
     held = 0
     for shard in where.glob("*.safetensors"):
-        with shard.open("rb") as stream:
-            header = json.loads(stream.read(int.from_bytes(stream.read(8), "little")))
+        header = safetensors_header(shard)
         held += sum(entry["data_offsets"][1] - entry["data_offsets"][0]
                     for name, entry in header.items()
                     if name != "__metadata__" and MAPPED not in name)
@@ -154,7 +146,7 @@ class MlxTreeBackend(ServerBackend):
             if not report.ok:
                 raise ServerFailed(report.said())
         log_path = server_log("mlx-tree", spec.port)
-        process, base_url, load_s = launch(argv, port=spec.port, log_path=log_path,
-                                           timeout=timeout, env=dict(os.environ))
+        process, base_url, load_s = launch(argv, lease, log_path=log_path,
+                                           timeout=timeout, env=hub_environment())
         return ServerInfo(base_url=base_url, port=spec.port, pid=process.pid, backend=self.name,
                           log_path=log_path, load_s=load_s, process=process)

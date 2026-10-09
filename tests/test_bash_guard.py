@@ -23,7 +23,7 @@ BLOCKED, ALLOWED = 2, 0
 def guard(command: str, tool: str = "Bash", **env: str) -> int:
     done = subprocess.run(
         [str(GUARD)], text=True, capture_output=True, env={**os.environ, **env},
-        input=json.dumps({"tool_name": tool, "tool_input": {"command": command}}))
+        input=json.dumps({"tool_name": tool, "cwd": "/", "tool_input": {"command": command}}))
     assert done.returncode in (BLOCKED, ALLOWED), done.stderr
     if done.returncode == BLOCKED:
         assert "blocked:" in done.stderr, "a refusal has to say what to do instead"
@@ -54,6 +54,8 @@ def guard(command: str, tool: str = "Bash", **env: str) -> int:
     ('git push --tags', "a tag is a release"),
     ('git push origin --delete work', "a deletion is not a push of the development branch"),
     ('git merge --ff-only work && git push origin main', "still main after a merge"),
+    ('ML_STACK_PUSH_MAIN=yes git push origin main', "the variable an agent can set opens nothing"),
+    ('git merge --ff-only 0.2dev && ML_STACK_PUSH_MAIN=yes git push origin main', "nor after a merge"),
     ('ML_STACK_PUSH_MAIN=yes git push --force origin main',
      "the opener opens a push of main, never a forced one"),
     ('ML_STACK_PUSH_MAIN=yes git push --all origin', "nor every branch at once"),
@@ -63,6 +65,14 @@ def guard(command: str, tool: str = "Bash", **env: str) -> int:
     ('FOO=1 git add -A', "and still stages everything"),
     ('CUDA_VISIBLE_DEVICES=0 llama-server -m model.gguf', "and still starts a server by hand"),
     ('FOO=1 nohup ml-stack-bench run &', "and still backgrounds a job nobody watches"),
+    ('./build/bin/llama-server -m x.gguf --port 8081', "a built binary run by hand"),
+    ('sudo llama-server -m x.gguf', "through sudo"),
+    ('exec llama-server', "no arguments at all"),
+    ('cd x && llama-server -m a.gguf', "after a cd"),
+    ('ML_STACK_BROKER_LOCAL=1 ml-stack-serve up m.gguf', "a private broker with no queue"),
+    ('ml-stack-serve up m.gguf --anyway', "a flag that skipped the lease"),
+    ('ml-stack-serve up m.gguf --context 256k --direct', "a direct start"),
+    ('ml-stack-serve up m.gguf --no-broker', "a start that skips the broker"),
 ])
 def test_the_shells_that_should_have_been_commands_are_refused(command, why):
     assert guard(command) == BLOCKED, why
@@ -72,6 +82,9 @@ def test_the_shells_that_should_have_been_commands_are_refused(command, why):
     'git status',
     'python3 -m pytest tests -q',
     'ml-stack-serve up model.gguf --port 8080',
+    'ml-stack-serve up Qwen3.8-27B-UD-Q4_K_XL.gguf --context 256k --kv q8_0 --no-wait',
+    'ml-stack-serve down Qwen3.8-27B',
+    'ls /opt/homebrew/bin/llama-server',
     'ml-stack-bench sweep --serve foo.gguf --smoke',
     'pgrep -fl llama-server',
     'grep -rn llama-server src/',
@@ -88,8 +101,6 @@ def test_the_shells_that_should_have_been_commands_are_refused(command, why):
     'git rev-list --left-right --count origin/main...main',
     'PYTHONPATH=src python3 -m pytest tests -q -n 4',
     'ML_STACK_WINDOW_POSITION=3460,20 ml-stack-scrape look https://example.invalid',
-    'ML_STACK_PUSH_MAIN=yes git push origin main',
-    'git merge --ff-only 0.2dev && ML_STACK_PUSH_MAIN=yes git push origin main',
 ])
 def test_ordinary_work_is_not_refused(command):
     """A guard that fires on ordinary commands is a guard that gets switched off."""
@@ -121,3 +132,11 @@ def test_the_guard_can_be_switched_off_for_a_session():
     """MLSTACK_GUARD=off is the escape hatch; needing it means a rule is wrong, but it must work."""
     assert guard("pkill -f llama-server", MLSTACK_GUARD="off") == ALLOWED
 
+
+
+def test_the_refusal_names_the_command_that_leases():
+    done = subprocess.run(
+        [str(GUARD)], text=True, capture_output=True,
+        input=json.dumps({"tool_name": "Bash", "tool_input": {"command": "llama-server -m x"}}))
+    assert done.returncode == BLOCKED
+    assert "ml-stack-serve up MODEL" in done.stderr and "ml-stack-serve down" in done.stderr

@@ -5,25 +5,28 @@ from __future__ import annotations
 import argparse
 import getpass
 import json
+import os
 import sys
+import webbrowser
 from typing import Any
 
 from ml_stack.log import say, warn
+from ml_stack.person import HumanRequired, require_person
 
+from . import launch_open, members_cli, recovery
 from .discovery import (
-    MIN_PASSPHRASE,
+    MIN_JOIN_LENGTH,
     DiscoveryError,
     cluster_group,
     create_cluster_key,
     derive_token,
     discover,
-    join_cluster,
     key_path,
     load_cluster_key,
+    require_name,
 )
-
-DEFAULT_GROUP_NAME = "ml-stack"
-"""The group a passphrase belongs to. Two households that both chose the same words end"""
+from .onboard.clusters import known_clusters, pick_cluster
+from .onboard.joining import cluster_action
 
 
 def _require_key(path: str | None) -> bytes:
@@ -35,12 +38,11 @@ def _require_key(path: str | None) -> bytes:
 
 
 def _prompt_passphrase(confirm: bool) -> str:
-    """Ask twice, because a typo here does not fail -- it silently makes a cluster of one."""
+    """Read a passphrase, with confirmation when creating a cluster."""
     while True:
         first = getpass.getpass("  Passphrase: ")
-        if len(first.strip()) < MIN_PASSPHRASE:
-            say(f"  Too short -- at least {MIN_PASSPHRASE} characters. "
-                "A few words you will remember beats a short complicated one.")
+        if len(first.strip()) < MIN_JOIN_LENGTH:
+            say(f"  The passphrase needs at least {MIN_JOIN_LENGTH} characters.")
             continue
         if not confirm:
             return first
@@ -64,19 +66,23 @@ def cmd_setup(args: argparse.Namespace) -> int:
         say("or 'ml-stack-peers setup --force' to join a different one.")
         return 0
 
-    say("Connect this machine to the others you want to train with.")
-    say("Run this on every machine, with the SAME passphrase. That is all it takes.")
+    say("Create a new cluster." if args.create else "Join a cluster already running on this network.")
     say()
 
     group = args.group
-    if interactive and not args.group_given:
-        typed = input(f"  Group name [{DEFAULT_GROUP_NAME}]: ").strip()
-        group = typed or DEFAULT_GROUP_NAME
+    if interactive and not args.group_given and not os.environ.get("ML_STACK_NONINTERACTIVE"):
+        if args.create:
+            group = input("  Cluster name: ").strip()
+        else:
+            say("  Looking for clusters on this network...", flush=True)
+            choice = pick_cluster(known_clusters(args.cluster_key), default="")
+            group = choice.name
+    group = require_name(group)
 
     if args.passphrase:
         passphrase = args.passphrase
     elif interactive:
-        passphrase = _prompt_passphrase(confirm=True)
+        passphrase = _prompt_passphrase(confirm=args.create)
     else:
         passphrase = sys.stdin.readline()
         if not passphrase.strip():
@@ -84,13 +90,14 @@ def cmd_setup(args: argparse.Namespace) -> int:
             return 2
 
     say()
-    say("  Deriving the key (this is deliberately slow, once)...", flush=True)
-    join_cluster(passphrase, group=group, path=args.cluster_key)
+    say("  Creating the cluster..." if args.create else "  Looking for the cluster on this network...", flush=True)
+    cluster_action("create" if args.create else "join", passphrase, group, args.cluster_key)
+    recovery.remember(passphrase, group, args.cluster_key, say=lambda s: say(f"  {s}"))
 
-    say(f"  Joined '{group}'.")
+    say(f"  {'Created' if args.create else 'Joined'} '{group}'.")
     say()
     say("Next:")
-    say("  1. Run this same command on your other machines, same passphrase.")
+    say("  1. Join your other machines with this name and passphrase, without --create.")
     say("  2. On each of them, start the daemon:")
     say()
     say("       ml-stack-traind")
@@ -107,18 +114,12 @@ def cmd_setup(args: argparse.Namespace) -> int:
 def cmd_init(args: argparse.Namespace) -> int:
     p = key_path(args.cluster_key)
     existed = p.exists()
-    key = create_cluster_key(args.cluster_key)
+    create_cluster_key(args.cluster_key, group=args.group)
     say(f"cluster key {'already at' if existed else 'written to'} {p}")
-    say()
-    say("Run this on every other machine that should join:")
-    say()
-    say(f"    mkdir -p {p.parent} && printf '%s\\n' '{key}' > {p} "
-        f"&& chmod 600 {p}")
-    say()
-    say("or, on a Windows machine, in PowerShell:")
-    say()
-    say(f'    New-Item -ItemType Directory -Force "{p.parent}" | Out-Null; '
-        f'Set-Content -NoNewline -Path "{p}" -Value "{key}"')
+    say("Export its name and key together, then copy the recovery file privately:")
+    say("    ml-stack-cluster recovery export cluster-recovery.json")
+    say("On the other machine (including Windows PowerShell):")
+    say("    ml-stack-cluster recovery import cluster-recovery.json")
     say()
     say("Then start the daemon on the box with the card:")
     say()
@@ -201,6 +202,22 @@ def cmd_resume(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_open(args: argparse.Namespace) -> int:
+    """Open this machine's page in a browser, signed in with a one-shot ticket."""
+    try:
+        require_person("open the ml-stack page")
+        url = launch_open.ticket_url()
+    except (HumanRequired, launch_open.LaunchError) as exc:
+        warn(f"error: {exc}")
+        return 2
+    if args.print:
+        say(url)
+    else:
+        webbrowser.open(url)
+        say(url.partition("?")[0])
+    return 0
+
+
 def cmd_when(args: argparse.Namespace) -> int:
     """What this machine's schedule looks like."""
     peer = _peer(args)
@@ -237,15 +254,19 @@ def main(argv: list[str] | None = None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     setup = sub.add_parser(
         "setup", help="join a cluster with a passphrase (start here)")
-    setup.add_argument("--group", default=DEFAULT_GROUP_NAME,
-                       help="which cluster these words belong to, so two groups on one "
-                            f"network stay separate (default: {DEFAULT_GROUP_NAME})")
+    setup.add_argument("--group", default="", help="cluster name (required)")
+    setup.add_argument("--create", action="store_true", help="create a new cluster instead of joining an existing one")
     setup.add_argument("--passphrase", default="",
                        help="skip the prompt. Avoid on a shared machine: it lands in "
                             "your shell history and in 'ps'.")
     setup.add_argument("--force", action="store_true",
                        help="leave the cluster this machine is in and join another")
-    sub.add_parser("init", help="mint a random key instead of using a passphrase")
+    init = sub.add_parser("init", help="mint a random key instead of using a passphrase")
+    init.add_argument("--group", required=True, help="cluster name")
+    opened = sub.add_parser("open", help="open this machine's page in your browser, signed in "
+                                         "(a person at a terminal)")
+    opened.add_argument("--print", action="store_true",
+                        help="print the one-use page address instead of opening it")
     sub.add_parser("key", help="print the cluster key")
     sub.add_parser("token", help="print the traind bearer token this key derives")
     ls = sub.add_parser("ls", help="list daemons on this LAN")
@@ -268,6 +289,7 @@ def main(argv: list[str] | None = None) -> int:
             sp.add_argument("--reason", default="",
                             help="shown to anyone looking at the fleet")
 
+    members_cli.add_commands(sub)
     busy = sub.add_parser("busy", help="block out hours, e.g. 'mon-fri 09:00-17:00'")
     busy.add_argument("when", nargs="?", default="")
     busy.add_argument("--free", action="store_true",
@@ -276,10 +298,14 @@ def main(argv: list[str] | None = None) -> int:
     busy.add_argument("--name", default="")
     busy.add_argument("--port", type=int, default=8770)
     args = ap.parse_args(argv)
-    args.group_given = "--group" in (argv if argv is not None else sys.argv)
+    args.group_given = any(a == "--group" or a.startswith("--group=")
+                           for a in (argv if argv is not None else sys.argv))
     fn = {"setup": cmd_setup, "init": cmd_init, "key": cmd_key,
           "token": cmd_token, "ls": cmd_ls, "pause": cmd_pause,
-          "resume": cmd_resume, "when": cmd_when, "busy": cmd_busy}[args.cmd]
+          "resume": cmd_resume, "when": cmd_when, "busy": cmd_busy, "open": cmd_open,
+          "members": cmd_ls}[args.cmd]
+    if args.cmd == "members":
+        return members_cli.run(args)
     try:
         return fn(args)
     except (DiscoveryError, OSError) as exc:

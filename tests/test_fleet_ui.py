@@ -18,14 +18,20 @@ import urllib.error
 from pathlib import Path
 
 import pytest
+from launch_support import arm, disarm
 
+from ml_stack.fleet import tls
 from ml_stack.fleet.api import Daemon, make_handler
 from ml_stack.fleet.daemon import load_or_create_token
 from ml_stack.fleet.discovery import in_cluster, primary_ip
+from ml_stack.fleet.framing import LimitedServer
 from ml_stack.fleet.jobs import JobRunner
+from ml_stack.fleet.onboard.pairing import unverified_context
 from ml_stack.fleet.session import Sessions, Throttle, parse_cookie
 from ml_stack.fleet.ui import UI, asset_bytes
 from ml_stack.http import Server
+from tests.cluster_support import a_keystore  # noqa: F401
+from tests.keystore_support import counting  # noqa: F401
 
 
 def _maybe_json(raw: bytes) -> dict:
@@ -33,20 +39,48 @@ def _maybe_json(raw: bytes) -> dict:
     try:
         return json.loads(raw or b"{}")
     except ValueError:
-        return {"raw": raw[:400].decode(errors="replace")}
+        return {"raw": raw.decode(errors="replace")}
+
+
+
+
+
+@pytest.fixture(autouse=True)
+def no_release_lookup(monkeypatch):
+    """The settings view asks the daemon for the newest release; a test does not ask GitHub."""
+    from ml_stack.fleet import updates
+
+    def offline(*args, **kwargs):
+        raise updates.UpdateError("no network in tests")
+
+    monkeypatch.setattr(updates, "check", offline)
+
+
+@pytest.fixture(autouse=True)
+def the_passphrase_is_kept(a_keystore):  # noqa: F811
+    """Joining stores the passphrase and signing in compares against it."""
+
+
+@pytest.fixture(autouse=True)
+def nobody_else_is_on_the_network(monkeypatch):
+    """No existing cluster answers the test discovery socket."""
+    from ml_stack.fleet.onboard import joining
+
+    monkeypatch.setattr(joining, "find_joiners", lambda *a, **k: [])
 
 
 def _free_port() -> int:
     with socket.socket() as s:
-        s.bind(("", 0))
+        s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
 
 
 class Serving:
-    """A real daemon with the UI mounted, bound on every interface."""
+    """A daemon with a loopback UI and an optional explicit LAN listener."""
 
-    def __init__(self, tmp_path, name="studio", setup_token="", schedule=None):
+    def __init__(self, tmp_path, name="studio", setup_token="", schedule=None, secure=True):
         self.schedule = schedule
+        self.secure = secure
         root = tmp_path / "traind"
         self.files = root / "files"
         self.files.mkdir(parents=True)
@@ -61,12 +95,25 @@ class Serving:
         self.ui.settings_path = tmp_path / "settings.json"
         self.ui.report = lambda: {"cpus": 8, "accelerator": False}
         self.port = _free_port()
-        self.httpd = Server(
-            ("0.0.0.0", self.port),
-            make_handler(Daemon(self.runner, self.files, token, name, ui=self.ui,
+        self.rows = arm(self)
+        from ml_stack.fleet import invite_client, invite_routes
+        from ml_stack.fleet.discovery import memberships
+        from ml_stack.fleet.invites import Invitations
+
+        identity = tls.identity(tmp_path / "tls", name) if secure else None
+        context = tls.server_context(identity) if identity else None
+        self.ui.invitations = Invitations(lambda: memberships(self.keyfile),
+                                         lambda: (f"https://127.0.0.1:{self.port}",
+                                                  identity.fingerprint if identity else ""))
+        self.ui.join_invitation = lambda code: invite_routes.joined(
+            self.ui, invite_client.redeem(code, name))
+        self.httpd = LimitedServer(
+            ("127.0.0.1", self.port), tls=context,
+            handler=make_handler(Daemon(self.runner, self.files, token, name, ui=self.ui,
                          schedule=schedule, tokens=self._cluster_tokens,
-                         cluster_key_path=self.keyfile,
+                         cluster_key_path=self.keyfile, ui_from_lan=True,
                          schedule_path=(root / "availability.json") if schedule else None)))
+        self.lan_httpd = None
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
 
     def _cluster_tokens(self):
@@ -75,8 +122,17 @@ class Serving:
 
         return {derive_token(m.key) for m in memberships(self.keyfile)}
 
-    def call(self, path, *, method="GET", body=None, host="127.0.0.1",
-             headers=None, ui_header=True, cookie=""):
+    def call(self, path, *, method="GET", body=None, **options):
+        host = options.pop("host", "127.0.0.1")
+        headers = options.pop("headers", None)
+        ui_header = options.pop("ui_header", True)
+        cookie = options.pop("cookie", "")
+        if options:
+            raise TypeError(f"Unknown request options: {', '.join(options)}")
+        if host != "127.0.0.1" and self.lan_httpd is None:
+            self.lan_httpd = LimitedServer((host, self.port), self.httpd.RequestHandlerClass,
+                                          tls=self.httpd.tls)
+            threading.Thread(target=self.lan_httpd.serve_forever, daemon=True).start()
         data = json.dumps(body).encode() if body is not None else None
         sent = {"Content-Type": "application/json"}
         if ui_header:
@@ -84,7 +140,9 @@ class Serving:
         if cookie:
             sent["Cookie"] = cookie
         sent.update(headers or {})
-        conn = http.client.HTTPConnection(host, self.port, timeout=10)
+        conn = (http.client.HTTPConnection(host, self.port, timeout=10)
+                if host == "127.0.0.1" or not self.secure
+                else http.client.HTTPSConnection(host, self.port, timeout=10, context=unverified_context()))
         try:
             conn.request(method, path, body=data, headers=sent)
             r = conn.getresponse()
@@ -93,9 +151,13 @@ class Serving:
             conn.close()
 
     def close(self):
+        disarm(self)
         self.runner.shutdown()
         self.httpd.shutdown()
         self.httpd.server_close()
+        if self.lan_httpd:
+            self.lan_httpd.shutdown()
+            self.lan_httpd.server_close()
 
 
 @pytest.fixture
@@ -116,20 +178,37 @@ class TestAssets:
         assert asset_bytes("style.css") is not None, "style.css is missing from web/"
 
     def test_every_component_the_page_lists_is_on_disk(self):
-        from ml_stack.fleet.page import COMPONENTS, COMPONENTS_DIR
+        from ml_stack.fleet.page import COMPONENTS, COMPONENTS_DIR, MODULES, components
 
-        assert COMPONENTS, "a page of no components would pass the loop below"
-        for name in COMPONENTS:
+        assert components(), "the page contains no components"
+        for name in (*COMPONENTS, *MODULES):
             assert (COMPONENTS_DIR / f"{name}.html").is_file(), f"{name} is missing"
 
     def test_every_component_defines_the_element_the_shell_holds(self):
-        from ml_stack.fleet.page import COMPONENTS, COMPONENTS_DIR
+        from ml_stack.fleet.page import COMPONENTS, COMPONENTS_DIR, WEB
 
+        shell = (WEB / "shell.html").read_text(encoding="utf-8")
         for name in COMPONENTS:
+            if f"<{name}" not in shell:
+                continue
             text = (COMPONENTS_DIR / f"{name}.html").read_text(encoding="utf-8")
             assert f"customElements.define('{name}'" in text \
                 or f'customElements.define("{name}"' in text, \
                 f"{name}.html defines no <{name}>"
+
+    def test_shared_modules_load_before_consumers_without_custom_elements(self):
+        from ml_stack.fleet.page import COMPONENTS, FIT_ONLY, MODULES, components
+
+        parts = components()
+        names = [part.name for part in parts]
+        for name, consumers in MODULES.items():
+            assert name not in COMPONENTS
+            assert names.count(name) == 1
+            module = next(part for part in parts if part.name == name).read()
+            assert not module.templates
+            assert "customElements.define" not in module.script
+            assert all(names.index(name) < names.index(consumer) for consumer in consumers)
+        assert not set(MODULES) & {part.name for part in components(FIT_ONLY)}
 
     def test_every_asset_the_page_asks_for_exists(self):
         """A stylesheet that 404s is a UI that looks broken rather than one that is."""
@@ -168,6 +247,7 @@ class TestAssets:
 
 
 # -- the setup guard -----------------------------------------------------
+@pytest.mark.redteam
 class TestFirstRunIsNotUpForGrabs:
     def test_a_fresh_daemon_says_it_needs_setting_up(self, serving):
         status, body, _ = serving.call("/ui/setup")
@@ -175,7 +255,7 @@ class TestFirstRunIsNotUpForGrabs:
 
     def test_setup_works_from_the_machine_itself(self, serving):
         status, body, _ = serving.call("/ui/setup/join", method="POST",
-                                       body={"passphrase": WORDS, "group": "home"})
+                                       body={"mode": "create", "passphrase": WORDS, "group": "home"})
         assert status == 200, body
         assert body["in_cluster"] is True and body["group"] == "home"
         assert in_cluster(serving.keyfile)
@@ -184,7 +264,7 @@ class TestFirstRunIsNotUpForGrabs:
         """Whoever reaches an unjoined daemon first would own it. Being on the LAN is
         not enough; you have to be on the box, or use ssh and the CLI."""
         status, body, _ = serving.call("/ui/setup/join", method="POST",
-                                       body={"passphrase": WORDS},
+                                       body={"mode": "create", "group": "home", "passphrase": WORDS},
                                        host=primary_ip())
         assert status == 403
         assert "ssh" in body["error"]
@@ -194,7 +274,7 @@ class TestFirstRunIsNotUpForGrabs:
         """DNS rebinding: a page anywhere can point a domain at 127.0.0.1 and POST to
         it. Loopback-only buys nothing without checking what it was addressed to."""
         status, body, _ = serving.call(
-            "/ui/setup/join", method="POST", body={"passphrase": WORDS},
+            "/ui/setup/join", method="POST", body={"mode": "create", "group": "home", "passphrase": WORDS},
             headers={"Host": f"evil.example.com:{serving.port}"})
         assert status == 403
         assert "hostname" in body["error"]
@@ -208,9 +288,9 @@ class TestFirstRunIsNotUpForGrabs:
 
     def test_rejoining_needs_a_session_once_the_box_is_in_a_cluster(self, serving):
         serving.call("/ui/setup/join", method="POST",
-                     body={"passphrase": WORDS, "group": "home"})
+                     body={"mode": "create", "passphrase": WORDS, "group": "home"})
         status, body, _ = serving.call("/ui/setup/join", method="POST",
-                                       body={"passphrase": "different words here"})
+                                       body={"mode": "create", "group": "home", "passphrase": "different words here"})
         assert status == 401
         assert "sign in" in body["error"]
 
@@ -218,34 +298,62 @@ class TestFirstRunIsNotUpForGrabs:
         s = Serving(tmp_path, setup_token="abc123xyz")
         try:
             refused, _, _ = s.call("/ui/setup/join", method="POST",
-                                   body={"passphrase": WORDS}, host=primary_ip())
+                                   body={"mode": "create", "group": "home", "passphrase": WORDS}, host=primary_ip())
             assert refused == 403
             ok, body, _ = s.call("/ui/setup/join", method="POST",
-                                 body={"passphrase": WORDS}, host=primary_ip(),
+                                 body={"mode": "create", "group": "home", "passphrase": WORDS}, host=primary_ip(),
                                  headers={"X-ML-Stack-Setup": "abc123xyz"})
             assert ok == 200, body
         finally:
             s.close()
 
 
-class TestJoiningTwice:
-    def test_a_cluster_with_no_name_is_the_same_one_either_way(self, serving):
-        """The wizard and the Clusters box must derive the same key from the same
-        words, or two machines set up different ways never see each other."""
-        from ml_stack.fleet.discovery import key_from_passphrase, memberships
+class TestThePassphraseNeverCrossesPlainHttp:
+    def test_another_machine_is_refused_the_interface_when_it_would_be_plain_http(self, tmp_path):
+        """A listener beyond this machine cannot be built without TLS, so no passphrase can reach it."""
+        plain = Serving(tmp_path, secure=False)
+        try:
+            for path, method in (("/ui/setup", "GET"), ("/ui/session", "POST")):
+                with pytest.raises(ValueError, match="TLS or not at all"):
+                    plain.call(path, method=method, body={"passphrase": WORDS}
+                               if method == "POST" else None, host=primary_ip())
+                assert plain.lan_httpd is None
+            assert plain.call("/ui/setup")[0] == 200
+        finally:
+            plain.close()
+
+    def test_over_tls_the_same_request_reaches_the_sign_in(self, serving):
+        serving.call("/ui/setup/join", method="POST", body={"mode": "create", "passphrase": WORDS, "group": "home"})
+        status, _, headers = serving.call("/ui/session", method="POST",
+                                          body={"passphrase": WORDS}, host=primary_ip())
+        assert status == 200 and "Set-Cookie" in headers
+
+
+class TestExplicitClusterActions:
+    def test_a_missing_name_is_refused_without_creating_a_cluster(self, serving):
+        status, body, _ = serving.call("/ui/setup/join", method="POST",
+                                       body={"passphrase": WORDS, "mode": "create"})
+        assert status == 400 and "cluster name" in body["error"]
+        assert not in_cluster(serving.keyfile)
+
+    def test_recreating_a_local_cluster_preserves_its_key(self, serving):
+        from ml_stack.fleet.discovery import memberships
 
         status, body, headers = serving.call("/ui/setup/join", method="POST",
-                                             body={"passphrase": WORDS})
+            body={"passphrase": WORDS, "group": "home", "mode": "create"})
         assert status == 200, body
         cookie = headers["Set-Cookie"].split(";")[0]
         first = memberships(serving.keyfile)[0]
-
         status, body, _ = serving.call("/ui/clusters", method="POST", cookie=cookie,
-                                       body={"passphrase": WORDS})
-        assert status == 200, body
-        rows = memberships(serving.keyfile)
-        assert [m.group for m in rows] == [first.group]
-        assert rows[0].key == key_from_passphrase(WORDS, group="ml-stack")
+            body={"passphrase": "different words", "group": "home", "mode": "create"})
+        assert status == 400 and "already belongs" in body["error"]
+        assert memberships(serving.keyfile)[0].key == first.key
+
+    def test_joining_an_unseen_cluster_creates_no_key(self, serving):
+        status, body, _ = serving.call("/ui/setup/join", method="POST",
+            body={"passphrase": WORDS, "group": "home", "mode": "join"})
+        assert status == 400 and "No machine" in body["error"]
+        assert not in_cluster(serving.keyfile)
 
 
 # -- a machine in no cluster ---------------------------------------------
@@ -286,7 +394,7 @@ class TestOnItsOwn:
     def test_there_is_no_password_to_ask_for(self, serving):
         assert serving.call("/ui/setup")[1]["needs_password"] is False
         serving.call("/ui/setup/join", method="POST",
-                     body={"passphrase": WORDS, "group": "home"})
+                     body={"mode": "create", "passphrase": WORDS, "group": "home"})
         assert serving.call("/ui/setup")[1]["needs_password"] is True
 
     def test_the_machine_itself_gets_in_without_signing_in(self, serving):
@@ -316,7 +424,7 @@ class TestOnItsOwn:
     def test_a_cluster_puts_the_password_back(self, serving):
         self.finished(serving)
         serving.call("/ui/setup/join", method="POST",
-                     body={"passphrase": WORDS, "group": "home"})
+                     body={"mode": "create", "passphrase": WORDS, "group": "home"})
         status, body, _ = serving.call("/ui/settings")
         assert status == 401 and "sign in" in body["error"]
 
@@ -326,30 +434,39 @@ class TestSignIn:
     @pytest.fixture
     def joined(self, serving):
         serving.call("/ui/setup/join", method="POST",
-                     body={"passphrase": WORDS, "group": "home"})
+                     body={"mode": "create", "passphrase": WORDS, "group": "home"})
         return serving
 
     def test_the_passphrase_signs_you_in(self, joined):
         """Typing the words you already know, rather than pasting 43 characters."""
         status, body, headers = joined.call("/ui/session", method="POST",
-                                            body={"passphrase": WORDS})
+                                            body={"passphrase": WORDS, "group": "home"})
         assert status == 200 and body["signed_in"]
         assert "HttpOnly" in headers["Set-Cookie"]
         assert "SameSite=Strict" in headers["Set-Cookie"]
 
+    @pytest.mark.redteam
     def test_the_wrong_passphrase_does_not(self, joined):
         status, _, _ = joined.call("/ui/session", method="POST",
                                    body={"passphrase": "not the words"})
         assert status == 401
+
+    @pytest.mark.redteam
+    def test_correct_passphrase_for_a_different_group_is_refused(self, joined):
+        status, body, headers = joined.call('/ui/session', method='POST',
+                                            body={'passphrase':WORDS,'group':'ml-stack'})
+        assert status == 401 and not body.get('signed_in')
+        assert 'Set-Cookie' not in headers
 
     def test_one_typo_does_not_lock_you_out(self, joined):
         """Someone who fumbles a passphrase once and is then told to wait has been
         punished for being the legitimate user."""
         joined.call("/ui/session", method="POST", body={"passphrase": "wrong words"})
         status, body, _ = joined.call("/ui/session", method="POST",
-                                      body={"passphrase": WORDS})
+                                      body={"passphrase": WORDS, "group": "home"})
         assert status == 200, body
 
+    @pytest.mark.redteam
     def test_persistent_guessing_is_slowed_down(self, joined):
         for _ in range(6):
             status, body, _ = joined.call("/ui/session", method="POST",
@@ -363,15 +480,50 @@ class TestSignIn:
 
     def test_a_session_opens_the_cluster_view(self, joined):
         _, _, headers = joined.call("/ui/session", method="POST",
-                                    body={"passphrase": WORDS})
+                                    body={"passphrase": WORDS, "group": "home"})
         cookie = headers["Set-Cookie"].split(";")[0]
         status, body, _ = joined.call("/ui/peers", cookie=cookie)
         assert status == 200
         assert body["group"] == "home"
 
+    @pytest.mark.redteam
+    def test_launch_ticket_requires_session_and_is_consumed_once(self, joined):
+        status, _, _ = joined.call('/ui/launch-ticket', method='POST')
+        assert status == 401
+        _, _, headers = joined.call('/ui/session', method='POST',
+                                    body={'passphrase': WORDS, 'group': 'home'})
+        cookie=headers['Set-Cookie'].split(';')[0]
+        status, body, headers=joined.call('/ui/launch-ticket', method='POST', cookie=cookie)
+        assert status == 200 and headers['Cache-Control'] == 'no-store'
+        assert joined.call('/ui/launch-ticket', method='POST', cookie=cookie, ui_header=False)[0] == 403
+        assert joined.call('/ui/launch-ticket', method='POST', cookie=cookie, headers={'Host':'foreign.example'})[0] == 403
+        ticket=body['ticket']
+        status, body, _=joined.call('/ui/session',method='POST',body={'ticket':ticket})
+        assert status == 200 and body['signed_in']
+        status, _, _=joined.call('/ui/session',method='POST',body={'ticket':ticket})
+        assert status == 401
+        assert joined.call('/ui/launch-ticket',cookie=cookie)[0] == 405
+
+    def test_browser_launch_exchanges_ticket_and_removes_address_credential(self, joined):
+        playwright=pytest.importorskip('playwright.sync_api')
+        _, _, headers=joined.call('/ui/session',method='POST',
+                                 body={'passphrase':WORDS,'group':'home'})
+        cookie=headers['Set-Cookie'].split(';')[0]
+        _, body, _=joined.call('/ui/launch-ticket',method='POST',cookie=cookie)
+        with playwright.sync_playwright() as driver:
+            browser=driver.chromium.launch(headless=True)
+            page=browser.new_page()
+            page.goto(f'http://127.0.0.1:{joined.port}/ui/?launch_ticket={body["ticket"]}#tasks')
+            page.wait_for_function("() => !location.search.includes('launch_ticket')")
+            page.wait_for_function("() => document.cookie !== undefined && window.fleetModel !== undefined")
+            status=page.evaluate("async () => (await fetch('/ui/session',{headers:{'X-ML-Stack-UI':'1'}})).json()")
+            assert status['signed_in']
+            assert page.url.endswith('#tasks')
+            browser.close()
+
     def test_signing_out_ends_the_session(self, joined):
         _, _, headers = joined.call("/ui/session", method="POST",
-                                    body={"passphrase": WORDS})
+                                    body={"passphrase": WORDS, "group": "home"})
         cookie = headers["Set-Cookie"].split(";")[0]
         joined.call("/ui/session", method="DELETE", cookie=cookie)
         status, _, _ = joined.call("/ui/peers", cookie=cookie)
@@ -381,7 +533,7 @@ class TestSignIn:
         """The cookie is scoped to /ui. A browser session must not become a bearer
         credential for the route that runs commands."""
         _, _, headers = joined.call("/ui/session", method="POST",
-                                    body={"passphrase": WORDS})
+                                    body={"passphrase": WORDS, "group": "home"})
         cookie = headers["Set-Cookie"].split(";")[0]
         status, _, _ = joined.call("/jobs", cookie=cookie)
         assert status == 401
@@ -436,15 +588,14 @@ class TestThrottle:
         t.failed("1.2.3.4")
         t.succeeded("1.2.3.4")
         assert t.blocked_for("1.2.3.4") == 0
+        assert t.acquire()
 
     def test_one_derivation_at_a_time(self):
-        """scrypt is ~64MB a call on an unauthenticated route. Twenty at once is a
-        gigabyte on a box whose whole job is to have memory free for training."""
+        """scrypt is ~32MB a call on an unauthenticated route; a sign-in waits for the one running."""
         t = Throttle(slots=1, wait_s=0.05)
         assert t.acquire()
         assert not t.acquire(), "a second derivation ran concurrently"
         t.release()
-        assert t.acquire()
 
 
 class TestPreferences:
@@ -453,7 +604,7 @@ class TestPreferences:
     @pytest.fixture
     def joined(self, serving):
         serving.call("/ui/setup/join", method="POST",
-                     body={"passphrase": WORDS, "group": "home"})
+                     body={"mode": "create", "passphrase": WORDS, "group": "home"})
         return serving
 
     def test_a_gpu_machine_is_suggested_for_training(self):
@@ -622,7 +773,7 @@ class TestSettingsScreen:
     @pytest.fixture
     def signed_in(self, serving):
         serving.call("/ui/setup/join", method="POST",
-                     body={"passphrase": WORDS, "group": "home"})
+                     body={"mode": "create", "passphrase": WORDS, "group": "home"})
         _, _, headers = serving.call("/ui/session", method="POST",
                                      body={"passphrase": WORDS})
         return serving, headers["Set-Cookie"].split(";")[0]
@@ -636,7 +787,7 @@ class TestSettingsScreen:
         assert "autostart" in body and "version" in body
 
     def test_settings_need_a_session(self, serving):
-        serving.call("/ui/setup/join", method="POST", body={"passphrase": WORDS})
+        serving.call("/ui/setup/join", method="POST", body={"mode": "create", "group": "home", "passphrase": WORDS})
         assert serving.call("/ui/settings")[0] == 401
 
     def test_the_settings_screen_cannot_raise_the_job_count(self, signed_in):
@@ -688,7 +839,7 @@ class TestTheInterfaceAndTheDaemonAgree:
     @pytest.fixture
     def signed_in(self, serving):
         serving.call("/ui/setup/join", method="POST",
-                     body={"passphrase": WORDS, "group": "home"})
+                     body={"mode": "create", "passphrase": WORDS, "group": "home"})
         _, _, headers = serving.call("/ui/session", method="POST",
                                      body={"passphrase": WORDS})
         return serving, headers["Set-Cookie"].split(";")[0]
@@ -708,7 +859,8 @@ class TestTheInterfaceAndTheDaemonAgree:
             if not pp.startswith("/ui"):
                 continue
             path = pp.split("?", 1)[0]
-            cleaned.add(re.sub(r"\$\{[^}]*\}", "x", path))
+            placeholder = "a" * 32 if path.startswith("/ui/projects/") else "x"
+            cleaned.add(re.sub(r"\$\{[^}]*\}", placeholder, path))
         return sorted(cleaned)
 
     @pytest.mark.slow
@@ -842,7 +994,7 @@ class TestUpdates:
 
         assert asset_for(Release("9.9.9", "", "", ({"name": "source.tar.gz"},), 0)) is None
 
-    def test_a_download_whose_digest_is_wrong_is_discarded(self, tmp_path):
+    def test_a_download_whose_digest_is_wrong_is_discarded(self, tmp_path, loopback_net):
         import http.server
         import threading
 
@@ -867,8 +1019,8 @@ class TestUpdates:
                      "browser_download_url": f"http://127.0.0.1:{srv.server_address[1]}/x",
                      "digest": "sha256:" + "0" * 64}
             with pytest.raises(UpdateError, match="digest"):
-                download(asset, tmp_path)
-            assert not list(tmp_path.iterdir())
+                download(asset, tmp_path / "in")
+            assert not list((tmp_path / "in").iterdir())
         finally:
             srv.shutdown()
 
@@ -896,13 +1048,13 @@ def test_every_components_script_parses(tmp_path):
     import shutil
     import subprocess
 
-    from ml_stack.fleet.page import COMPONENTS, COMPONENTS_DIR
+    from ml_stack.fleet.page import COMPONENTS, COMPONENTS_DIR, MODULES
     from ml_stack.ui import load
 
     node = shutil.which("node")
     if node is None:
         pytest.skip("no node to parse with")
-    for name in COMPONENTS:
+    for name in (*COMPONENTS, *MODULES):
         script = load(COMPONENTS_DIR, [name])[0].read().script
         path = tmp_path / f"{name}.js"
         path.write_text(script, encoding="utf-8")
@@ -925,7 +1077,8 @@ class TestUpdatingItself:
         monkeypatch.setattr(updates, "check", lambda **k: updates.Release(
             "0.2.0", "", "", ({"name": "ml-stack-macos-arm64.zip"},), 0))
         monkeypatch.setattr(updates, "asset_for", lambda r, key="": r.assets[0])
-        monkeypatch.setattr(updates, "download", lambda a, into, **k: tmp_path / "a.zip")
+        monkeypatch.setattr(updates, "download_release",
+                            lambda r, a, into, **k: tmp_path / "a.zip")
         monkeypatch.setattr(updates, "install", lambda a: seen.setdefault("put", a))
 
         got = updates.apply_if_newer()
@@ -966,8 +1119,14 @@ class TestUpdatingItself:
         tried = threading.Event()
         monkeypatch.setattr(updates, "apply_if_newer",
                             lambda: (tried.set(), {"installed": False})[1])
-        thread = updates.watch(wanted=lambda: True, idle=lambda: False,
-                               every_s=0.02, first_after_s=0.0)
+        thread = updates.watch(
+            wanted=lambda: True,
+            idle=lambda: False,
+            schedule=updates.UpdateSchedule(
+                first_after_s=0.0,
+                interval=0.02,
+            ),
+        )
         time.sleep(0.4)
         assert not tried.is_set(), "it updated while a job was running"
         assert thread.is_alive()
@@ -978,8 +1137,14 @@ class TestUpdatingItself:
         tried = threading.Event()
         monkeypatch.setattr(updates, "apply_if_newer",
                             lambda: (tried.set(), {"installed": False})[1])
-        updates.watch(wanted=lambda: False, idle=lambda: True,
-                      every_s=0.02, first_after_s=0.0)
+        updates.watch(
+            wanted=lambda: False,
+            idle=lambda: True,
+            schedule=updates.UpdateSchedule(
+                first_after_s=0.0,
+                interval=0.02,
+            ),
+        )
         time.sleep(0.4)
         assert not tried.is_set(), "it updated with the setting off"
 
@@ -992,8 +1157,14 @@ class TestUpdatingItself:
                             lambda: {"ok": True, "installed": True, "version": "9.9.9"})
         monkeypatch.setattr(updates, "relaunch",
                             lambda **k: (done.set(), True)[1])
-        updates.watch(wanted=lambda: True, idle=lambda: True,
-                      every_s=0.05, first_after_s=0.0)
+        updates.watch(
+            wanted=lambda: True,
+            idle=lambda: True,
+            schedule=updates.UpdateSchedule(
+                first_after_s=0.0,
+                interval=0.05,
+            ),
+        )
         assert done.wait(3.0), "it never restarted itself"
 
     def test_relaunch_says_no_when_this_is_not_a_bundle(self, monkeypatch):

@@ -48,9 +48,9 @@ from ml_stack.serve.backend import (
     ServerFailed,
     ServerSpec,
     UnknownFlag,
-    emitted_flags,
     unknown_flags,
 )
+from ml_stack.serve.emitted import emitted_flags
 from ml_stack.serve.preflight import Check, Preflight as _RealPreflight, Report
 from ml_stack.world import about
 from ml_stack.world.organisation import make
@@ -272,6 +272,7 @@ def _faked(args: argparse.Namespace, home: Path, built: list[Any]):
         # the argv built, every flag in it checked. A spec the backend refuses is refused
         # here, naming what it refused (measured 2026-09-02: a head still named by hf:
         # file, refused in the lease after a self-check that built no argv)
+        spec_kwargs.pop("reason", None)
         spec = ServerSpec(model=model, port=port or 1, context=context, **spec_kwargs)
         backend = getattr(manager, "backend", None) or LlamaServerBackend(binary=stand_in)
         argv = backend.command(backend.resolved_draft(spec))
@@ -369,12 +370,15 @@ def selfcheck(argv: Sequence[str]) -> str:
     the scoring and the saved run are real, and a run not asked as ``--smoke`` smokes
     first. Returns one line saying what got through, or raises `SelfCheckFailed` with the
     traceback and what the run printed. ``--detach``, ``--no-queue`` and
-    ``--no-selfcheck`` are ignored.
+    ``--no-selfcheck`` are ignored; ``--fleet`` and ``--peers`` are dropped, so a fleet sweep
+    checks the line each peer would run.
     """
     rest = [a for a in argv if a not in ("--detach", "--no-queue", "--no-selfcheck")]
     args = bench._parser().parse_args(rest)
     if args.cmd not in bench.MEASURING:
         raise ValueError(f"{args.cmd} measures nothing; there is nothing to check")
+    if getattr(args, "fleet", False):
+        args.fleet, args.peers = False, ""
     began = time.monotonic()
     built: list[Any] = []
     said = io.StringIO()

@@ -10,16 +10,24 @@ import threading
 from pathlib import Path
 
 import pytest
+from conftest import threaded_server
 
 from ml_stack.fleet.models import Models
 from ml_stack.fleet.weights import ModelError, resolve
 from ml_stack.http import Server
+from tests.net_site import gguf_bytes
 
 
 def free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
+
+
+@pytest.fixture(autouse=True)
+def loopback_is_the_internet(monkeypatch):
+    """These tests download from a server on this machine, which has to be named."""
+    monkeypatch.setenv("ML_STACK_FETCH_ALLOW_HOSTS", "127.0.0.1")
 
 
 @pytest.fixture
@@ -51,6 +59,14 @@ class TestFinding:
         assert store.find("qwen3") is not None
         assert store.find("llama") is None
 
+    def test_listed_takes_only_an_exact_name_from_the_listing(self, store, tmp_path):
+        held = a_model(tmp_path / "models", "Qwen3-4B-Instruct-Q4_K_M.gguf")
+        outside = a_model(tmp_path / "elsewhere", "stray.gguf")
+        assert store.listed(" Qwen3-4B-Instruct-Q4_K_M.gguf ").path == held
+        assert store.listed("qwen3") is None
+        assert store.listed(str(outside)) is None
+        assert store.listed(str(held)) is None
+
     def test_the_beacon_carries_names_and_sizes_only(self, store, tmp_path):
         a_model(tmp_path / "models")
         row = store.public()[0]
@@ -64,17 +80,46 @@ class TestFinding:
         assert len(store.digest(model)) == 64
 
 
+def handler_replying(status: int, body: dict):
+    """A request handler class answering every GET with ``status`` and ``body`` as JSON."""
+    class Replying(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            payload = json.dumps(body).encode()
+            self.send_response(status)
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def log_message(self, *args):
+            pass
+
+    return Replying
+
+
 class TestSources:
     def test_a_hugging_face_reference_becomes_a_url(self):
         url = resolve("hf:Qwen/Qwen3-4B-GGUF/qwen3-4b-q4.gguf")
         assert url.startswith("https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/")
         assert url.endswith("qwen3-4b-q4.gguf?download=true")
 
-    @pytest.mark.parametrize("bad", ["just-a-name", "hf:owner", "hf:owner/repo",
-                                     "ftp://somewhere/x.gguf"])
+    @pytest.mark.parametrize("bad", ["just-a-name", "hf:owner", "ftp://somewhere/x.gguf"])
     def test_something_that_is_not_a_source_is_refused(self, bad):
         with pytest.raises(ModelError):
             resolve(bad)
+
+    def test_a_repository_alone_is_answered_with_its_q4_build(self, monkeypatch, loopback_net):
+        listing = {"siblings": [{"rfilename": n} for n in (
+            "README.md", "m-q8_0.gguf", "m-q4_k_m.gguf", "mmproj-f16.gguf",
+            "m-q4_k_m-00001-of-00002.gguf")]}
+        with threaded_server(handler_replying(200, listing)) as base:
+            monkeypatch.setattr("ml_stack.fleet.weights.LISTING", base + "/api/models")
+            assert resolve("hf:owner/repo").endswith("/owner/repo/resolve/main/m-q4_k_m.gguf?download=true")
+
+    def test_a_repository_the_hub_does_not_know_is_refused(self, monkeypatch, loopback_net):
+        with threaded_server(handler_replying(404, {"error": "not found"})) as base:
+            monkeypatch.setattr("ml_stack.fleet.weights.LISTING", base + "/api/models")
+            with pytest.raises(ModelError, match="could not read hf:owner/repo"):
+                resolve("hf:owner/repo")
 
 
 class TestGetting:
@@ -92,7 +137,7 @@ class TestGetting:
             store.ensure("absent.gguf")
 
     def test_it_downloads_when_no_machine_has_it(self, store, tmp_path):
-        payload = os.urandom(2 * 1024 * 1024)
+        payload = gguf_bytes(extra=2 * 1024 * 1024)
 
         class H(http.server.BaseHTTPRequestHandler):
             def log_message(self, *a):
@@ -117,7 +162,7 @@ class TestGetting:
         assert got.path.parent == store.store
 
     def test_a_short_download_is_left_to_resume_from(self, store):
-        payload = os.urandom(1024 * 1024)
+        payload = gguf_bytes(extra=1024 * 1024)
 
         class H(http.server.BaseHTTPRequestHandler):
             def log_message(self, *a):
@@ -152,7 +197,7 @@ class TestResuming:
 
     def test_a_server_that_ignores_range_does_not_get_spliced_onto_the_part(
             self, store):
-        payload = os.urandom(512 * 1024)
+        payload = gguf_bytes(extra=512 * 1024)
         part = store.store / "m.gguf.part"
         part.write_bytes(b"\xff" * 4096)
 
@@ -179,7 +224,7 @@ class TestResuming:
         assert not part.exists()
 
     def test_a_part_left_by_a_different_file_is_discarded(self, store):
-        payload = os.urandom(256 * 1024)
+        payload = gguf_bytes(extra=256 * 1024)
         part = store.store / "m.gguf.part"
         part.write_bytes(b"\x00" * 8192)
         Path(str(part) + ".from").write_text(json.dumps(
@@ -234,7 +279,7 @@ class TestResuming:
         assert not part.exists()
 
     def test_a_genuine_resume_asks_for_the_rest_and_keeps_what_it_had(self, store):
-        head, tail = b"A" * 4096, b"B" * 4096
+        head, tail = gguf_bytes(extra=4096 - 24), b"B" * 4096
         part = store.store / "m.gguf.part"
         part.write_bytes(head)
 
@@ -404,7 +449,7 @@ class TestDraftModels:
         assert draft_beside(big) is None
 
     def test_getting_a_draft_puts_it_next_to_the_model(self, store, tmp_path):
-        payload = os.urandom(2 * 1024 * 1024)
+        payload = gguf_bytes(extra=2 * 1024 * 1024)
 
         class H(http.server.BaseHTTPRequestHandler):
             def log_message(self, *a):
@@ -653,7 +698,7 @@ class TestProgress:
     def test_the_two_kinds_of_progress_do_not_share_a_callback(self, store):
         """ensure() reports a stage as text and bytes as two numbers. One callback
         taking both would be called with a string and then with a pair."""
-        payload = os.urandom(512 * 1024)
+        payload = gguf_bytes(extra=512 * 1024)
 
         class H(http.server.BaseHTTPRequestHandler):
             def log_message(self, *a):
@@ -720,7 +765,7 @@ class TestGettingInTheBackground:
     def test_a_download_runs_without_holding_the_caller(self, store):
         from ml_stack.fleet.models import Downloads
 
-        payload = os.urandom(1024 * 1024)
+        payload = gguf_bytes(extra=1024 * 1024)
         srv = self.serve(payload)
         downloads = Downloads(store)
         try:
@@ -741,7 +786,7 @@ class TestGettingInTheBackground:
         the only counts ever seen are nothing and everything."""
         from ml_stack.fleet.models import CHUNK, Downloads
 
-        payload = os.urandom(4 * CHUNK)
+        payload = gguf_bytes(extra=4 * CHUNK)
         srv = self.serve(payload, delay=0.01)
         downloads = Downloads(store)
         try:
@@ -775,7 +820,7 @@ class TestGettingInTheBackground:
     def test_asking_twice_for_the_same_model_does_not_start_it_twice(self, store):
         from ml_stack.fleet.models import Downloads
 
-        payload = os.urandom(512 * 1024)
+        payload = gguf_bytes(extra=512 * 1024)
         srv = self.serve(payload, delay=0.05)
         downloads = Downloads(store)
         try:
@@ -966,3 +1011,102 @@ class TestTheResumeStamp:
         stamp.write_text(json.dumps({"version": STAMP_VERSION + 1, "url": "http://x/y.gguf",
                                      "validator": "abc"}))
         assert _read_stamp(stamp) == {}
+
+
+class TestWhereADownloadMayComeFrom:
+    def test_a_source_on_this_machine_or_its_network_is_refused_unless_named(
+            self, store, monkeypatch):
+        monkeypatch.delenv("ML_STACK_FETCH_ALLOW_HOSTS")
+        for source in ("http://127.0.0.1:9/m.gguf", "http://169.254.169.254/latest/m.gguf",
+                       "http://localhost/m.gguf", "http://192.168.1.9/m.gguf",
+                       "http://[::1]/m.gguf"):
+            with pytest.raises(ModelError, match=r"not on the public internet|this machine"):
+                store.ensure("m.gguf", source=source)
+        assert not list(store.store.glob("*"))
+
+    @pytest.mark.parametrize("name", ["../escape.gguf", "a/../../escape.gguf", "nul.gguf",
+                                      "con", "x\x00.gguf", "bad|name.gguf"])
+    def test_a_file_name_that_is_not_one_plain_name_is_refused(self, store, name):
+        with pytest.raises(ModelError):
+            store.ensure(name, source="http://127.0.0.1:9/whatever.gguf")
+        assert not list(store.store.glob("*"))
+
+    def test_a_redirect_to_a_private_address_is_refused(self, store):
+        class Redirecting(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_GET(self):
+                self.send_response(302)
+                self.send_header("Location", "http://169.254.169.254/latest/meta-data/")
+                self.end_headers()
+
+        srv = Server(("127.0.0.1", free_port()), Redirecting)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        try:
+            with pytest.raises(ModelError, match=r"169\.254\.169\.254"):
+                store.ensure("far.gguf", source=f"http://127.0.0.1:{srv.server_address[1]}/f")
+        finally:
+            srv.shutdown()
+        assert not list(store.store.glob("*"))
+
+
+def a_peer_holding(listing, body):
+    """A server that lists ``listing`` at /models and answers every other path with ``body``."""
+
+    class Holding(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            reply = json.dumps({"models": listing}).encode() if self.path == "/models" else body
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(reply)))
+            self.end_headers()
+            self.wfile.write(reply)
+
+    return threaded_server(Holding)
+
+
+class TestWhatAPeerOrServerSends:
+    @pytest.mark.parametrize("evil", ["../../escaped.gguf", "/tmp/escaped-abs.gguf"])
+    def test_a_peer_cannot_place_a_file_outside_the_store(self, store, tmp_path, evil):
+        with a_peer_holding([{"name": evil}], gguf_bytes()) as base:
+            got = store._from_peer("escaped", base, b"k", None)
+        assert got.path.parent == store.store
+        assert not (tmp_path / "escaped.gguf").exists()
+        assert not Path("/tmp/escaped-abs.gguf").exists()
+
+    def test_a_peer_name_without_a_weights_suffix_is_refused(self, store):
+        with a_peer_holding([{"name": "evil.sh"}], gguf_bytes()) as base, pytest.raises(ModelError):
+            store._from_peer("evil", base, b"k", None)
+        assert not list(store.store.glob("*"))
+
+    def test_a_peer_file_that_is_not_a_gguf_is_deleted(self, store):
+        with a_peer_holding([{"name": "m.gguf"}], b"<html>not a model</html>") as base, \
+                pytest.raises(ModelError):
+            store._from_peer("m", base, b"k", None)
+        assert not list(store.store.glob("*"))
+
+    def test_a_download_that_is_not_a_gguf_is_deleted(self, store):
+        payload = b"<html>" + os.urandom(1024)
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+
+        srv = Server(("127.0.0.1", free_port()), H)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        try:
+            with pytest.raises(ModelError):
+                store.ensure("far.gguf",
+                             source=f"http://127.0.0.1:{srv.server_address[1]}/far.gguf")
+        finally:
+            srv.shutdown()
+        assert not list(store.store.glob("*"))

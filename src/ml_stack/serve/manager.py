@@ -9,14 +9,22 @@ import threading
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from dataclasses import replace
+from contextvars import ContextVar
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
 
+import psutil
+
 from ml_stack.client import is_healthy, reported_models
+from ml_stack.client.chat import forget_server
 from ml_stack.client.health import serving_params
 from ml_stack.files import write_json
-from ml_stack.hub import free_memory, room as machine_room
+from ml_stack.hub import free_memory, installed_for, room as machine_room
+from ml_stack.limits import read as limits_read
+from ml_stack.lock import only_one
+from ml_stack.serve import admission, exit_guard, guarded, mtp, provenance, quant_guard, unmanaged
+from ml_stack.serve.admitting import STATE_LOCK_TIMEOUT_S, Admitting
 from ml_stack.serve.backend import (
     Lease,
     LlamaServerBackend,
@@ -24,8 +32,10 @@ from ml_stack.serve.backend import (
     ServerFailed,
     ServerInfo,
     ServerSpec,
+    UnknownFlag,
     default_slot_save_path,
 )
+from ml_stack.serve.binary import BinaryNotFound
 from ml_stack.serve.escalation import (
     Escalating,
     plan_for,
@@ -34,22 +44,25 @@ from ml_stack.serve.escalation import (
     slots_on,
     summarise,
 )
-from ml_stack.serve.events import Event, emit
+from ml_stack.serve.events import Caller, Event, Growth, emit
 from ml_stack.serve.leases import (
     lease_file,
     merge_state,
     orphaned,
     reap_one,
     recorded_servers,
+    same_process,
 )
 from ml_stack.serve.matching import model_matches, serving_mismatch
 from ml_stack.serve.mlx_tree import MlxTreeBackend, is_mlx
 from ml_stack.serve.ports import DEFAULT_HOST, free_port, port_is_free, reclaim_port
 from ml_stack.serve.process import (
+    cmdline_digest,
     kill_process_tree,
     measuring,
     pid_exists,
     self_or_ancestor,
+    started_at,
 )
 from ml_stack.serve.python_engines import ENGINES
 from ml_stack.serve.weights import scaled_timeout, weight_of
@@ -61,13 +74,28 @@ class Measuring(ServerFailed):
     """A measurement holds the card, so no second model is loaded onto it."""
 
 
+ASKING: ContextVar[int] = ContextVar("ml_stack_serve_asking", default=0)
+"""The pid of the process a broker is starting a server for."""
+
+
 def measurement_on_the_card() -> dict[str, Any] | None:
     """The measurement holding the bench's lock, or None when nothing is or this process
-    is the holder."""
+    or the process being served for is the holder."""
     held = measuring()
     if not held or self_or_ancestor(held.get("pid")):
         return None
+    asker = ASKING.get()
+    if asker and (held.get("pid") == asker or _descends_from(asker, held.get("pid"))):
+        return None
     return held
+
+
+def _descends_from(pid: int, ancestor: Any) -> bool:
+    """Whether ``ancestor`` is one of the processes that started ``pid``."""
+    try:
+        return any(p.pid == ancestor for p in psutil.Process(pid).parents())
+    except psutil.Error:
+        return False
 
 
 def measurement_said(held: dict[str, Any]) -> str:
@@ -79,7 +107,6 @@ def measurement_said(held: dict[str, Any]) -> str:
 
 
 UNAVAILABLE_COOLDOWN_S = 3.0
-STATE_LOCK_TIMEOUT_S = 30.0
 
 # How much of what is free a second model may take before it is judged not to fit. Below 1.0
 # because a model needs its weights *and* room to work in, and a machine that fills itself
@@ -87,7 +114,42 @@ STATE_LOCK_TIMEOUT_S = 30.0
 BESIDE_HEADROOM = 0.8
 
 
-class ServerManager:
+@dataclass(frozen=True)
+class Starting:
+    """How a lease may be satisfied: ``roam`` lets it be served on another port, ``escalate``
+    lets a server with too few slots be grown, ``anyway`` starts it during a measurement,
+    ``iq`` is the IQ-quantisation mode (``off``, ``warn``, ``block``), ``who`` names the asker,
+    and the rest are the checks the start runs."""
+
+    roam: bool = True
+    check_flags: bool = True
+    preflight: bool = True
+    warmup_request: bool = True
+    escalate: bool = False
+    anyway: bool = False
+    iq: str = ""
+    who: str = ""
+
+    def checks(self) -> dict[str, bool]:
+        """The checks a start runs, as the keyword arguments a backend takes."""
+        return {"check_flags": self.check_flags, "preflight": self.preflight,
+                "warmup_request": self.warmup_request}
+
+
+def reusing_installed(spec: ServerSpec) -> ServerSpec:
+    """``spec`` with each ``hf:owner/repo/file`` model, projector and draft that is already
+    installed -- from the Hub cache, llama.cpp's cache, LM Studio or Ollama -- replaced by
+    the file, so it is not downloaded again."""
+    changes: dict[str, str] = {}
+    for field in ("model", "mmproj", "draft"):
+        value = getattr(spec, field)
+        found = installed_for(value) if isinstance(value, str) and value.startswith("hf:") else None
+        if found:
+            changes[field] = str(found.path)
+    return replace(spec, **changes) if changes else spec
+
+
+class ServerManager(Admitting):
     """Leases model servers, one per (model, port), shared across this machine."""
 
     def __init__(
@@ -95,16 +157,24 @@ class ServerManager:
         backend: ServerBackend | None = None,
         *,
         state_file: Path | None = None,
+        broker: Any = None,
+        stop_on_exit: bool = True,
     ) -> None:
+        self.stop_on_exit = stop_on_exit
+        self.iq = ""
         self.backend = backend or LlamaServerBackend()
         self.tree: ServerBackend = MlxTreeBackend()
         self.state_file = state_file or lease_file()
         self.say: Callable[[str], None] | None = None
+        self._broker = broker
+        self.confirm: Callable[[str], bool] | None = None
+        self._leases: dict[str, ServerInfo] = {}
         self._mine: dict[str, dict] = {}
         self._processes: dict[int, Any] = {}
         self._lock = threading.Lock()
         self._port_locks: dict[int, threading.Lock] = {}
         self._unavailable_until: dict[int, float] = {}
+        self._swept = False
 
     def backend_for(self, spec: ServerSpec) -> ServerBackend:
         """The backend that serves ``spec``: the engine it names, tree decoding for MLX
@@ -118,69 +188,76 @@ class ServerManager:
 
     # ------------------------------------------------------------------ leasing
 
+    def with_backend(self, backend: ServerBackend) -> ServerManager:
+        """A manager over ``backend`` that shares this one's records and processes."""
+        other = ServerManager(backend, state_file=self.state_file, broker=self._broker,
+                              stop_on_exit=self.stop_on_exit)
+        other._mine, other._processes = self._mine, self._processes
+        other._lock, other._port_locks = self._lock, self._port_locks
+        other.tree = self.tree
+        return other
+
+    @property
+    def broker(self) -> Any:
+        """The broker every start, release and escalation goes through."""
+        if self._broker is None:
+            from ml_stack.serve.broker_wire import broker_for  # broker_wire imports this module
+
+            self._broker = broker_for(self)
+        return self._broker
+
     def lease(self, spec: ServerSpec, *, timeout: float | None = None,
               roam: bool = True, check_flags: bool = True, preflight: bool = True,
               warmup_request: bool = True, escalate: bool = False, anyway: bool = False,
-              on_event: Event | None = None,
-              say: Callable[[str], None] | None = None) -> ServerInfo:
-        """A healthy server for ``spec``. Starts one only if there is not one already.
+              iq: str = "", on_event: Event | None = None,
+              say: Callable[[str], None] | None = None, reason: str = "") -> ServerInfo:
+        """A healthy server for ``spec``, from the broker: one already up that fits, else a
+        new one when the machine has the memory for it. The broker waits for memory and
+        refuses with `AdmissionRefused` when none comes free. ``reason`` is why, in one line.
 
-        A server on the port whose record names a leasing process that has gone is an
-        orphan: one serving what was asked for is adopted and its record made this
-        process's; one serving something else is stopped before a server is started.
-        Either way ``say`` (else ``self.say``, else the log) is told.
-
-        When the port is busy with something else and this machine has the memory to hold
-        both, it is served beside it on a free port rather than refused: a small model does
-        not need the large one evicted, and making a person pick another port by hand is
-        work a machine can do. ``roam=False`` for a caller that truly needs *that* port —
-        the one that expects every consumer to meet on it.
-
-        ``escalate=True`` is for a caller that may genuinely need more than one concurrent
-        cache: when the only reason a running server does not match ``spec`` is that it
-        holds fewer slots than asked, it is grown (or, if that will not fit, split, or
-        summarised and split -- see :meth:`escalate`) rather than refused. A spec with no
-        ``slot_save_path`` is given this manager's own default so a later escalation has
-        somewhere to save a live conversation before the relaunch.
-
-        ``timeout=None`` (the default) scales with the weights on disk -- see
-        ``scaled_timeout`` -- so a caller that never thought about it still gets a timeout
-        sized for what it is actually waiting on. A caller that passes a number means it,
-        and gets exactly that instead.
-
-        Starting a server is refused with `Measuring` while another process holds the
-        bench's measuring lock; adopting one already up is not. ``anyway=True`` starts it
-        regardless.
+        ``on_event`` and ``say`` are called with a broker running in this process and not
+        with the machine's broker. The rest of the arguments are those of
+        :meth:`_start_server`.
         """
-        if escalate:
-            # llama.cpp's slot-save file carries the cache's stream count, and a restore
-            # raises "n_stream mismatch" the moment that count differs from the file's --
-            # which a change in slot count always does unless every stream is one shared
-            # buffer throughout, slot count or no. A lease that may later escalate is
-            # kv_unified from its first launch, not only from the relaunch.
-            if not spec.slot_save_path:
-                spec = replace(spec, slot_save_path=str(default_slot_save_path()))
-            if not spec.kv_unified:
-                spec = replace(spec, kv_unified=True)
+        spec = reusing_installed(spec)
+        wanted = quant_guard.mode(iq or self.iq)
+        if wanted == "block":
+            quant_guard.enforce(spec.model, gpu_layers=spec.n_gpu_layers, asked=wanted)
+        how = Starting(roam, check_flags, preflight, warmup_request, escalate, anyway, wanted)
+        info = self.broker.start(spec, Caller(on_event=on_event, say=say or self.say,
+                                              claim=provenance.asked(reason)),
+                                 timeout=timeout, options=asdict(how))
+        if info.lease:
+            self._leases[info.lease] = info
+        return info
 
-        now = time.monotonic()
-        until = self._unavailable_until.get(spec.port, 0.0)
-        if now < until:
-            raise ServerFailed(
-                f"port {spec.port} was marked unavailable {until - now:.1f}s ago; "
-                "not retrying yet (negative cache)"
-            )
+    def _start_server(self, spec: ServerSpec, *, timeout: float | None = None,
+                      how: Starting | None = None, on_event: Event | None = None,
+                      say: Callable[[str], None] | None = None) -> ServerInfo:
+        """A healthy server for ``spec``: the one on its port, else one already up elsewhere that
+        serves it, else a new one. Called by the broker and by nothing else.
 
+        A server on the port whose leasing process has gone is an orphan: one serving what
+        was asked for is adopted, one serving something else is stopped. With ``how.roam``
+        a busy port is served beside, on a free port, when the memory allows. With
+        ``how.escalate`` a server with fewer slots than asked is grown rather than
+        refused. ``timeout=None`` scales with the weights on disk. `Measuring` refuses a
+        start while another process holds the bench's measuring lock, unless ``how.anyway``.
+        ``say`` (else ``self.say``, else the log) is told of each decision.
+        """
+        how = how or Starting()
+        roam, escalate, anyway = how.roam, how.escalate, how.anyway
+        told = say or self.say or logger.info
+        spec = self._permitted(spec, escalate)
+        iq = self._quant_guard(spec, how)
+        spec, drafting = self._with_mtp(spec, escalate)
+        if drafting.note:
+            (told if drafting.worth_saying else logger.info)(f"port {spec.port}: {drafting.note}")
         resolved_timeout = (
             timeout if timeout is not None else scaled_timeout(weight_of(spec.model)))
-        starting = {"check_flags": check_flags, "preflight": preflight,
-                    "warmup_request": warmup_request}
-        refused = self._over_limit(spec)
-        if refused:
-            raise ServerFailed(refused)
 
+        self._sweep_orphans(spec.port, told)
         with self._port_lock(spec.port):
-            told = say or self.say or logger.info
             entry = self._load().get(str(spec.port))
             stray = entry if isinstance(entry, dict) and orphaned(entry) else None
             try:
@@ -189,16 +266,19 @@ class ServerManager:
                 if escalate:
                     running = self._slots_shortfall(spec)
                     if running is not None:
-                        return self.escalate(
-                            running, add_slots=max(1, int(spec.parallel or 1))
-                            - max(1, int(running.parallel or 1)),
-                            timeout=resolved_timeout, anyway=anyway, on_event=on_event,
-                            say=told)
+                        more = (max(1, int(spec.parallel or 1))
+                                - max(1, int(running.parallel or 1)))
+                        return self._escalate(
+                            running, Growth(add_slots=more, timeout=resolved_timeout,
+                                            anyway=anyway),
+                            Caller(on_event=on_event, say=told))
                 if stray is None:
+                    if roam and (reused := self._reusable(spec, on_event=on_event)):
+                        return reused
                     if not roam or not port_is_free(spec.port):
                         elsewhere = (self._beside(spec, timeout=resolved_timeout,
                                                   on_event=on_event, anyway=anyway,
-                                                  **starting)
+                                                  **how.checks())
                                     if roam else None)
                         if elsewhere is not None:
                             return elsewhere
@@ -210,11 +290,31 @@ class ServerManager:
                         self._take_over(spec.port, stray, say=told)
                     emit(on_event, "ready", port=spec.port, adopted=True)
                     return adopted
+                if (stray is None and not port_is_free(spec.port)
+                        and is_healthy(f"http://{DEFAULT_HOST}:{spec.port}", timeout=1.0)):
+                    taken = self._unmanaged_on(spec, told)
+                    if taken is not None:
+                        emit(on_event, "ready", port=spec.port, adopted=True)
+                        return taken
+                    if roam and (reused := self._reusable(spec, on_event=on_event)):
+                        return reused
+                    elsewhere = (self._beside(spec, timeout=resolved_timeout,
+                                              on_event=on_event, anyway=anyway, **how.checks())
+                                 if roam else None)
+                    if elsewhere is not None:
+                        return elsewhere
+                    raise ServerFailed(
+                        f"port {spec.port} is served by a server ml-stack did not start. "
+                        f"It is left alone; lease on a different port, or set "
+                        f"{unmanaged.ENV}=auto to adopt servers that pass its checks.")
 
+            if roam and (reused := self._reusable(spec, on_event=on_event)):
+                return reused
             try:
                 info = self._launch(spec, timeout=resolved_timeout, on_event=on_event,
-                                    anyway=anyway, **starting)
-            except Measuring:
+                                    anyway=anyway, reuse=roam, **how.checks())
+            except (Measuring, admission.AdmissionRefused, guarded.SentinelRefused):
+                self._forget(spec.port)
                 raise
             except ServerFailed:
                 self._forget(spec.port)
@@ -222,11 +322,72 @@ class ServerManager:
                 raise
 
             self._unavailable_until.pop(spec.port, None)
-            self._record(spec, info)
+            if not info.mtp_note:
+                info = replace(info, mtp_note=drafting.note)
+            if not info.adopted:
+                self._record(spec, info, iq=iq)
             return info
 
+    def _quant_guard(self, spec: ServerSpec, how: Starting) -> quant_guard.IqQuant | None:
+        """The IQ quantisation ``spec`` is when it was warned about; `BlockedQuant` in strict
+        mode. llama.cpp specs only. The mode is the lease's own, else this process's; a
+        lease from the broker wire carries none."""
+        if self.backend_for(spec) is not self.backend:
+            return None
+        return quant_guard.enforce(spec.model, gpu_layers=spec.n_gpu_layers,
+                                   asked=how.iq,
+                                   who=how.who)
+
+    def _permitted(self, spec: ServerSpec, escalate: bool) -> ServerSpec:
+        """``spec`` as it will be started, or `ServerFailed` when the port was just given up
+        on or a limit on this machine refuses the lease."""
+        spec = reusing_installed(spec)
+        if escalate:
+            # llama.cpp's slot-save file carries the cache's stream count, and a restore
+            # raises "n_stream mismatch" the moment that count differs from the file's --
+            # which a change in slot count always does unless every stream is one shared
+            # buffer throughout, slot count or no. A lease that may later escalate is
+            # kv_unified from its first launch, not only from the relaunch.
+            if not spec.slot_save_path:
+                spec = replace(spec, slot_save_path=str(default_slot_save_path()))
+            if not spec.kv_unified:
+                spec = replace(spec, kv_unified=True)
+
+        if why := guarded.blocked(spec.model):
+            raise guarded.SentinelRefused(why)
+        now = time.monotonic()
+        until = self._unavailable_until.get(spec.port, 0.0)
+        if now < until:
+            raise ServerFailed(
+                f"port {spec.port} was marked unavailable {until - now:.1f}s ago; "
+                "not retrying yet (negative cache)"
+            )
+
+        refused = self._over_limit(spec)
+        if refused:
+            raise ServerFailed(refused)
+        return spec
+
+    def _with_mtp(self, spec: ServerSpec, escalate: bool) -> tuple[ServerSpec, mtp.Plan]:
+        """``spec`` with the MTP head it is served with by default, and the plan that chose it.
+
+        A head the default picked is verified against sentinel's pin like the weights; one
+        that fails is left out and the lease goes on without it.
+        """
+        try:
+            binary = self.backend_for(spec).binary  # type: ignore[attr-defined]
+        except (BinaryNotFound, OSError, AttributeError):
+            binary = None
+        chosen = mtp.plan(spec, binary=binary, escalate=escalate)
+        if chosen.draft:
+            try:
+                guarded.verify(chosen.draft, state_file=self.state_file, stop=self.reclaim)
+            except guarded.SentinelRefused as refused:
+                chosen = mtp.Plan(note=f"MTP off: {refused}", loud=True)
+        return mtp.applied(spec, chosen), chosen
+
     def _launch(self, spec: ServerSpec, *, timeout: float, on_event: Event | None = None,
-                anyway: bool = False, **starting: Any) -> ServerInfo:
+                anyway: bool = False, reuse: bool = False, **starting: Any) -> ServerInfo:
         """Start ``spec``, telling ``on_event`` when the load begins and ends.
 
         The one place a fresh process is asked for, so ``up``, an adopt that falls
@@ -241,10 +402,30 @@ class ServerManager:
                 f"{measurement_said(held)}. Loading a second model onto it would spoil "
                 f"that measurement and this one. Wait for it to finish, stop it with "
                 f"'ml-stack-bench stop', or pass --anyway to load beside it.")
+        guarded.verify(spec.model, state_file=self.state_file, stop=self.reclaim)
+        if spec.draft and spec.mtp is not True:
+            guarded.verify(spec.draft, state_file=self.state_file, stop=self.reclaim)
         emit(on_event, "loading", port=spec.port, model=Path(str(spec.model)).name,
               slots=max(1, int(spec.parallel or 1)))
-        info = self.backend_for(spec).start(spec, lease=self._pending(spec), timeout=timeout,
-                                  **starting)
+        admitted = self._admitted(spec, on_event=on_event, reuse=reuse, load_s=timeout)
+        if isinstance(admitted, ServerInfo):
+            return admitted
+        try:
+            info = self.backend_for(spec).start(spec, lease=admitted, timeout=timeout, **starting)
+        except (ServerFailed, UnknownFlag) as why:
+            if spec.mtp is not True:
+                raise
+            mtp.failed(spec.model, spec.draft, getattr(self.backend_for(spec), "binary", None))
+            spec = replace(spec, draft=None, spec_type="", mtp=False)
+            note = f"MTP off: the server would not start with it ({str(why).splitlines()[0]})"
+            note += "; docs/serving.md, 'Multi-token prediction', has the one-command check"
+            (self.say or logger.warning)(f"port {spec.port}: {note}; starting without")
+            info = replace(self.backend_for(spec).start(spec, lease=admitted, timeout=timeout,
+                                                        **starting), mtp_note=note)
+        else:
+            if spec.mtp is True:
+                info = replace(info, mtp=Path(str(spec.draft)).name if spec.draft else "embedded",
+                               mtp_note=f"MTP on: {spec.spec_type}")
         emit(on_event, "ready", port=spec.port, load_s=info.load_s, warmup_s=info.warmup_s)
         return info
 
@@ -271,6 +452,20 @@ class ServerManager:
             return None
         return replace(spec, parallel=params.total_slots,
                        context=params.n_ctx * params.total_slots)
+
+    def _sweep_orphans(self, keep: int, say: Callable[[str], None]) -> None:
+        """Once per manager, stop every server on this machine whose leasing process has gone,
+        except the one on ``keep``, which the lease about to run adopts or replaces. Only a
+        record that proves its pid still belongs to the server (start time and command
+        line) is acted on."""
+        with self._lock:
+            if self._swept:
+                return
+            self._swept = True
+        for port, entry in recorded_servers(self.state_file).items():
+            if port != keep and orphaned(entry, strict=True):
+                with self._port_lock(port):
+                    self._stop_orphan(port, entry, say=say, why="swept before a new start")
 
     def _stop_orphan(self, port: int, entry: dict, *, say: Callable[[str], None],
                      why: str) -> None:
@@ -304,23 +499,29 @@ class ServerManager:
         with self._port_lock(moved.port):
             try:
                 info = self._launch(moved, timeout=timeout, on_event=on_event,
-                                    anyway=anyway, **starting)
-            except Measuring:
+                                    anyway=anyway, reuse=True, **starting)
+            except (Measuring, admission.AdmissionRefused, guarded.SentinelRefused):
+                self._forget(moved.port)
                 raise
             except ServerFailed:
                 self._forget(moved.port)
                 return None
-            self._record(moved, info)
+            if not info.adopted:
+                self._record(moved, info)
             return info
 
     def adopt(self, spec: ServerSpec) -> ServerInfo | None:
-        """The already-running server for ``spec``, if there is one. Else ``None``."""
+        """The running server for ``spec`` on its port, if the lease record holds one there.
+        ``None`` for a port nothing answers on, and for one only an unmanaged server
+        answers on."""
         base_url = f"http://{DEFAULT_HOST}:{spec.port}"
-        if not is_healthy(base_url, timeout=1.0):
+        if str(spec.port) not in self._load() or not is_healthy(base_url, timeout=1.0):
             return None
 
         mismatch = serving_mismatch(spec, reported_models(base_url), serving_params(base_url))
-        if mismatch:
+        entry = self._load().get(str(spec.port), {})
+        if not admission.compatible(spec, entry, mismatch):
+            mismatch = mismatch or ["recorded cache, draft, or template settings differ"]
             raise ServerFailed(
                 f"port {spec.port} is already serving different settings -- "
                 + "; ".join(mismatch)
@@ -340,21 +541,23 @@ class ServerManager:
                 timeout: float | None = None, anyway: bool = False,
                 on_event: Event | None = None,
                 say: Callable[[str], None] | None = None) -> ServerInfo:
-        """Grow the server on ``spec.port`` by ``add_slots`` more concurrent conversations,
-        keeping every one already live.
+        """:meth:`_escalate`, asked of the broker."""
+        return self.broker.escalate(spec, Growth(add_slots, room, timeout, anyway),
+                                    Caller(on_event=on_event, say=say or self.say))
 
-        ``spec`` is the settings actually running -- its ``context`` and ``parallel`` are
-        what the port is serving now, not what a caller wishes it were (:meth:`lease`'s
-        ``escalate=True`` works this out with :meth:`_slots_shortfall` before calling
-        here). Every slot with a live conversation is saved through
-        ``/slots/{id}?action=save`` before anything stops. The whole cache grows when
-        ``fit`` says the extra room is there; otherwise the existing total is split
-        across the larger slot count, and any conversation too long for what that leaves
-        it is summarised on the model itself and re-seeded in place of its cache -- which
-        is kept regardless, named in every message about that slot. Raises
-        :class:`~ml_stack.serve.escalation.EscalationRefused` only when a live
-        conversation would be dropped and summarising it did not rescue that.
+    def _escalate(self, spec: ServerSpec, growth: Growth, caller: Caller) -> ServerInfo:
+        """Grow the server on ``spec.port`` by ``growth.add_slots`` conversations, keeping
+        every one already live.
+
+        ``spec`` is the settings the port is serving now. Each live slot is saved through
+        ``/slots/{id}?action=save`` first. The cache grows when ``fit`` says the room is
+        there, else the existing total is split across more slots, and a conversation too
+        long for its share is summarised and re-seeded. Raises `EscalationRefused` when a
+        live conversation would be dropped and summarising it did not rescue that.
         """
+        add_slots, room, timeout, anyway = (growth.add_slots, growth.room, growth.timeout,
+                                            growth.anyway)
+        on_event, say = caller.on_event, caller.say
         told = say or self.say or logger.info
         current_slots = max(1, int(spec.parallel or 1))
         new_slots = current_slots + max(1, int(add_slots))
@@ -387,6 +590,7 @@ class ServerManager:
         emit(on_event, "stopping", port=spec.port, pid=pid)
         if pid:
             kill_process_tree(pid)
+            exit_guard.release(pid)
         self._forget(spec.port)
 
         # kv_unified keeps the cache's stream count at 1 across the relaunch; any other
@@ -410,6 +614,15 @@ class ServerManager:
         return info
 
     def release(self, info: ServerInfo, *, grace_s: float = 5.0) -> None:
+        """Let go of a lease; the broker stops the server when nobody else holds it. A
+        record with no lease is stopped directly."""
+        if info.lease:
+            self._leases.pop(info.lease, None)
+            self.broker.drop(info, grace_s=grace_s)
+            return
+        self._stop_server(info, grace_s=grace_s)
+
+    def _stop_server(self, info: ServerInfo, *, grace_s: float = 5.0) -> None:
         """Stop a server this process started. Adopted servers are left running."""
         if info.adopted:
             logger.debug("not stopping %s: we adopted it", info.base_url)
@@ -419,12 +632,18 @@ class ServerManager:
             held = info.process
         if info.pid:
             kill_process_tree(info.pid, grace_s=grace_s)
+        exit_guard.release(info.pid)
         reap_one(held, grace_s=grace_s)
         self._forget(info.port)
 
     def detach(self, info: ServerInfo) -> None:
+        """Record the server under its own pid, held by nobody, until it is taken down."""
+        self.broker.detach(info)
+
+    def _detach(self, info: ServerInfo) -> None:
         """Record the server under its own pid and stop tracking it in this process."""
         self._processes.pop(info.port, None)
+        exit_guard.release(info.pid)
         entry = self._mine.pop(str(info.port), None)
         if entry is None or not info.pid:
             self._save()
@@ -435,12 +654,17 @@ class ServerManager:
             self._write(state)
 
     def stop_all(self, *, grace_s: float = 5.0) -> list[int]:
-        """Stop every server this process started."""
+        """Release every lease this process holds and stop every server it started."""
         stopped: list[int] = []
+        for info in list(self._leases.values()):
+            self.release(info, grace_s=grace_s)
+            if info.pid:
+                stopped.append(info.pid)
         for entry in list(self._mine.values()):
             pid = entry.get("pid")
             if isinstance(pid, int) and pid_exists(pid):
                 stopped += kill_process_tree(pid, grace_s=grace_s)
+            exit_guard.release(pid)
         for held in list(self._processes.values()):
             reap_one(held, grace_s=grace_s)
         self._processes.clear()
@@ -448,9 +672,19 @@ class ServerManager:
         self._save()
         return stopped
 
+    def close(self) -> None:
+        """Stop every server this manager started. Servers it adopted are left running."""
+        self.stop_all()
+
+    def __enter__(self) -> ServerManager:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
+
     # ------------------------------------------------------------------ state file
 
-    def _pending(self, spec: ServerSpec) -> Lease:
+    def _pending(self, spec: ServerSpec, *, est_bytes: int = 0) -> Lease:
         """Write the server down before it exists, and hand the backend the proof.
 
         The record carries the port, the model and this process as owner with no pid yet;
@@ -461,22 +695,44 @@ class ServerManager:
         self._mine[str(spec.port)] = {
             "port": spec.port, "pid": None, "backend": self.backend_for(spec).name,
             "model": str(spec.model), "owner_pid": os.getpid(), "pending": True,
+            "device": admission.device_of(spec), "est_bytes": est_bytes,
+            "embedding": bool(spec.embedding), "mmproj": bool(spec.mmproj),
+            "context": int(spec.context), "parallel": int(spec.parallel or 1),
         }
         self._save()
-        return Lease(port=spec.port, owner_pid=os.getpid(), state_file=str(self.state_file))
+        return Lease(port=spec.port, owner_pid=os.getpid(), state_file=str(self.state_file),
+                     stop_on_exit=self.stop_on_exit)
 
-    def _record(self, spec: ServerSpec, info: ServerInfo) -> None:
+    def _record(self, spec: ServerSpec, info: ServerInfo,
+                iq: quant_guard.IqQuant | None = None) -> None:
         self._mine[str(spec.port)] = {
             "port": info.port,
             "pid": info.pid,
             "backend": info.backend,
             "model": str(spec.model),
             "owner_pid": os.getpid(),
+            "device": admission.device_of(spec),
+            "est_bytes": (self._mine.get(str(spec.port)) or {}).get("est_bytes", 0),
+            "embedding": bool(spec.embedding),
+            "mmproj": bool(spec.mmproj),
+            "mtp": info.mtp,
+            "cache_type_k": spec.cache_type_k,
+            "cache_type_v": spec.cache_type_v,
+            "draft": str(spec.draft or ""),
+            "spec_type": spec.spec_type,
+            "chat_template_file": str(spec.chat_template_file or ""),
+            "mtp_note": info.mtp_note,
+            "context": int(spec.context),
+            "parallel": int(spec.parallel or 1),
             "base_url": info.base_url,
             "load_s": info.load_s,
             "warmup_s": info.warmup_s,
+            "started": started_at(info.pid),
+            "cmdline": cmdline_digest(info.pid),
             **({"log": str(info.log_path)} if info.log_path else {}),
+            **({"iq_warning": iq.name} if iq is not None else {}),
         }
+        forget_server(info.base_url)
         if info.process is not None:
             self._processes[info.port] = info.process
         self._save()
@@ -499,8 +755,6 @@ class ServerManager:
     @contextmanager
     def _exclusive(self) -> Iterator[None]:
         """Hold the state file against every other thread and process for the block."""
-        from ml_stack.lock import only_one
-
         with self._lock, only_one(self.state_file.with_suffix(".lock"), wait=True,
                                   timeout=STATE_LOCK_TIMEOUT_S, announce=logger.debug):
             yield
@@ -531,9 +785,7 @@ class ServerManager:
     def _over_limit(self, spec: ServerSpec) -> str:
         """Why this machine's limits refuse this lease, or "". A server already up on this
         port is adopted rather than added, so it is not counted against the server limit."""
-        from ml_stack.limits import read
-
-        limits = read()
+        limits = limits_read()
         if not (limits.servers or limits.slots):
             return ""
         running = sum(1 for port, entry in recorded_servers(self.state_file).items()
@@ -546,7 +798,17 @@ class ServerManager:
         return reclaim_port(port, recorded_pids=[recorded] if recorded else None)
 
 
-_DEFAULT = ServerManager()
+_DEFAULT: ServerManager | None = None
+_DEFAULT_LOCK = threading.Lock()
+
+
+def default_manager() -> ServerManager:
+    """The manager `serve` uses when it is not given one, built on first use."""
+    global _DEFAULT
+    with _DEFAULT_LOCK:
+        if _DEFAULT is None:
+            _DEFAULT = ServerManager()
+        return _DEFAULT
 
 
 @contextmanager
@@ -560,16 +822,18 @@ def serve(
     roam: bool = True,
     escalate: bool = False,
     anyway: bool = False,
+    iq: str = "",
     on_event: Event | None = None,
     say: Callable[[str], None] | None = None,
+    reason: str = "",
     **spec_kwargs: object,
 ) -> Iterator[ServerInfo]:
     """Run a server for the duration of the block, yielding its ``ServerInfo``.
 
-    ``roam``, ``escalate``, ``anyway``, ``on_event`` and ``say`` go to
+    ``roam``, ``escalate``, ``anyway``, ``iq``, ``on_event``, ``say`` and ``reason`` go to
     :meth:`ServerManager.lease`.
     """
-    manager = manager or _DEFAULT
+    manager = manager or default_manager()
     spec = ServerSpec(
         model=model,
         port=port if port is not None else free_port(),
@@ -577,7 +841,7 @@ def serve(
         **spec_kwargs,  # type: ignore[arg-type]
     )
     info = manager.lease(spec, timeout=timeout, roam=roam, escalate=escalate,
-                         anyway=anyway, on_event=on_event, say=say)
+                         anyway=anyway, iq=iq, on_event=on_event, say=say, reason=reason)
     try:
         yield info
     finally:
@@ -593,12 +857,19 @@ def stop_all_servers() -> list[int]:
     except (OSError, ValueError):
         return stopped
 
-    for entry in state.values() if isinstance(state, dict) else []:
+    kept = {}
+    for key, entry in state.items() if isinstance(state, dict) else []:
         if not isinstance(entry, dict):
             continue
+        if entry.get("unmanaged"):
+            kept[key] = entry
+            continue
         pid = entry.get("pid")
-        if isinstance(pid, int) and pid_exists(pid):
+        if isinstance(pid, int) and same_process(entry):
             stopped += kill_process_tree(pid)
 
-    held.unlink(missing_ok=True)
+    if kept:
+        write_json(held, kept)
+    else:
+        held.unlink(missing_ok=True)
     return stopped

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from typing import Any, Callable, Sequence
+from typing import Any
+from collections.abc import Callable, Sequence
 
 from ml_stack.serve.fit import Fit
 from ml_stack.serve.profile import Profile, family_of, quant_of

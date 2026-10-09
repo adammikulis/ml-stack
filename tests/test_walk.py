@@ -208,8 +208,8 @@ def test_saying_something_in_the_fleet_chat_waits_for_the_whole_reply(slow_model
     from test_fleet_ui import WORDS, Serving
 
     from ml_stack.fleet.conversations import Conversations
-    from ml_stack.fleet.discovery import join_cluster
     from ml_stack.fleet.serving import Serving as Models
+    from tests.cluster_support import join_cluster
 
     monkeypatch.setenv("ML_STACK_CACHE", str(tmp_path / "cache"))
     served = Serving(tmp_path, name="laptop")

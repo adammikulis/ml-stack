@@ -18,13 +18,11 @@ from ml_stack.testing.fakes import (
     ScriptedModel,
     Served,
     Yielding,
-    drift,
     fake_binary,
     fake_llama_binary,
     fake_llama_server,
     fake_serve,
     metrics_text,
-    mirrors,
     reply_from,
     serve_from_argv,
 )
@@ -53,6 +51,7 @@ from ml_stack.testing.parity import (
     run_pair,
     torch_grad_norms,
 )
+from ml_stack.testing.signatures import drift, mirrors
 
 __all__ = [
     "DRAFTING",

@@ -1,0 +1,90 @@
+<script>
+(function () {
+  const M = window.fleetModel;
+  const el = M.el;
+
+  M.startupModels = async function (kept) {
+    const panel = el("div", { class: "group" });
+    const status = el("div", { id: "startup-model-status", role: "status", "aria-live": "polite" });
+    let result;
+    try {
+      result = await M.api("/ui/models/startup");
+    } catch (e) {
+      result = { error: String(e) };
+    }
+    const models = result.models || [];
+    if (!result.ok || !models.length) {
+      panel.append(el("div", { class: "hint" },
+        result.error || "Choose a model later from Models."));
+      return { panel, status, start: async () => {} };
+    }
+    const memory = result.memory || {};
+    if (!models.some((m) => m.file === kept.modelFile)) {
+      kept.modelFile = (models.find((m) => m.recommended) || models[0]).file;
+    }
+    const select = el("select", { id: "startup-model-choice" },
+      ...models.map((m) => el("option", { value: m.file },
+        `${m.name}${m.recommended ? " (recommended)" : ""}`)));
+    select.value = kept.modelFile;
+    const detail = el("div", { class: "hint", id: "startup-model-detail" });
+    const draw = () => {
+      kept.modelFile = select.value;
+      const m = models.find((x) => x.file === select.value);
+      detail.textContent = `${m.download_gb ?? m.gb} GB download`
+        + (m.draft_ref ? ` + ${m.draft_download_gb ?? m.draft_gb} GB MTP draft` : "")
+        + (m.what ? `. ${m.what.replace(/\.$/, "")}` : "")
+        + (m.estimated_context ? `. Estimated up to ${M.ctxWords(m.estimated_context)} at Q8 KV, depending on other apps` : "")
+        + ". Downloading leaves the model ready to run from Models.";
+    };
+    select.onchange = draw;
+    draw();
+    const opt = el("input", { type: "checkbox", id: "startup-model-download" });
+    opt.checked = !!kept.downloadModel;
+    opt.onchange = () => { kept.downloadModel = opt.checked; };
+    panel.append(el("h2", {}, "Optional first model"),
+      el("div", { class: "hint", id: "startup-model-memory" },
+        `${memory.pool || "Memory"}: ${M.gb(memory.capacity_gb)?.replace("GB", "GiB") || "unknown"} capacity, `
+        + `${M.gb(memory.free_gb)?.replace("GB", "GiB") || "unknown"} free. `
+        + "Starting a model checks the memory available then."),
+      el("label", { for: select.id }, "Model"), select, detail,
+      el("label", { class: "opt", for: opt.id }, opt,
+        M.row("Download this model when I install and continue",
+          "Setup does not require a download. Browse Models when you are ready.")));
+
+    const report = (g) => {
+      status.replaceChildren(M.ui("ml-progress", {
+        label: g.name, format: "bytes", done: g.done || 0, total: g.total || 0,
+        state: g.state === "failed" ? "failed" : g.state === "done" ? "done" : "running",
+        message: g.state === "done" ? "Downloaded. Open Models to run it." : M.downloadMessage(g),
+      }));
+    };
+    const poll = async (id) => {
+      try {
+        const r = await M.api("/ui/models");
+        if (!r.ok) throw new Error(r.error || "Could not check the model download.");
+        const g = (r.getting || []).find((x) => x.id === id);
+        if (!g) return;
+        report(g);
+        if (g.state === "getting") setTimeout(() => poll(id), 1000);
+      } catch (e) {
+        status.replaceChildren(el("div", { class: "err" }, String(e)));
+      }
+    };
+    return { panel, status, start: async () => {
+      if (!kept.downloadModel || kept.modelStarted) return;
+      const m = models.find((x) => x.file === kept.modelFile);
+      const r = await M.api("/ui/models", { method: "POST",
+        body: JSON.stringify({ name: m.file, source: m.ref, mtp: !!(m.draft_ref || m.mtp_ref), vision: false }) });
+      if (!r.ok || r.error) throw new Error(r.error || "Could not start the model download.");
+      kept.modelStarted = true;
+      if (r.id) {
+        report(r);
+        poll(r.id);
+      } else {
+        status.replaceChildren(el("div", { class: "ok" },
+          `${m.name} is ready. Open Models to run it.`));
+      }
+    } };
+  };
+})();
+</script>

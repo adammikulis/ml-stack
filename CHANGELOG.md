@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.3.0 (draft, for the owner to edit; release-please writes the dated entry)
+
+### Breaking changes
+
+* **Python 3.12 or later.** `requires-python` is `>=3.12`; CI runs 3.12 to 3.14.
+* **`mcp>=2.3,<3`.** `ml_stack.mcp` and `ml_stack.agent.McpTools` use the 2.x client (MCP revision 2026-07-28).
+* **`psutil` is a core dependency.** The `serve` extra is gone; finding and stopping a server's process tree needs it.
+* **Fleet protocol 2, pinned TLS, signed requests.** A daemon beyond this machine speaks TLS to a certificate its peers pin, every request is signed with a secret derived from the cluster key, and the passphrase salt is random per cluster. A protocol 1 peer is ignored and a machine of a cluster joined before this must join again (`ml-stack-peers setup`). A passphrase is at least 12 characters. A daemon listens on this machine only until it joins a cluster, or `--lan`, `--host` or `--setup-from-lan` says otherwise.
+* **`Agent` runs with the guard.** With no `interventions` it builds the tool-policy, secrets, untrusted-text and taint rails and, when an installed model can serve as judge, the model tier. `interventions=guard.off(because=...)` is the way to run without; an empty list raises.
+* **Model servers come from the broker.** `ServerManager.lease` asks the machine's broker, which admits a server only when the memory is there and queues generation requests one at a time per pool. A server nothing in ml-stack started is adopted only when `ML_STACK_ADOPT_UNMANAGED` allows it.
+* **Credentials come from `ml_stack.credentials`.** A token is read from the environment variable, the file `NAME_FILE` names, `~/.ml-stack/credentials.toml`, Hugging Face's token file or the keychain, in that order; child processes do not inherit tokens.
+* **Downloads refuse private addresses.** Model and release downloads refuse loopback, private, link-local, metadata and carrier-grade-NAT addresses at every redirect; `ML_STACK_FETCH_ALLOW_HOSTS` names an exception.
+
+### Features
+
+* `ml-stack-models` lists installed models from the Hugging Face, llama.cpp, LM Studio and Ollama caches, estimates the memory a model needs, suggests settings for the machine and pulls a model with progress, resume and checksums.
+* `ml-stack-decide` and `/decide` on the daemon choose one of a named set of options and report a probability for each.
+* `ml-stack-security` (sentinel) keeps a hash-chained event log, quarantines a changed model or binary, holds text a rail denied and plants decoy credentials.
+* Taint tracking: once text from outside the person has been read, a call that changes something runs only when each argument is vouched for or the person confirms.
+* `python -m ml_stack.redteam` sends attacks at the library's own surfaces through PyRIT.
+* `ml_stack.web` and `ml_stack.datasheet` page through search results, read PDFs, download files with a provenance record and find a part's datasheet.
+* `ml_stack.ui` elements (`ml-meter`, `ml-chip`, `ml-table` and the rest) draw the daemon page.
+* One bounded reader for GGUF and safetensors headers.
+
 ## [0.2.1](https://github.com/adammikulis/ml-stack/compare/v0.2.0...v0.2.1) (2026-09-26)
 
 

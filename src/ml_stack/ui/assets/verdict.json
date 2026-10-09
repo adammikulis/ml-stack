@@ -1,0 +1,6 @@
+{
+  "yellow_at": 0.8,
+  "red_at": 0.95,
+  "names": ["green", "yellow", "red", "none"],
+  "labels": {"green": "OK", "yellow": "Tight", "red": "Over", "none": "Unknown"}
+}

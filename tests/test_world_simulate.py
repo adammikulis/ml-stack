@@ -72,7 +72,7 @@ def tiny_world(kind: str = "company") -> World:
             edges.append({"source": pid, "rel": "reports_to", "target": LEADS[dept]})
     team = {dept: [p for p, row in PEOPLE.items() if row[1] == dept] for dept in LEADS}
     for members in team.values():
-        for a, b in zip(members, members[1:]):
+        for a, b in zip(members, members[1:], strict=False):
             edges.append({"source": a, "rel": "works_with", "target": b})
     for pid in team["eng"]:
         edges.append({"source": pid, "rel": "works_on", "target": "project:lantern"})

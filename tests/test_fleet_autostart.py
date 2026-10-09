@@ -139,3 +139,50 @@ class TestChangingTheAnswer:
         auto, _ = mac
         with pytest.raises(ValueError):
             auto.install("whenever", log_dir=tmp_path)
+
+
+class TestWhatRunsAsRoot:
+    """An install that asks for administrator rights hands the password dialog one command that
+    already holds the file's text, so nothing a user-level process can change is read as root."""
+
+    def test_the_boot_job_is_written_by_the_privileged_command_not_copied_from_a_staged_file(
+            self, monkeypatch, tmp_path):
+        from ml_stack.fleet import autostart
+
+        asked = []
+        monkeypatch.setattr(sys, "platform", "darwin")
+        monkeypatch.setattr(autostart, "_ask_and_run",
+                            lambda command, prompt: asked.append(command) or (True, ""))
+        monkeypatch.setattr(autostart, "_mac_path", lambda mode: tmp_path / "boot.plist")
+        monkeypatch.setattr(subprocess, "run",
+                            lambda *a, **k: types.SimpleNamespace(returncode=0, stdout="",
+                                                                  stderr=""))
+
+        autostart.install("boot", log_dir=tmp_path / "logs")
+
+        assert asked and "cp " not in asked[0] and "<plist" in asked[0]
+        assert not list((tmp_path / "logs").glob("*.plist")), "no staged file to swap"
+
+    def test_a_path_with_quotes_stays_one_argument_in_the_privileged_command(
+            self, monkeypatch, tmp_path):
+        import shlex
+
+        from ml_stack.fleet import autostart
+
+        asked = []
+        evil = tmp_path / "it's \"here\"; rm -rf ~"
+        monkeypatch.setattr(sys, "platform", "darwin")
+        monkeypatch.setattr(autostart, "_runs", lambda argv: True)
+        monkeypatch.setattr(autostart, "_ask_and_run",
+                            lambda command, prompt: asked.append(command) or (True, ""))
+        monkeypatch.setattr(autostart, "_mac_path", lambda mode: evil / "boot.plist")
+        autostart.install("boot", log_dir=tmp_path / "logs")
+
+        words = shlex.split(asked[0])
+        assert str(evil / "boot.plist") in words and "rm" not in words
+
+    def test_the_text_of_an_applescript_string_cannot_end_it(self):
+        from ml_stack.platform import applescript_quote
+
+        assert applescript_quote('a"b\\c') == 'a\\"b\\\\c'
+        assert '"' not in applescript_quote('" & (do shell script "id") & "').replace('\\"', "")

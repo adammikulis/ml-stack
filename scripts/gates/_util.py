@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import ast
+import hashlib
+import json
+import sys
+import tempfile
 from functools import cache
 from pathlib import Path
 
@@ -121,3 +125,35 @@ def calls(tree: ast.Module) -> tuple[tuple[ast.Call, str], ...]:
         if isinstance(node, ast.Call):
             out.append((node, qualify(dotted(node.func), bound)))
     return tuple(out)
+
+
+def tree_fingerprint(root: Path) -> str:
+    """A hash of every file the checkers and collection read, and of the interpreter."""
+    digest = hashlib.sha256(f"{sys.version}\0{sys.executable}".encode())
+    for base in ("src", "tests", "scripts", "pyproject.toml"):
+        place = root / base
+        paths = [place] if place.is_file() else sorted(place.rglob("*")) if place.is_dir() else []
+        for path in paths:
+            if path.is_file() and "__pycache__" not in path.parts and path.suffix != ".pyc":
+                digest.update(path.relative_to(root).as_posix().encode())
+                digest.update(path.read_bytes())
+    return digest.hexdigest()
+
+
+def remembered(root: Path, name: str, compute, salt: str = "", fingerprint: str = ""):
+    """``compute()`` as JSON, kept in the temporary directory under the tree's fingerprint.
+
+    A tree byte-identical to one already computed gets the stored answer back; ``salt`` is
+    whatever else the answer depends on and ``fingerprint`` the tree's hash when the caller
+    already has it.
+    """
+    key = hashlib.sha256(f"{fingerprint or tree_fingerprint(root)}\0{salt}".encode()).hexdigest()
+    kept = Path(tempfile.gettempdir()) / "ml-stack-gates" / f"{name}-{key}.json"
+    try:
+        return json.loads(kept.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        pass
+    value = compute()
+    kept.parent.mkdir(parents=True, exist_ok=True)
+    kept.write_text(json.dumps(value), encoding="utf-8")
+    return value

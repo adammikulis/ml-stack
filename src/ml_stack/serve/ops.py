@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import platform
+import struct
 import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -23,6 +24,8 @@ from ml_stack.client.health import serving_params
 from ml_stack.fleet.serving import Serving
 from ml_stack.log import warn
 from ml_stack.serve import (
+    broker_wire,
+    chat_template as chat_template_mod,
     fit as fit_mod,
     measuring as measuring_mod,
     preflight as preflight_mod,
@@ -43,7 +46,7 @@ from ml_stack.serve.manager import ServerManager
 from ml_stack.serve.mlx_tree import is_mlx, report_for
 from ml_stack.serve.ports import DEFAULT_HOST, server_pids_on_port
 from ml_stack.serve.process import every_server, machine_memory, pid_exists
-from ml_stack.units import human_bytes
+from ml_stack.units import human_bytes, parse_duration
 
 __all__ = ["FIT_HEAD", "PLIST", "PROBE_TIMEOUT", "Drafting", "Limits",
            "Machine",
@@ -74,6 +77,7 @@ class Drafting:
     ahead: int | None = None             # tokens it guesses per verification pass
     metrics: bool | None = None          # whether the server answers /metrics
     counted: Speculative | None = None   # its counters since it came up
+    note: str = ""                       # why multi-token prediction is on or off, from its lease
 
     @property
     def loaded(self) -> bool:
@@ -101,6 +105,8 @@ class Snapshot:
     verdict: str = ""
     reason: str = ""
     log: str | None = None
+    iq_warning: str | None = None
+    device: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -190,7 +196,7 @@ def _float_or_none(value: object) -> float | None:
     return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
 
 
-def drafting_of(base_url: str, entry: Mapping[str, Any], params: Any) -> Drafting:
+def drafting_of(base_url: str, entry: Mapping[str, Any], params: Any, note: str = "") -> Drafting:
     """The draft head a server was started with, and the counters it reports for it."""
     metrics = params.raw.get("endpoint_metrics") if params is not None else None
     head = str(entry.get("draft") or "")
@@ -198,7 +204,8 @@ def drafting_of(base_url: str, entry: Mapping[str, Any], params: Any) -> Draftin
     return Drafting(head=Path(head).name if head else "",
                     spec_type=str(entry.get("spec_type") or ""),
                     ahead=_int_or_none(entry.get("draft_max")),
-                    metrics=None if metrics is None else bool(metrics), counted=counted)
+                    metrics=None if metrics is None else bool(metrics), counted=counted,
+                    note=note)
 
 
 def look(port: int, records: dict[int, dict], served: Mapping[int, Any] | None = None
@@ -231,10 +238,13 @@ def look(port: int, records: dict[int, dict], served: Mapping[int, Any] | None =
         owner_pid=owner,
         holder_running=pid_exists(owner),
         recorded=bool(entry),
+        device=str(entry.get("device") or ""),
         load_s=_float_or_none(entry.get("load_s")),
         warmup_s=_float_or_none(entry.get("warmup_s")),
         log=str(entry["log"]) if entry.get("log") else None,
-        drafting=(drafting_of(url, (served or {}).get(port) or {}, params)
+        iq_warning=str(entry["iq_warning"]) if entry.get("iq_warning") else None,
+        drafting=(drafting_of(url, (served or {}).get(port) or {}, params,
+                              str(entry.get("mtp_note") or ""))
                   if served is not None and port in served else None),
     )
 
@@ -443,7 +453,11 @@ def resolve_spec(spec: ServerSpec, *, manager: ServerManager) -> Resolved:
     if asked_mmproj.lower() == "auto" and not seeing:
         notes.append("no vision projector is shipped beside that model; it will not read "
                      "pictures")
-    spec = replace(spec, draft=draft or None, mmproj=seeing or None, spec_type=kind)
+    template = spec.chat_template_file or chat_template_mod.written_beside(str(spec.model))
+    if template and not spec.chat_template_file:
+        notes.append("using a chat template that renders later system messages")
+    spec = replace(spec, draft=draft or None, mmproj=seeing or None, spec_type=kind,
+                   chat_template_file=template)
     spec, yarn_said = LlamaServerBackend.resolved_context(spec)
     if yarn_said:
         notes.append(yarn_said)
@@ -469,7 +483,7 @@ def up(spec: ServerSpec, *, manager: ServerManager, timeout: float | None = None
     if say is not None:
         manager.say = say
     info = manager.lease(spec, timeout=timeout, escalate=escalate, anyway=anyway,
-                         on_event=on_event)
+                         on_event=on_event, reason=f"serving {Path(str(spec.model)).name}")
     held = recorded_servers(lease_file()).get(info.port) or {}
     if not info.adopted or held.get("owner_pid") == os.getpid():
         # a server this process started, or an orphan it took over: on the record under the
@@ -512,8 +526,6 @@ def servings(model: str = "", *, workload: str = "") -> list[Any]:
 
 def tensors(models: Iterable[str]) -> list[str]:
     """What each model file is made of, from its GGUF header alone."""
-    import struct
-
     out = []
     for one in models:
         try:
@@ -644,6 +656,11 @@ def write_plist(where: Path, mb: int) -> Path:
     return where
 
 
+def adopt_unmanaged(mode: str) -> None:
+    """Set whether the broker adopts llama-servers it did not start: off, ask or auto."""
+    limits_mod.changed(adopt_unmanaged=mode)
+
+
 def limits(*, memory_size: str = "", servers: int | None = None, slots: int | None = None,
            idle: str = "", clear: bool = False) -> Limits:
     """Set whatever is named, then read back what this machine allows.
@@ -652,7 +669,6 @@ def limits(*, memory_size: str = "", servers: int | None = None, slots: int | No
     time that cannot be read.
     """
     from ml_stack.hub import machine_room
-    from ml_stack.units import parse_duration
 
     if clear:
         return Limits((), limits_mod.clear(), 0, 0)
@@ -685,7 +701,6 @@ def reclaim(*, idle: str = "") -> tuple[float, Any]:
 
     Raises `Refused` when no idle time is given and none is set.
     """
-    from ml_stack.units import parse_duration
 
     older = parse_duration(idle) if idle else limits_mod.read().idle_s
     if not older:
@@ -717,8 +732,14 @@ def down(port: int, *, root: str | Path | None = None) -> tuple[Stopped, str]:
         raise Refused(f"something is serving on {url}{where}, and this machine has no "
                       "record of starting it.", "  stop it the way it was started.")
 
+    if entry.get("unmanaged"):
+        raise Refused(f"{url} was adopted and not started by ml-stack, so ml-stack does not "
+                      "stop it.", "  stop it the way it was started.")
     owner = _int_or_none(entry.get("owner_pid"))
     pid = _int_or_none(entry.get("pid"))
+    if owner is not None and owner == broker_wire.running():
+        broker_wire.stop(port, force=True)
+        return Stopped(port, url, pid, pid_exists(pid), owner), withdraw(root, port)
     if owner is not None and owner != pid and pid_exists(owner):
         raise Refused(f"{url} is held by process {owner}, which is still running.",
                       "  that process started it and will stop it.")

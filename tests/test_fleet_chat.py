@@ -19,17 +19,41 @@ from test_fleet_ui import WORDS, Serving as UIServing
 from ml_stack.fleet.api import Daemon, make_handler
 from ml_stack.fleet.chat import find, targets
 from ml_stack.fleet.daemon import load_or_create_token
-from ml_stack.fleet.discovery import join_cluster
 from ml_stack.fleet.jobs import JobRunner
 from ml_stack.fleet.serving import Serving
-from ml_stack.http import Server
+from ml_stack.http import Server, ServerError, open_stream
 from ml_stack.testing.fakes import FakeLlamaServer, Served
+from tests.cluster_support import a_keystore, join_cluster  # noqa: F401
+from tests.keystore_support import counting  # noqa: F401
+from tests.net_site import gguf_bytes
 
 PIECES = ["Hel", "lo", " there"]
 
 
 def tmp_path_of(ui):
     return ui.files.parent
+
+
+
+
+
+@pytest.fixture(autouse=True)
+def the_passphrase_is_kept(a_keystore):  # noqa: F811
+    """Joining stores the passphrase and signing in compares against it."""
+
+
+@pytest.fixture(autouse=True)
+def loopback_is_the_internet(monkeypatch):
+    """The download test fetches from a server on this machine, which has to be named."""
+    monkeypatch.setenv("ML_STACK_FETCH_ALLOW_HOSTS", "127.0.0.1")
+
+
+@pytest.fixture(autouse=True)
+def nobody_else_is_on_the_network(monkeypatch):
+    """A join finds no machine to shake hands with, so it makes the cluster."""
+    from ml_stack.fleet.onboard import joining
+
+    monkeypatch.setattr(joining, "find_joiners", lambda *a, **k: [])
 
 
 def _free_port() -> int:
@@ -41,7 +65,7 @@ def _free_port() -> int:
 @pytest.fixture
 def model_server():
     """A llama.cpp-shaped server that streams a reply a piece at a time."""
-    fake = FakeLlamaServer(Served(pieces=tuple(PIECES), gap=0.05))
+    fake = FakeLlamaServer(Served(model="qwen3-4b.gguf", pieces=tuple(PIECES), gap=0.05))
     try:
         yield fake.port
     finally:
@@ -74,6 +98,22 @@ def host(tmp_path, model_server):
 
 
 class TestPickingWhereToSend:
+    def test_known_non_chat_local_and_peer_targets_are_excluded(self):
+        from ml_stack.fleet.serving import Served as LocalServed
+
+        class Local:
+            def live(self):
+                return [LocalServed(port=9998, models=['embedding.gguf'], capabilities={'chat': False}),
+                        LocalServed(port=9999, models=['future-decoder.gguf'])]
+
+        peer = {'base_url': 'http://127.0.0.1:12345', 'name': 'peer', 'device': {'serving': [
+            {'models': ['speech'], 'capabilities': {'chat': False}},
+            {'models': ['remote-decoder'], 'capabilities': {'chat': True}}]}}
+        assert [row.model for row in targets([peer], Local())] == ['future-decoder.gguf', 'remote-decoder']
+        found = targets([peer], Local())
+        assert found[0].public()['capabilities']['chat'] is None
+        assert found[1].public()['capabilities']['chat'] is True
+
     def test_a_machine_serving_nothing_still_sees_a_peers_model(self, host):
         found = targets([host], serving=None, token="t")
         assert [t.model for t in found] == ["qwen3-4b.gguf"]
@@ -116,6 +156,7 @@ class TestChattingThroughTheInterface:
                                 body={"passphrase": WORDS})
         assert ui.ui.models is None
         assert ui.ui.serving is None
+        ui.ui.settings.download_sources = "both"
         ui.ui._peers = (time.time(), [host])
         try:
             yield ui, headers["Set-Cookie"].split(";")[0]
@@ -129,6 +170,16 @@ class TestChattingThroughTheInterface:
         assert [m["model"] for m in body["models"]] == ["qwen3-4b.gguf"]
         assert body["models"][0]["peer"] == "host"
 
+    def test_post_cannot_select_a_known_non_chat_server(self, bare):
+        ui, cookie = bare
+        peer = ui.ui._peers[1][0]
+        peer['device']['serving'][0]['capabilities'] = {'chat': False, 'embedding': True}
+        status, body, _ = ui.call('/ui/chat', cookie=cookie)
+        assert status == 200 and body['models'] == []
+        status, body, _ = ui.call('/ui/chat', method='POST', cookie=cookie,
+            body={'model': 'qwen3-4b.gguf', 'messages': [{'role': 'user', 'content': 'hello'}]})
+        assert status == 503 and 'no machine' in body['error']
+
     def test_a_machine_with_nothing_installed_holds_a_conversation(self, bare):
         ui, cookie = bare
         status, raw, headers = ui.call(
@@ -139,6 +190,13 @@ class TestChattingThroughTheInterface:
         assert headers.get("X-ML-Stack-Peer") == "host"
         text = raw["raw"] if "raw" in raw else json.dumps(raw)
         assert "Hel" in text and "there" in text
+
+    @pytest.mark.parametrize('limit',[0,-1,True,1.5,'2048'])
+    def test_invalid_output_budget_is_refused_before_generation(self, bare, limit):
+        ui,cookie=bare
+        status,body,_=ui.call('/ui/chat',method='POST',cookie=cookie,
+            body={'model':'qwen3-4b.gguf','messages':[{'role':'user','content':'hi'}],'max_output_tokens':limit})
+        assert status == 400 and 'positive integer' in body['error']
 
     def test_the_reply_arrives_as_it_is_generated(self, bare):
         """read(n) waits for n bytes and delivers the whole reply at once."""
@@ -155,7 +213,8 @@ class TestChattingThroughTheInterface:
 
         began = time.monotonic()
         arrived = []
-        with urllib.request.urlopen(req, timeout=10) as r:
+        with open_stream(req.full_url, data=req.data, method=req.get_method(),
+                         headers=dict(req.header_items()), timeout=10) as r:
             while True:
                 block = r.read1(4096)
                 if not block:
@@ -248,15 +307,17 @@ class TestChattingThroughTheInterface:
 
     @pytest.mark.slow
 
-    def test_asking_for_a_model_answers_before_it_has_arrived(self, bare, tmp_path):
+    def test_asking_for_a_model_answers_before_it_has_arrived(self, bare, tmp_path, monkeypatch):
         """A multi-gigabyte fetch must not be held open inside one request."""
         import os
         import time as clock
+        from dataclasses import replace
         from http.server import BaseHTTPRequestHandler
 
+        from ml_stack.fleet import models as model_module
         from ml_stack.fleet.models import CHUNK, Downloads, Models
 
-        payload = os.urandom(2 * CHUNK)
+        payload = gguf_bytes() + os.urandom(2 * CHUNK)
         seen = threading.Event()
 
         class Slow(BaseHTTPRequestHandler):
@@ -275,6 +336,9 @@ class TestChattingThroughTheInterface:
                 self.wfile.write(payload[CHUNK:])
 
         blob = Server(("127.0.0.1", _free_port()), Slow)
+        monkeypatch.setattr(model_module, "MODEL_LIMITS", replace(
+            model_module.MODEL_LIMITS,
+            allow_hosts=frozenset({f"127.0.0.1:{blob.server_address[1]}"})))
         threading.Thread(target=blob.serve_forever, daemon=True).start()
 
         ui, cookie = bare
@@ -305,12 +369,13 @@ class TestChattingThroughTheInterface:
                     saw_partial = True
                     seen.set()
                 if row["state"] != "getting":
-                    assert row["state"] == "done", row
+                    assert row["state"] == "done", row.get("error") or row
                     break
                 clock.sleep(0.05)
         finally:
             seen.set()
             blob.shutdown()
+            blob.server_close()
 
         assert saw_partial, "the screen could never show how far along it was"
         assert (models_dir / "big.gguf").read_bytes() == payload
@@ -358,7 +423,6 @@ class TestAnsweringToSeveralClusters:
         from ml_stack.fleet.daemon import load_or_create_token
         from ml_stack.fleet.discovery import derive_token, memberships
         from ml_stack.fleet.jobs import JobRunner
-        from ml_stack.http import Server
 
         root = tmp_path / "traind"
         files = root / "files"
@@ -377,21 +441,20 @@ class TestAnsweringToSeveralClusters:
         return f"http://127.0.0.1:{port}", runner, httpd
 
     def ask(self, base, token):
-        import urllib.error
-        import urllib.request
+        # /health answers anyone with whether the daemon is there. /jobs wants a request
+        # signed with the cluster's secret, which is what this is about.
+        from ml_stack.http import build_request
 
-        # /health answers anyone: it is how a peer checks a machine is alive. /jobs
-        # is behind the bearer token, which is what this is about.
-        req = urllib.request.Request(f"{base}/jobs")
-        req.add_header("Authorization", f"Bearer {token}")
+        req = build_request(f"{base}/jobs", token=token)
         try:
-            with urllib.request.urlopen(req, timeout=5) as r:
+            with open_stream(req.full_url, headers=dict(req.header_items()), timeout=5) as r:
                 return r.status
-        except urllib.error.HTTPError as exc:
-            return exc.code
+        except ServerError as exc:
+            return exc.status
 
     def test_either_cluster_can_reach_it(self, tmp_path):
-        from ml_stack.fleet.discovery import derive_token, join
+        from ml_stack.fleet.discovery import derive_token
+        from tests.cluster_support import join
 
         anchor = tmp_path / "cluster.key"
         join(WORDS, group="home", path=anchor)
@@ -411,7 +474,8 @@ class TestAnsweringToSeveralClusters:
             httpd.server_close()
 
     def test_a_cluster_it_left_is_refused(self, tmp_path):
-        from ml_stack.fleet.discovery import derive_token, join, leave, memberships
+        from ml_stack.fleet.discovery import derive_token, leave, memberships
+        from tests.cluster_support import join
 
         anchor = tmp_path / "cluster.key"
         join(WORDS, group="home", path=anchor)

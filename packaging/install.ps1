@@ -13,12 +13,12 @@
 #
 #   (default)   the app: the release zip for this machine, a window, updates from releases
 #   -Headless   a venv under %LOCALAPPDATA%\ml-stack, console scripts on PATH, no window
-#   -Dev        a git checkout with an editable install, following main
+#   -Dev        a git checkout with an immutable install, following 0.2dev
 #   -System     -Headless, per machine: a Scheduled Task at startup, as the user who ran it
 #   -Uninstall  takes it off, and leaves the model cache alone
 #
 # Every step past the install is an ml-stack command, not PowerShell: ml-stack-serve build,
-# ml-stack-setup, ml-stack-models fetch, ml-stack-fleet join, ml-stack-doctor.
+# ml-stack-setup, ml-stack-models fetch, ml-stack-cluster join, ml-stack-doctor.
 #
 # Unattended: ML_STACK_MODE, ML_STACK_NAME, ML_STACK_PASSPHRASE, ML_STACK_CLUSTER,
 # ML_STACK_MODELS, ML_STACK_ADOPT_CACHE, ML_STACK_REF, ML_STACK_OFFLINE_ZIP,
@@ -42,7 +42,7 @@ $repo    = if ($env:ML_STACK_REPO) { $env:ML_STACK_REPO } else { "adammikulis/ml
 $api     = "https://api.github.com/repos/$repo/releases/latest"
 $gitUrl  = "https://github.com/$repo"
 $python  = "3.13"
-$extras  = "store,hub,web,plot,graph"
+$extras  = "store,hub,web,plot,graph,coordinator,agents"
 $arch    = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "x86_64" }
 $key     = "ml-stack-windows-$arch"
 $offZip  = $env:ML_STACK_OFFLINE_ZIP
@@ -126,7 +126,14 @@ function Install-App {
             $asset = $release.assets | Where-Object { $_.name -like "*$key*" } | Select-Object -First 1
             if (-not $asset) { throw "release $($release.tag_name) has no download for $key" }
             Write-Host "Downloading $($release.tag_name)..."
+            $want = ([string]$asset.digest) -replace '^sha256:', ''
+            if ($want -notmatch '^[0-9a-fA-F]{64}$') {
+                throw "release $($release.tag_name) reports no sha256 for $key, so it cannot be checked"
+            }
             Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zip
+            if ((Get-FileHash -Algorithm SHA256 -Path $zip).Hash -ne $want.ToUpper()) {
+                throw "the download does not match the sha256 GitHub reports for it"
+            }
         }
         Expand-Archive -Path $zip -DestinationPath (Join-Path $tmp "out") -Force
 
@@ -146,9 +153,8 @@ function Install-App {
         Open-Firewall
         Write-Host ""
         Write-Host "Installed to $dest"
-        Write-Host "Open ml-stack from the Start menu, and type the same passphrase you used on your other machines."
-        Write-Host "It downloads gemma-4-E2B on first run (2.6G, about 1.5s a question) and offers"
-        Write-Host "the bigger models this machine has room for."
+        Write-Host "Open ml-stack to name this device and choose Dev or Prod."
+        Write-Host "Setup downloads continue in the background while you finish onboarding."
     }
     finally {
         Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
@@ -240,30 +246,34 @@ function Install-Headless {
     Open-Firewall
 }
 
-# -- dev: a checkout that follows main ----------------------------------------
+# -- dev: a checkout that follows development ----------------------------------------
 function Install-Dev {
     Step "developer"
+    $script:track = if ($env:ML_STACK_TRACK) { $env:ML_STACK_TRACK } else { "0.2dev" }
     if (-not (Get-Command git -ErrorAction SilentlyContinue)) { throw "this needs git" }
     $src = if ($env:ML_STACK_SRC) { $env:ML_STACK_SRC } else { Join-Path $env:LOCALAPPDATA "ml-stack\src" }
     if (Test-Path (Join-Path $src ".git")) {
+        $branch = & git -C $src branch --show-current
+        if ($branch -ne $script:track) { throw "$src must be on $script:track; choose a separate ML_STACK_SRC" }
         Write-Host "updating $src"
         & git -C $src pull --ff-only
-        if ($LASTEXITCODE -ne 0) { Write-Host "  it has commits main does not; left alone" }
+        if ($LASTEXITCODE -ne 0) { throw "could not fast-forward $src" }
     }
     else {
         Write-Host "cloning into $src"
         New-Item -ItemType Directory -Path (Split-Path $src) -Force | Out-Null
-        & git clone $gitUrl $src
+        & git clone --branch $script:track $gitUrl $src
         if ($LASTEXITCODE -ne 0) { throw "could not clone $gitUrl" }
     }
     New-Venv (Venv-Root)
-    Write-Host "editable install of $src"
+    Write-Host "immutable install of $src"
     Push-Location $src
-    try { & (Join-Path $script:bin "pip.exe") install --quiet -e ".[$extras]" }
+    try { & (Join-Path $script:bin "pip.exe") install --quiet ".[$extras]"; if ($LASTEXITCODE -ne 0) { throw "could not install $src" } }
     finally { Pop-Location }
+    & (Join-Path $script:bin "python.exe") -c 'import sys; from pathlib import Path; from ml_stack.fleet.runtime_wheel import install_checkout; code, note = install_checkout(Path(sys.argv[1]), timeout=1800); print(note); raise SystemExit(code)' $src
+    if ($LASTEXITCODE -ne 0) { throw "could not install the committed runtime from $src" }
     Add-ToPath $script:bin
     Open-Firewall
-    $script:track = if ($env:ML_STACK_TRACK) { $env:ML_STACK_TRACK } else { "main" }
 }
 
 # -- per machine: at startup, as the user who installed it --------------------
@@ -326,8 +336,8 @@ function Fetch-Models {
 
 function Join-Fleet {
     Step "joining the fleet"
-    $fleet = Join-Path $script:bin "ml-stack-fleet.exe"
-    if (-not (Test-Path $fleet)) { Write-Host "skipped: no ml-stack-fleet"; return }
+    $fleet = Join-Path $script:bin "ml-stack-cluster.exe"
+    if (-not (Test-Path $fleet)) { Write-Host "skipped: no ml-stack-cluster"; return }
     $argv = @("join", "--persist")
     if ($env:ML_STACK_NAME)    { $argv += @("--name", $env:ML_STACK_NAME) }
     if ($env:ML_STACK_CLUSTER) { $argv += @("--group", $env:ML_STACK_CLUSTER) }
@@ -335,7 +345,7 @@ function Join-Fleet {
     if ($env:ML_STACK_PASSPHRASE) { $argv += @("--passphrase", $env:ML_STACK_PASSPHRASE) }
     elseif (-not (Interactive)) {
         Write-Host "no passphrase, and no console to ask at. Set ML_STACK_PASSPHRASE and re-run,"
-        Write-Host "or run:  ml-stack-fleet join --persist"
+        Write-Host "or run:  ml-stack-cluster join --persist"
         return
     }
     & $fleet @argv

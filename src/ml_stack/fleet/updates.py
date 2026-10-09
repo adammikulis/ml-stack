@@ -1,23 +1,13 @@
-"""Keeping this machine's ml-stack current: a newer release, or the head of a branch.
-
-Two modes, and a machine picks one. **Releases** is what a bundled install does: ask
-GitHub for the newest release, download the zip for this platform, swap the whole bundle
-into place -- the daemon, the CLI and the app window are one download -- and restart.
-**A branch** is for a machine that is a git checkout with an editable install: poll
-``git ls-remote`` for the head of, say, ``main``, fast-forward onto it, reinstall only if
-the packaging changed, and restart. That one runs unreviewed code the moment it is pushed,
-so it is off unless asked for.
-
-Neither ever interrupts work. `quiet` is the gate both loops pass through: no job running,
-no benchmark measuring, no model loaded. A machine part way through a run is left alone
-until it is not, however new the code is.
-"""
+"""Install signed releases and immutable wheels from tracked branches at idle boundaries."""
 
 from __future__ import annotations
 
-import hashlib
+import contextlib
+import json
+import logging
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -26,27 +16,40 @@ import threading
 import time
 import zipfile
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
+from ml_stack import net, runtime
 from ml_stack.files import promote
-from ml_stack.http import ServerError, ServerUnreachable, open_stream, request_json
+from ml_stack.http import ServerError, ServerUnreachable
+from ml_stack.httpguard import Refused
+from ml_stack.lock import Busy
+from ml_stack.net import git as netgit, provenance
+from ml_stack.paths import repo_root
+from ml_stack.safenames import Unsafe, safe_filename, unpack
 
+from . import signing
 from .measuring import installed_commit
+from .runtime_wheel import source_checkout
 
 __all__ = [
     "GIT_URL",
     "REPO",
     "Pulled",
     "Release",
+    "TrackedBranch",
     "UpdateError",
+    "UpdateRuntime",
+    "UpdateSchedule",
     "apply_if_newer",
     "asset_for",
     "check",
     "checkout_here",
     "current_version",
     "download",
+    "download_release",
+    "follow_runtime",
     "in_the_way",
     "install",
     "quiet",
@@ -56,6 +59,8 @@ __all__ = [
     "track_once",
     "watch",
 ]
+
+_LOG = logging.getLogger(__name__)
 
 REPO = "adammikulis/ml-stack"
 GIT_URL = f"https://github.com/{REPO}"
@@ -67,15 +72,15 @@ PIP_TIMEOUT = 1800.0
 EVERY_S = 300.0
 """How often a tracked branch is looked at: five minutes, the same order as a push."""
 
+SIGNATURE_SUFFIX = ".sig"
+SIGNATURE_LIMIT = 16384
+
 COMPANIONS = ("ml-stack", "ml-stack-headless", "ml-stack.exe", "ml-stack-headless.exe")
 """What a release download holds beside the thing that is running. An update replaces the
 whole install, not the one binary that happened to notice it: the daemon and the CLI on
 different versions is the bug this list exists to prevent."""
 
-INSTALL_TRIGGERS = ("pyproject.toml", "setup.py", "setup.cfg", "uv.lock", "poetry.lock",
-                    "requirements.txt", "requirements-dev.txt")
-"""A pull that changed one of these needs ``pip install -e .`` again; any other pull does
-not, because an editable install already reads the files that moved."""
+
 
 
 class UpdateError(RuntimeError):
@@ -108,11 +113,10 @@ def _parse(version: str) -> tuple[int, ...]:
 
 def current_version() -> str:
     """The running version, or empty when there is no way to tell."""
-    try:
-        from importlib.metadata import version
+    from importlib.metadata import PackageNotFoundError, version
+
+    with contextlib.suppress(PackageNotFoundError, LookupError):
         return version("ml-stack")
-    except Exception:                                 # noqa: BLE001
-        pass
     told = os.environ.get("ML_STACK_VERSION", "").strip()
     if told:
         return told
@@ -147,14 +151,16 @@ def platform_key() -> str:
 def check(repo: str = REPO, *, timeout: float = TIMEOUT) -> Release:
     """Ask GitHub for the newest release."""
     try:
-        body = request_json(API.format(repo=repo), method="GET", timeout=timeout, tries=3,
-                            headers={"Accept": "application/vnd.github+json"})
+        body = net.default().json(API.format(repo=repo), net.Ask(
+            purpose="update check", tries=3, headers={"Accept": "application/vnd.github+json"}))
     except ServerUnreachable as exc:
         raise UpdateError(f"could not reach GitHub: {exc}") from None
     except ServerError as exc:
         raise UpdateError(f"could not reach GitHub: {exc.status}") from None
     except (OSError, ValueError) as exc:
         raise UpdateError(f"could not reach GitHub: {exc}") from None
+    if not isinstance(body, dict):
+        raise UpdateError("GitHub answered with something that is not a release")
     return Release(
         version=str(body.get("tag_name") or "").lstrip("v"),
         url=str(body.get("html_url") or ""),
@@ -168,55 +174,66 @@ def asset_for(release: Release, key: str = "") -> dict[str, Any] | None:
     """The download for this machine, or None if the release has none."""
     key = key or platform_key()
     for asset in release.assets:
-        if key in str(asset.get("name", "")):
+        name = str(asset.get("name", ""))
+        if key in name and not name.endswith(SIGNATURE_SUFFIX):
             return asset
     return None
 
 
-def download(asset: dict[str, Any], into: Path | str,
-             *, on_progress: Any = None, timeout: float = 600.0) -> Path:
-    """Fetch one asset and check it against the digest GitHub reports for it.
+def download(asset: dict[str, Any], into: Path | str, *, on_progress: Any = None,
+             allow_unscanned: bool = False, library_links: bool = False) -> Path:
+    """Fetch one asset through the net pipeline and check it against the digest GitHub reports
+    for it; an asset with no digest, or a name that is not one plain file name, is refused
+    before anything is fetched.
 
-    The digest is not a signature: it proves the bytes match what that release holds, not
-    who built them. Trust here is the same as downloading it by hand -- TLS to github.com
-    and the repository name below.
+    The file is format-checked and virus-scanned; an archive that no
+    scanner could look at is kept only with ``allow_unscanned``.
     """
+    want = str(asset.get("digest") or "").removeprefix("sha256:").strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{64}", want):
+        raise UpdateError(f"{asset.get('name')!r} comes with no sha256 digest to check it against")
+    try:
+        name = safe_filename(str(asset["name"]))
+    except Unsafe as exc:
+        raise UpdateError(f"the asset's name is not a usable file name: {exc}") from None
     into = Path(into).expanduser()
     into.mkdir(parents=True, exist_ok=True)
-    target = into / str(asset["name"])
-    url = str(asset["browser_download_url"])
-    total = int(asset.get("size") or 0)
-
-    digest = hashlib.sha256()
-    done = 0
-    partial = target.with_suffix(target.suffix + ".part")
+    target = into / name
+    progress = (lambda done, total: on_progress(done, total)) if on_progress else None
+    hooks = on_progress if isinstance(on_progress, net.Hooks) else net.Hooks(progress=progress)
     try:
-        with open_stream(url, timeout=timeout) as r, partial.open("wb") as fh:
-            while True:
-                block = r.read(CHUNK)
-                if not block:
-                    break
-                fh.write(block)
-                digest.update(block)
-                done += len(block)
-                if on_progress:
-                    on_progress(done, total)
-    except (ServerError, OSError) as exc:
-        partial.unlink(missing_ok=True)
+        net.download(str(asset["browser_download_url"]), target, net.Want(
+            sha256=want, size=int(asset.get("size") or 0), require_digest=True,
+            allow_unscanned=allow_unscanned, library_links=library_links,
+            max_bytes=8 << 30, purpose="release download"),
+            hooks=hooks)
+    except net.ChecksumMismatch:
+        raise UpdateError("the download does not match the digest GitHub reports for it") from None
+    except (net.Blocked, net.Truncated, ServerError, OSError, Refused) as exc:
         raise UpdateError(f"download failed: {exc}") from None
-
-    want = str(asset.get("digest") or "").removeprefix("sha256:").strip().lower()
-    if want and digest.hexdigest() != want:
-        partial.unlink(missing_ok=True)
-        raise UpdateError("the download does not match the digest GitHub reports for it")
-    if total and done != total:
-        partial.unlink(missing_ok=True)
-        raise UpdateError(f"got {done} of {total} bytes")
-    promote(partial, target)
     return target
 
 
-def install(archive: Path | str, *, app_path: Path | str | None = None) -> Path:
+def download_release(release: Release, asset: dict[str, Any], into: Path | str, *,
+                     on_progress: Any = None) -> Path:
+    """Fetch a release asset and keep it only if its ``.sig`` verifies against the pinned key."""
+    name = str(asset["name"])
+    sig = next((a for a in release.assets if a.get("name") == name + SIGNATURE_SUFFIX), None)
+    if sig is None:
+        raise UpdateError(f"{name} has no signature, so it is not installed")
+    with tempfile.TemporaryDirectory(prefix="ml-stack-sig-") as tmp:
+        signature = download(sig, tmp, allow_unscanned=True).read_bytes()[:SIGNATURE_LIMIT]
+    target = download(asset, into, on_progress=on_progress)
+    try:
+        signing.verify_file(target, signature)
+    except signing.SignatureError as exc:
+        target.unlink(missing_ok=True)
+        provenance.sidecar(target).unlink(missing_ok=True)
+        raise UpdateError(f"{name} is not installed: {exc}") from None
+    return target
+
+
+def install(archive: Path | str, *, app_path: Path | str | None = None, keep_backup: bool = False) -> Path:
     """Unpack a downloaded release over the running one. Returns what it replaced.
 
     The replacement is atomic per item: the new copy is unpacked beside the old, and only
@@ -229,27 +246,51 @@ def install(archive: Path | str, *, app_path: Path | str | None = None) -> Path:
 
     staging = Path(tempfile.mkdtemp(prefix="ml-stack-update-", dir=str(target.parent)))
     try:
-        with zipfile.ZipFile(archive) as zf:
-            for member in zf.namelist():
-                if member.startswith("/") or ".." in Path(member).parts:
-                    raise UpdateError(f"refusing an archive entry named {member!r}")
-            zf.extractall(staging)
+        try:
+            unpack(archive, staging)
+        except (Unsafe, zipfile.BadZipFile) as exc:
+            raise UpdateError(f"refusing the download: {exc}") from None
         found = _pick(staging, target.name)
         if found is None:
             raise UpdateError(f"the download has no {target.name} in it")
         _restore_modes(found)
 
         backup = target.with_name(target.name + ".old")
+        if keep_backup and (backup.exists() or backup.is_symlink()):
+            raise UpdateError("An earlier runtime backup requires recovery before another installation.")
         shutil.rmtree(backup, ignore_errors=True)
         backup.unlink(missing_ok=True)
         if target.exists():
             promote(target, backup)
         promote(found, target)
-        shutil.rmtree(backup, ignore_errors=True)
+        if not keep_backup:
+            shutil.rmtree(backup, ignore_errors=True)
         _replace_companions(staging, target)
         return target
     finally:
         shutil.rmtree(staging, ignore_errors=True)
+
+
+def complete_install(target: Path) -> None:
+    """Remove the retained runtime backup after replacement readiness is verified."""
+    backup = target.with_name(target.name + ".old")
+    if backup.is_symlink():
+        raise UpdateError("Runtime backup cannot be a symbolic link.")
+    shutil.rmtree(backup)
+
+
+def restore_install(target: Path) -> Path | None:
+    """Restore the retained runtime and preserve the failed replacement beside it."""
+    backup = target.with_name(target.name + ".old")
+    if backup.is_symlink():
+        raise UpdateError("Runtime backup cannot be a symbolic link.")
+    if not backup.exists():
+        return None
+    retained = Path(tempfile.mkdtemp(prefix="ml-stack-failed-runtime-", dir=target.parent))
+    if target.exists():
+        promote(target, retained / target.name)
+    promote(backup, target)
+    return retained
 
 
 def _replace_companions(staging: Path, target: Path) -> list[Path]:
@@ -335,9 +376,9 @@ def relaunch(*, delay_s: float = 1.5, stop: bool = True) -> bool:
 
 
 # -- what an update must never walk over ------------------------------------------------
-def in_the_way(*, jobs: "Callable[[], bool] | None" = None,
-               measuring: "Callable[[], bool] | None" = None,
-               leases: "Callable[[], bool] | None" = None) -> str:
+def in_the_way(*, jobs: Callable[[], bool] | None = None,
+               measuring: Callable[[], bool] | None = None,
+               leases: Callable[[], bool] | None = None) -> str:
     """Why an update has to wait, or "" when nothing is in its way.
 
     Three things, and any one of them is enough: a training job, a benchmark measuring
@@ -360,14 +401,14 @@ def in_the_way(*, jobs: "Callable[[], bool] | None" = None,
     return ""
 
 
-def quiet(**checks: "Callable[[], bool] | None") -> "Callable[[], bool]":
+def quiet(**checks: Callable[[], bool] | None) -> Callable[[], bool]:
     """`in_the_way` as the ``idle`` gate `watch` and `track` take."""
     return lambda: not in_the_way(**checks)
 
 
 # -- what this machine says about how it updates ----------------------------------------
 LAST: dict[str, Any] = {"tracking": "off", "checked_at": 0.0, "error": "", "commit": ""}
-"""The last look either loop took, for ``/health`` and so ``ml-stack-fleet status`` can
+"""The last look either loop took, for ``/health`` and so ``ml-stack-cluster status`` can
 show a peer's mode and when it last asked. Written by the loops, read by `state`."""
 
 _AGE: dict[str, float] = {}
@@ -379,7 +420,7 @@ def note(**fields: Any) -> None:
     LAST.update(fields)
 
 
-def commit_age_s(commit: str = "", checkout: "Path | None" = None) -> float:
+def commit_age_s(commit: str = "", checkout: Path | None = None) -> float:
     """How old the commit this machine runs is, in seconds; 0 when there is no telling.
 
     Cached on the sha, because the beacon rebuilds its report every ten seconds and the
@@ -419,7 +460,7 @@ def state() -> dict[str, Any]:
     that was last looked at, so `fleet.join.table` can print "main, 4m ago" rather than a
     claim nobody checked.
     """
-    commit = str(LAST.get("commit") or "") or _installed_commit()
+    commit = _installed_commit()
     return {"version": current_version(), "commit": commit,
             "commit_age_s": commit_age_s(commit),
             "tracking": str(LAST.get("tracking") or "off"),
@@ -457,38 +498,75 @@ class Pulled:
                 "diverged": self.diverged, "error": self.error}
 
 
-def checkout_here() -> "Path | None":
+def checkout_here() -> Path | None:
     """The git working tree this package is imported from, or None for a plain install."""
-    from ml_stack.paths import repo_root
-
-    return repo_root(Path(__file__).resolve().parent)
+    return repo_root(Path(__file__).resolve().parent) or source_checkout()
 
 
-def git_in(checkout: "Path | str") -> Git:
+def git_in(checkout: Path | str) -> Git:
     """The real git, rooted in ``checkout``. Output is stdout and stderr together, because
     what a failed pull says is on stderr and the report has to carry it."""
     where = str(Path(checkout).expanduser())
 
-    def run(args: Any) -> "tuple[int, str]":
+    def run(args: Any) -> tuple[int, str]:
+        words = [str(a) for a in args]
         try:
-            done = subprocess.run(["git", "-C", where, *[str(a) for a in args]],
-                                  capture_output=True, text=True, timeout=GIT_TIMEOUT)
-        except (OSError, subprocess.SubprocessError) as exc:
+            if words and words[0] in netgit.NETWORK:
+                done = netgit.run(words, cwd=Path(where), url=_remote_in(words),
+                                  protocols="https:ssh")
+            else:
+                done = subprocess.run(["git", "-C", where, *words], capture_output=True,
+                                      text=True, timeout=GIT_TIMEOUT)
+        except netgit.GitFailed as exc:
+            return 1, str(exc)
+        except (OSError, subprocess.SubprocessError, Refused) as exc:
             return 1, str(exc)
         return done.returncode, f"{done.stdout}{done.stderr}".strip()
 
     return run
 
 
-def pip_install(checkout: "Path | str") -> "tuple[int, str]":
-    """``pip install -e .`` in the checkout, with the interpreter that is running."""
+def _remote_in(words: list[str]) -> str:
+    """The address after ``--`` in a git network command, or ''."""
+    return words[words.index("--") + 1] if "--" in words and words.index("--") + 1 < len(words) else ""
+
+
+def pip_install(checkout: Path | str) -> tuple[int, str]:
+    """Build, verify and select the checkout's HEAD as an immutable runtime in a separate process."""
+    argv = [sys.executable, "-m", "ml_stack.runtime_cli", "ensure", "--checkout", str(Path(checkout).expanduser())]
     try:
-        done = subprocess.run([sys.executable, "-m", "pip", "install", "-e", "."],
-                              cwd=str(Path(checkout).expanduser()), capture_output=True,
-                              text=True, timeout=PIP_TIMEOUT)
+        done = subprocess.run(argv, capture_output=True, text=True, timeout=PIP_TIMEOUT)
     except (OSError, subprocess.SubprocessError) as exc:
-        return 1, str(exc)
+        return 1, str(exc)[-2000:]
     return done.returncode, f"{done.stdout}{done.stderr}".strip()[-2000:]
+
+
+@dataclass(frozen=True, slots=True)
+class TrackedBranch:
+    repo_url: str
+    branch: str
+    install_dir: Path | str
+
+
+@dataclass(frozen=True, slots=True)
+class UpdateRuntime:
+    git: Git | None = None
+    pip: Callable[[Path], tuple[int, str]] = pip_install
+    restart: Callable[[], Any] | None = None
+    admission: Callable[[], contextlib.AbstractContextManager[Any]] = contextlib.nullcontext
+
+
+@dataclass(frozen=True, slots=True)
+class UpdateSchedule:
+    interval: float = EVERY_S
+    first_after_s: float = 30.0
+    rounds: int = 0
+
+
+_DEFAULT_RUNTIME = UpdateRuntime()
+_TRACK_SCHEDULE = UpdateSchedule()
+_RELEASE_SCHEDULE = UpdateSchedule(interval=24 * 3600, first_after_s=300.0)
+_FOLLOW_SCHEDULE = UpdateSchedule(interval=60.0, first_after_s=60.0)
 
 
 def _same(a: str, b: str) -> bool:
@@ -500,27 +578,46 @@ def _same(a: str, b: str) -> bool:
     return n >= 7 and a[:n] == b[:n]
 
 
-def track_once(repo_url: str, branch: str, install_dir: "Path | str", *,
-               git: Git | None = None,
-               pip: "Callable[[Path], tuple[int, str]]" = pip_install,
-               restart: "Callable[[], Any] | None" = None) -> Pulled:
-    """One look at ``branch``: fast-forward onto it if it moved, and restart on the new code.
+REMOTE = re.compile(r"(https://[A-Za-z0-9][A-Za-z0-9.-]*(:[0-9]{1,5})?/[A-Za-z0-9._/~-]+"
+                    r"|ssh://[A-Za-z0-9_.@-]+(:[0-9]{1,5})?/[A-Za-z0-9._/~-]+"
+                    r"|[A-Za-z0-9_.-]+@[A-Za-z0-9][A-Za-z0-9.-]*:[A-Za-z0-9._/~-]+)")
+BRANCH = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]*")
 
-    Never a merge. A checkout holding commits the branch does not have is *reported and
-    left alone* -- resolving that is a person's decision, and a daemon that reset someone's
-    work in progress at three in the morning would be unforgivable. ``pip install -e .``
-    runs only when the pull touched packaging (`INSTALL_TRIGGERS`); an editable install
-    already sees every other file that moved. A pull that fails changes nothing, so the
-    daemon keeps running the code it started with.
 
-    ``git``, ``pip`` and ``restart`` are the three seams; everything else is what the
-    machine does.
-    """
-    checkout = Path(install_dir).expanduser()
-    run = git if git is not None else git_in(checkout)
-    bring_back = restart if restart is not None else restart_after_update
+def check_remote(repo_url: str, branch: str) -> None:
+    """`UpdateError` unless ``repo_url`` is an https or ssh git address and ``branch`` a
+    branch name: neither may start with a dash or name a transport that runs a program."""
+    if not REMOTE.fullmatch(repo_url) or ".." in repo_url:
+        raise UpdateError(f"{repo_url!r} is not an https or ssh git address")
+    if not BRANCH.fullmatch(branch) or ".." in branch or branch.endswith((".lock", "/")):
+        raise UpdateError(f"{branch!r} is not a branch name")
 
-    rc, out = run(["ls-remote", repo_url, branch])
+
+def _unsigned(run: Git, target: str = "FETCH_HEAD") -> str:
+    """Return the signature verification failure for a commit, or an empty string."""
+    key = signing.RELEASE_KEY.split()
+    if len(key) < 2:
+        return "no release key is set"
+    with tempfile.TemporaryDirectory(prefix="ml-stack-signers-") as tmp:
+        signers = Path(tmp) / "allowed_signers"
+        signers.write_text(f"* {key[0]} {key[1]}\n")
+        rc, out = run(["-c", "gpg.format=ssh", "-c", f"gpg.ssh.allowedSignersFile={signers}",
+                       "verify-commit", target])
+    return "" if rc == 0 else (out or "verify-commit failed")
+
+
+def track_once(source: TrackedBranch, *, runtime: UpdateRuntime = _DEFAULT_RUNTIME) -> Pulled:
+    """Fast-forward a signed branch and install its immutable wheel before restarting."""
+    repo_url, branch = source.repo_url, source.branch
+    checkout = Path(source.install_dir).expanduser()
+    run = runtime.git if runtime.git is not None else git_in(checkout)
+    bring_back = runtime.restart if runtime.restart is not None else restart_after_update
+
+    try:
+        check_remote(repo_url, branch)
+    except UpdateError as exc:
+        return Pulled(branch, error=str(exc))
+    rc, out = run(["ls-remote", "--", repo_url, branch])
     head = out.split()[0] if rc == 0 and out.split() else ""
     if rc != 0 or not head:
         return Pulled(branch, error=f"could not read {branch} on {repo_url}: "
@@ -531,13 +628,23 @@ def track_once(repo_url: str, branch: str, install_dir: "Path | str", *,
     if rc != 0 or not local:
         return Pulled(branch, remote=head,
                       error=f"{checkout} is not a git checkout: {out or 'no HEAD'}")
-    if _same(local, head):
+    if _same(local, head) and _same(_installed_commit(), local):
         return Pulled(branch, was=local, now=local, remote=head)
 
-    rc, out = run(["fetch", repo_url, branch])
+    rc, out = run(["fetch", "--", repo_url, branch])
     if rc != 0:
         return Pulled(branch, was=local, now=local, remote=head,
                       error=f"could not fetch {branch}: {out}")
+
+    refused = _unsigned(run, local if _same(local, head) else "FETCH_HEAD")
+    if refused:
+        return Pulled(branch, was=local, now=local, remote=head,
+                      error=f"{branch} at {head[:7]} is not signed by the release key, "
+                            f"so it is not pulled: {refused}")
+
+    if _same(local, head):
+        return _install_branch(Pulled(branch, was=local, now=local, remote=head),
+                               checkout, runtime.pip, bring_back)
 
     rc, _ = run(["merge-base", "--is-ancestor", "HEAD", "FETCH_HEAD"])
     if rc != 0:
@@ -545,65 +652,52 @@ def track_once(repo_url: str, branch: str, install_dir: "Path | str", *,
                       error=f"{checkout} has commits {branch} does not, so it is left "
                             f"alone. Merge or reset it by hand, then it follows again.")
 
-    rc, changed = run(["diff", "--name-only", "HEAD", "FETCH_HEAD"])
-    moved = [line.strip() for line in changed.splitlines() if line.strip()]
-    # Not being able to list what moved means installing anyway: a stale install is worse
-    # than a wasted minute.
-    needs_install = rc != 0 or any(Path(f).name in INSTALL_TRIGGERS for f in moved)
-
-    rc, out = run(["pull", "--ff-only", repo_url, branch])
+    rc, out = run(["merge", "--ff-only", "FETCH_HEAD"])
     if rc != 0:
         return Pulled(branch, was=local, now=local, remote=head,
-                      error=f"git pull --ff-only failed, so this machine keeps the code "
+                      error=f"git merge --ff-only failed, so this machine keeps the code "
                             f"it has: {out}")
 
     rc, out = run(["rev-parse", "HEAD"])
     now = out.split()[0] if rc == 0 and out.split() else head
 
-    if needs_install:
-        code, said = pip(checkout)
-        if code != 0:
-            return Pulled(branch, was=local, now=now, remote=head, pulled=True,
-                          error=f"pulled {now[:7]}, but 'pip install -e .' failed and it "
-                                f"was not restarted: {said}")
-        return Pulled(branch, was=local, now=now, remote=head, pulled=True,
-                      installed=True, restarted=str(bring_back() or ""))
-    return Pulled(branch, was=local, now=now, remote=head, pulled=True,
-                  restarted=str(bring_back() or ""))
+    return _install_branch(Pulled(branch, was=local, now=now, remote=head, pulled=True),
+                           checkout, runtime.pip, bring_back)
 
 
-def track(repo_url: str, branch: str, install_dir: "Path | str", *,
-          interval: float = EVERY_S, first_after_s: float = 30.0,
-          idle: "Callable[[], bool]" = lambda: True,
-          git: Git | None = None,
-          pip: "Callable[[Path], tuple[int, str]]" = pip_install,
-          restart: "Callable[[], Any] | None" = None,
-          rounds: int = 0) -> threading.Thread:
-    """Follow ``branch`` on a timer, on a machine that is a checkout with an editable install.
+def _install_branch(result: Pulled, checkout: Path,
+                    pip: Callable[[Path], tuple[int, str]], restart: Callable[[], Any]) -> Pulled:
+    code, said = pip(checkout)
+    if code != 0:
+        return replace(result, error=f"source is at {result.now[:7]}, but immutable wheel "
+                       f"installation failed and it was not restarted: {said}")
+    return replace(result, installed=True, restarted=str(restart() or ""))
 
-    ``idle`` is `quiet`: nothing is pulled over a job, a measurement or a loaded model. The
-    thread stops once it has restarted, because the restart is what puts the new code in
-    charge -- either the process is gone or it re-execs. ``rounds`` bounds the loop for a
-    test; 0 is forever.
-    """
-    note(tracking=branch)
+
+def track(source: TrackedBranch, *, idle: Callable[[], bool] = lambda: True,
+          runtime: UpdateRuntime = _DEFAULT_RUNTIME,
+          schedule: UpdateSchedule = _TRACK_SCHEDULE) -> threading.Thread:
+    """Follow a signed branch and replace the installed wheel while idle."""
+    note(tracking=source.branch)
 
     def loop() -> None:
-        time.sleep(first_after_s)
+        time.sleep(schedule.first_after_s)
         seen = 0
-        while not rounds or seen < rounds:
+        while not schedule.rounds or seen < schedule.rounds:
             seen += 1
             try:
-                if idle():
-                    got = track_once(repo_url, branch, install_dir, git=git, pip=pip,
-                                     restart=restart)
-                    note(checked_at=time.time(), error=got.error,
-                         commit=got.now or LAST.get("commit", ""))
-                    if got.restarted:
-                        return
+                with runtime.admission():
+                    if idle():
+                        got = track_once(source, runtime=runtime)
+                        note(checked_at=time.time(), error=got.error,
+                             commit=got.now or LAST.get("commit", ""))
+                        if got.restarted:
+                            return
+            except Busy:
+                pass
             except Exception as exc:                  # noqa: BLE001 - a loop that dies stops following
                 note(checked_at=time.time(), error=str(exc))
-            time.sleep(interval)
+            time.sleep(schedule.interval)
 
     thread = threading.Thread(target=loop, daemon=True, name="track")
     thread.start()
@@ -625,6 +719,46 @@ def restart_after_update() -> str:
     return autostart.restart()
 
 
+def selected_commit() -> str:
+    """The commit the machine's selected runtime was built from, or "" when none is selected."""
+    try:
+        row = json.loads((runtime.directory() / "selected.json").read_text(encoding="utf-8"))
+        return str(row.get("commit", "")) if isinstance(row, dict) else ""
+    except (OSError, ValueError):
+        return ""
+
+
+def follow_runtime(*, idle: Callable[[], bool], schedule: UpdateSchedule = _FOLLOW_SCHEDULE,
+                   admission: Callable[[], contextlib.AbstractContextManager[Any]] = contextlib.nullcontext
+                   ) -> threading.Thread | None:
+    """Restart this process onto the selected runtime when it is behind it and nothing is in the way.
+
+    Returns None when no runtime is selected.
+    """
+    if not selected_commit():
+        return None
+
+    def loop() -> None:
+        time.sleep(schedule.first_after_s)
+        while True:
+            try:
+                with admission():
+                    chosen = selected_commit()
+                    if chosen and not _same(chosen, _installed_commit()) and idle():
+                        note(commit=chosen)
+                        if restart_after_update():
+                            return
+            except Busy:
+                pass
+            except (OSError, ValueError, subprocess.SubprocessError) as exc:
+                note(checked_at=time.time(), error=str(exc))
+            time.sleep(schedule.interval)
+
+    thread = threading.Thread(target=loop, daemon=True, name="follow-runtime")
+    thread.start()
+    return thread
+
+
 def apply_if_newer() -> dict[str, Any]:
     """Put the newest release in place, if there is one. Says what happened."""
     if running_path() is None:
@@ -640,24 +774,19 @@ def apply_if_newer() -> dict[str, Any]:
             return {"ok": False, "installed": False,
                     "error": f"release {release.version} has no download for "
                              "this machine"}
-        archive = download(asset, tempfile.mkdtemp(prefix="ml-stack-update-"))
+        archive = download_release(release, asset,
+                                   tempfile.mkdtemp(prefix="ml-stack-update-"))
         install(archive)
     except UpdateError as exc:
         return {"ok": False, "installed": False, "error": str(exc)}
     return {"ok": True, "installed": True, "version": release.version}
 
 
-def watch(*, wanted: "Callable[[], bool]", idle: "Callable[[], bool]",
-          every_s: float = 24 * 3600, first_after_s: float = 300.0,
-          restart: "Callable[[], Any] | None" = None,
-          rounds: int = 0) -> threading.Thread:
-    """Check for a newer release on a timer, and put it on when nothing is running.
-
-    A machine part way through a training run, a measurement or an answer is left alone
-    until it is not (``idle`` is `quiet`). ``restart`` is the seam: the release is the
-    whole install, so what comes back is the new daemon, the new CLI and, if this is the
-    windowed copy, the new window. ``rounds`` bounds the loop for a test; 0 is forever.
-    """
+def watch(*, wanted: Callable[[], bool], idle: Callable[[], bool],
+          restart: Callable[[], Any] | None = None,
+          schedule: UpdateSchedule = _RELEASE_SCHEDULE,
+          admission: Callable[[], contextlib.AbstractContextManager[Any]] = contextlib.nullcontext) -> threading.Thread:
+    """Check releases on a schedule and install them when the machine is idle."""
     bring_back = restart if restart is not None else restart_after_update
     # Recorded here rather than from inside the thread: which mode this machine is in is
     # known the moment the watcher is set up, and a loop writing it on every turn is a loop
@@ -665,19 +794,23 @@ def watch(*, wanted: "Callable[[], bool]", idle: "Callable[[], bool]",
     note(tracking="releases")
 
     def loop() -> None:
-        time.sleep(first_after_s)
+        time.sleep(schedule.first_after_s)
         seen = 0
-        while not rounds or seen < rounds:
+        while not schedule.rounds or seen < schedule.rounds:
             seen += 1
             try:
-                if wanted() and idle():
-                    got = apply_if_newer()
-                    note(checked_at=time.time(), error=str(got.get("error") or ""))
-                    if got.get("installed") and bring_back():
-                        return
-            except Exception:                         # noqa: BLE001
+                with admission():
+                    if wanted() and idle():
+                        got = apply_if_newer()
+                        note(checked_at=time.time(), error=str(got.get("error") or ""))
+                        if got.get("installed") and bring_back():
+                            return
+            except Busy:
                 pass
-            time.sleep(every_s)
+            except Exception as exc:                  # noqa: BLE001
+                _LOG.exception("Release update check failed")
+                note(checked_at=time.time(), error=str(exc))
+            time.sleep(schedule.interval)
 
     thread = threading.Thread(target=loop, daemon=True, name="updates")
     thread.start()

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import time
+import uuid
 from typing import ClassVar
 
 import pytest
@@ -81,12 +82,14 @@ class TestBuildBody:
                       request=Request(n_predict=512)).build_body([], top_k=40)
         assert body["top_k"] == 40 and body["n_predict"] == 512
 
-    def test_the_token_ceiling_defaults_high(self):
-        """A ceiling is not a budget: nothing is spent that is not generated, so a high one
-        costs nothing and a low one truncates -- and what it truncates is the answer, never
-        the thinking. Measured, gemma-4 filled a 220-token ceiling with reasoning and
-        returned empty content."""
-        assert Client("http://x").build_body([])["n_predict"] >= 8192
+    def test_output_limits_default_to_none(self):
+        from ml_stack.client import Transport
+        assert Request().n_predict is None
+        assert Transport().timeout is None
+        assert Client("http://x").build_body([])["n_predict"] == -1
+        hosted = Client("http://x", transport=Transport(api="openai"))
+        assert "max_tokens" not in hosted.build_body([])
+        assert hosted.build_body([], n_predict=257)["max_tokens"] == 257
 
     def test_tools_only_appear_when_supplied(self):
         tool = {"type": "function", "function": {"name": "ping", "parameters": {}}}
@@ -643,18 +646,34 @@ class TestHealth:
 class TestRetry:
     def test_retries_a_local_500_and_succeeds(self, server):
         """Local servers commonly answer 500 to a request that overlaps another."""
+        # A request that is not this test's (another worker's stale poller can land on a port
+        # that was just handed to this server) is answered 404 and counted nowhere: only the
+        # requests carrying this test's own model name are the attempts under test.
+        mine = f"retry-{uuid.uuid4().hex}"
         state = {"calls": 0}
+        strangers: list[bytes] = []
 
         def handler(method: str, path: str, body: bytes):
+            try:
+                ours = json.loads(body).get("model") == mine
+            except ValueError:
+                ours = False
+            if not ours:
+                strangers.append(body)
+                return 404, b"not for this test"
             state["calls"] += 1
             if state["calls"] < 3:
                 return 500, b"busy"
             return json_reply({"data": [{"embedding": [0.1, 0.2]}]})
 
         instance = server(handler)
-        vectors = embed("hello", base_url=instance.base_url, tries=3)
+        # one stranger on purpose, so the isolation above is exercised every run, not only under load
+        with pytest.raises(ServerError):
+            embed("someone else", base_url=instance.base_url, model="not-mine", tries=1)
+        assert len(strangers) == 1 and state["calls"] == 0
+        vectors = embed("hello", base_url=instance.base_url, model=mine, tries=3)
         assert vectors == [[0.1, 0.2]]
-        assert state["calls"] == 3
+        assert state["calls"] == 3, f"strangers on this port: {strangers}"
 
     def test_never_retries_a_4xx(self, server):
         """The request is wrong and will stay wrong; hammering only delays the report."""
@@ -1351,3 +1370,17 @@ def test_a_server_that_refuses_the_depth_is_asked_again_without_it(monkeypatch):
                     request=Request(spec_draft_max=2)).chat([{"role": "user", "content": "hi"}])
     assert len(sent) == 1, "the server is asked once, not once per client"
     chat_mod.forget_speculative()
+
+@pytest.mark.parametrize("model", ["bottlecapai/ThinkingCap-Qwen3.8-27B", "ThinkingCap-Qwen3.8-27B-IQ4_XS.gguf"])
+def test_thinkingcap_template_defaults_and_explicit_overrides(model):
+    client = Client("http://127.0.0.1:1", model=model)
+    messages = [{"role": "user", "content": "fixture"}]
+    body = client.build_body(messages)
+    assert body["chat_template_kwargs"] == {"enable_thinking": True, "reasoning_effort": "xhigh"}
+    assert "thinking_budget" not in body
+    assert client.build_body(messages, chat_template_kwargs={"reasoning_effort": "medium"})["chat_template_kwargs"]["reasoning_effort"] == "medium"
+    assert client.build_body(messages, reasoning_effort="low")["chat_template_kwargs"]["reasoning_effort"] == "low"
+    assert client.build_body(messages, think=False)["chat_template_kwargs"] == {"enable_thinking": False}
+    assert client.build_body(messages, chat_template_kwargs={"enable_thinking": False})["chat_template_kwargs"] == {"enable_thinking": False}
+    generic = Client("http://127.0.0.1:1", model="Qwen3.8-27B")
+    assert "chat_template_kwargs" not in generic.build_body(messages)

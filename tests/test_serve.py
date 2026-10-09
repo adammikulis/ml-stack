@@ -35,13 +35,14 @@ from ml_stack.serve import (
     tail,
     wait_until_free,
 )
-from ml_stack.serve.leases import orphaned
+from ml_stack.serve.leases import lease_file, orphaned
 from ml_stack.testing.fakes import (
     FakeLlamaServer,
     Served,
     fake_binary,
     fake_llama_binary,
 )
+from ml_stack.testing.registry import record_server
 from tests.conftest import leased
 
 
@@ -52,9 +53,19 @@ def wait_until_exited(pid: int, *, timeout: float = 10.0) -> None:
     are still exiting, which is before ``waitpid`` will report the group at all.
     """
     deadline = time.monotonic() + timeout
-    while os.waitid(os.P_PID, pid, os.WEXITED | os.WNOWAIT | os.WNOHANG) is None:
+    while not _exited(pid):
         assert time.monotonic() < deadline, f"pid {pid} never exited"
         time.sleep(0.005)
+
+
+def _exited(pid: int) -> bool:
+    """Whether ``pid`` has exited and is waiting to be reaped."""
+    if hasattr(os, "waitid"):
+        return os.waitid(os.P_PID, pid, os.WEXITED | os.WNOWAIT | os.WNOHANG) is not None
+    import psutil
+
+    # os.waitid is missing on macOS before 3.13
+    return psutil.Process(pid).status() == psutil.STATUS_ZOMBIE
 
 
 @pytest.fixture
@@ -204,6 +215,15 @@ class TestPorts:
         sock.close()
         assert port_is_free(port)
 
+    def test_windows_does_not_ask_to_share_the_port(self, monkeypatch):
+        asked = []
+        real = socket.socket.setsockopt
+        monkeypatch.setattr(socket.socket, "setsockopt",
+                            lambda self, *a: (asked.append(a), real(self, *a))[1])
+        monkeypatch.setattr(sys, "platform", "win32")
+        port_is_free(free_port())
+        assert (socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) not in asked
+
 
 class TestProcess:
     def test_a_live_process_exists(self):
@@ -325,7 +345,9 @@ class TestModelMatches:
 
 
 class TestAdoption:
-    def _manager(self, tmp_path, binary):
+    def _manager(self, tmp_path, binary, instance=None, model="model.gguf"):
+        if instance is not None:
+            record_server(tmp_path / "servers.json", instance.port, model=model)
         return ServerManager(
             LlamaServerBackend(binary=binary),
             state_file=tmp_path / "servers.json",
@@ -337,7 +359,7 @@ class TestAdoption:
 
     def test_a_matching_server_is_adopted(self, server, tmp_path, binary):
         instance = server(lambda m, p, b: json_reply({"data": [{"id": "model.gguf"}]}))
-        manager = self._manager(tmp_path, binary)
+        manager = self._manager(tmp_path, binary, instance)
 
         info = manager.adopt(ServerSpec(model="model.gguf", port=instance.port))
         assert info is not None and info.adopted
@@ -346,7 +368,7 @@ class TestAdoption:
         """'Something answers on this port' and 'it serves what I asked for' are
         different facts. Adopting on the first silently benchmarks the wrong weights."""
         instance = server(lambda m, p, b: json_reply({"data": [{"id": "some-other.gguf"}]}))
-        manager = self._manager(tmp_path, binary)
+        manager = self._manager(tmp_path, binary, instance)
 
         with pytest.raises(ServerFailed, match="model: asked for 'model.gguf'"):
             manager.adopt(ServerSpec(model="model.gguf", port=instance.port))
@@ -371,7 +393,7 @@ class TestAdoption:
         the Q4_K_M and reports only its repository must not be handed out for the F16 --
         that mismatch served @@@@@@@@ from the wrong weights."""
         instance = server(self._repo_handler("/models/gpt-oss-20b-Q4_K_M.gguf"))
-        manager = self._manager(tmp_path, binary)
+        manager = self._manager(tmp_path, binary, instance)
 
         with pytest.raises(ServerFailed, match="model:"):
             manager.adopt(ServerSpec(
@@ -382,7 +404,7 @@ class TestAdoption:
         """The same repository, asked for the exact file /props says is loaded, is
         shared rather than loaded a second time."""
         instance = server(self._repo_handler("/models/gpt-oss-20b-Q4_K_M.gguf"))
-        manager = self._manager(tmp_path, binary)
+        manager = self._manager(tmp_path, binary, instance)
 
         info = manager.adopt(ServerSpec(
             model="hf:unsloth/gpt-oss-20b-GGUF/gpt-oss-20b-Q4_K_M.gguf", port=instance.port))
@@ -391,7 +413,7 @@ class TestAdoption:
     def test_release_leaves_an_adopted_server_running(self, server, tmp_path, binary):
         """Terminate only what you launched."""
         instance = server(lambda m, p, b: json_reply({"data": [{"id": "model.gguf"}]}))
-        manager = self._manager(tmp_path, binary)
+        manager = self._manager(tmp_path, binary, instance)
 
         info = manager.adopt(ServerSpec(model="model.gguf", port=instance.port))
         manager.release(info)
@@ -549,6 +571,51 @@ class TestDetach:
             proc.wait()
 
 
+class TestRecord:
+    def test_a_new_server_on_a_port_is_asked_about_again(self, tmp_path, binary):
+        from ml_stack.client import chat
+
+        url = "http://127.0.0.1:9105"
+        chat._FAMILY_BY_URL[url] = "stale"
+        chat._NO_SPECULATIVE.add(url)
+        manager = ServerManager(LlamaServerBackend(binary=binary),
+                                state_file=tmp_path / "servers.json")
+        manager._record(ServerSpec(model="m.gguf", port=9105),
+                        ServerInfo(base_url=url, port=9105, pid=None, backend="llama.cpp"))
+
+        assert url not in chat._FAMILY_BY_URL
+        assert url not in chat._NO_SPECULATIVE
+
+
+class TestClose:
+    def test_leaving_the_block_stops_a_server_the_manager_started(self, tmp_path, binary):
+        state = tmp_path / "servers.json"
+        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        try:
+            with ServerManager(LlamaServerBackend(binary=binary), state_file=state) as manager:
+                info = ServerInfo(base_url="http://127.0.0.1:9103", port=9103, pid=proc.pid,
+                                  backend="llama.cpp", process=proc)
+                manager._record(ServerSpec(model="m.gguf", port=9103), info)
+            assert proc.wait(timeout=10) is not None
+            assert 9103 not in recorded_servers(state)
+        finally:
+            proc.kill()
+            proc.wait()
+
+    def test_a_server_the_manager_only_adopted_survives_close(self, tmp_path, binary):
+        state = tmp_path / "servers.json"
+        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        try:
+            state.write_text(json.dumps({"9104": {"port": 9104, "pid": proc.pid,
+                                                  "owner_pid": proc.pid, "model": "m.gguf"}}))
+            with ServerManager(LlamaServerBackend(binary=binary), state_file=state):
+                pass
+            assert proc.poll() is None
+        finally:
+            proc.kill()
+            proc.wait()
+
+
 def test_tail_reports_a_missing_log_rather_than_raising(tmp_path):
     """A start failure with no tail is unactionable, and the tail itself must never be
     the thing that raises."""
@@ -609,7 +676,9 @@ class TestShapeMismatch:
 class TestAdoptingTheWrongShape:
     """The right model in the wrong shape is still the wrong server."""
 
-    def _manager(self, tmp_path, binary):
+    def _manager(self, tmp_path, binary, instance=None):
+        if instance is not None:
+            record_server(tmp_path / "servers.json", instance.port, model="a-model.gguf")
         return ServerManager(
             LlamaServerBackend(binary=binary),
             state_file=tmp_path / "servers.json",
@@ -618,7 +687,7 @@ class TestAdoptingTheWrongShape:
     def test_a_running_server_with_too_few_slots_is_refused(
             self, serving, tmp_path, binary):
         instance = serving("a-model.gguf", context=4096, slots=1)
-        manager = self._manager(tmp_path, binary)
+        manager = self._manager(tmp_path, binary, instance)
 
         with pytest.raises(ServerFailed, match="slots: asked for 4, serving 1"):
             manager.adopt(ServerSpec(model="a-model.gguf", port=instance.port,
@@ -628,7 +697,7 @@ class TestAdoptingTheWrongShape:
             self, serving, tmp_path, binary):
         """A caller that asked for 32k and gets 4k has its prompts truncated instead."""
         instance = serving("a-model.gguf", context=4096, slots=1)
-        manager = self._manager(tmp_path, binary)
+        manager = self._manager(tmp_path, binary, instance)
 
         with pytest.raises(ServerFailed,
                            match="context: asked for 32768 per slot, serving 4096"):
@@ -638,7 +707,7 @@ class TestAdoptingTheWrongShape:
     def test_context_is_compared_one_slot_at_a_time(self, serving, tmp_path, binary):
         """llama-server splits --ctx-size across -np, and reports one slot's share."""
         instance = serving("a-model.gguf", context=32768, slots=2)
-        manager = self._manager(tmp_path, binary)
+        manager = self._manager(tmp_path, binary, instance)
 
         adopted = manager.adopt(ServerSpec(model="a-model.gguf", port=instance.port,
                                            context=65536, parallel=2))
@@ -650,7 +719,7 @@ class TestAdoptingTheWrongShape:
 
     def test_the_shape_that_was_asked_for_is_adopted(self, serving, tmp_path, binary):
         instance = serving("a-model.gguf", context=4096, slots=1)
-        manager = self._manager(tmp_path, binary)
+        manager = self._manager(tmp_path, binary, instance)
 
         info = manager.adopt(ServerSpec(model="a-model.gguf", port=instance.port,
                                         context=4096, parallel=1))
@@ -663,6 +732,7 @@ class TestAdoptingTheWrongShape:
         monkeypatch.setattr(mod, "is_healthy", lambda *a, **k: True)
         monkeypatch.setattr(mod, "reported_models", lambda *a, **k: ["a-model.gguf"])
         monkeypatch.setattr(mod, "serving_params", lambda *a, **k: None)
+        record_server(lease_file(), 8099, model="a-model.gguf")
         assert ServerManager().adopt(ServerSpec(model="a-model.gguf", port=8099, parallel=4))
 
 
@@ -747,7 +817,7 @@ class TestServingBeside:
     def test_a_caller_that_needs_that_port_still_gets_the_refusal(self, serving, tmp_path):
         instance = serving("somethingelse.gguf")
         held = self.manager(tmp_path, [])
-        with pytest.raises(ServerFailed, match="different settings"):
+        with pytest.raises(ServerFailed, match="ml-stack did not start"):
             held.lease(ServerSpec(model=tmp_path / "mine.gguf", port=instance.port), roam=False)
 
     def test_it_refuses_when_the_machine_has_no_room(self, serving, tmp_path, monkeypatch):
@@ -757,7 +827,7 @@ class TestServingBeside:
         instance = serving("somethingelse.gguf")
         monkeypatch.setattr("ml_stack.serve.manager.free_memory", lambda: 1024)
         held = self.manager(tmp_path, [])
-        with pytest.raises(ServerFailed, match="different settings"):
+        with pytest.raises(ServerFailed, match="ml-stack did not start"):
             held.lease(ServerSpec(model=big, port=instance.port))
 
 
@@ -970,7 +1040,8 @@ class TestTheStartedProcess:
         assert os.getsid(info.pid) != os.getsid(0)
 
     def test_the_log_is_not_held_open_while_the_load_is_waited_on(self, tmp_path, monkeypatch):
-        psutil = pytest.importorskip("psutil", reason="ml-stack[serve]")
+        import psutil
+
         from ml_stack.serve import backend as backend_module
 
         real = backend_module.wait_for_health
@@ -1017,6 +1088,7 @@ import sys
 import time
 from pathlib import Path
 
+from ml_stack.serve import grant
 from ml_stack.serve.backend import ServerSpec
 from ml_stack.serve.manager import ServerManager
 
@@ -1035,7 +1107,8 @@ ServerManager._load = slow_read
 manager = ServerManager(state_file=state)
 while time.time() < start_at:
     time.sleep(0.01)
-manager._pending(ServerSpec(model="/models/quince-2b.gguf", port=port))
+with grant.broker_grant():  # a Lease, which `_pending` hands back, exists only inside the broker's grant
+    manager._pending(ServerSpec(model="/models/quince-2b.gguf", port=port))
 time.sleep(2.0)
 """
 
@@ -1072,7 +1145,7 @@ def test_every_start_writes_its_own_log_under_the_home_and_the_oldest_go(tmp_pat
         one = home.state("logs") / f"llama-server-8080-20260101-00000{n}-1.log"
         one.parent.mkdir(parents=True, exist_ok=True)
         one.write_text(f"run {n}\n")
-        os.utime(one, (1_000_000 + n, 1_000_000 + n))
+        os.utime(one, (time.time() - 100 + n, time.time() - 100 + n))
         older.append(one)
     beside = home.state("logs") / "llama-server-8081-20260101-000000-1.log"
     beside.write_text("another port\n")

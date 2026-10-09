@@ -8,8 +8,16 @@ from typing import Any, Protocol
 
 from ml_stack.train.checkpoint import CheckpointError, assert_exact_restore
 
-__all__ = ["Step", "TorchStep", "MLXStep", "step_for",
-           "tied_names", "state_once", "load_state_once", "load_mlx_state"]
+__all__ = [
+    "MLXStep",
+    "Step",
+    "TorchStep",
+    "load_mlx_state",
+    "load_state_once",
+    "state_once",
+    "step_for",
+    "tied_names",
+]
 
 Batch = Any
 Loss = Callable[[Any, Batch], Any]
@@ -84,7 +92,7 @@ class TorchStep:
         out: dict[str, Any] = {}
         names = [n for n, _ in self.model.named_parameters()]
         params = list(self.model.parameters())
-        index = {id(p): n for n, p in zip(names, params)}
+        index = {id(p): n for n, p in zip(names, params, strict=False)}
         for param, state in self.opt.state.items():
             base = index.get(id(param))
             if base is None:
@@ -102,7 +110,7 @@ class TorchStep:
             return
         names = [n for n, _ in self.model.named_parameters()]
         params = list(self.model.parameters())
-        by_name = dict(zip(names, params))
+        by_name = dict(zip(names, params, strict=False))
         for flat, value in optimizer.items():
             base, _, key = flat.rpartition(".")
             param = by_name.get(base)

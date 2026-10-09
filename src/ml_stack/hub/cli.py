@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from ml_stack import hub
 from ml_stack.hub.naming import _SHARD
@@ -41,13 +43,13 @@ def _head_lines(repo: str) -> list[str]:
     return out
 
 
-def _parser() -> argparse.ArgumentParser:
-    """``ml-stack-models``' parser: find, files, card, fetch, layout."""
+def _parser(extend: Callable[[Any], None] | None = None) -> argparse.ArgumentParser:
+    """``ml-stack-models``' parser: find, files, card, fetch, layout, and what ``extend``
+    adds to its subcommands."""
     ap = argparse.ArgumentParser(
         prog="ml-stack-models",
         description="Find a model that is newer than anything you remember, and serve it.")
-    sub = ap.add_subparsers(dest="cmd", required=True,
-                            metavar="{find,files,card,fetch,layout}")
+    sub = ap.add_subparsers(dest="cmd", required=True)
 
     look = sub.add_parser("find", help="repositories matching some words")
     look.add_argument("words", nargs="+", help="e.g. gemma-4 E4B")
@@ -72,6 +74,8 @@ def _parser() -> argparse.ArgumentParser:
                                        "serving them -- every shard of a sharded model")
     got.add_argument("refs", nargs="+", metavar="REF",
                      help="hf:owner/repo/file.gguf, one or more")
+    got.add_argument("--no-peers", action="store_true",
+                     help="do not ask paired devices first; download from the Hub (also ML_STACK_NO_PEERS=1)")
 
     shape = sub.add_parser("layout", help="the attention layout off a GGUF header: which "
                                           "layers hold a full cache, slide, recur or share "
@@ -79,6 +83,8 @@ def _parser() -> argparse.ArgumentParser:
     shape.add_argument("model", help="a path, an hf: reference already fetched, or a file "
                                      "name copied from `files`")
     shape.add_argument("--json", action="store_true", help="the same as JSON")
+    if extend:
+        extend(sub)
     return ap
 
 
@@ -136,7 +142,7 @@ def _card(args) -> int:
 def _fetch(args) -> int:
     """``ml-stack-models fetch``: every shard of each reference, with what came down."""
     for one in args.refs:
-        path = hub.fetch(one)
+        path = hub.fetch(one, peers=False if args.no_peers else None)
         total = 0
         for shard in hub.shards_beside(path):
             size = shard.stat().st_size if shard.exists() else 0
@@ -162,7 +168,7 @@ def _builds(repo: str, ending: str, listing: list[tuple[str, int]]) -> None:
         many = f"  {shards} shards" if shards > 1 else ""
         # IQ builds decode through lookup tables Metal runs slowly: on a Mac the
         # smaller IQ file was the slower model (README, "What this measured")
-        slow = "  IQ: slower on Metal, take a K-quant" if hub.iq_on_metal(name) else ""
+        slow = "  IQ: refused on Metal unless overridden, take a K-quant" if hub.iq_on_metal(name) else ""
         say(f"{human_bytes(size):>8}  {name}{many}{mark}{slow}")
     for name, size in listing:
         if hub.aside(name):
@@ -192,11 +198,13 @@ def _files(args) -> int:
     return 0
 
 
-def main(argv: list[str] | None = None) -> int:
-    """``ml-stack-models`` -- find a model on the Hub and print how to serve it."""
-    args = _parser().parse_args(argv)
+def main(argv: list[str] | None = None, extend: Callable[[Any], None] | None = None,
+         more: dict[str, Callable[[Any], int]] | None = None) -> int:
+    """``ml-stack-models`` -- find a model on the Hub and print how to serve it. ``extend``
+    adds subcommands to the parser and ``more`` maps each to its function."""
+    args = _parser(extend).parse_args(argv)
     ran = {"layout": _layout, "find": _find, "card": _card, "fetch": _fetch,
-           "files": _files}[args.cmd]
+           "files": _files, **(more or {})}[args.cmd]
     try:
         return ran(args)
     except Exception as exc:  # noqa: BLE001 - the Hub is somebody else's machine

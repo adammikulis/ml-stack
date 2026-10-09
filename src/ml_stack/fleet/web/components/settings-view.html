@@ -1,21 +1,56 @@
 <!-- settings-view: what this machine does, what it can train with, and taking it off again -->
+<style>
+settings-view { display:contents; }
+settings-view #settings { padding:calc(28px * var(--ui-density,1)) calc(32px * var(--ui-density,1)); max-width:1320px; width:100%; }
+settings-view .settings-heading { display:flex; align-items:center; gap:16px; margin-bottom:24px; }
+settings-view .settings-heading h1 { margin:0; }
+settings-view .settings-heading p { margin:6px 0 0; }
+settings-view .settings-icon { display:grid; place-items:center; width:52px; height:52px; background:var(--poolside-pink); color:var(--poolside-pink-ink,var(--poolside-navy)); border-radius:16px; font-size:2.000rem; }
+settings-view .settings-layout { display:grid; grid-template-columns:220px minmax(0,1fr); gap:32px; }
+settings-view .settings-sections { display:flex; flex-direction:column; gap:5px; align-self:start; }
+settings-view .settings-sections button { margin:0; text-align:left; background:transparent; color:var(--text); border:0; padding:calc(13px * var(--ui-density,1)) calc(15px * var(--ui-density,1)); border-radius:10px; font-weight:500; }
+settings-view .settings-sections button[aria-selected="true"] { background:var(--poolside-navy); color:var(--poolside-navy-ink,#fff); }
+settings-view .settings-content { min-width:0; }
+settings-view .settings-pane { border:1px solid var(--line); background:var(--bg-raised); border-radius:18px; padding:calc(26px * var(--ui-density,1)); }
+settings-view .settings-pane[hidden] { display:none; }
+settings-view .settings-pane > header { border-bottom:1px solid var(--line); padding-bottom:18px; margin-bottom:22px; }
+settings-view .settings-pane > header h2 { font-size:1.643rem; margin:0 0 8px; }
+settings-view .settings-pane .group { border:0; border-radius:0; padding:0; margin:0 0 24px; background:transparent; }
+settings-view .settings-pane .group:last-child { margin-bottom:0; }
+settings-view .settings-pane h3 { font-size:1.071rem; margin:22px 0 12px; }
+settings-view .settings-pane .opt { padding:calc(12px * var(--ui-density,1)); border:1px solid var(--line); border-radius:10px; margin-bottom:8px; }
+settings-view .settings-toolbar { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin:16px 0; }
+settings-view .settings-toolbar button { width:auto; margin:0; }
+settings-view .settings-footer { display:flex; align-items:center; gap:18px; margin-top:20px; }
+settings-view #settings-save { width:auto; min-width:150px; margin:0; background:var(--poolside-pink); color:var(--poolside-pink-ink,var(--poolside-navy)); }
+settings-view #settings-note { min-height:24px; }
+settings-view .library-kind { display:inline-block; font-size:0.786rem; border:1px solid var(--line); border-radius:20px; padding:calc(2px * var(--ui-density,1)) calc(8px * var(--ui-density,1)); margin:4px 8px; }
+settings-view [aria-busy="true"] { opacity:.8; }
+settings-view #settings-removal { border-top:1px solid var(--line); padding-top:24px; }
+@media(max-width:760px) { settings-view #settings { padding:calc(20px * var(--ui-density,1)); } settings-view .settings-layout { grid-template-columns:1fr; gap:16px; } settings-view .settings-sections { flex-direction:row; overflow:auto; } settings-view .settings-sections button { white-space:nowrap; } settings-view .settings-pane { padding:calc(20px * var(--ui-density,1)); } }
+</style>
 <template>
   <main id="settings" hidden>
-    <h1>Settings</h1>
-    <p class="sub" id="settings-sub"></p>
-    <div class="two">
-      <div id="settings-left"></div>
-      <div id="settings-right">
-        <div class="group" id="settings-libs"></div>
-        <div class="group" id="settings-chatting"></div>
-        <div class="group" id="settings-updates"></div>
-        <div id="settings-when"></div>
+    <header class="settings-heading"><span class="settings-icon" aria-hidden="true">⚙</span><div><h1>Settings</h1><p class="sub" id="settings-sub"></p></div></header>
+    <div class="settings-layout">
+      <nav class="settings-sections" aria-label="Settings sections" role="tablist" aria-orientation="vertical">
+        <button type="button" role="tab" data-section="appearance" aria-selected="true">Appearance &amp; advanced</button>
+        <button type="button" role="tab" data-section="models" aria-selected="false">Models &amp; providers</button>
+        <button type="button" role="tab" data-section="compute" aria-selected="false">Compute &amp; device</button>
+        <button type="button" role="tab" data-section="libraries" aria-selected="false">Libraries &amp; simulators</button>
+        <button type="button" role="tab" data-section="credentials" aria-selected="false">Credentials</button>
+        <button type="button" role="tab" data-section="maintenance" aria-selected="false">Maintenance</button>
+      </nav>
+      <div class="settings-content">
+        <section class="settings-pane" data-pane="appearance" role="tabpanel"><theme-editor></theme-editor><div class="group" id="settings-interface"></div></section>
+        <section class="settings-pane" data-pane="models" role="tabpanel" hidden><header><h2>Models &amp; providers</h2><p class="hint">Set defaults for new conversations and choose where models come from.</p></header><div class="group" id="settings-chatting"></div></section>
+        <section class="settings-pane" data-pane="compute" role="tabpanel" hidden><header><h2>Device availability</h2><p class="hint">Decide when this device contributes and what happens when you need it.</p></header><div id="settings-left"></div><div id="settings-when"></div><div class="group" id="settings-wired"><h2>GPU memory</h2><wired-memory></wired-memory></div></section>
+        <section class="settings-pane" data-pane="libraries" role="tabpanel" hidden><header><h2>Libraries &amp; simulators</h2><p class="hint">Add training and simulation capabilities to managed environments.</p></header><div class="group" id="settings-libs"></div></section>
+        <section class="settings-pane" data-pane="credentials" role="tabpanel" hidden><header><h2>Provider credentials</h2><p class="hint">Connect services using locally stored tokens and API keys.</p></header><div class="group" id="settings-credentials"></div></section>
+        <section class="settings-pane" data-pane="maintenance" role="tabpanel" hidden><header><h2>Maintenance</h2><p class="hint">Updates, device setup, and storage management.</p></header><div class="group" id="settings-updates"></div><div class="group" id="settings-again"></div><details data-advanced><summary>Runtime tools</summary><div class="group" id="settings-agent-runtime"></div></details><div class="group" id="settings-removal"></div></section>
+        <footer class="settings-footer"><button id="settings-save">Save preferences</button><div id="settings-note" role="status" aria-live="polite"></div></footer>
       </div>
     </div>
-    <button id="settings-save">Save</button>
-    <div class="group" id="settings-again"></div>
-    <div class="group" id="settings-removal"></div>
-    <div id="settings-note"></div>
   </main>
 </template>
 <script>
@@ -33,10 +68,43 @@
       this.note = this.querySelector("#settings-note");
       this.save = this.querySelector("#settings-save");
       this.save.onclick = () => this.apply();
+      const tabs = [...this.querySelectorAll("[data-section]")];
+      for (const [index, button] of tabs.entries()) {
+        const pane = this.querySelector(`[data-pane="${button.dataset.section}"]`);
+        button.id = `settings-tab-${button.dataset.section}`;
+        button.setAttribute("aria-controls", `settings-pane-${button.dataset.section}`);
+        button.tabIndex = index ? -1 : 0;
+        pane.id = `settings-pane-${button.dataset.section}`;
+        pane.setAttribute("aria-labelledby", button.id);
+        button.onclick = () => this.selectSection(button.dataset.section);
+        button.onkeydown = event => {
+          if (!["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
+          event.preventDefault();
+          const next = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1
+            : (index + (event.key === "ArrowDown" ? 1 : -1) + tabs.length) % tabs.length;
+          tabs[next].click(); tabs[next].focus();
+        };
+      }
       M.onRoute((route) => {
         const on = route === "settings";
         this.box.hidden = !on;
-        if (on) this.draw();
+        if (on) this.loadSettings();
+      });
+    }
+
+    selectSection(section) {
+      for (const pane of this.querySelectorAll("[data-pane]")) pane.hidden = pane.dataset.pane !== section;
+      for (const button of this.querySelectorAll("[data-section]")) {
+        button.setAttribute("aria-selected", String(button.dataset.section === section));
+        button.tabIndex = button.dataset.section === section ? 0 : -1;
+      }
+      this.save.hidden = !["appearance", "models", "compute", "maintenance"].includes(section);
+    }
+
+    loadSettings() {
+      this.draw().catch(error => {
+        this.note.replaceChildren(el("div", {class:"err"}, error.message),
+          el("button", {class:"ghost small", onclick:() => this.loadSettings()}, "Retry loading settings"));
       });
     }
 
@@ -49,15 +117,18 @@
     }
 
     check(key, label, why) {
-      const input = el("input", { type: "checkbox", id: key,
+      const input = el("input", { type: "checkbox", id: key, "aria-label":label,
                                   ...(this.pick[key] ? { checked: "1" } : {}) });
       input.onchange = () => { this.pick[key] = input.checked; };
       return el("label", { class: "opt", for: key }, input, M.row(label, why));
     }
 
     async draw() {
+      this.save.disabled = true;
+      this.note.textContent = "Loading preferences…";
       const s = await api("/ui/settings");
       if (M.refused(s)) return;
+      if (!s.ok) throw Error(s.error || "Could not load preferences.");
       const cur = s.settings || {};
       M.group = s.group || "";
       this.pick = {
@@ -67,8 +138,17 @@
         on_close: cur.on_close || "",
         auto_update: cur.auto_update !== false,
         autodownload_models: cur.autodownload_models !== false,
+        download_sources: cur.download_sources || "both",
         context: cur.context || 8192,
+        always_show_advanced: cur.always_show_advanced === true,
+        chat_max_output_tokens: cur.chat_max_output_tokens,
       };
+      M.setPreferences({...cur, resolved_theme:s.resolved_theme});
+      this.querySelector("#settings-interface").replaceChildren(
+        el("h2", {}, "Interface"),
+        this.check("always_show_advanced", "Always show advanced options",
+          "Keep detailed model, training, tool, and maintenance settings expanded across the workspace."),
+        el("p", {class:"hint"}, "Start with the essential controls. Open advanced options as you learn, or keep them visible here. Saved on this device."));
       this.querySelector("#settings-sub").textContent =
         `${s.name}${s.machine?.gpu ? " — " + s.machine.gpu : ""}`;
       const nav = document.querySelector("fleet-nav");
@@ -76,7 +156,7 @@
 
       this.querySelector("#settings-left").replaceChildren(
         el("div", { class: "group" },
-          el("h2", {}, "What this machine does"),
+          el("h2", {}, "What this device does"),
           this.radio("labels", "train", "Train models", ""),
           this.radio("labels", "prep", "Prepare data", ""),
           this.radio("labels", "train,prep", "Both", "")),
@@ -87,9 +167,19 @@
             "your computer will ask for your password"),
           this.radio("autostart", "manual", "Only when I open it", "")));
 
+      const output = el("input", {type:"number", min:"1", step:"1", "aria-label":"Default maximum output tokens"});
+      output.value = cur.chat_max_output_tokens ?? "";
+      output.oninput = () => { this.pick.chat_max_output_tokens = output.value === "" ? null : Number(output.value); };
       this.querySelector("#settings-chatting").replaceChildren(
-        el("h2", {}, "Chatting"),
-        M.contextPicker(cur.context || 8192, (n) => { this.pick.context = n; }));
+        el("h2", {}, "Model defaults"),
+        el("label", {}, "Default maximum output tokens", output),
+        el("p", {class:"hint"}, "Used by new conversations. Leave blank for no output cap. Existing conversations keep their selected limits. Reasoning effort is configured separately."),
+        el("h3", {}, "Download sources"),
+        this.radio("download_sources", "internet", "Internet only", "Skip LAN model transfers."),
+        this.radio("download_sources", "lan", "LAN only", "No Internet fallback for models or MTP heads."),
+        this.radio("download_sources", "both", "Both", "Try your Pool first, then the Internet."),
+        M.contextPicker(cur.context || 8192, (n) => { this.pick.context = n; }),
+        el("p", {class:"hint"}, "Serving context controls the model memory window. Coding conversations can select automatic context separately."));
 
       const status = el("div", { class: "hint", style: "margin-top:10px" },
         el("span", { class: "spin" }), " Checking for updates…");
@@ -97,14 +187,14 @@
         el("h2", {}, "Updates"),
         el("div", { class: "hint" }, `You have version ${s.version || "?"}.`),
         this.check("autodownload_models", "Get models automatically",
-          "from another machine on your network if one has it, otherwise the internet"),
+          "using the download sources selected above"),
         this.check("auto_update", "Download and install updates automatically",
           "checked once a day, put on when no job is running, and it restarts itself"),
         status);
 
       this.querySelector("#settings-when").replaceChildren(...M.kids(
         el("div", { class: "group" },
-          el("h2", {}, "When you need the machine"),
+          el("h2", {}, "When you need this device"),
           this.radio("on_paused", "stop", "Pausing stops what is running",
             "the run picks up from its last checkpoint"),
           this.radio("on_paused", "finish", "Pausing lets the current job finish", "")),
@@ -112,8 +202,8 @@
           el("h2", {}, "Closing the window"),
           this.radio("on_close", "", "Ask me each time", ""),
           this.radio("on_close", "background", "Keep running in the background",
-            "stays in the cluster"),
-          this.radio("on_close", "quit", "Quit", "leaves the cluster")),
+            "stays in the Pool"),
+          this.radio("on_close", "quit", "Quit", "leaves the Pool")),
         (s.schedule?.windows || []).length
           ? el("div", { class: "group" },
               el("h2", {}, "Not available"),
@@ -122,60 +212,131 @@
           : null));
 
       this.querySelector("#settings-again").replaceChildren(
-        el("h2", {}, "Set this machine up again"),
+        el("h2", {}, "Set this device up again"),
         el("div", { class: "hint" },
           "Walks through naming it and choosing a passphrase, as it did the first time. "
-          + "The clusters it is already in are left alone."),
+          + "The Pools it is already in are left alone."),
         el("button", { class: "ghost small",
           onclick: () => M.go("first-run") }, "Run setup again"));
 
-      this.drawLibraries();
-      this.drawUpdates(status);
-      this.drawRemoval();
+      M.agentRuntimeMaintenance(this.querySelector("#settings-agent-runtime"));
+      M.applyAdvanced(this);
+      this.save.disabled = false;
+      this.note.replaceChildren();
+      this.drawLibraries().catch(error => this.libraryError(error));
+      this.drawCredentials().catch(error => {
+        this.querySelector("#settings-credentials").replaceChildren(
+          el("h2", {}, "API credentials"), el("div", {class:"err"}, error.message));
+      });
+      this.drawUpdates(status).catch(() => { status.textContent = "Could not check for updates right now."; });
+      this.drawRemoval().catch(error => {
+        this.querySelector("#settings-removal").replaceChildren(el("h2", {}, "Remove Poolside"),
+          el("div", {class:"err"}, error.message));
+      });
+    }
+
+    async drawCredentials() {
+      const target = this.querySelector("#settings-credentials");
+      const result = await api("/ui/credentials");
+      if (M.refused(result)) return;
+      if (!result.ok) throw Error(result.error || "Could not load API credentials.");
+      const rows = result.credentials || [];
+      const name = el("input", {type:"text", autocomplete:"off", maxlength:"64", placeholder:"HF_TOKEN, ANTHROPIC_API_KEY, OPENAI_API_KEY"});
+      const value = el("input", {type:"password", autocomplete:"new-password", placeholder:"Paste a token or API key"});
+      const listed = el("div", {class:"hint"}, rows.length
+        ? rows.map(row => `${row.name} · ${row.present ? row.source : "not set"}`).join("\n")
+        : "No saved credentials.");
+      const note = el("div", {role:"status", "aria-live":"polite"});
+      const save = el("button", {class:"ghost small", type:"button"}, "Save credential");
+      const remove = el("button", {class:"ghost small", type:"button"}, "Remove credential");
+      save.onclick = async () => {
+        save.disabled = true;
+        try {
+          const saved = await api("/ui/credentials", {method:"POST", body:JSON.stringify({name:name.value, value:value.value})});
+          if (!saved.ok) throw Error(saved.error || "Could not save credential.");
+          value.value = "";
+          note.textContent = `${saved.saved} saved. The value is not shown again.`;
+          await this.drawCredentials();
+        } catch (error) { note.textContent = error.message; }
+        finally { save.disabled = false; }
+      };
+      remove.onclick = async () => {
+        remove.disabled = true;
+        try {
+          const deleted = await api("/ui/credentials", {method:"DELETE", body:JSON.stringify({name:name.value})});
+          if (!deleted.ok) throw Error(deleted.error || "Could not remove credential.");
+          note.textContent = deleted.removed ? `${deleted.name} removed.` : `${name.value} was not saved here.`;
+          value.value = "";
+          await this.drawCredentials();
+        } catch (error) { note.textContent = error.message; }
+        finally { remove.disabled = false; }
+      };
+      target.replaceChildren(el("h2", {}, "API credentials"),
+        el("div", {class:"hint"}, "Save multiple named tokens or API keys for Hugging Face, Claude, Codex, and other providers. Values are stored locally and never displayed."),
+        listed, el("label", {}, "Credential name", name), el("label", {}, "Token or API key", value),
+        el("div", {class:"settings-toolbar"}, save, remove), note);
     }
 
     async apply() {
-      const save = this.save;
-      save.disabled = true;
-      save.innerHTML = '<span class="spin"></span> Saving…';
-      const r = await api("/ui/settings", { method: "POST", body: JSON.stringify({
-        ...this.pick, labels: this.pick.labels ? this.pick.labels.split(",") : [] }) });
-      save.disabled = false;
-      save.textContent = "Save";
-      this.note.replaceChildren(r.manual
-        ? el("div", {}, el("div", { class: "err" }, r.manual_why || "Needs permission."),
-            el("pre", { class: "cmd" }, r.manual))
-        : el("div", { class: "ok" }, "Saved."));
+      this.save.disabled = true;
+      this.save.textContent = "Saving…";
+      this.box.setAttribute("aria-busy", "true");
+      try {
+        const result = await api("/ui/settings", {method:"POST", body:JSON.stringify({
+          ...this.pick, labels:this.pick.labels ? this.pick.labels.split(",") : []})});
+        if (!result.ok || result.error) throw Error(result.error || "Could not save preferences.");
+        M.setPreferences({...M.preferences, ...this.pick});
+        this.note.replaceChildren(result.manual
+          ? el("div", {}, el("div", {class:"err"}, result.manual_why || "Needs permission."),
+              el("pre", {class:"cmd"}, result.manual))
+          : el("div", {class:"ok"}, "Preferences saved."));
+      } catch (error) { this.note.replaceChildren(el("div", {class:"err"}, error.message)); }
+      finally {
+        this.save.disabled = false;
+        this.save.textContent = "Save preferences";
+        this.box.setAttribute("aria-busy", "false");
+      }
+    }
+
+    libraryError(error) {
+      this.querySelector("#settings-libs").replaceChildren(el("h2", {}, "Libraries & simulators"),
+        el("div", {class:"err", role:"status"}, error.message),
+        el("button", {class:"ghost small", onclick:() => this.drawLibraries().catch(error => this.libraryError(error))}, "Retry"));
     }
 
     async drawLibraries() {
       const libs = this.querySelector("#settings-libs");
       libs.hidden = false;
       libs.replaceChildren(
-        el("h2", {}, "What this machine can train with"),
+        el("h2", {}, "Libraries & simulators"),
         el("div", { class: "hint" }, el("span", { class: "spin" }), " Looking…"));
       const L = await api("/ui/libraries");
-      if (L.status === 501) { libs.hidden = true; return; }
+      if (!L.ok) {
+        libs.replaceChildren(el("h2", {}, "Libraries & simulators"),
+          el("div", {class:"err", role:"status"}, L.error || "Could not load installed libraries."),
+          el("button", {class:"ghost small", onclick:() => this.drawLibraries().catch(error => this.libraryError(error))}, "Retry"));
+        return;
+      }
       const want = new Set((L.libraries || []).filter((x) => x.installed).map((x) => x.name));
       const boxes = (L.libraries || []).map((lib) => {
         const input = el("input", { type: "checkbox", id: `lib-${lib.name}`,
-                                    ...(lib.installed || (!L.ready && lib.default)
-                                        ? { checked: "1" } : {}) });
-        if (!lib.installed && !L.ready && lib.default) want.add(lib.name);
+                                    ...(lib.installed ? { checked: "1" } : {}) });
         input.onchange = () => {
           if (input.checked) want.add(lib.name); else want.delete(lib.name);
         };
         return el("label", { class: "opt", for: `lib-${lib.name}` }, input,
           el("span", {},
             el("b", {}, lib.title),
+            el("span", {class:"library-kind"}, lib.installed ? "Installed" : "Available to install"),
             el("span", { class: "why" },
               `${lib.blurb} · ${lib.size_mb >= 1000
                 ? (lib.size_mb / 1000).toFixed(1) + " GB" : lib.size_mb + " MB"}`
-              + (lib.version ? ` · installed ${lib.version}` : ""))));
+              + (lib.version ? ` · version ${lib.version}` : "")
+              + (lib.python_version ? ` · Python ${lib.python_version}` : ""))));
       });
 
-      const apply = el("button", { class: "ghost" }, "Apply");
-      const out = el("div");
+      const apply = el("button", { class: "ghost" }, "Apply library changes");
+      const out = el("div", {role:"status", "aria-live":"polite"});
       apply.onclick = async () => {
         const before = new Set((L.libraries || []).filter((x) => x.installed).map((x) => x.name));
         const install = [...want].filter((n) => !before.has(n));
@@ -185,23 +346,34 @@
           return;
         }
         apply.disabled = true;
-        apply.innerHTML = '<span class="spin"></span> This can take a while…';
-        const r = await api("/ui/libraries", { method: "POST",
-          body: JSON.stringify({ install, remove }) });
-        apply.disabled = false;
-        apply.textContent = "Apply";
-        const failed = Object.entries(r.changed || {}).filter(([, v]) => !v.ok);
-        out.replaceChildren(failed.length
-          ? el("div", { class: "err" },
-              failed.map(([k, v]) => `${k}: ${v.error}`).join("; "))
-          : el("div", { class: "ok" }, "Done."));
+        apply.textContent = "Installing libraries…";
+        for (const box of libs.querySelectorAll("input")) box.disabled = true;
+        try {
+          const result = await api("/ui/libraries", {method:"POST", body:JSON.stringify({install, remove})});
+          if (!result.ok) throw Error(result.error || "Could not change installed libraries.");
+          const watch = async () => {
+            const changed = await M.followSetupJob(result.job, job => {
+              out.replaceChildren(el("div", {class:"hint", role:"status"}, `${job.state}: ${job.note}`));
+            });
+            const failed = Object.entries(changed.changed || {}).filter(([, value]) => !value.ok);
+            if (failed.length) throw Error(failed.map(([name, value]) => `${name}: ${value.error}`).join("; "));
+            await this.drawLibraries();
+            libs.append(el("div", {class:"ok", role:"status"}, "Library changes applied. Installed simulators are ready to reopen."));
+          };
+          watch().catch(error => out.replaceChildren(el("div", {class:"err", role:"status"}, error.message)));
+        } catch (error) { out.replaceChildren(el("div", {class:"err"}, error.message)); }
+        finally {
+          apply.disabled = false; apply.textContent = "Apply library changes";
+          for (const box of libs.querySelectorAll("input")) box.disabled = false;
+        }
       };
 
       libs.replaceChildren(
-        el("h2", {}, "What this machine can train with"),
+        el("h2", {}, "Libraries & simulators"),
         el("div", { class: "hint" },
-          L.ready ? "Installed alongside ml-stack, not in your system Python."
-                  : "Nothing installed yet. Tick what this machine should be able to do."),
+          (L.libraries || []).some(lib => lib.installed)
+            ? "Installed in managed environments. Uncheck a library to remove it; shared dependencies are retained."
+            : "Choose the capabilities you need. Simulator runtimes are remembered after installation."),
         ...boxes, apply, out);
     }
 
@@ -243,11 +415,11 @@
     async drawRemoval() {
       const removal = this.querySelector("#settings-removal");
       removal.replaceChildren(
-        el("h2", {}, "Remove ml-stack"),
-        el("div", { class: "hint" }, "Loading what is on this machine…"));
+        el("h2", {}, "Remove Poolside"),
+        el("div", { class: "hint" }, "Loading what is on this device…"));
       const u = await api("/ui/uninstall");
       if (u.error) {
-        removal.replaceChildren(el("h2", {}, "Remove ml-stack"),
+        removal.replaceChildren(el("h2", {}, "Remove Poolside"),
           el("div", { class: "err" }, u.error));
         return;
       }
@@ -285,7 +457,7 @@
             : null));
       };
       removal.replaceChildren(
-        el("h2", {}, "Remove ml-stack"),
+        el("h2", {}, "Remove Poolside"),
         el("div", { class: "hint" },
           "Ticked items go. Your models and your own files are left unless you say "
           + "otherwise."),

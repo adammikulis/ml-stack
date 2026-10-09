@@ -161,7 +161,7 @@ def stale(decisions: dict[str, dict[str, Any]], nodes: Mapping[str, Mapping[str,
     for one in (decisions.get("conflicts") or {}).values():
         ends = list((one or {}).get("ends") or ("", ""))
         said = list((one or {}).get("labels") or ("", ""))
-        out += int(any(gone(end, name) for end, name in zip(ends, said + ["", ""])))
+        out += int(any(gone(end, name) for end, name in zip(ends, said + ["", ""], strict=False)))
     for key, one in (decisions.get("suspects") or {}).items():
         out += int(gone(key, (one or {}).get("label")))
     return out

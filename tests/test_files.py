@@ -2,16 +2,20 @@
 
 import errno
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from types import SimpleNamespace
 
 import pytest
+from test_hub_discover import symlink
 
-from ml_stack import files as files_module
 from ml_stack.files import (
     UNVERSIONED,
     CrossDevice,
     promote,
     prune_orphans,
     read_json,
+    reading,
     version_of,
     versioned,
     write_json,
@@ -78,7 +82,7 @@ def test_a_directory_and_a_symlink_are_promoted_the_same_way(tmp_path):
     promote(staging, tmp_path / "checkpoint-100")
     assert (tmp_path / "checkpoint-100" / "weights").is_dir()
 
-    (tmp_path / "latest.tmp").symlink_to("checkpoint-100", target_is_directory=True)
+    symlink(tmp_path / "latest.tmp", "checkpoint-100", directory=True)
     promote(tmp_path / "latest.tmp", tmp_path / "latest")
     assert (tmp_path / "latest").is_symlink()
     assert (tmp_path / "latest" / "weights").is_dir()
@@ -90,7 +94,7 @@ def test_a_move_across_filesystems_says_so_rather_than_copying(tmp_path, monkeyp
     def elsewhere(_source, _target):
         raise OSError(errno.EXDEV, "Cross-device link")
 
-    monkeypatch.setattr(files_module.os, "replace", elsewhere)
+    monkeypatch.setattr("ml_stack.files.replace", elsewhere)
     (tmp_path / "cache").mkdir()
     with pytest.raises(CrossDevice, match="different filesystems"):
         promote(tmp_path / "cache", tmp_path / "shared")
@@ -138,3 +142,47 @@ def test_sha256_file_matches_hashlib_across_chunk_boundaries(tmp_path):
     path = tmp_path / "blob.bin"
     path.write_bytes(data)
     assert sha256_file(path, chunk=4096) == sha256_file(path) == hashlib.sha256(data).hexdigest()
+
+
+def test_status_updates_preserve_open_and_concurrent_snapshots(tmp_path):
+    from workspace_kit import run_python
+
+    from ml_stack.workspace import localagent
+
+    ws = SimpleNamespace(base=tmp_path / "workspace")
+    status = localagent.Status(ws, "worker")
+    status.update(state="paused", counter=0, payload="0" * 8192)
+    initial = localagent.status_of(ws, "worker")
+    ready = threading.Barrier(5)
+    stopped = threading.Event()
+
+    def read_snapshots():
+        ready.wait(timeout=10)
+        count = 0
+        while not stopped.is_set():
+            row = localagent.status_of(ws, "worker")
+            assert row["payload"] == str(row["counter"]) * 8192
+            assert row["state"] in {"paused", "running"}
+            count += 1
+        return count
+
+    code = '''import sys
+from pathlib import Path
+from types import SimpleNamespace
+from ml_stack.workspace.localagent import Status
+status = Status(SimpleNamespace(base=Path(sys.argv[1])), "worker")
+for counter in range(1, 51):
+    status.update(state="running", counter=counter, payload=str(counter) * 8192)
+'''
+    with reading(status.path) as snapshot, ThreadPoolExecutor(max_workers=4) as pool:
+        readers = [pool.submit(read_snapshots) for _ in range(4)]
+        ready.wait(timeout=10)
+        try:
+            result = run_python(code, ws.base, "", str(ws.base), timeout=30)
+            assert result.returncode == 0, result.stderr
+        finally:
+            stopped.set()
+        assert all(reader.result(timeout=10) > 0 for reader in readers)
+        assert json.load(snapshot) == initial
+    assert localagent.status_of(ws, "worker")["counter"] == 50
+    assert list(status.path.parent.glob("*.tmp")) == []

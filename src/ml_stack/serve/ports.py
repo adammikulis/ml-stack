@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import logging
 import socket
+import sys
 import time
+
+import psutil
 
 from ml_stack.serve.process import kill_pid, pid_exists
 
@@ -21,7 +24,8 @@ DEFAULT_HOST = "127.0.0.1"
 def port_is_free(port: int, host: str = DEFAULT_HOST) -> bool:
     """Whether ``port`` can be bound on ``host``. A pure socket check, no state."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        if sys.platform != "win32":  # on Windows SO_REUSEADDR binds over a live listener
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             sock.bind((host, port))
             return True
@@ -49,11 +53,6 @@ def wait_until_free(port: int, host: str = DEFAULT_HOST, *, timeout: float = 5.0
 
 def server_pids_on_port(port: int) -> list[int]:
     """Pids of *our* model-server binaries listening on ``port``."""
-    try:
-        import psutil
-    except ImportError:
-        return []
-
     pids: list[int] = []
     for process in psutil.process_iter(["pid", "name"]):
         name = process.info.get("name") or ""

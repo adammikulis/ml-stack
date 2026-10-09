@@ -1,4 +1,4 @@
-"""``ml-stack-fleet plan``: which model each peer serves, and how many slots, for N users.
+"""``ml-stack-cluster plan``: which model each peer serves, and how many slots, for N users.
 
 Profiles, memory records and peers are invented; the command is driven through `join.main`
 against daemons on loopback, and ``--apply`` against the real daemon handler over a
@@ -17,17 +17,18 @@ from test_fleet_join import WORDS, FakeDaemon, _free_tcp, _free_udp
 from ml_stack.fleet import join as joining
 from ml_stack.fleet.api import Daemon, make_handler
 from ml_stack.fleet.daemon import load_or_create_token
-from ml_stack.fleet.discovery import Advertiser, Beacon, join as join_cluster, load_cluster_key
+from ml_stack.fleet.discovery import Advertiser, Beacon, load_cluster_key
 from ml_stack.fleet.jobs import JobRunner
 from ml_stack.fleet.join import main
 from ml_stack.fleet.models import Models
 from ml_stack.fleet.plan import Room, fit_for, place, ranked, room_of, table
 from ml_stack.fleet.remote import Peer, PeerError
-from ml_stack.fleet.serving import Hosting, NoRoom, Serving
+from ml_stack.fleet.serving import Hosting, NoRoom, ServeSettings, Serving
 from ml_stack.http import Server
 from ml_stack.serve.fit import Fit
 from ml_stack.serve.profile import Profile
 from ml_stack.testing.fakes import fake_llama_binary
+from tests.cluster_support import join as join_cluster
 
 G = 1 << 30
 M = 1 << 20
@@ -287,7 +288,7 @@ class TestCommand:
 
     def test_in_no_cluster_it_says_join(self, tmp_path, capsys):
         assert main(["--cluster-key", str(tmp_path / "none.key"), "plan", "--users", "1"]) == 1
-        assert "ml-stack-fleet join" in capsys.readouterr().err
+        assert "ml-stack-cluster join" in capsys.readouterr().err
 
 
 # -- POST /serve, and --apply -------------------------------------------------------------
@@ -397,7 +398,7 @@ class TestServeRoute:
         hosting = Hosting(tmp_path, Serving(tmp_path / "serving.json"),
                           fits=lambda: list(FITS))
         with pytest.raises(NoRoom, match="24.0G"):
-            hosting.start(tmp_path / MID, name=MID, context=16384, parallel=8, room=24 * G)
+            hosting.start(tmp_path / MID, ServeSettings(name=MID, context=16384, parallel=8, room=24 * G))
 
 
 class TestApply:

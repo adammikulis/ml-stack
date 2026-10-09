@@ -1,21 +1,18 @@
 """The web as tools: search, read, look — with the network and the browser faked.
 
 Every engine, fetch and browser here is a stand-in, so nothing reaches the network and no
-browser opens. The one test that really searches is skipped unless ``MLSTACK_NET`` is set,
+browser opens. The one test that really searches is skipped unless ``ML_STACK_LIVE_NET=1`` is set,
 so a person can run it on purpose and an agent never does by accident.
 """
 
 from __future__ import annotations
 
 import contextlib
-import io
 import json
-import os
-import urllib.request
 
 import pytest
 
-from ml_stack import http, web
+from ml_stack import http, net, web
 from ml_stack.scrape.browser import BrowserUnavailable
 from ml_stack.web import (
     ENGINES,
@@ -32,6 +29,7 @@ from ml_stack.web import (
     searxng_engine,
     tools,
 )
+from tests.web_site import Site, loopback_pipeline
 
 PAGE = ("<html><head><title>Quenlow Robotics - About</title></head><body><nav>Home</nav>"
         "<h1>About the Quenlow works</h1>"
@@ -50,6 +48,11 @@ def public_dns(monkeypatch):
     def addresses(host):
         return ["10.0.0.5"] if host.endswith(".internal") else ["1.2.3.4"]
     monkeypatch.setattr(http, "_addresses", addresses)
+
+
+def inner(text):
+    """What lies between the untrusted-content fences."""
+    return text.split("\n", 1)[1].rsplit("\n", 1)[0]
 
 
 def fetching(pages):
@@ -153,36 +156,34 @@ def test_ddgs_rows_are_renamed_and_its_rate_limit_becomes_search_unavailable(mon
 
 
 def test_searxng_builds_the_json_search_url_and_parses_the_reply(monkeypatch):
-    opened = []
-
-    def urlopen(request, timeout=None, context=None):
-        opened.append((request.full_url, request.get_header("Accept")))
+    site = Site()
+    with net.use(loopback_pipeline()):
         body = json.dumps({"results": [
             {"title": "Pellard Foundry", "url": "https://pellard.example/",
              "content": "castings", "engine": "duckduckgo"},
             {"title": "second", "url": "https://tessyn.example/", "content": "c"}]})
-        return contextlib.closing(io.BytesIO(body.encode()))
-
-    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
-    # a self-hosted instance is on this side of the router, and must not be refused
-    monkeypatch.setenv("SEARXNG_URL", "http://localhost:8080/")
-    rows = searxng_engine("Pellard Foundry", 1)
+        site.routes["/search"] = (200, {"Content-Type": "application/json"}, body.encode())
+        # a self-hosted instance is on this side of the router, and must not be refused
+        monkeypatch.setenv("SEARXNG_URL", site.base + "/")
+        rows = searxng_engine("Pellard Foundry", 1)
+    site.close()
     assert rows == [{"title": "Pellard Foundry", "url": "https://pellard.example/",
                      "snippet": "castings"}]
-    assert opened == [("http://localhost:8080/search?q=Pellard+Foundry&format=json",
-                       "application/json")]
+    assert site.hits == ["/search?q=Pellard+Foundry&format=json"]
 
     monkeypatch.delenv("SEARXNG_URL")
-    with pytest.raises(SearchUnavailable, match="SEARXNG_URL"):
+    with pytest.raises(SearchUnavailable, match=r"SEARXNG_URL"):
         searxng_engine("anything", 1)
 
 
 def test_a_searxng_that_is_down_is_search_unavailable_not_a_traceback(monkeypatch):
-    def urlopen(request, timeout=None, context=None):
-        raise OSError("connection refused")
-    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
-    monkeypatch.setenv("SEARXNG_URL", "http://searx.internal")
-    with pytest.raises(SearchUnavailable, match="connection refused"):
+    import socket
+
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    monkeypatch.setenv("SEARXNG_URL", f"http://127.0.0.1:{port}")
+    with net.use(loopback_pipeline()), pytest.raises(SearchUnavailable, match=r"(?i)refused"):
         searxng_engine("kilns", 3)
 
 
@@ -195,7 +196,7 @@ def test_read_returns_title_and_text_and_never_the_scripts(public_dns):
     got = read("https://quenlow.example/about", fetch=fetch, browse=no_browser)
     assert got["url"] == "https://quenlow.example/about"
     assert got["title"] == "About the Quenlow works"
-    assert got["text"].startswith("Quenlow Robotics builds arms for potteries.")
+    assert inner(got["text"]).startswith("Quenlow Robotics builds arms for potteries.")
     assert "secret" not in got["text"] and "Home" not in got["text"]
     assert got["rendered"] is False and "truncated" not in got
 
@@ -205,8 +206,8 @@ def test_read_cuts_on_a_sentence_boundary_and_says_so(public_dns):
     fetch = fetching({"https://quenlow.example/about": PAGE})
     got = read("https://quenlow.example/about", fetch=fetch, browse=no_browser, limit=150)
     assert got["truncated"] is True
-    assert len(got["text"]) <= 150
-    assert got["text"].endswith(".") and got["text"] == \
+    assert len(inner(got["text"])) <= 150
+    assert inner(got["text"]).endswith(".") and inner(got["text"]) == \
         "Quenlow Robotics builds arms for potteries. It was founded in Ambleford. " \
         "The arms load kilns at night and unload them before anyone arrives."
 
@@ -266,7 +267,7 @@ def test_read_falls_through_to_the_browser_when_the_plain_text_is_thin(public_dn
     got = read("https://quenlow.example/", fetch=fetch, browse=browsing(page))
     assert page.visited == ["https://quenlow.example/"]
     assert got["rendered"] is True
-    assert got["text"].startswith("Quenlow Robotics builds arms")
+    assert "Quenlow Robotics builds arms" in got["text"]
 
 
 def test_read_does_not_open_a_browser_for_a_page_that_read_fine(public_dns):
@@ -288,8 +289,8 @@ def test_rendered_true_skips_the_plain_fetch(public_dns):
 def test_without_a_browser_a_thin_page_is_returned_as_it_was(public_dns):
     fetch = fetching({"https://quenlow.example/": SHELL})
     got = read("https://quenlow.example/", fetch=fetch, browse=no_browser)
-    assert got == {"url": "https://quenlow.example/", "title": "Quenlow", "text": "",
-                   "rendered": False}
+    assert got["text"].count("UNTRUSTED WEB CONTENT") == 2 and got["title"] == "Quenlow"
+    assert (got["url"], got["rendered"], got["untrusted"]) == ("https://quenlow.example/", False, True)
 
 
 def test_a_failed_plain_fetch_is_raised_when_the_browser_cannot_help(public_dns):
@@ -319,9 +320,9 @@ def test_look_returns_the_screenshot_first_then_the_largest_pictures(public_dns)
         return url.rsplit("/", 1)[1].encode()
 
     got = look("https://quenlow.example/about", browse=browsing(page), fetch_bytes=fetch_bytes)
-    assert set(got) == {"url", "title", "text", "_images"}
+    assert {"url", "title", "text", "_images", "untrusted", "origin"} <= set(got)
     assert got["title"] == "About the Quenlow works"
-    assert got["text"].startswith("Quenlow Robotics builds arms") and len(got["text"]) <= 1500
+    assert "Quenlow Robotics builds arms" in got["text"] and len(got["text"]) <= 1500 + 200
     assert got["_images"] == [PNG, b"big.jpg", b"medium.jpg", b"third.jpg"]
     assert fetched == ["https://quenlow.example/img/big.jpg",
                        "https://quenlow.example/img/medium.jpg",
@@ -365,9 +366,9 @@ def names(pairs):
     return [schema["function"]["name"] for schema, _ in pairs]
 
 
-def test_two_tools_for_a_text_model_and_three_for_one_that_sees():
-    assert names(tools()) == ["web_search", "web_read"]
-    assert names(tools(vision=True)) == ["web_search", "web_read", "web_look"]
+def test_the_tools_for_a_text_model_and_for_one_that_sees():
+    assert names(tools()) == ["web_search", "web_read", "web_download"]
+    assert names(tools(vision=True)) == ["web_search", "web_read", "web_look", "web_download"]
     for schema, callable_ in tools(vision=True):
         assert callable(callable_) and schema["type"] == "function"
         assert schema["function"]["parameters"]["required"]
@@ -413,40 +414,43 @@ def test_the_search_tool_says_nothing_matched_rather_than_returning_a_list():
         {"title": "t", "url": "https://tessyn.example/", "snippet": "s"}]
 
 
-def test_the_read_tool_turns_a_refusal_and_a_failure_into_none(public_dns):
+def test_the_read_tool_turns_a_refusal_and_a_failure_into_none(public_dns, origins):
     pytest.importorskip("trafilatura", reason="ml-stack[web] reads this")
     fetch = fetching({"https://quenlow.example/about": PAGE})
-    (_, _), (_, reading) = tools(fetch=fetch, browse=no_browser)
+    origins.typed("http://127.0.0.1/ https://quenlow.example/missing https://quenlow.example/about")
+    (_, _), (_, reading), _ = tools(fetch=fetch, browse=no_browser)
     assert reading({"url": "http://127.0.0.1/"})["none"].startswith("could not read")
     assert "none" in reading({"url": "https://quenlow.example/missing"})
     got = reading({"url": "https://quenlow.example/about"})
     assert got["title"] == "About the Quenlow works" and got["rendered"] is False
 
 
-def test_the_read_tool_passes_rendered_through(public_dns):
+def test_the_read_tool_passes_rendered_through(public_dns, origins):
     page = StubPage(PAGE)
-    (_, _), (_, reading) = tools(fetch=fetching({}), browse=browsing(page))
+    origins.typed("https://quenlow.example/")
+    (_, _), (_, reading), _ = tools(fetch=fetching({}), browse=browsing(page))
     got = reading({"url": "https://quenlow.example/", "rendered": True})
     assert got["rendered"] is True and page.visited == ["https://quenlow.example/"]
 
 
-def test_the_look_tool_says_no_browser_without_one(public_dns):
-    (_, _), (_, _), (_, looking) = tools(browse=no_browser, vision=True)
+def test_the_look_tool_says_no_browser_without_one(public_dns, origins):
+    origins.typed("https://quenlow.example/ http://localhost/")
+    (_, _), (_, _), (_, looking), _ = tools(browse=no_browser, vision=True)
     got = looking({"url": "https://quenlow.example/"})
     assert got == {"none": "no browser: playwright is not installed"}
     assert looking({"url": "http://localhost/"})["none"].startswith("could not look at")
 
 
-def test_the_look_tool_returns_the_shape_the_ask_loop_strips(public_dns):
+def test_the_look_tool_returns_the_shape_the_ask_loop_strips(public_dns, origins):
     pytest.importorskip("trafilatura", reason="ml-stack[web] reads this")
     page = StubPage(PAGE, images=[])
-    (_, _), (_, _), (_, looking) = tools(browse=browsing(page), vision=True)
+    origins.typed("https://quenlow.example/")
+    (_, _), (_, _), (_, looking), _ = tools(browse=browsing(page), vision=True)
     got = looking({"url": "https://quenlow.example/"})
     assert got["_images"] == [PNG] and got["title"] == "About the Quenlow works"
 
 
-@pytest.mark.skipif(not os.environ.get("MLSTACK_NET"),
-                    reason="really searches the web; set MLSTACK_NET=1 to run on purpose")
+@pytest.mark.live_net
 def test_a_real_search_returns_pages_with_links():
     """Deliberate: this one reaches ddgs and whatever engines it fronts. A rate limit is a
     skip, not a failure — it says something about the afternoon, not about the code."""

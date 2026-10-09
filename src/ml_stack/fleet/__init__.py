@@ -16,9 +16,10 @@ _WHERE = {
     "Conversations": "conversations",
     "Message": "conversations",
     "Daemon": "api",
+    "DaemonOptions": "daemon",
     "make_handler": "api",
     "load_or_create_token": "daemon",
-    "serve_forever": "daemon",
+    "serve": "daemon",
     "REPORT_GROUP": "device",
     "device_report": "device",
     "registered_reports": "device",
@@ -32,16 +33,13 @@ _WHERE = {
     "Beacon": "discovery",
     "DEFAULT_CLUSTER": "discovery",
     "DiscoveryError": "discovery",
-    "MIN_PASSPHRASE": "discovery",
-    "check_passphrase": "discovery",
+    "MIN_JOIN_LENGTH": "discovery",
     "cluster_group": "discovery",
     "create_cluster_key": "discovery",
     "derive_token": "discovery",
     "discover": "discovery",
-    "group_path": "discovery",
     "in_cluster": "discovery",
-    "join_cluster": "discovery",
-    "key_from_passphrase": "discovery",
+    "join_by_passphrase": "onboard.joining",
     "key_path": "discovery",
     "load_cluster_key": "discovery",
     "Suggestion": "catalogue",
@@ -79,7 +77,147 @@ _WHERE = {
     "run": "work",
 }
 
-__all__ = sorted(_WHERE)
+Advertiser: Any
+BENCH_KIND: Any
+Beacon: Any
+Candidate: Any
+ChatError: Any
+Conversation: Any
+Conversations: Any
+DEFAULT_CLUSTER: Any
+Daemon: Any
+DaemonOptions: Any
+DaemonError: Any
+DiscoveryError: Any
+Downloads: Any
+Endpoint: Any
+Getting: Any
+Job: Any
+JobRunner: Any
+MIN_JOIN_LENGTH: Any
+Message: Any
+Model: Any
+ModelError: Any
+Models: Any
+Peer: Any
+PeerError: Any
+Placement: Any
+REPORT_GROUP: Any
+Rates: Any
+Requires: Any
+Score: Any
+Served: Any
+Serving: Any
+Suggestion: Any
+Target: Any
+Unit: Any
+calibrate: Any
+candidates: Any
+choose: Any
+cluster_group: Any
+create_cluster_key: Any
+derive_token: Any
+device_report: Any
+discover: Any
+discover_serving: Any
+draft_beside: Any
+eligible: Any
+families: Any
+family_of: Any
+how_many: Any
+in_cluster: Any
+join_by_passphrase: Any
+is_unfiltered: Any
+key_path: Any
+load_cluster_key: Any
+load_or_create_token: Any
+make_handler: Any
+measure: Any
+popular: Any
+registered_reports: Any
+resolve: Any
+resolve_report: Any
+run: Any
+safe_relpath: Any
+searched_count: Any
+searched_families: Any
+serve: Any
+soonest: Any
+stdlib_device_report: Any
+suggestions: Any
+targets: Any
+
+__all__ = [
+    'BENCH_KIND',
+    'DEFAULT_CLUSTER',
+    'MIN_JOIN_LENGTH',
+    'REPORT_GROUP',
+    'Advertiser',
+    'Beacon',
+    'Candidate',
+    'ChatError',
+    'Conversation',
+    'Conversations',
+    'Daemon',
+    'DaemonError',
+    'DaemonOptions',
+    'DiscoveryError',
+    'Downloads',
+    'Endpoint',
+    'Getting',
+    'Job',
+    'JobRunner',
+    'Message',
+    'Model',
+    'ModelError',
+    'Models',
+    'Peer',
+    'PeerError',
+    'Placement',
+    'Rates',
+    'Requires',
+    'Score',
+    'Served',
+    'Serving',
+    'Suggestion',
+    'Target',
+    'Unit',
+    'calibrate',
+    'candidates',
+    'choose',
+    'cluster_group',
+    'create_cluster_key',
+    'derive_token',
+    'device_report',
+    'discover',
+    'discover_serving',
+    'draft_beside',
+    'eligible',
+    'families',
+    'family_of',
+    'how_many',
+    'in_cluster',
+    'is_unfiltered',
+    'join_by_passphrase',
+    'key_path',
+    'load_cluster_key',
+    'load_or_create_token',
+    'make_handler',
+    'measure',
+    'popular',
+    'registered_reports',
+    'resolve',
+    'resolve_report',
+    'run',
+    'safe_relpath',
+    'searched_count',
+    'searched_families',
+    'serve',
+    'soonest',
+    'stdlib_device_report',
+    'suggestions',
+    'targets',
+]
 
 
 def __getattr__(name: str) -> Any:

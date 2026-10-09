@@ -68,6 +68,7 @@ def test_the_whole_serving_becomes_the_arguments_serve_takes():
         "port": 8082, "context": 131072, "parallel": 4,
         "cache_type_k": "q8_0", "cache_type_v": "q8_0",
         "draft": "hf:owner/repo/mtp-Q8_0.gguf", "spec_type": "draft-mtp", "spec_draft_max": 4,
+        "spec_draft_type_k": "q8_0", "spec_draft_type_v": "q8_0",
         "mmproj": "/models/mmproj-F16.gguf", "reasoning_budget": 0,
     }
 
@@ -253,7 +254,7 @@ def test_a_knob_goes_to_the_section_that_owns_it_and_an_unknown_one_is_refused()
     # what the client is built with; `think` is taken per call and is in neither
     thinking = laid.over(think=False).talking
     assert thinking.request() == Request(n_predict=4096, temperature=0.7, top_k=20)
-    assert thinking.transport() == Transport(timeout=300.0)
+    assert thinking.transport() == Transport(timeout=None)
     with pytest.raises(TypeError, match="tightt"):
         config.over(tightt=True)
 
@@ -282,7 +283,7 @@ def test_one_run_leases_one_serving_for_the_bench_the_page_and_a_slot(shipped, l
         """One lease, without what is not the serving: the bench's prefix cache and skipped
         warm-up, and the manager, which is the named build asserted below."""
         return {k: v for k, v in kwargs.items()
-                if k not in ("cache_reuse", "warmup", "timeout", "manager")}
+                if k not in ("cache_reuse", "warmup", "timeout", "manager", "reason")}
 
     assert lease_of(asked[0][1]) == shipped.lease(), "the bench's"
     assert lease_of(asked[1][1]) == shipped.lease(), "the page's"
@@ -390,3 +391,33 @@ def test_one_cache_type_reads_both_ways():
     assert split_cache_type("") == ("", "")
     assert said_cache("q8_0", "q8_0") == "q8_0"
     assert said_cache("q8_0", "q4_0") == "q8_0/q4_0"
+
+
+def test_shared_chat_and_coding_acquire_verified_broker_lease(monkeypatch):
+    from contextlib import contextmanager
+    from types import SimpleNamespace
+
+    from ml_stack.serve import manager
+    from ml_stack.serve.serving import Config, served
+
+    calls = []
+    released = []
+
+    @contextmanager
+    def verified(model, **settings):
+        calls.append((model, settings))
+        try:
+            yield SimpleNamespace(base_url="http://127.0.0.1:65521", port=65521, adopted=True)
+        finally:
+            released.append(True)
+
+    monkeypatch.setattr(manager, "serve", verified)
+    monkeypatch.setattr(serving_mod, "serving_said", lambda _: "262144 tokens")
+    config = Config(serving=Serving(model="qwen.gguf", slot_context=262144, draft="mtp-qwen.gguf"))
+    with served(config, chat_template_file="shared.jinja") as endpoint:
+        assert endpoint.endswith(":65521")
+        assert not released
+    assert released == [True]
+    assert calls[0][1]["context"] == 262144
+    assert calls[0][1]["draft"] == "mtp-qwen.gguf"
+    assert calls[0][1]["chat_template_file"] == "shared.jinja"

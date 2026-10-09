@@ -141,6 +141,24 @@ class TestThePlan:
 
         monkeypatch.setattr(tool_calls, "device_for", lambda: "mps")
 
+    def test_configured_base_overrides_manifest_without_size_estimates(self, tmp_path):
+        from ml_stack.train.run import _base_of
+
+        config = validate("tool-calls", {"size": "e4b", "base": "invented/custom-causal"})
+        base, entry = _base_of("tool-calls", config, e4b_data(tmp_path))
+        assert base == "invented/custom-causal"
+        assert entry == {}
+
+    def test_empty_base_uses_manifest_then_size(self, tmp_path):
+        from ml_stack.train.run import _base_of
+
+        config = validate("tool-calls", {"size": "e4b", "base": ""})
+        assert _base_of("tool-calls", config, e4b_data(tmp_path))[0] == E4B
+        (tmp_path / "e4b-data" / "manifest.json").unlink()
+        base, entry = _base_of("tool-calls", config, tmp_path / "e4b-data")
+        assert base == E4B
+        assert entry["params_m"] == 7996
+
     def test_e4b_says_what_fits_and_what_it_will_take(self, tmp_path):
         config = validate("tool-calls", {"size": "e4b"})
         fit = plan_for("tool-calls", config, e4b_data(tmp_path))
@@ -215,7 +233,7 @@ class TestTheAdapter:
 
     def test_it_resumes_from_its_own_adapter(self, dataset, tmp_path):
         pytest.importorskip("peft", reason="ml-stack[train-lora]")
-        data, base = dataset
+        data, _base = dataset
         out = tmp_path / "run"
         config = {"lora": True, "steps": 20, "context": 256, "batch_size": 2,
                   "learning_rate": 0.001}

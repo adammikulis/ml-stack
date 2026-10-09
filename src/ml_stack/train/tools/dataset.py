@@ -8,6 +8,8 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from ml_stack.train.tools.drift import fingerprint
+
 HOLDOUT_EVERY = 10
 """One seed question in ten is held out, by hash, with every paraphrase of it."""
 
@@ -51,13 +53,15 @@ def write_dataset(out: Path, rows: Sequence[Mapping[str, Any]], *, base: str,
 
     The manifest is how the ``tool-calls`` recipe knows which chat template to render
     with: a conversation set is made *for* a model, and the recipe reads that here rather
-    than asking again.
+    than asking again. It also pins the tool schemas the rows were made for (``schema_hash``
+    and ``signatures``), which `drift.check` compares against the live tools.
     """
     out.mkdir(parents=True, exist_ok=True)
     train, holdout = split(rows)
     for name, part in (("train.jsonl", train), ("holdout.jsonl", holdout)):
         (out / name).write_text(lines(part))
+    pinned = fingerprint(rows[0]["tools"]) if rows and rows[0].get("tools") else {}
     summary = {"base": base, "rows": len(rows), "train": len(train), "holdout": len(holdout),
-               "per_tool": counts(rows), **manifest}
+               "per_tool": counts(rows), **pinned, **manifest}
     (out / "manifest.json").write_text(json.dumps(summary, indent=2))
     return summary

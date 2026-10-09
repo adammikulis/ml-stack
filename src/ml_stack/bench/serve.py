@@ -125,7 +125,7 @@ def drafted_by(config: Any, head: str) -> Any:
     """``config`` serving ``head``: a path or ``hf:`` reference, "" for none, or `EMBEDDED`."""
     if head == EMBEDDED:
         return config.over(draft="", spec_type="draft-mtp")
-    return config.over(draft=str(head or ""), spec_type="")
+    return config.over(draft=str(head or ""), spec_type="", mtp=False if not head else None)
 
 
 class NotLoaded(RuntimeError):
@@ -214,7 +214,8 @@ def up(config: Any, *, binary: str = "", serve_timeout: float = 900.0) -> Any:
         extra["manager"] = manager
     began = time.time()
     before_load = bench.machine_memory()
-    with ml_stack.serve.serve(config.model, timeout=serve_timeout, **extra) as server:
+    with ml_stack.serve.serve(config.model, timeout=serve_timeout, **extra,
+                              reason=f"bench of {Path(str(config.model)).name}") as server:
         loaded = time.time() - began
         _said_up(server, loaded, report)
         yield server, {**_held(config, server, report, build),
@@ -292,7 +293,7 @@ def _ask_way(load: _Load, way: Mapping[str, Any],
                        embed_url=loading.embed_url, embed_model=loading.embed_model)
     got = bench.measure(ask, questions, label=here, client=client, trace=loading.trace,
                         log=print, baseline=load.baseline, graph=load.graph,
-                        per_question=float(load.config.talking.timeout))
+                        per_question=load.config.talking.timeout)
     for row in got:
         row.steps = f"{row.steps}; server up in {load.loaded:.0f}s".strip("; ")
     record = {**bench.footprint(load.server.base_url), "graph": _which(load.graph),

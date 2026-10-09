@@ -1,34 +1,243 @@
 # Handoff
 
-**Every item here is a task.** A finished task is deleted, not marked done — what exists and
-why is in `README.md`, `docs/`, the code and `git log`. Each carries the context to pick it
-up cold. Rules: invented names only, everywhere (`tests/known-fixtures.txt`, or a rule in
-`contracts/name-shapes.json` when the refusal is a code fragment); tests build their own
-fixtures and never read `~/.ml-stack`; a measurement is estimated before it runs and smoked
-before it is paid for; the development branch is pushed after every merge and `main` is
-pushed by Adam alone (a push there cuts a release).
-The app that drives this library is `~/ai_ceo`; its `HANDOFF.md` holds what is
-Slack-specific. What the kept runs say is `docs/report-2026-09-23.md`,
-`docs/model-ranking.md`, `docs/architectures/` and `src/ml_stack/data/profiles.json` (the shape a model measured best in for one workload --
-`ask`, `ingest` or `chat` -- read by `ml-stack-serve up --for WORKLOAD` (profile by default;
-`--no-profile` serves the model bare), `sweep`, `extract` and `converse`).
+## Pending recovery work
 
-Settled: Flash-Next answers (80% F1 at 26.7 s/q, 100 questions) and extracts (96% node / 76%
-relation F1); its head is served at length 4, and the paired runs put lengths 2 to 7 at
-1.14-1.74x without separating them; one slot for extraction; `single` +8 pts on E4B at ten
-questions, unconfirmed.
+- NATS JetStream as an optional journal link: parked in `~/.ml-stack/bundles/nats-jetstream-parked-20261008.bundle` (verified complete history; tips from `git bundle list-heads`), branches fix/linux-immutable-runner, fix/linux-admission-stdio-current, fix/nats-*, feat/nats-*, feat/jetstream-message-store, fix/authenticated-agent-messages(-nats), docs/nats-coordination-quickstart, feat/canonical-writer-isolation, fix/test-kernel-isolation, fix/linux-runner-immutable. Depends on it: the message store replacing graph messages, the managed loopback broker, board-host/authority_machine checks (native task registration, CPU verification client), writer attribution in `chain.held`. Mesh journals are the board; JetStream may only become a link, never a host or authority.
+- Board delivery latency exceeds the existing budgets: measured single-recipient DM 479 ms and Board 363 ms against 50/150 ms. Reduce graph opening and integrity-query costs; preserve integrity, privacy and latency budgets. Evidence: `/private/tmp/ml-stack-board-observer-handoff.md`.
+- Preserve `/private/tmp/ml-stack-qwen-worker-project/published-source` while pending task scopes and the stopped worker reference it. Add an authenticated offline source-rebinding operation before removing this source anchor; preserve pending task states and grants.
+- Triage the remaining failures from the October 6 macOS background full red-team run at `920cf217`: 130 failed, 30 errors, 13,729 passed, 364 skipped. Re-run the remaining Board latency, serving, training, gym and fixture failures after scoped setup, pairing and installer repairs. Evidence: `/private/tmp/dev-final-background-full.log`, `/private/tmp/dev-full-failures.txt` and `/private/tmp/ml-stack-full-lifecycle-project-diagnosis.md`. Linux testing remains owner-paused.
+- Verify an authenticated connection and a Board message/reply with the other physical device after separate Dev profile activation. Local discovery and browser checks do not establish this roundtrip.
 
-Fixes first, then measurements that need the card, then what does not exist yet.
-Inside the fixes, most blocking first.
+## Overnight landing run (2026-10-08 to 2026-10-09, lead claude-828605)
 
-Nothing here is blocked by a kept measurement, a hash or a pin: `CLAUDE.md` says what that
-means and what it costs. An entry that reads "we cannot change that, it would invalidate
-the benchmarks" is an entry someone should rewrite as the change plus the re-measurement.
+Landed on origin/0.2dev, each after a run that exited 0 with a pass count and a green gate: gate made read-only and incremental (`173e52f1`), reranker (`efaccdfe`), measuring scheduler (`d92d5634`), keystore audit F-1..F-7 (`4fa7686d`), admission queue of 128 and the keystore_guard layer (`e3761c51`), admission failure runs unscheduled (`f405f6b3`), result-cache fix (`3bb493a0`), selector precision (`80e3c389`), ccache (`7c0ffdb3`), restart idle-retry and the recovery test (`d80d7621`), UI publication stack with chat capabilities (`ae9dcca0`).
 
+- **Not landed, ready:** farm-out prototype `5ac77886` on `worktree-agent-ae0631fa365cf413f` (`docs/test-farm.md`; loopback only, the real RTX 3090 Ti device was never contacted; needs a security review before it lands; its checklist "Bringing a real device in" waits for the Windows-side Claude and the owner). Fixed-cost guards on `worktree-agent-ad0e8f850ab97fff6` (far behind, overlaps the baseline in `scripts/test`). Baseline `test-agent-shell-baseline` (agent-marker plugin; `tests/test_running_on_linux.py` has 3 failures from the Linux-runner rewrite).
+- **The gate fails inside an agent session** (4 `tests/test_redteam_human_floor.py` cases and 13 `tests/test_worker_completion.py` tests see the session's own agent markers). Run it with `env -u CLAUDECODE -u AI_AGENT -u ML_STACK_WORKSPACE_AGENT -u ML_STACK_SESSION_HARNESS -u ML_STACK_SESSION_ID -u CLAUDE_CODE_ENTRYPOINT` until the baseline branch lands.
+- **The installed `ml_stack` in the pyenv site-packages is a 0.2.1 wheel from 2026-10-07**; the `ml-stack*` launchers follow `~/.ml-stack/runtimes` but the library import does not. Owner order: use our latest code continuously. A `.pth` or editable install of the primary checkout is needed (`editables` is missing; the auto-mode classifier refused the write to the shared pyenv). The old install is saved in the `pyenv-ml-stack` tarball in `~/.ml-stack/bundles`.
+- **The Board is unreachable from this checkout** (`ml-stack-workspace inbox`: "the project host was not authenticated by cluster discovery", later "this project already names another Board"), so no contact from the Windows-side Claude was read.
+- **Tests that fail on a clean tip:** four `tests/test_testslots.py` timing tests under heavy load (`test_invalid_rpc_token_cannot_acquire_capacity`, `test_idle_tail_workers_release_capacity_for_another_suite`, `test_short_tests_do_not_wait_for_a_polling_tail_between_batches`, `test_disconnected_rpc_waiter_releases_its_queue_entry`); the launch-ticket browser tests in `tests/test_conversations_workspace.py`; the `FakeDaemon` fixture in `tests/test_fleet_join.py` (no `device` argument); `tests/test_redteam_human_floor.py` depends on the session environment; the `scripts/test` broker still has no queue position or calibration run for agents.
+- **Restart audit issues not fixed:** capacity held for an uncertain launch has no person-gated release (`src/ml_stack/fleet/jobs.py:263`); a verification receipt is trusted from a file the run wrote (`src/ml_stack/runtime_store.py:55,62`); the chat repair path cannot register a candidate runtime (`src/ml_stack/fleet/runtime_repair.py:115-146`).
+- **Owner decisions pending:** 3.9 GB of unmanaged runtime trees under `~/.ml-stack/runtimes`; write-deny sandbox for the real-state check; keystore decisions D-1..D-8 (`docs/keystore-platform-audit-2026-10-08.md`).
+- **Parked Codex work:** about 450 distinct unlanded patches, of which 8 NATS-stack branches are in `~/.ml-stack/bundles/codex-parked-20261008.bundle` and the old land branch in the `land-old` bundle beside it (restore: `git fetch <bundle> <branch>:<branch>`, branch names from `git bundle list-heads`). Still unlanded: `integrate/dev-cpu`, the workspace reputation and attribution commits `133dd374` and `7f31bc29`, Studio (`feat/poolside-studio-mlx`), board-history rebuild-conversations, coordination batch.
+
+## Open from the claude session (2026-10-08)
+
+- **Broker branches 2-5 of the one-thing-computing rule are not started** (branch 1, the device field, is landed). `broker-purpose-not-exclusive`: `Broker._decide` in `src/ml_stack/serve/broker.py` still serialises same-purpose asks behind a held server (`busy`, `_first_for_purpose`); a different model under one purpose must get its own resident server when memory admits. Then `gate-compute-lease-per-device` (`serve/gate.py`), `workspace-allocation-device`, and `rule-docs-and-bench-profiles` (measure a CPU model beside a GPU one for memory-bandwidth cost; per-platform setting, default allowed). Rule: `AGENTS.md`, "One thing computing on the GPU at a time".
+- **Old GPU-rule wording remains** in `HANDOFF.md` (the serving section), `docs/experiments/iq-vs-kquant-metal.md:53`, `src/ml_stack/ingest/serving.py:87`, `src/ml_stack/bench/queue.py:21` and `tests/workspace_screen_corpus.py:35`; each states "one model on the GPU" and needs rewording or a decision.
+- **Branch hygiene rule (f) has no mechanical check**: a bound on `scripts/test` fixed cost needs an opt-in timing harness (AGENTS.md, "Branch hygiene and landing").
+- **Hooks are not verified end to end on the restored runtime.** SessionStart, SubagentStart/Stop and the nudge push (message text shown in the TUI) have only run from source; the nudge board fix needs a Board host restart. The installed `ml-stack-workspace` was down for a time during another agent's runtime deploy.
+- **`authority_machine` removal (`4ee616e7`) is unverified on two real machines**: discovery, certificate pinning and the host-address path are covered by fakes and in-process TLS only. The Projects and Tasks pages were not driven in a browser (browser tests fail on this machine). `board_host` is self-declared and tied to a device only by the pinned certificate.
+- **Owner has not reviewed the `AGENTS.md` rules changes** (authority registry, GPU rule, "The agents push; the owner does not").
+- **Not built, discussed:** attested instructions (one-time hash on UserPromptSubmit, taint tracking for delegated gates) and decision-model screening of board messages at ingest.
+- **Home pool, slices 1-12 not started** (`docs/home-pool.md`, section 3): tailnet IPv4 route display, device capability block with a `Requires` filter, board-fed landing queue, phone person credential, remote test runner, mesh board stage 1, remote-broker lease, phone capabilities, pool MCP tools, Tailscale prepare/verify, PWA client, wake and idle unload. Start with slices 1, 2 and 3 (independent). The tailnet IPv4 admission in `Invitations.mint`, `companion_routes` and `invite_routes` is fixed; the route display per device is not.
+- **Pool encryption: slices 1 (no TLS-off, TLS 1.3 floor) and 2 (per-device certificates, membership, revocation) are done, see `docs/pool-encryption.md` section 10; not started, in this order** (`docs/pool-encryption.md`, section 5, decisions 8.1): remove `ML_STACK_FLEET_TLS=off` and `http://` LAN project hosts and seal streams (1); per-device keys, signed membership and per-device revocation (2); TLS 1.3 mutual with pinned per-device certificates (2b); end-to-end DMs and notes via HPKE (4); encrypted-at-rest for the cluster key, TLS key and board graph (3); guest tenancy G1-G5 (Level 1 only unless attestation hardware is bought).
+- **Blocked until the product takes off: anything needing a paid Apple developer account** (owner constraint 2026-10-08): app attest or a signed helper, Level 2 guest tenancy on Apple silicon, secure enclave keys through a signed app, notarized or signed macOS and iOS builds for others, a native iPhone app, TestFlight, APNs push. Unblocked: PWA over HTTPS over Tailscale for phones, sideloaded Android app, unsigned local Mac builds, Level 1 guest tenancy (`docs/pool-encryption.md` section 8.1).
+- **Fleet jobs cannot run tests** (the `fleet/commands.py` allowlist has no test kind) and there is no pool-wide test dispatch; `docs/home-pool.md` slice 5 is the design.
+- **No idle unload and no Wake-on-LAN** for pool devices (`docs/home-pool.md` slice 12).
+- **A phone needs a person-credentialed device kind**: person-session routes are loopback-only (`host_ok` refuses a DNS Host and a `tailscale serve` proxy arrives as loopback), so slice 4 must add the kind before the PWA or a remote phone can command anything.
+
+- **The agent sandbox is staged, not installed or measured** (`docs/agent-sandbox.md`, `scripts/agent-sandbox`). The owner runs the fifteen acceptance steps; every sandboxed result in the compatibility matrix is predicted. Open design gaps: the workspace CLI writes `~/.ml-stack/workspace` from the agent's own process, so a sandboxed agent that may announce may also edit board files (needs the CLI to go through the daemon with `workspace/` read-only to agents); `testslots_rpc` binds an ephemeral loopback port that Linux and WSL cannot allow-list (needs a configurable fixed port); Codex's workspace-write cannot deny `.git/config` and `.git/hooks` in the shared git directory.
+
+## Landing queue phase 2 leftovers (2026-10-08)
+
+- Implemented: board requests, independent review, runner, pause and cancel, push of the development branch only (`docs/landing-queue.md`, "What is implemented"). Not built: (1) the task-lifecycle entry (an accepted task enters the queue from `reviewed()`; completion and rework through the `finish` and `blocked` events); (2) the SessionStart suggestion line when the queue is non-empty and no runner holds the claim; (3) the gate runs `scripts/test` synchronously inside `land_check.execute`, not through `scripts/test submit|wait`, so a cancel kills the gate process rather than cancelling a job; (4) a request from another device lands only if the runner's checkout already has the branch (no fetch from the requester); (5) a verified batch whose fast-forward is blocked is left `needs-human` and not retried; (6) stuck detection is output silence only, not broker job state.
+
+## Deferred by the second landing batch (2026-10-08)
+
+- **Mesh journals (signed, `docs/mesh-board.md`).**
+  - A person-only command to clear a damaged origin through `Journals.forgive` is not built. It needs an authority entry and human-floor registry entries, so no agent can run it.
+  - Acknowledgements are not signed, and `keys.json` and `damaged.json` are not sealed; a local writer can rewrite them.
+  - There is no per-peer request-rate limit, and the 4 MB request limit is applied after the body is read (`mesh_sync.route`), not before.
+  - Board order is not stable across devices (rows fold in merged order per device); a stable cross-device order is not built.
+  - A reply to a `name@dN` sender is not routed back to the device that wrote it.
+- **Person-session launch tickets (`docs/person-delegation.md`).**
+  - `POST /ui/setup/join` on a machine with no cluster still opens an uncredentialed session.
+  - The Windows and WSL window is not handled.
+  - Packaged-app acceptance for the owner: (1) fresh install, first run; (2) quit and reopen; (3) a stale window and Reopen; (4) a typed URL, then `ml-stack peers open` once; (5) an agent's `peers open` is refused and a curl with a forged `X-ML-Stack-Launch` header gets 403; (6) Production asks for the passphrase.
+- **Restart and durable jobs.** `job_exit` is untested on Windows; the other restart gaps are in the overnight section above.
+- **Unblock.**
+  - Three `project_connection` / remote failures still need tracing (see the baseline list in the batch 2 report).
+  - Hook diagnostics `post.reader-timeout` and `host not authenticated by cluster discovery` entries are untouched.
+- **Runtime cost.** `ml-stack runtime ensure --settle` has not run end to end on a real checkout.
+
+## Deferred by the third landing batch (2026-10-08)
+
+- **UI publication stack.**
+  - `GET /ui/board/agents` takes 4-8 s for 43 agents because `registered()` opens a store per agent; board routes are still O(N) in the verified log read.
+  - The python launcher `_health` accepts any JSON dict.
+  - `fix/poolside-chat-capabilities` landed with the UI publication batch (`ae9dcca0`), with its `RecursionError` fix.
+  - Not driven for real: the Tauri window, an MLX run in Studio, runtime repair.
+  - The Development pool sign-in (the `local-session` route, its screen and pool scoping) was dropped because launch tickets replaced it; a pool choice after sign-out needs a new design on the ticket model.
+  - About 22 older UI browser tests drift from the current page (credentials, invites, model_tasks, pool_browser, sdk_chat, simple_controls, workspace_browser, startup_model_page, tasks_ui, agent_controls, workspace_board_ui).
+- **Disk writes (`docs/disk-writes.md`, "What remains").** `claude-edit-guard` rewrites its whole index (4.5 s, 0.75 MB) after any `src/ml_stack` edit and agents may not edit it, so the HEAD-keyed index is the owner's change; bytes per SQLite/ladybug touch need `fs_usage` under sudo; `HEARTBEAT_S` for task leases needs a liveness decision.
+- **Earned trust (`docs/earned-trust.md`).** Section 8 slices (landing record M1, reviewer concentration M7, suspension rules, signed-head anchor in the keystore, coordinator eligibility from the ledger) are not built; the owner decisions are recorded in section 9 and its wording for AGENTS.md (section 10) is not yet added.
+- **Service and home pool (`docs/service.md`, `docs/home-pool.md`, `docs/pool-encryption.md`).** Plans only; the section 8 checklist items marked Violates (one cluster key, one account per device, no tenant id) are open.
+- **Coordination plumbing.** The lead-answer rule is in AGENTS.md; whether the claude-lead-attention hook nudges often enough is unmeasured.
+
+## Autostart units (prepare and install)
+
+- **`runtime-ensure` has not run unattended against a real checkout.** The unit runs `ml-stack runtime ensure` as no agent (no `ML_STACK_WORKSPACE_AGENT` in its environment) from the `ml-stack` launcher in the `--launchers` directory; it needs a first `ensure --checkout --launchers` run by a person or agent, and hourly runs on a checkout with local edits or a held commit have not been observed.
+- **No unit has run under a real service manager here.** The `launchctl bootstrap`/`bootout`, `systemctl --user`, `schtasks /XML` commands and copy-truncate log rotation under launchd are covered by a recorder and real files, not by a loaded unit. Run the reboot checklist in `docs/install.md` on a Mac and on the WSL device; the Windows task XML has not been loaded on Windows. systemd units have no watchdog because the daemon sends no `sd_notify`.
+- **`autostart.install` (UI toggle, join, `--persist`) still writes units from a running process.** The Settings and join flows call it without a manifest; moving them to prepare plus a person's `install` is the rest of the owner's decision that agents never install units.
+
+## Active work (2026-10-06)
+
+- **Speed up checks without reducing coverage.** `scripts/gates/_floors.py` now reuses the gate's
+  full tree fingerprint for its collection cache. An uncached `scripts/budgets` run still took
+  95.6 seconds; further profiling and safe optimization remain.
+
+
+
+## Pending setup and coverage
+
+- [ ] **The release signing key does not exist yet.** Run `scripts/release-key create --write` at a
+  terminal and commit `src/ml_stack/fleet/signing.py`. `packaging/install.sh` and `install.ps1`
+  still install an unsigned download.
+
+- [ ] **No real OS keystore prompt has been driven by hand.** Tests use fakes and the real-keystore
+  guard stays on; what a person sees on a first Keychain prompt is as documented in `docs/keystore.md`
+  and unobserved.
+- [ ] **The macOS desktop-session heuristic is a guess.** `keystore` and the dialog decide whether a
+  person could answer a prompt from a terminal or `DISPLAY`/`WAYLAND_DISPLAY`-style signals; on macOS
+  that is an approximation not checked on a real login, SSH or launchd session.
+- [ ] **`ml-stack-memory rekey` changes the file's salt.** A copy of a store made before a rekey
+  stays sealed under the old salt and key.
+- [ ] **Reputation hooks exist only in processes that call `reputation.install()`.** A process that
+  does not call it records nothing about the sources it deals with.
+- [ ] **The IQ-on-Metal refusal rests on thin evidence.** One model, one machine, nine and ten
+  questions (`docs/serving.md`); the pre-registered re-measurement is pending.
+- [ ] **Grant ledger, connector credential broker, a hard outward-send rule and the "what can it do
+  now" listing are not built** (`docs/assistant-security.md`, "Order of work").
+- [ ] **Requests inbox: sources not raised through it yet** (`docs/requests.md`). Fleet join requests
+  (`fleet/onboard/requests.py`, `fleet/onboard/cli.py` accept and decline), `ml-stack-security
+  approve-host` (`net/cli.py`, refusals in `net/policy.py`), the reputation notice
+  (`reputation/notice.py`, its own dialog), keystore unlock, hold windows and rule suggestions keep
+  their own prompts; the kinds exist in `ml_stack.requests.model.KINDS`.
+- [ ] **Requests page in the shell.** The element (`ui/assets/ml-requests.js`) and
+  `inbox.route.RequestsApp.dispatch` are not mounted in the workspace shell yet, and the page has
+  only had DOM-level tests (a probe of `plain()` under node), no browser run.
+- [ ] **Always allow answered in the UI saves no rule.** The call runs once; a rule is saved only from
+  the terminal's second prompt.
+- [ ] **A background process that cannot read the keystore keeps no requests on disk.** Sentinel's
+  dialog keeps its own in memory for that process; the page does not see them.
 ## Fixes
 
 What is broken, unproven, or claims more than it does. Nothing here is a new
 capability; every line is something that already exists not being what it says.
+
+### The agent loop
+
+- [ ] **Taint tracking has been run against one served model only.** `docs/taint.md` has Qwen3-4B
+  (20 web attempts per arm, 18 planted-text runs per guard). A larger model, more repetitions
+  and the red-team's direct-injection arms would say how the usability cost and the proven
+  versus unproven split move.
+- [ ] **Taint events have no subscriber.** `taint.subscribe(fn)` receives a `TaintEvent` for each
+  refused or questioned call; the sentinel branch's bus (`docs/sentinel.md`) is the intended
+  subscriber (`taint.subscribe(bus.emit)`) and is not written yet.
+- [ ] **No tool wrapper routes untrusted reads through `taint.extract`.** A tool whose answer has a
+  typed shape (a model listing, a version, a status) could return only the validated fields, and
+  then not contaminate; `taint.quarantined` does it for a callable, and nothing does it for an MCP
+  `ToolSource`. The free-text case (summarise this page) has no schema and stays fenced data.
+- [ ] **Pasted documents in the person's own turn are the person's text.** `Ledger.admit` takes a
+  `Level.UNTRUSTED` label for them, but no entry point (the CLI, a chat front end) labels a paste.
+- [ ] **MCP tasks are not driven.** The mcp 2.2 client has no tasks API, so a long-running tool
+  call cannot be polled or cancelled through `McpTools`, and task progress is not an agent
+  event. Progress for an ordinary call reaches `McpTools.on_progress` only.
+- [ ] **No tool-calling base-versus-tuned comparison in one command.** `ml-stack-train-tools eval`
+  scores one served model; comparing a base and a tuned model means running it against each
+  server and diffing the JSON.
+
+### The local agent (`docs/local-agent.md`)
+- Its approvals go to `localtools.ask_a_person`, which answers no; replace its body with a raised
+  request when the Requests inbox merges, so an agent in a role that asks can be answered.
+- No context trimming: a task is held inside the 32768-token context by its caps. A task with large
+  tool results needs a trim that drops whole oldest turns at a fixed boundary.
+- The guard's model-based screen (`native_screen`) is not attached to the local agent's chat.
+- `--orders-from` defaults to `claude`: whoever registers that id is obeyed.
+- The general local agent has no worktree of its own; Coding mode works in the selected project
+  directly, so edits need a separate checkout when isolation is required.
+
+### Sentinel wiring (`docs/sentinel.md`, "What is armed by default")
+
+- [x] **A bare `Agent`, the Broker (`_launch`, `lease`, `start`), the Broker and fleet daemons
+  (scan loop, decoys, authenticator watch) use sentinel by default**, with a logged opt-out that
+  needs a reason. Tests in `tests/test_sentinel_wiring_*.py` fail when the wiring is removed.
+- [x] **Model output, compaction summaries, `scrub_env` at the spawn helpers, `mcp_allowed` at
+  connect, behavioural canaries in the daemons' scan loop, aggregated guard events
+  (`GuardLogHandler`, `broker_listener`, `sandbox_listener`, unmanaged listeners) and a loopback
+  decoy endpoint are wired.** Tests: `tests/test_sentinel_canaries_scheduled.py`,
+  `test_sentinel_score_wiring.py`, `test_sentinel_screens_wired.py`,
+  `test_sentinel_decoy_endpoint.py`, each checked by breaking the wire.
+- [ ] **Still not wired:** the scan loop, canaries and decoy listener live in the daemons only (a
+  library user who calls `serve.serve()` or runs an `Agent` in a script gets start-time checks
+  and the per-session score, no timer and no decoy endpoint); nothing quarantines an MCP server
+  on its own; `exe_mismatches` is not scheduled; `taint.subscribe` has no sentinel subscriber;
+  an environment passed as `None` (inherit) is not scrubbed; the canary baseline is the model's
+  own first answers, and the false-alarm corpus for the decoy endpoint is 48 scripted runs.
+- [ ] **A model ml-stack did not pull is trusted at its first start** (pinned then, source `first-use`, logged).
+  A model it pulled (`gguf`, `safetensors`, through `net.download` / `net.accept`) is pinned at pull with
+  `source=pull`, and a signed manifest accepted from a peer must agree with the file at load (docs/sentinel.md,
+  "Supply chain"). Not armed: manifests match by file name only; a list is accepted only after a peer-first pull or the
+  onboarding `fetch` (no command takes one from a file, no vendor digest list is read); the serial high-water mark is a
+  sealed file the same user could reset; archives (llama.cpp builds, the Python bundle) are not pinned.
+- [ ] **The npm and cargo audit gates and the SBOM step have only run on recorded reports and locally**
+  (`tests/test_supply_chain_audit.py`); the first scheduled `audit.yml` run on GitHub is the real test (the cargo-audit
+  version in the workflow is pinned by hand), and the SBOM omits npm packages.
+- [ ] **A file edited in place with size and mtime restored is caught only by the next deep scan
+  round**, not at start (the start skips the hash when path, size, mtime and inode match the last
+  full verification).
+
+### Serving: one broker, one request at a time per pool
+- [ ] **Run `tests/test_serve_real_llama.py` on a card with nothing else on it** (`pytest
+  --slow tests/test_serve_real_llama.py`). It leases a real llama-server through the
+  broker, sends two requests from separate processes and checks the line of requests and
+  the stop on release; it skips while any other llama-server runs, so it has not run
+  against a real server yet.
+- [ ] **The machine's broker does not deliver `on_event` or `say` to its caller.** Over
+  its socket `RemoteBroker.start` answers once, and the caller is told only that the
+  server is ready. A load's progress (`loading`, `restoring`, a memory wait) belongs
+  streamed back as lines.
+- [ ] **One `gpu` pool.** A machine with several CUDA devices queues all their requests
+  in one line; `ServerSpec` has no device to put a server in a pool of its own.
+- [ ] **`adopt_unmanaged = ask` has no prompt.** `ServerManager.confirm` is the hook; no
+  command sets it, so `ask` adopts nothing from the CLI. vLLM, SGLang and MLX servers
+  started by hand are not found at all, only `llama-server`.
+
+### What still reaches the internet around the pipeline
+
+`docs/internet.md` is the list; each of these is a path in it.
+
+- [ ] **`ddgs` makes its own requests.** `web.ddgs_engine` hands the query to the library, which
+  opens its own connections to the engines, so the address check, the host policy and the size
+  cap do not apply to the search call itself (its results are cleaned and labelled). Replace it
+  with an engine written against `net.default().open`, or make SearXNG the default.
+- [ ] **pip installs unpinned dependencies.** `fleet/environment.py:Environment.pip` and
+  `fleet/updates.py:pip_install` run `pip install`, which talks to the index with pip's own
+  transport and checks no hashes. Download wheels through the pipeline into staging and install
+  from there with `--no-index --require-hashes`, or state the index and the packages and pin
+  them.
+- [ ] **`ml-stack-bench standard` lets lm-eval fetch datasets.** `datasets` downloads through
+  `huggingface_hub`'s transport. Fetch the datasets a task names through `hub.snapshot` and run
+  the harness with `HF_HUB_OFFLINE=1`.
+- [ ] **The browser resolves names itself.** `net/browserguard.py` checks the address of every
+  request, then Chromium resolves the name again to connect, so a name whose answer changes in
+  between reaches a private address. Pin with `--host-resolver-rules` from the checked answer,
+  or send the browser through a local proxy that connects to the pinned address.
+- [ ] **Windows Defender and Linux ClamAV are untested here.** The Defender command line and
+  exit codes are tested against a stand-in script; ClamAV was exercised on macOS only. Run
+  `tests/test_net_scan.py` on a Windows machine with Defender and on Linux with `clamav`
+  installed, and keep the result in `docs/internet.md`.
+- [ ] **The hash-reputation lookup has met no real service.** It is tested against a local
+  server shaped like VirusTotal's answer, and nothing constructs `HashLookup` outside tests (there is no
+  `ML_STACK_NET_HASH_LOOKUP` switch). Wire it behind an opt-in, run it once with a key
+  (`ml-stack-credentials set VIRUSTOTAL_API_KEY`, then approve `www.virustotal.com`) and compare the fields.
+- [ ] **A `/metrics` address in the fleet view is fetched from this machine.** `fleet/ui.py:_scraped`
+  opens whatever a signed-in person typed, loopback and LAN included. Limit it to loopback and
+  the fleet's peers, or send it through `net`.
+- [ ] **Branch tracking installs what it pulls.** `fleet/updates.py:track_once` runs
+  `pip install -e .` after a fast-forward of a branch a person chose to follow. Show the diff
+  of the packaging files to the person, or install only from a tag with a digest.
 
 ### Getting it onto a machine that is not this one
 
@@ -37,10 +246,10 @@ capability; every line is something that already exists not being what it says.
   "Machine Learning toolkit and algorithms library", last uploaded 2018-09-14 -- and a
   pending publisher for it is refused. `ml-stack` itself is unregistered, so this is a
   request to waive the similarity check at `github.com/pypi/support`, not a PEP 541
-  takeover of `mlstack`. The name stays `ml-stack` (Adam, 2026-09-18): `llm-stack` is
+  takeover of `mlstack`. The name stays `ml-stack` (the owner, 2026-09-18): `llm-stack` is
   refused the same way by `llmstack`, which unlike `mlstack` is live and in this field,
   and every other free single word is free because it is obscure. When the waiver lands,
-  add the pending publisher -- owner `adammikulis`, repository `ml-stack`, workflow
+  add the pending publisher -- the owner's GitHub account, repository `ml-stack`, workflow
   `release.yml`, no environment. Until then it uploads nothing and the docs install from
   git.
 - [ ] **Set the `PYPI_ENABLED` repository variable to `true` once the waiver above lands
@@ -50,7 +259,7 @@ capability; every line is something that already exists not being what it says.
   turn uploads on.
 
 ### Not losing what it read
-- [ ] **Two ladybug faults are worked around here and stay here** (Adam, 2026-09-04: no
+- [ ] **Two ladybug faults are worked around here and stay here** (the owner, 2026-09-04: no
   upstreaming to public repositories). `CypherStore._run` prepares every statement that
   carries values afresh, and `access.read_lock` keeps a writer out while a read runs.
   `tests/test_graph_engine_contract.py` has one test for each that goes red when a ladybug
@@ -89,7 +298,7 @@ capability; every line is something that already exists not being what it says.
 
 ### The vocabulary
 
-Words this library coined that a reader has to learn before the code means anything. Adam,
+Words this library coined that a reader has to learn before the code means anything. the owner,
 2026-09-09, on `measured shape`: "it tells you nothing"; "look at the other jargon and see
 if it's AI-ese". `lease` stays -- it says what it does for server talk. Counts are uses
 across `src/`.
@@ -146,7 +355,7 @@ across `src/`.
   Worth doing next in this order: `ml-stack-setup`
   and `ml-stack-doctor` (one module, two entry points), `ml-stack-ingest`,
   `ml-stack-models`, `ml-stack-store`, `ml-stack-speech`, `ml-stack-train-run`,
-  `ml-stack-train-tools`, `ml-stack-do`, `ml-stack-claude`, `ml-stack-agent`,
+  `ml-stack-train-tools`, `ml-stack-chat`, `ml-stack-claude`, `ml-stack-agent`,
   `ml-stack-graph`, `ml-stack-audit`, `ml-stack-suite`, `ml-stack-fleet`,
   `ml-stack-peers`, `ml-stack-traind`. A command whose row in the README's table changes
   is a change to `ml_stack.cli.reference` and `scripts/reference --write`.
@@ -177,6 +386,35 @@ across `src/`.
   moves below `graph`; the other two are a page and a request handler leasing a server,
   which is what the machine layer is for.
 
+### Red-teaming
+
+`python -m ml_stack.redteam` and `docs/redteam.md` exist; what is missing from them:
+
+- [ ] **Re-run `docs/redteam/baseline-2026-10-02.json` after each of agent, decide, hardening and
+  model-discovery lands.** `python -m ml_stack.redteam run --against docs/redteam/baseline-2026-10-02.json`
+  needs an installed GGUF and `pip install -e ".[redteam]"` in its own virtualenv. The kept baseline
+  was measured on `0.2dev` merged with `agent/port-pcbe` and `agent/hardening` (see the baseline's
+  header); the `loop` and `compaction` scenarios import `ml_stack.agent`, so
+  `.github/workflows/redteam.yml` runs only `extraction,chat,fleet` until it is on the
+  development branch -- add `loop,compaction` to its `--scenarios` then.
+- [ ] **The guard benchmark is not written.** The brief's precision/recall of tool-call guards on
+  injected against benign calls needs a `guard` scenario: labelled tool-call contexts built from
+  `styles.json`, the pages and the PyRIT converters, each guard asked `before_tool_call`, recall and
+  false-positive rate reported per guard. `scenarios/loop.py:PolicyGuard` is the reference guard to
+  start from. `ml_stack.decide.guard.ToolCallGuard` uses its own `ml_stack.interventions` (`Call`,
+  `Context`, `Verdict`), not `ml_stack.agent.interventions`; one of the two has to go before the
+  benchmark can take both.
+- [ ] **Multi-turn attacks and a judge are not wired.** PyRIT's `CrescendoAttack`, `PAIRAttack` and
+  `RedTeamingAttack` need an adversarial chat target and a scorer that is not a canary; the local
+  model could play both (`pyrit_bridge.ResponderTarget` wraps any `Responder`), with its scores
+  reported as noisy. Every scorer today is objective evidence.
+- [ ] **The findings in `docs/redteam/findings.md` marked open have an owner and no fix.** Each
+  names the file, a reproducing `python -m ml_stack.redteam run --scenarios ...` line and the
+  test that should go red when it is fixed.
+- [ ] **Check the `redteam` extra on Python 3.11, 3.12 and 3.14 by installing it.** PyRIT 1.1.0
+  declares `>=3.10,<3.15` and `uv pip compile` resolves it for all three; only 3.13 was installed
+  and run.
+
 ### Finding a model
 
 - [ ] **Two callers still decide for themselves what an `hf:` reference means.**
@@ -190,6 +428,27 @@ across `src/`.
   not a reason to leave three answers in the tree: pick one meaning, make `located` the
   only place that holds it, and record which kept runs stop being comparable. Whoever takes
   it should check `bench.serve.served` and `serve/preflight.py` first.
+
+- [ ] **`hub.find`, `hub.files`, `hub.fetch`, `hub.card` and the draft lookups still go
+  through `huggingface_hub`.** `hub.remote` (listing, search) and `hub.pull` do the same over
+  plain HTTP with resume, checksums and progress. Move the first group onto the second so
+  `ml-stack-models find|files|fetch` work without the `hub` extra and put files in the
+  store `discover()` reads first, and so `hub.fetch` stops being a second download path.
+- [ ] **Folders for LM Studio, GPT4All, Jan, ModelScope and KaggleHub, and every Linux and
+  Windows folder in `hub.places`, follow each tool's documentation.** Only the Hugging Face
+  cache, llama.cpp's cache and Ollama were read off installs, all on macOS. Run
+  `ml-stack-models where` on a machine with each tool and set `verified` in `hub/places.py`.
+- [ ] **The memory estimate is measured only with flash attention on, on Apple silicon.**
+  Flash attention off, a draft model, partial offload, CUDA, ROCm and Windows are formulas
+  with no load log behind them, and `hub.probe`'s `nvidia-smi` and `rocm-smi` readers have
+  only been run on sample output. Each needs a machine with that hardware and the table in
+  `docs/model-discovery.md` extended.
+- [ ] **`suggest_model` ranks by parameters and quantisation, not by a score.** The model
+  ranking in `docs/model-ranking.md` and `data/profiles.json` are per workload and per model
+  family; feed them in so "recommended for this machine" follows a measurement.
+- [ ] **Pulls read `HF_TOKEN` and the login file by hand and fetch with `ml_stack.http`.**
+  When `ml_stack.credentials` and the guarded fetch land (`agent/hardening`), read the token
+  through the first and route the redirect target through the second.
 
 ### The shared fakes
 
@@ -212,8 +471,7 @@ across `src/`.
 ### Measuring across the fleet
 - [ ] **Run it for real across two machines.** Everything is tested against fakes and
   loopback; nothing has crossed a real network or a real Windows box. One visit:
-  `irm https://raw.githubusercontent.com/adammikulis/ml-stack/main/packaging/install.ps1 |
-  iex` (the app) or the `--headless` mode, then from here `ml-stack-fleet status`, a
+  `packaging/install.ps1` from the release repository (the app) or the `--headless` mode, then from here `ml-stack-fleet status`, a
   `ml-stack-fleet plan --users 3 --context 16384 --apply`, and a `sweep --fleet --serve
   gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf --sample 6`. Expect bugs; the daemon's log and
   `ml-stack-doctor` are the first two places to look. After that the Windows box follows
@@ -279,7 +537,7 @@ across `src/`.
   `test_fleet_daemon.py` 1,002, `test_fleet_models.py` 969, `test_hub.py` 963,
   `test_fleet_join.py` 936. Widen `ROOTS` to `tests/` and split all thirteen; the gate
   takes no budget line, so this lands as one branch per file, not as a recorded number.
-  Held until 0.2.0 was cut (Adam, 2026-09-18) on sequencing alone -- a 4,828-line file is
+  Held until 0.2.0 was cut (the owner, 2026-09-18) on sequencing alone -- a 4,828-line file is
   not a one-branch job -- and nothing else.
 - [ ] **`tests/test_graph_ask.py` (2,383 lines) tests five modules under the name of one
   that is gone.** `graph/ask.py` is now `graph/prompts.py`, `graph/looking.py`,
@@ -302,9 +560,78 @@ across `src/`.
   milliseconds and advertises `tts` and `vad`. Both go away if the probe runs somewhere
   that is not the daemon's own process.
 
+### The test suite
+
+- [ ] **The red-team runs do not use the verdict cache yet.** `ml_stack.testing.verdicts` has the
+  cache (key: model-file hash, attack id, guard or prompt version, source of the modules the
+  attack touches; a failing verdict is never served), `sample` (seeded tenth plus every class
+  touching a changed file) and `Limits` (few tokens, thinking off, `cache_prompt`, the canary as a
+  stop string). `ml_stack.redteam` lives on `agent/redteam` and is not on this branch, so nothing
+  calls them. After that branch lands: wrap each scenario's `execute` in `verdicts.run`, add
+  `--no-cache` and `--quick` (the sample) to the red-team command and keep the full sweep as the
+  nightly and release command, declare each scenario's `surfaces`, and send `Limits.body(...)` with
+  every request. Then measure per-attack and total wall time with and without the cache against a
+  real model through the broker, serially, and check the cached verdicts equal an uncached full
+  run on a sample; none of that has been measured, only the scripted Bash-guard layer (20
+  attacks: 1.3 s uncached, 0.00 s on a warm cache).
+- [ ] **Tests that assert a wall-clock bound fail on a loaded machine.** `test_serve.py` (a
+  negative-cache lease under 0.5 s), `test_fleet_join.py` (`peer_pause` with no cluster under
+  1 s), `test_client.py` (a dead process polled under 2 s), `test_fleet_bench.py` (a preparing
+  handle under 2 s, an install slower than 4 s), `test_bench_selfcheck.py` (under 10 s),
+  `test_fleet_work.py` (under 10 s), `test_ingest.py` (a 300-unit fold under 20 s). Each wants the
+  clock handed in, or a count of polls or calls in place of seconds.
+- [ ] **`scripts/test fast` has not been timed on a quiet machine.** The target is under 30 s at
+  `-n 4`; it was measured only beside other suites (load 90 to 270), where it took 143 CPU
+  seconds. Time it alone, and re-run `scripts/test heavy --junit j.xml` if it is over.
+- [ ] **`scripts/test quick` reruns everything when the installed packages change.** pytest-testmon
+  records the package list in `.testmondata`, so any `pip install` in the shared interpreter
+  makes the next `quick` a full run, and each new worktree pays one full run to record its map.
+  Seeding a new worktree's map from the last one, or ignoring the packages that change often
+  (`testmon_ignore_dependencies`), would stop that.
+- [ ] **`scripts/verify-quick` has covered seven modules, not fifteen, and `quick` reruns about
+  855 tests whatever changed.** It mutated `serve/ports`, `serve/escalation`, `client/tokens`,
+  `client/cache`, `harness`, `claude` and `hub/naming`; the one miss (`claude.main`, reached only
+  through `tests/test_cli_help.py`'s computed import) is covered by `affected.dynamic_tests` and
+  caught on the re-run. Not yet covered: `fleet`, `http`, `ui`, `train`, `units` and the
+  credential code in `fleet/session`. The 855 tests are a constant set testmon selects on top of
+  the change (831 to 855 in every row, load 190 to 240); what makes them always affected is not
+  found, and it is most of `quick`'s run time.
+- [ ] **Two slow tests fail under load and pass alone.** `test_fleet_daemon.py::
+  test_the_default_is_still_one_job_at_a_time` and `test_fleet_discovery.py::
+  test_peers_ls_reports_the_running_daemon` (a fixture error) failed in a `--slow -n 2` run of
+  the fleet files beside other suites (load 40 to 100) and passed alone. Both wait on a real
+  daemon with a fixed deadline; they want a deadline that scales or a readiness probe. The rest of
+  the slow tier has not been run under `_no_public_network`, which refuses a connection or name
+  lookup beyond the LAN in every test.
+
+### The agent workspace
+
+`ml_stack.workspace` (`docs/workspace.md`) is a library, a command and MCP tools over a state
+directory. What it does not do yet:
+- [ ] **A loopback daemon** answering `macauth` signed requests, for an agent that runs as
+  another user or in a sandbox that cannot share the directory. Today the boundary is the
+  account.
+- [ ] **A repair command** for a damaged log: a broken chain refuses new rows until someone
+  moves the file aside by hand.
+- [ ] **Claims keyed to a process start time**, so a reused pid does not keep a dead owner's
+  claim alive until its TTL.
+- [ ] **Scratch size enforced as files are written**: the limit is checked when a folder is
+  made and when `scratch-ls` runs, not on each write.
+- [ ] **Embedding search over notes** through the graph store; keyword search through
+  `graph.search.lexical` is what exists.
+- [ ] **Embedding search over files**: `file search` ranks words with `graph.search.lexical`
+  fused per word; vectors are not used.
+- [ ] **A request to the person for a held file**: a held file waits in the quarantine
+  (`quarantine-ls`); nothing raises a `requests` item for it.
+- [ ] **The verified or claimed model on a file's `posted_by` edge**, once model identity is
+  on the integration branch; the edge carries `agent-claimed` only.
+- [ ] **The Board page lists a file's download on its message** but has no per-board file list.
+- [ ] **Files outlive their message only for the person**: `gc` shreds the content of a
+  file once its messages are pruned; a longer-lived file store needs its own retention.
+
 ## Measurements
 
-Each needs the GPU and Adam's call. Estimate before it runs, smoke it before it is
+Each needs the GPU and the owner's call. Estimate before it runs, smoke it before it is
 paid for, and one thing on the card at a time.
 
 ### Served shapes with no paired baseline
@@ -349,7 +676,7 @@ no such pair, so what their head buys is unmeasured; each is read again with
   `ServerUnreachable` -- nothing was serving on 8080 at the time -- so it needs
   `ml-stack-ingest retry --out ~/.ml-stack/sources.ladybug` before a `--resume` reads it for
   real; the other six have never been attempted. Whether they are worth it -- about three
-  days of GPU at 86 s a unit, one slot -- is Adam's call; the command is `ml-stack-ingest
+  days of GPU at 86 s a unit, one slot -- is the owner's call; the command is `ml-stack-ingest
   ~/Documents/Textbooks/<pdf> --out ~/.ml-stack/sources.ladybug --model <flash-next>
   --images --resume --serve-port 8080`, one source at a time, and it tidies itself at the
   source's end. Two answers before that: what a question over the store scores
@@ -498,7 +825,7 @@ works against any client, lm-eval included. Servers are now launched with `--met
 
 ### Flash-Next, two builds: llama.cpp (unsloth GGUF Q4_K_XL, with and without the draft head) against Ollama (MLX, nvfp4)
 
-Adam, 2026-09-03: which is better, faster, or both; a LinkedIn graphic; "if ollama can't
+the owner, 2026-09-03: which is better, faster, or both; a LinkedIn graphic; "if ollama can't
 keep up due to lack of drafting head, points in llama.cpp's favor"; "make sure we're
 measuring actual max mem usage during the test". The machine has 128 GB; the GGUF serves at
 ~90 GB and the Ollama model is 104 GB on disk (`qwen3.8-flash-next:125b-mlx`, 1658
@@ -646,7 +973,7 @@ time with the page's server down for the Ollama half.
   the sweep would settle. `chat` has no bench of its own -- the world writer and
   `fleet.chat` both point at a server already up -- so measuring it needs a command first.
 
-Adam, 2026-09-04: "we're never going to have that many users, so flash-next is the way to
+the owner, 2026-09-04: "we're never going to have that many users, so flash-next is the way to
 go (with shared MTP) always." So ranking a second model is not worth GPU: `gpt-oss-20b`
 (a profile, no fit record), `Qwen3.8-27B` (a fit record, no profile) and Flash-Next
 `IQ4_XS` (a fit record, no profile) stay half-measured on purpose, and `ml-stack-fleet
@@ -684,14 +1011,14 @@ plan` names them as unplaceable rather than guessing.
   2.1k a question from 5.2k; F1 81% against 85% inside the ±19 band. But calls went 6.2 to
   7.7 a question -- 22 `show` calls over nine questions where one is the design -- and
   written tokens 5.1k to 7.8k, so the wall clock (27.7 against 25.6 s/q) did not move; three
-  agents' suites were running, so the wall clock is unreliable either way (Adam). Next:
+  agents' suites were running, so the wall clock is unreliable either way (the owner). Next:
   `show --trace flashprefix-plain`, find what invites the second `show` (the show nudge now
   offers every tool), then a quiet `--sample 20` of both.
 - [ ] **The fine-tuned tool caller.** `ml-stack-train-tools from-bench` over the traced runs
   (traces are on by default at ≤20 questions; the hundred-question runs before that carry
   none -- rerun Flash-Next's hundred with `--trace` for ~5,000 turns), then
   `ml-stack-train-run --recipe tool-calls --size e4b --lora --export-gguf --yes` (~18 h
-  here; Adam's go-ahead), then the measure in `docs/research/tool-caller-finetune.md`.
+  here; the owner's go-ahead), then the measure in `docs/research/tool-caller-finetune.md`.
 - [ ] **Watch ggml-org/llama.cpp#27836, then measure it here; nobody has compared it to
   the fork.** A draft, last touched 2026-09-02, checked 2026-09-06. Mainline is b10825,
   the fork b10715, and the profile pins `--build unsloth` so mainline moving changes
@@ -725,6 +1052,30 @@ Capabilities that do not exist yet.
 - [ ] **A router across the fleet.** `ml-stack-fleet plan --apply` serves the placement;
   nothing yet sends a new session to a free slot on the best model. The daemon's `/infer`
   proxies by model name on one machine; the router picks the machine.
+
+### Decision models
+
+- [ ] **Trained deciders are not in model discovery.** `ml_stack.decide.registry` records them
+  by name under the state root; `hub.discover` (model-discovery branch) should list a directory
+  holding `decider.json` as a model of format `decider`.
+- [ ] **The pointer backend takes the GPU without a lease.** `PointerDecider` loads onto MPS or
+  CUDA directly, so it can run beside a served model; it should ask `ml_stack.serve` for a lease
+  and release it when `/decide` has been idle.
+- [ ] **The pointer backend is slow on Apple silicon at guard-prompt length.** 200 to 450 ms
+  median for 300 to 600 tokens: transformers runs the Gated DeltaNet layers in a PyTorch
+  reference loop. A Metal chunk kernel, or one forward over the shared state for the three
+  guard questions, is the fix; neither exists here.
+- [ ] **No per-process memory figures.** The decision-models document has latency, accuracy,
+  Brier and ECE but only the pointer model's device memory (3.7 GB); measure resident memory
+  of each llama-server and the embedding server with the `ps` of the pid `ml-stack-serve up`
+  prints.
+- [ ] **The guard benchmark has one author.** 412 cases written and checked by one person;
+  a second reviewer, and cases from a project other than the one the templates came from, are
+  what would make an accuracy figure mean more than "on these templates". `make-cases` output
+  is rule-labelled and has never been read in bulk.
+- [ ] **A Qwen3.5-4B Q4_K_M server returns non-finite logits** on llama.cpp build 10816 (the
+  first token is `@` with null log-probabilities). Check against a newer build.
+- [ ] **MLX does not train a decider.** `ml-stack-train-decider` is PyTorch only.
 
 ### Speech
 - [ ] **Nothing streams.** `StreamingASR` in `speech/protocols.py` is a protocol no
@@ -766,11 +1117,100 @@ worth taking, in this order:
   facts the fleet app's cluster view already shows, in a terminal. Worth it only if a
   headless machine wants one.
 
-## Verifying
+### Security (ml-stack issue #18)
 
-```bash
-python3 -m pytest tests -q -n 4 > /tmp/out.txt; echo $?   # never pipe into tail; -n 4 while a bench runs
-ml-stack-setup                                             # the machine
-ml-stack-bench status                                      # measuring, serving, what the job kept
-ml-stack-serve profile                                     # every model's serving
-```
+What the 2026-10 hardening pass left open; `docs/security.md` has the model and the findings.
+- [ ] **Task grants remain tied to their original cluster after Dev rekey.**
+  Automatic Dev renewal preserves the agent capability and Board history, but task eligibility
+  and remote task authorization compare the complete project grant, including `cluster_id`.
+  Compare stable project authority without changing task specs or hashes; retain negative
+  authorization coverage for different projects and authorities.
+- [ ] **A device certificate lasts ten years and a replacement is a new pairing.** It is the device's
+  identity in every cluster's record (`fleet/membership.py`), so there is no in-place renewal; rotation with a
+  signed handover is slice 7 of `docs/pool-encryption.md`.
+- [ ] **File and model downloads and the `/infer` stream are signed and not sealed by the
+  application.** They travel inside the daemon's TLS 1.3 (no switch turns it off). Sealing them
+  needs a framed stream of sealed chunks (`docs/pool-encryption.md`, slice 1, the part not yet done).
+- [ ] **A machine that joined from a recovery file holds no hash of the passphrase**, so it cannot
+  take other machines in by passphrase and the web interface cannot sign it in by passphrase.
+- [ ] **`web.py`, `scrape/` and `ingest/run.py` still fetch through `http.check` and urllib.**
+  `ml_stack.httpguard.fetch` pins the checked address for the connection and checks every
+  redirect; the page reader and the browser (a redirect or a sub-request inside Playwright
+  reaches a private address unchecked) should use it, or a `page.route` that applies
+  `httpguard.resolve`. Another branch owns `web.py`.
+- [ ] **`hub/` calls `huggingface_hub` without `token=`.** `credentials.get("HF_TOKEN")` is the
+  resolver; `listing.py`, `cards.py`, `drafts.py`, `spec/engine.py` and `mlx_tree.py` should
+  pass it so `ML_STACK_CREDENTIALS_FILE` and the keychain reach a download.
+- [ ] **37 `except ...: pass` sites report as S110 and S112** (device probes, memory
+  readings, the accelerator reports in `train/accelerator.py`). Each should name the
+  exception it expects and log the rest at debug.
+- [ ] **`fleet/api.py` `do_GET` and `_route_post` are 99 and 115 statements.** Splitting each
+  route into a method is what clears PLR0915 there.
+- [ ] **`scripts/test-on-linux` was not run for this pass,** and CI's `pip install` lines are
+  unpinned and unhashed (there is no lockfile to audit with `pip-audit` or `osv-scanner`).
+- [ ] **Windows job objects.** A server survives a killed host only until the watchdog
+  notices; on Windows the watchdog is all there is, and it was not run there.
+
+### Integration (0.3.0)
+
+`docs/INTEGRATION-REPORT.md` has the merge order, the commands and the numbers.
+- [ ] **Two integration decisions to check by a person.** (1) `redteam/tools.py` reads a page with
+  the plain extractor on purpose, so the hidden-text attacks still reach the guards behind the
+  reader; the reader the agent really uses (`web.read`) strips them first, and
+  `test_redteam_toolbox.py` pins that. A red-team arm that runs the toolbox through `web.read`
+  would measure the pipeline's stripping instead. (2) `ML_STACK_DECIDE_URL` is loopback-only unless the host is named in
+  `ML_STACK_FETCH_ALLOW_HOSTS` (decided by the lead: a decider sees every call it judges), so the
+  net-scan exemption for it is a guarantee (`docs/security.md`, "What is exempt from the net scan";
+  `tests/test_decide_hosts.py`).
+- [ ] **The `spake2` package was not checked against `fleet/onboard/pake.py` on the wheel the
+  `fleet-onboard` extra installs;** the pairing tests ran with whatever `spake2` this machine has.
+- [ ] **Nine slow-tier tests fail here and eight of them on `agent/hardening` alone:**
+  `test_fleet_bench.py::test_a_frozen_peer_installs_the_bench_after_accepting_the_job`,
+  `test_fleet_chat.py::...test_asking_for_a_model_answers_before_it_has_arrived`,
+  `test_fleet_daemon.py::test_serve_forever_prefers_the_settings_name_over_the_hostname`,
+  `test_walk.py::test_saying_something_in_the_fleet_chat_waits_for_the_whole_reply`, the two
+  offline-install tests in `test_packaging_install_runs.py` (they need built wheels and
+  `ladybug`), two graph-page browser waits and a TLS handshake timeout in
+  `test_fleet_bind.py`. Each needs a cause, not a retry.
+- [ ] **The `--redteam` tier runs nowhere by default** and is what found a red-team policy guard
+  that denied every call. Put it on a schedule or in the default tier.
+- [ ] **Python 3.11, `scripts/test-on-linux`, Windows and Linux were not run** for 0.3.0 (the 3.11
+  build segfaults on this machine, Docker's daemon was down). `vermin` says 3.11 is the minimum
+  of `src`, `scripts` and `tests`.
+- [ ] **The isolation guard watches files, not directories.** `~/.ml-stack/gate/gpu` changes
+  when anything leases a real model; a test that wrote only a directory there would not fail the
+  run.
+- [ ] **Record `tests-collected` on a machine with every extra installed.** `scripts/budgets
+  --update` refuses without `nemoguardrails`.
+- [ ] **Sandbox: Linux is argv-only.** `bubblewrap.arguments` is tested as a list; no Linux host
+  has run it. Landlock and seccomp are not written.
+- [ ] **Sandbox: container backend.** `sandbox/container.py` raises `NotImplementedError`; Apple
+  `container` was installed but its service was not started, so latency and mounts are unmeasured.
+- [ ] **Sandbox: host allow-lists.** Network is deny, loopback or named ports. Host names need the
+  `sandbox-runtime` proxy as an optional backend.
+- [ ] **Sandbox: confined model server is opt-in** (`ML_STACK_SANDBOX_SERVE=1`). Make it the default
+  after speculative heads, mmproj and multi-shard models have run inside it.
+- [ ] **Sandbox: Claude Code's Bash sandbox** is configured in `harness.confined_bash()` and
+  checked as options only; no model-driven run has exercised it.
+
+## Pending verification
+
+- [ ] **The destructive-action classifier's model layer has not been measured on a real decider**
+  (`docs/destructive-actions.md`); only the stub logprob server has exercised it.
+- [ ] **Destructive verdicts are not written to the activity log.** They reach `Run.events` and
+  `DestructiveRail.on_verdict` only.
+- [ ] **An approved plan is not classified when it is approved.** A destructive or unsure call asks
+  even when a step names it.
+- [ ] **The Board is not in the MCP tools or the chat tools.** Agents reach it through
+  `ml-stack-workspace board ...` only; an MCP `workspace_board_*` set needs the same membership checks
+  and a red-team pass.
+
+- [ ] **Board subscriptions deliver a board's older messages to a new member.** A subscription made
+  after others posted delivers every unread row after the inbox cursor, bounded by `--limit` only.
+- [ ] **The page's live feed is a long poll on one wake pipe name per person (`<id>.web`).** Two open tabs
+  share one pipe, so one of them can wake up to 2 s late; `board.view` is recorded for thread lists only.
+- [ ] **A board post wakes every member's follower pipes, and a waiting `wait` rescans on each.** The cost is
+  fine at 40 agents (p99 38 ms); a board with hundreds of members needs the signal limited to subscribers
+  and open followers.
+- [ ] **No board search, edit or delete, and no per-board retention.** Board messages age out with the bus
+  (`retention_s`); `boards.jsonl` is never pruned.

@@ -5,9 +5,11 @@ from __future__ import annotations
 import importlib.util
 import platform
 import re
+import shlex
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, requires, version as installed_version
 
+from packaging.markers import InvalidMarker, Marker
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.utils import canonicalize_name
 from packaging.version import InvalidVersion, Version
@@ -34,8 +36,8 @@ class Capability:
     module: str
 
     @property
-    def fix(self) -> str:
-        return f"pip install 'ml-stack[{self.extra}]'"
+    def fix(self) -> list[str]:
+        return ["pip", "install", f"ml-stack[{self.extra}]"]
 
     def present(self) -> bool:
         """Whether the module behind this extra can be imported on this machine."""
@@ -46,6 +48,8 @@ class Capability:
 
 
 STANDARD: tuple[Capability, ...] = (
+    Capability("coordinator", "device identity", "identifies devices on the network", "machineid"),
+    Capability("agents", "agent runtime", "runs chat and tools through the Agents SDK", "agents"),
     Capability("store", "the graph store",
                "keeps a graph, and the bench's runs, in one file on disk", "ladybug"),
     Capability("hub", "model downloads",
@@ -74,6 +78,14 @@ def missing() -> list[Capability]:
     return [c for c, here in standard() if not here]
 
 
+def _applies(marker: str, extra: str) -> bool:
+    """Whether a requirement's environment marker holds on this interpreter."""
+    try:
+        return Marker(marker.strip()).evaluate({"extra": extra})
+    except InvalidMarker:
+        return True
+
+
 def declared(distribution: str = "ml-stack") -> dict[str, list[str]]:
     """The extras of an installed distribution, read from its own metadata.
 
@@ -84,7 +96,7 @@ def declared(distribution: str = "ml-stack") -> dict[str, list[str]]:
     for line in requires(distribution) or []:
         requirement, _, marker = line.partition(";")
         named = _FOR_EXTRA.search(marker)
-        if named:
+        if named and _applies(marker, named.group(1)):
             out.setdefault(named.group(1), []).append(requirement.strip())
     return out
 
@@ -103,6 +115,8 @@ def unmet(extras_of: dict[str, list[str]]) -> list[tuple[str, str, str, str]]:
             except InvalidRequirement:
                 continue
             if canonicalize_name(want.name) == "ml-stack":
+                continue
+            if want.marker is not None and not want.marker.evaluate({"extra": extra}):
                 continue
             try:
                 have = installed_version(want.name)
@@ -144,7 +158,7 @@ def report() -> int:
     gone = missing()
     for one in gone:
         say(f"  ! {one.name}: not installed -- {one.does}")
-        say(f"    fix: {one.fix}")
+        say(f"    fix: {shlex.join(one.fix)}")
     old = behind()
     for _, name, have, wanted in old:
         say(f"  ! {name} {have} is installed, and {wanted} is asked for")

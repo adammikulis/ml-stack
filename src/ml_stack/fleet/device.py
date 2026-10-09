@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import functools
+import logging
 import os
 import platform
 import subprocess
@@ -13,10 +14,12 @@ from typing import Any
 
 from ml_stack.hub import free_memory, total_memory
 
+from . import managed_compute
 from .jobs import DaemonError
 
 REPORT_GROUP = "ml_stack.device_report"
 """Entry-point group a higher tier registers a richer device probe under."""
+_LOG = logging.getLogger(__name__)
 
 
 def _ram_used_gb(total_gb: float) -> float | None:
@@ -25,7 +28,7 @@ def _ram_used_gb(total_gb: float) -> float | None:
         import psutil
         return round(psutil.virtual_memory().used / 2**30, 2)
     except Exception:                                 # noqa: BLE001
-        pass
+        _LOG.debug("Process memory probe unavailable")
     free = free_memory()
     if free is not None:
         return round(max(0.0, total_gb - free / 2**30), 2)
@@ -72,7 +75,7 @@ def _cpu_busy_pct() -> float | None:
         else:
             return round(float(psutil.cpu_percent(interval=None)), 1)
     except Exception:                                 # noqa: BLE001
-        pass
+        _LOG.debug("Process utilization probe unavailable")
     try:
         load = os.getloadavg()[0]
         return round(min(100.0, 100.0 * load / (os.cpu_count() or 1)), 1)
@@ -109,6 +112,7 @@ def registered_reports() -> list[Callable[[], dict[str, Any]]]:
         try:
             out.append(ep.load())
         except Exception:                             # noqa: BLE001
+            _LOG.debug("Registered device report unavailable")
             continue
     return out
 
@@ -126,13 +130,14 @@ def resolve_report(spec: str) -> Callable[[], dict[str, Any]]:
         raise DaemonError(f"cannot load report {spec!r}: {exc}") from None
 
 
-def device_report(extra: Callable[[], dict[str, Any]] | None = None) -> dict[str, Any]:
+def device_report(extra: Callable[[], dict[str, Any]] | None = None, *, environment=None) -> dict[str, Any]:
     """What is on this box. Best effort, and additive."""
     out = stdlib_device_report()
     for fn in ([extra] if extra is not None else registered_reports()):
         try:
             out.update(fn() or {})
         except Exception:                             # noqa: BLE001
-            pass
+            _LOG.debug("Device capability probe unavailable")
+    if environment is not None and getattr(sys, "frozen", False):
+        out.update(managed_compute.report(environment))
     return out
-

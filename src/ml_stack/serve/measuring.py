@@ -21,7 +21,8 @@ def _load_log(spec, *, backend=None, timeout: float | None = None) -> str:
     same way, by the same preflight, before anything is spawned.
     """
     manager = ServerManager(backend or LlamaServerBackend())
-    info = manager.lease(spec, timeout=timeout)
+    info = manager.lease(replace(spec, mtp=bool(spec.mtp)), timeout=timeout,
+                         reason="measure what a load of this model logs")
     try:
         if info.adopted:
             raise ServerFailed(
@@ -45,6 +46,6 @@ def measure(spec, *, backend=None, timeout: float | None = None,
     without it comes back empty and truthfully says so.
     """
     if "-lv" not in spec.extra_args:
-        spec = replace(spec, extra_args=tuple(spec.extra_args) + ("-lv", "4"))
+        spec = replace(spec, extra_args=(*spec.extra_args, "-lv", "4"))
     text = (serve or _load_log)(spec, backend=backend, timeout=timeout)
     return parse_load_log(text)

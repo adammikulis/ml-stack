@@ -9,6 +9,7 @@ import json
 
 import pytest
 
+from ml_stack.serve import grant
 from ml_stack.serve.backend import Lease, LlamaServerBackend, ServerFailed, ServerInfo, ServerSpec
 from ml_stack.serve.manager import ServerManager
 from ml_stack.serve.ports import free_port
@@ -28,10 +29,42 @@ def test_a_lease_for_another_port_is_refused(tmp_path):
     gguf = tmp_path / "m.gguf"
     gguf.write_bytes(b"GGUF" + b"\x00" * 64)
     port = free_port()
+    with grant.broker_grant():
+        wrong = Lease(port=port + 1, owner_pid=1, state_file="x")
     with pytest.raises(ServerFailed, match="starts only on the port its record names"):
         LlamaServerBackend(binary=binary).start(
             ServerSpec(model=gguf, port=port), timeout=1.0, preflight=False,
-            check_flags=False, lease=Lease(port=port + 1, owner_pid=1, state_file="x"))
+            check_flags=False, lease=wrong)
+
+
+def test_a_lease_cannot_be_made_outside_a_broker_grant():
+    """The proof a backend launches on is minted by the broker's grant alone: asking for a
+    Lease anywhere else raises, so no CLI, helper or test starts a server by accident."""
+    with pytest.raises(grant.NoGrant, match="broker granted"):
+        Lease(port=1, owner_pid=1, state_file="x")
+    assert not grant.granted()
+    with grant.broker_grant():
+        assert grant.granted()
+        Lease(port=1, owner_pid=1, state_file="x")
+    assert not grant.granted()
+
+
+def test_launch_refuses_anything_that_is_not_a_lease(tmp_path):
+    from ml_stack.serve.backend import launch
+
+    with pytest.raises(grant.NoGrant):
+        launch(["true"], object(), log_path=tmp_path / "l", timeout=1.0, env={})  # type: ignore[arg-type]
+
+
+def test_the_manager_started_outside_the_broker_gets_no_grant(tmp_path):
+    """`_start_server` is the low-level start; called by hand it reaches `_pending` and is
+    refused before anything exists."""
+    manager = ServerManager(LlamaServerBackend(binary=fake_binary(tmp_path)),
+                            state_file=tmp_path / "servers.json")
+    gguf = tmp_path / "m.gguf"
+    gguf.write_bytes(b"GGUF" + b"\x00" * 64)
+    with pytest.raises(grant.NoGrant):
+        manager._start_server(ServerSpec(model=gguf, port=free_port()), timeout=1.0)
 
 
 def test_the_record_exists_before_the_process_and_is_filled_or_forgotten_after(tmp_path):
@@ -190,3 +223,22 @@ def test_a_lease_leaves_a_server_another_live_process_holds(tmp_path):
         if held.poll() is None:
             held.kill()
         held.wait()
+
+
+def test_a_pid_reused_by_another_process_is_not_a_server_to_stop(tmp_path, monkeypatch):
+    from ml_stack.serve.leases import orphaned
+    from ml_stack.serve.manager import stop_all_servers
+
+    monkeypatch.setenv("ML_STACK_HOME", str(tmp_path))
+    stranger = _sleeper()
+    try:
+        entry = {"port": 9111, "pid": stranger.pid, "owner_pid": 999_999_998,
+                 "backend": "fake", "model": "fine.gguf", "started": 1.0}
+        (tmp_path / "servers.json").write_text(json.dumps({"9111": entry}))
+
+        assert not orphaned(entry)
+        assert stop_all_servers() == []
+        assert stranger.poll() is None
+    finally:
+        stranger.kill()
+        stranger.wait()

@@ -7,10 +7,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from ml_stack.files import promote, sha256_file
-from ml_stack.http import ServerError, ServerUnreachable, open_stream
+from ml_stack import net
+from ml_stack.files import sha256_file
+from ml_stack.http import ServerError
+from ml_stack.httpguard import Refused
 
-_CHUNK = 1 << 16
 _PROGRESS_INTERVAL_S = 0.25
 
 
@@ -57,77 +58,41 @@ def fetch(
     url: str,
     target: Path | str,
     *,
-    name: str | None = None,
     on_progress: ProgressFn | None = None,
     expect_sha256: str | None = None,
     expect_bytes: int | None = None,
-    resume: bool = True,
-    timeout: float = 60.0,
 ) -> Path:
-    """Download ``url`` to ``target``, returning the path. Idempotent."""
+    """Download ``url`` to ``target`` through the net pipeline, returning the path. Idempotent."""
     target = Path(target).expanduser()
-    label = name or target.name
+    label = target.name
 
     if target.exists() and target.stat().st_size > 0:
         if expect_sha256 or expect_bytes:
             _verify(target, expect_sha256=expect_sha256, expect_bytes=expect_bytes, name=label)
         return target
 
-    target.parent.mkdir(parents=True, exist_ok=True)
-    partial = target.with_suffix(target.suffix + ".part")
+    last = {"at": 0.0}
 
-    start_at = partial.stat().st_size if (resume and partial.exists()) else 0
-    headers = {"Range": f"bytes={start_at}-"} if start_at else None
+    def progress(done: int, total: int) -> None:
+        now = time.monotonic()
+        if on_progress is not None and (now - last["at"] >= _PROGRESS_INTERVAL_S or done == total):
+            last["at"] = now
+            on_progress(Progress(label, done, total or None))
 
+    want = net.Want(sha256=expect_sha256 or "", size=expect_bytes or 0, purpose="document download",
+                    max_bytes=2 << 30)
     try:
-        with open_stream(url, headers=headers, timeout=timeout) as response:
-            if start_at and response.status != 206:
-                start_at = 0
-
-            remaining = response.headers.get("content-length")
-            total: int | None = None
-            if remaining is not None:
-                try:
-                    total = int(remaining) + start_at
-                except ValueError:
-                    total = None
-
-            mode = "ab" if start_at else "wb"
-            downloaded = start_at
-            last_report = 0.0
-
-            with partial.open(mode) as handle:
-                while True:
-                    block = response.read(_CHUNK)
-                    if not block:
-                        break
-                    handle.write(block)
-                    downloaded += len(block)
-
-                    if on_progress is not None:
-                        now = time.monotonic()
-                        if now - last_report >= _PROGRESS_INTERVAL_S:
-                            last_report = now
-                            on_progress(Progress(label, downloaded, total, start_at))
-
-            if on_progress is not None:
-                on_progress(Progress(label, downloaded, total, start_at))
-
-    except ServerUnreachable as exc:
+        net.download(url, target, want, hooks=net.Hooks(progress=progress))
+    except net.ChecksumMismatch as exc:
+        raise DownloadError(f"{label}: sha256 mismatch ({exc}). The file was set aside.") from exc
+    except net.Blocked as exc:
+        raise DownloadError(f"{label}: {exc}") from exc
+    except net.Truncated as exc:
         raise DownloadError(f"{label}: cannot fetch {url} ({exc})") from exc
     except ServerError as exc:
-        if exc.status == 416 and partial.exists():
-            partial.unlink(missing_ok=True)
-            raise DownloadError(
-                f"{label}: server rejected the resume range; the partial file was stale "
-                "and has been removed. Retry."
-            ) from exc
         raise DownloadError(f"{label}: HTTP {exc.status} fetching {url}") from exc
-    except (TimeoutError, OSError) as exc:
+    except (OSError, Refused) as exc:
         raise DownloadError(f"{label}: cannot fetch {url} ({exc})") from exc
-
-    _verify(partial, expect_sha256=expect_sha256, expect_bytes=expect_bytes, name=label)
-    promote(partial, target)
     return target
 
 

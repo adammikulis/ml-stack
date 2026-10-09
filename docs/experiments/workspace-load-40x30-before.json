@@ -1,0 +1,100 @@
+{
+  "agents": 40,
+  "budgets": {
+    "cpu_s_per_agent_per_message": 0.25,
+    "delivery_p99_s": 2.0,
+    "inbox_read_p99_s": 0.25,
+    "keystore_busy": 0,
+    "lock_wait_p99_s": 1.0,
+    "lost_messages": 0,
+    "send_p99_s": 1.0,
+    "unexpected_failures": 0
+  },
+  "bus_lock_hold_s": {
+    "max": 0.02901,
+    "n": 1200,
+    "p50": 0.00498,
+    "p99": 0.00986
+  },
+  "bus_lock_wait_s": {
+    "max": 0.74054,
+    "n": 1200,
+    "p50": 7e-05,
+    "p99": 0.24537
+  },
+  "claim_s": {
+    "max": 0.0902,
+    "n": 160,
+    "p50": 0.00929,
+    "p99": 0.08622
+  },
+  "cpu_s_per_agent_per_message": 0.0373,
+  "cpu_s_total": 44.74,
+  "date": "2026-10-03",
+  "default_limits": false,
+  "delivery_s": {
+    "max": 0.52566,
+    "n": 1200,
+    "p50": 0.04829,
+    "p99": 0.18902
+  },
+  "failures": {
+    "busy": 22
+  },
+  "heartbeat_s": {
+    "max": 0.00741,
+    "n": 1200,
+    "p50": 0.00093,
+    "p99": 0.00149
+  },
+  "inbox_read_s": {
+    "max": 0.00989,
+    "n": 40,
+    "p50": 0.00924,
+    "p99": 0.00989
+  },
+  "keystore_backend_calls": {
+    "delete": 0,
+    "get": 19,
+    "set": 1
+  },
+  "keystore_read_s": {
+    "max": 6.04663,
+    "n": 40,
+    "p50": 2.51826,
+    "p99": 6.04663
+  },
+  "log": {
+    "audit_bytes": 378474,
+    "bus_bytes": 427962,
+    "bus_rows": 1200,
+    "chain_ok": true
+  },
+  "machine": {
+    "cpus": 16,
+    "memory_gb": 128,
+    "platform": "macOS-26.6-arm64-arm-64bit-Mach-O"
+  },
+  "messages_each": 30,
+  "missed": [
+    "keystore_busy",
+    "unexpected_failures"
+  ],
+  "pass": false,
+  "received": 1200,
+  "send_s": {
+    "max": 0.78275,
+    "n": 1200,
+    "p50": 0.02819,
+    "p99": 0.29104
+  },
+  "sent": 1200,
+  "thread_read_s": {
+    "max": 0.00979,
+    "n": 120,
+    "p50": 0.00443,
+    "p99": 0.0097
+  },
+  "throughput_msgs_per_s": 76.9,
+  "wall_s": 15.61
+}

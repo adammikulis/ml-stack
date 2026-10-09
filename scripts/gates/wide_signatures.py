@@ -6,10 +6,12 @@ import ast
 from pathlib import Path
 
 from . import Finding
-from ._util import parse, python_files, rel
+from ._perfile import finder
+from ._util import parse
 
 NAME = "wide-signatures"
 OWNER = ""
+INCREMENTAL = True
 ROOTS = ("src/ml_stack",)
 LIMIT = 8
 
@@ -26,17 +28,18 @@ def _count(node: ast.FunctionDef | ast.AsyncFunctionDef) -> int:
     return len(names) + bool(args.vararg) + bool(args.kwarg)
 
 
-def find(root: Path) -> list[Finding]:
+def scan(path: Path, where: str) -> list[Finding]:
     out = []
-    for path in python_files(root, ROOTS):
-        where = rel(path, root)
-        tree = parse(path)
-        if tree is None:
+    tree = parse(path)
+    if tree is None:
+        return out
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
-        for node in ast.walk(tree):
-            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                continue
-            count = _count(node)
-            if count > LIMIT:
-                out.append(Finding(where, node.lineno, f"{node.name}: {count} parameters"))
+        count = _count(node)
+        if count > LIMIT:
+            out.append(Finding(where, node.lineno, f"{node.name}: {count} parameters"))
     return out
+
+
+find = finder(ROOTS, scan)

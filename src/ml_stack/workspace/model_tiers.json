@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "retrieved": "2026-10-08",
+  "source": "docs/model-benchmarks.md#1-lineups-and-exact-api-ids",
+  "families": [
+    {
+      "family": "anthropic",
+      "source": "docs/model-benchmarks.md#11-anthropic-claude-5-family",
+      "tiers": [
+        {"lowest": true,
+         "id_globs": ["claude-haiku-5-5", "anthropic.claude-haiku-5-5", "claude-haiku-4-5", "claude-haiku-4-5-*"]},
+        {"lowest": false,
+         "id_globs": ["claude-sonnet-5", "claude-sonnet-5-5", "anthropic.claude-sonnet-5-5", "claude-sonnet-4-6"]},
+        {"lowest": false,
+         "id_globs": ["claude-opus-5", "claude-opus-5-5", "anthropic.claude-opus-5-5", "claude-opus-4-5", "claude-opus-4-6", "claude-opus-4-7", "claude-opus-4-8"]},
+        {"lowest": false,
+         "id_globs": ["claude-fable-5", "claude-fable-5-1", "anthropic.claude-fable-5-1"]}
+      ]
+    },
+    {
+      "family": "openai",
+      "source": "docs/model-benchmarks.md#12-openai-gpt-6-family",
+      "tiers": [
+        {"lowest": true,
+         "id_globs": ["gpt-6-luna"]},
+        {"lowest": false,
+         "id_globs": ["gpt-6-sol", "gpt-6.1-sol"]},
+        {"lowest": false,
+         "id_globs": ["gpt-6-astra"]}
+      ]
+    }
+  ]
+}

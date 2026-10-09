@@ -1,0 +1,42 @@
+<style>
+gym-drone-camera { display:block; }
+gym-drone-camera[hidden] { display:none; }
+.drone-feeds { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin:16px 0; }
+.drone-feed { margin:0; border:1px solid var(--line,#cad6d9); border-radius:12px; overflow:hidden; background:#152326; }
+.drone-feed img { display:block; width:100%; aspect-ratio:1; max-height:260px; object-fit:contain; image-rendering:auto; }
+.drone-feed figcaption { padding:9px 12px; color:#eff6f4; font-size:13px; }
+.drone-camera-meta { color:var(--muted,#667c81); font-size:12px; }
+@media(max-width:520px) { .drone-feeds { grid-template-columns:1fr; } }
+</style>
+
+<script>
+(function () {
+  class GymDroneCamera extends HTMLElement {
+    connectedCallback() {
+      if (this.wired) return;
+      this.wired = true;
+      const el = window.fleetModel.el, feeds = el('div',{class:'drone-feeds'});
+      for (const [kind,label] of [['rgb','Regular camera'],['thermal','Thermal · visible surface temperatures']])
+        feeds.append(el('figure',{class:'drone-feed'},
+          el('img',{id:kind,alt:kind==='rgb'?'Live drone RGB camera':'Live drone synthetic thermal camera'}),
+          el('figcaption',{},label)));
+      this.append(feeds,el('p',{class:'drone-camera-meta',role:'status'}));
+    }
+    update(camera) {
+      this.hidden = !camera;
+      if (!camera) return;
+      for (const kind of ['rgb','thermal']) {
+        const node = this.querySelector('#'+kind), value = camera[kind];
+        node.hidden = !value;
+        if (value) node.src = value.startsWith('data:') ? value : 'data:image/png;base64,'+value;
+      }
+      const detections = camera.detections_visible || [];
+      this.querySelector('.drone-camera-meta').textContent =
+        'Controlled camera: '+(camera.agent_id || 'unknown agent')+' · Frame '+camera.frame_id
+        +' · '+Number(camera.world_time || 0).toFixed(1)+' s · '
+        +camera.thermal_kind+' · '+detections.length+' visible heat regions';
+    }
+  }
+  customElements.define('gym-drone-camera',GymDroneCamera);
+})();
+</script>

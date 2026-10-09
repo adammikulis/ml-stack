@@ -14,6 +14,8 @@ import pytest
 from ml_stack.fleet import llama
 from ml_stack.http import Server
 
+pytestmark = pytest.mark.usefixtures("loopback_net")
+
 
 def free_port() -> int:
     with socket.socket() as s:
@@ -132,7 +134,7 @@ class TestUnpacking:
         bad = tmp_path / "bad.zip"
         with zipfile.ZipFile(bad, "w") as zf:
             zf.writestr("../escaped.txt", "no")
-        with pytest.raises(llama.LlamaError, match="escapes"):
+        with pytest.raises(llama.LlamaError, match=r"refusing bad.*not a usable file name"):
             llama._unpack(bad, tmp_path / "out")
         assert not (tmp_path.parent / "escaped.txt").exists()
 
@@ -145,7 +147,7 @@ class TestUnpacking:
             info = tarfile.TarInfo("../escaped.txt")
             info.size = 2
             tf.addfile(info, io.BytesIO(b"no"))
-        with pytest.raises(llama.LlamaError, match="escapes"):
+        with pytest.raises(llama.LlamaError, match=r"refusing bad.*not a usable file name"):
             llama._unpack(bad, tmp_path / "out")
         assert not (tmp_path.parent / "escaped.txt").exists()
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import ipaddress
 import json
 import time
 import urllib.parse
@@ -11,6 +12,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from ml_stack import home
 from ml_stack.files import promote, sha256_file
 from ml_stack.http import (
     ONCE,
@@ -21,7 +23,16 @@ from ml_stack.http import (
     request_bytes,
 )
 
-from .discovery import Beacon, DiscoveryError, derive_token, discover, key_path, load_cluster_key
+from .discovery import (
+    Beacon,
+    DiscoveryError,
+    derive_token,
+    discover,
+    key_path,
+    load_cluster_key,
+    primary_ip,
+)
+from .onboard.lan import secure_scheme
 
 if TYPE_CHECKING:
     from ml_stack.speech.protocols import Transcript
@@ -31,6 +42,39 @@ DIGEST_HEADER = "X-ML-Stack-SHA256"
 
 # A read is safe to send again; an unreachable peer is not worth waiting on twice.
 READS = Retry(tries=3, when_unreachable=False)
+
+
+def device_address(peer, declared: str) -> bool:
+    """Whether an origin names the authenticated device endpoint."""
+    beacon = peer.beacon
+    if not beacon or not beacon.cert or not beacon.machine:
+        return False
+    try:
+        observed, named = urllib.parse.urlsplit(peer.base_url), urllib.parse.urlsplit(declared)
+        if (named.scheme != 'https' or observed.scheme != 'https' or named.port != observed.port
+                or named.username or named.password or named.path not in ('', '/')
+                or named.query or named.fragment):
+            return False
+        if declared.rstrip('/') == peer.base_url.rstrip('/'):
+            return True
+        if beacon.machine != home.machine_id():
+            return False
+        return same_machine_host(peer.base_url, declared)  # this machine's beacon under loopback or LAN name
+    except ValueError:
+        return False
+
+
+def same_machine_host(first: str, second: str) -> bool:
+    """Whether two origins on one port name this machine, by loopback or by its LAN address."""
+    try:
+        one, two = urllib.parse.urlsplit(first), urllib.parse.urlsplit(second)
+        if one.port != two.port:
+            return False
+        here = {primary_ip(), *(h for h in (one.hostname, two.hostname)
+                                if ipaddress.ip_address(h).is_loopback)}
+        return one.hostname in here and two.hostname in here
+    except ValueError:
+        return False
 
 
 def range_total(content_range: str) -> int | None:
@@ -57,6 +101,8 @@ def _peer_error(where: str, exc: ServerError) -> PeerError:
 class Peer:
     def __init__(self, base_url: str, token: str, *, timeout: float = 60.0,
                  beacon: Beacon | None = None) -> None:
+        if not secure_scheme(base_url):
+            raise ValueError(f"a peer is reached over https, or http on this machine only: {base_url}")
         self.base_url = base_url.rstrip("/")
         self.token = token
         self.timeout = timeout
@@ -139,6 +185,10 @@ class Peer:
         _, body, _ = self._request("GET", "/health", timeout=10, retry=READS)
         return json.loads(body or b"{}")
 
+    def members(self, group: str, rows: list[dict]) -> dict:
+        """Give this peer our record of a cluster's devices and take back its own."""
+        return self._json("POST", "/fleet/v1/members", {"group": group, "rows": rows})
+
     def availability(self, action: str = "", **fields: Any) -> dict:
         """Read or change when this peer takes work."""
         if not action:
@@ -167,10 +217,9 @@ class Peer:
         return out["metrics"], out["next"]
 
     # -- jobs ------------------------------------------------------------
-    def submit(self, argv: list[str] | str, *, name: str = "",
-               cwd: str = "", env: dict[str, str] | None = None) -> dict:
-        return self._json("POST", "/jobs", {"argv": argv, "name": name,
-                                            "cwd": cwd, "env": env or {}})
+    def submit(self, argv: list[str] | str, *, name: str = "") -> dict:
+        """Run an allowed ml-stack command here (`fleet.commands`); anything else is refused."""
+        return self._json("POST", "/jobs", {"argv": argv, "name": name})
 
     def stop(self, job_id: str) -> dict:
         return self._json("POST", f"/jobs/{job_id}/stop", {})
@@ -236,10 +285,9 @@ class Peer:
                     break
                 digest.update(chunk)
                 last = fh.tell() >= total
-                headers = {
-                    "Content-Range": f"bytes {sent}-{sent+len(chunk)-1}/{total}",
-                    "X-ML-Stack-Complete": "1" if last else "0",
-                }
+                headers = {"X-ML-Stack-Complete": "1" if last else "0"}
+                if chunk:
+                    headers["Content-Range"] = f"bytes {sent}-{sent+len(chunk)-1}/{total}"
                 if last:
                     headers[DIGEST_HEADER] = digest.hexdigest()
                 _, body, _ = self._request("PUT", f"/files/{remote}", data=chunk,

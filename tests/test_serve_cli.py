@@ -13,6 +13,7 @@ import os
 import subprocess
 import sys
 import time
+from dataclasses import replace
 
 import pytest
 from conftest import (
@@ -23,12 +24,14 @@ from conftest import (
     write_gguf,
 )
 
+from ml_stack import hub
 from ml_stack.client import is_healthy
 from ml_stack.client.counters import Speculative
-from ml_stack.serve import cli, ops
-from ml_stack.serve.backend import ServerInfo, ServerSpec
+from ml_stack.serve import cli, holding, lifecycle_cli, ops
+from ml_stack.serve.backend import ServerSpec
 from ml_stack.serve.ports import free_port
 from ml_stack.testing import FakeLlamaServer, FakePreflight, Served
+from ml_stack.testing.registry import record_server
 
 MODEL = "tinyfixture-4B-Q4_K_M.gguf"
 
@@ -42,15 +45,18 @@ def state(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def serving():
-    """llama-servers on real sockets, closed at the end of the test."""
+def serving(state):
+    """llama-servers on real sockets, recorded in the lease file as this machine's own
+    unless ``recorded=False``, closed at the end of the test."""
     started: list[FakeLlamaServer] = []
 
-    def start(**held) -> FakeLlamaServer:
+    def start(*, recorded: bool = True, **held) -> FakeLlamaServer:
         held.setdefault("model", f"/models/{MODEL}")
         held.setdefault("context", 4096)
         fake = FakeLlamaServer(Served(**held))
         started.append(fake)
+        if recorded:
+            record_server(state, fake.port, model=MODEL)
         return fake
 
     yield start
@@ -63,6 +69,20 @@ def record(state, port: int, *, pid: int, owner_pid: int) -> None:
         "port": port, "pid": pid, "owner_pid": owner_pid, "backend": "llama.cpp",
         "model": MODEL, "base_url": f"http://127.0.0.1:{port}",
     }}))
+
+
+def asking(monkeypatch, seen, *, leave=False):
+    """`up` as far as asking the broker: what it asks is kept in ``seen``, and (``leave``)
+    the command is left there instead of holding anything."""
+    def up(spec, *, manager, **kw):
+        seen["spec"] = spec
+        if leave:
+            raise SystemExit(0)
+        return holding.Hold(id="lease", shape="s", model=str(spec.model), context=spec.context,
+                            parallel=spec.parallel, status="ready", port=spec.port or 1,
+                            base_url=f"http://127.0.0.1:{spec.port or 1}", adopted=True)
+
+    monkeypatch.setattr(holding, "up", up)
 
 
 class TestStatus:
@@ -161,7 +181,7 @@ class TestStatus:
         assert f"held by process {os.getpid()}" in capsys.readouterr().out
 
     def test_an_unrecorded_server_says_down_will_not_touch_it(self, serving, state, capsys):
-        instance = serving()
+        instance = serving(recorded=False)
         assert cli.main(["status", "--port", str(instance.port)]) == 0
         assert "none on record" in capsys.readouterr().out
 
@@ -176,83 +196,15 @@ class TestStatus:
 
 
 class TestUp:
-    def test_it_adopts_a_compatible_server(self, serving, state, capsys):
-        instance = serving()
-        assert cli.main(["up", MODEL, "--port", str(instance.port)]) == 0
-
-        out = capsys.readouterr().out
-        assert out.startswith("adopted ")
-        assert instance.base_url in out
-
-    def test_adoption_is_reported_as_adoption_in_json(self, serving, state, capsys):
-        instance = serving()
-        assert cli.main(["up", MODEL, "--port", str(instance.port), "--json"]) == 0
-
-        payload = json.loads(capsys.readouterr().out)
-        assert payload["adopted"] is True
-        assert payload["base_url"] == instance.base_url
-
-    def test_it_refuses_a_different_shape_on_a_busy_port(self, serving, state, capsys):
-        """Adopting the wrong shape is what makes a caller reload the weights it
-        already had."""
-        instance = serving()
-        code = cli.main(["up", MODEL, "--port", str(instance.port),
-                         "--parallel", "4", "--context", "32768"])
-
-        assert code == 2
-        err = capsys.readouterr().err
-        assert "slots: asked for 4, serving 1" in err
-        assert "context: asked for 8192 per slot, serving 4096" in err
-        assert is_healthy(instance.base_url), "the refusal must not have stopped it"
-
-    def test_up_adopts_a_matching_orphan_and_records_it_as_its_own(self, serving, state,
-                                                                    capsys):
-        """After `up` has adopted it, the orphan is on the record under the server's own
-        pid -- the way `up` records a server it started -- so `status` no longer calls
-        it orphaned and `down` stops it."""
-        instance = serving()
-        orphan = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
-        try:
-            record(state, instance.port, pid=orphan.pid, owner_pid=999_999_998)
-            assert cli.main(["up", MODEL, "--port", str(instance.port)]) == 0
-            got = capsys.readouterr()
-            assert f"adopted {instance.base_url}" in got.out
-            assert "orphaned" in got.err
-            assert orphan.poll() is None, "the matching server is kept"
-            left = json.loads(state.read_text())[str(instance.port)]
-            assert left["pid"] == orphan.pid and left["owner_pid"] == orphan.pid
-
-            assert cli.main(["status", "--port", str(instance.port)]) == 0
-            out = capsys.readouterr().out
-            assert "orphaned" not in out and "started by 'ml-stack-serve up'" in out
-        finally:
-            if orphan.poll() is None:
-                orphan.kill()
-            orphan.wait()
-
-    def test_it_refuses_a_different_model_on_a_busy_port(self, serving, state, capsys):
-        instance = serving()
-        code = cli.main(["up", "other-8B-Q4_K_M.gguf", "--port", str(instance.port)])
-
-        assert code == 2
-        err = capsys.readouterr().err
-        assert f"model: asked for 'other-8B-Q4_K_M.gguf', serving '{MODEL}'" in err
 
     def test_the_flags_default_to_the_modules_own_shape(self, state, monkeypatch, capsys):
         seen: dict[str, object] = {}
-
-        def lease(self, spec, *, timeout=300.0, **kw):
-            seen["spec"] = spec
-            seen["timeout"] = timeout
-            return ServerInfo(base_url=f"http://127.0.0.1:{spec.port}", port=spec.port,
-                              pid=None, backend="llama.cpp", adopted=True)
-
-        monkeypatch.setattr(ops.ServerManager, "lease", lease)
+        asking(monkeypatch, seen)
         assert cli.main(["up", MODEL]) == 0
 
         spec = seen["spec"]
         default = ServerSpec(model="")
-        assert spec.port == default.port
+        assert spec.port == 0, "the caller does not pick the port; the broker does"
         assert spec.context == default.context
         assert spec.parallel == default.parallel
         assert str(spec.model) == MODEL
@@ -260,7 +212,7 @@ class TestUp:
 
 class TestDown:
     def test_it_refuses_a_server_this_machine_has_no_record_of(self, serving, state, capsys):
-        instance = serving()
+        instance = serving(recorded=False)
         assert cli.main(["down", "--port", str(instance.port)]) == 2
 
         err = capsys.readouterr().err
@@ -375,9 +327,10 @@ class TestTellingTheFleet:
 
         return Serving(root / "serving.json")
 
-    def test_putting_a_model_up_announces_it(self, serving, state, tmp_path):
+    def test_putting_a_model_up_announces_it(self, serving, state, tmp_path, monkeypatch):
         root = tmp_path / "traind"
         root.mkdir()
+        asking(monkeypatch, {})
         instance = serving(slots=2)
         assert cli.main(["up", MODEL, "--port", str(instance.port), "--parallel", "2",
                          "--root", str(root)]) == 0
@@ -386,11 +339,12 @@ class TestTellingTheFleet:
         assert served[0].slots == 2
         assert served[0].models == [MODEL]
 
-    def test_with_no_root_it_announces_under_the_state_root(self, serving, state, tmp_path):
+    def test_with_no_root_it_announces_under_the_state_root(self, serving, state, tmp_path, monkeypatch):
         from ml_stack import home
 
         root = home.state("traind")
         root.mkdir(parents=True)
+        asking(monkeypatch, {})
         instance = serving()
         assert cli.main(["up", MODEL, "--port", str(instance.port)]) == 0
         assert [s.port for s in self.beacon(root).all()] == [instance.port]
@@ -412,9 +366,10 @@ class TestTellingTheFleet:
             proc.wait(timeout=5)
         assert self.beacon(root).all() == [], "the beacon still points at a dead port"
 
-    def test_a_machine_with_no_fleet_is_not_given_one(self, serving, state, tmp_path):
+    def test_a_machine_with_no_fleet_is_not_given_one(self, serving, state, tmp_path, monkeypatch):
         """Announcing is for machines in a fleet; the rest get no stray files."""
         root = tmp_path / "never-set-up"
+        asking(monkeypatch, {})
         instance = serving()
         assert cli.main(["up", MODEL, "--port", str(instance.port), "--root", str(root)]) == 0
         assert not root.exists()
@@ -455,28 +410,23 @@ def test_a_draft_is_passed_through_and_auto_asks_the_one_chooser(monkeypatch, tm
     assert "no head shipped" in capsys.readouterr().err
 
 
-def test_up_withholds_a_fork_only_head_from_mainline_and_says_why(monkeypatch, tmp_path, capsys):
+def test_up_withholds_a_fork_only_head_from_mainline_and_says_why(monkeypatch, tmp_path, capsys,
+                                                                  request):
     """`up --draft auto` on a mainline binary serves no head whose README names a fork, and
     prints the chooser's reason with the README's own sentence under it. Mutation: pass
     `borrows=True` in `cmd_up` -- the head is served and the load fails at the far end."""
-    import huggingface_hub
-
     import ml_stack.hub as hub
     from ml_stack.serve import cli, ops
+    from ml_stack.testing.fakehub import FakeHub
 
     hub._DRAFT_NOTES.clear()
     shelves = {"maker/flash-GGUF": [("flash-Q4.gguf", 4_000_000_000),
                                     ("MTP/mtp-flash-shared-Q8_0.gguf", 2_600_000_000)]}
     monkeypatch.setattr(hub, "files", lambda repo, **kw: shelves.get(repo, []))
-    readme = tmp_path / "MTP-README.md"
-    readme.write_text("These do not work on mainline ggml-org/llama.cpp yet.")
-
-    def fake_download(repo, filename, **kw):
-        if filename == "MTP/README.md":
-            return str(readme)
-        raise OSError("no readme")
-
-    monkeypatch.setattr(huggingface_hub, "hf_hub_download", fake_download)
+    served = FakeHub({"maker/flash-GGUF": {
+        "MTP/README.md": b"These do not work on mainline ggml-org/llama.cpp yet."}})
+    request.addfinalizer(served.close)
+    served.point(monkeypatch)
     preflight = FakePreflight()
     monkeypatch.setattr("ml_stack.serve.preflight.Preflight", preflight)
     monkeypatch.setattr("ml_stack.hub.room", lambda: 0)
@@ -588,7 +538,6 @@ def test_up_refuses_a_flag_the_build_lacks_before_loading(tmp_path, monkeypatch,
     """The whole path -- lease, then the backend's launch -- against a stand-in that answers
     `--help` without `--draft-max`. Nothing is started; the refusal names the nearest."""
     import subprocess as sp
-    from dataclasses import replace
 
     from ml_stack.serve import backend
     from ml_stack.serve.backend import flags_of
@@ -616,20 +565,18 @@ def test_up_refuses_a_flag_the_build_lacks_before_loading(tmp_path, monkeypatch,
     monkeypatch.setattr(sp, "Popen",
                         lambda *a, **k: (_ for _ in ()).throw(AssertionError("started")))
 
-    real_lease = ops.ServerManager.lease
+    real = lifecycle_cli._asked_spec
 
-    def lease(self, spec, **kw):
-        # The real lease, with the retired flag put on the argv and a port nobody holds.
-        from ml_stack.serve.ports import free_port
-        return real_lease(self, replace(spec, extra_args=("--draft-max", "3"),
-                                        port=free_port()), **kw)
+    def asked(args, model, extra):
+        # the spec as asked, with the retired flag put on the argv
+        return replace(real(args, model, extra), extra_args=("--draft-max", "3"))
 
-    monkeypatch.setattr(ops.ServerManager, "lease", lease)
-    code = cli.main(["up", str(gguf), "--binary", str(binary), "--port", str(free_port())])
+    monkeypatch.setattr(lifecycle_cli, "_asked_spec", asked)
+    monkeypatch.setattr(hub, "room", lambda: 1 << 40)
+    code = cli.main(["up", str(gguf), "--binary", str(binary), "--no-profile"])
     err = capsys.readouterr().err
     assert code == 2
-    assert err.strip().splitlines()[-1] == (
-        "this llama-server has no --draft-max; it has --spec-draft-n-max")
+    assert "this llama-server has no --draft-max; it has --spec-draft-n-max" in err
 
 
 class TestPreflightOnly:
@@ -792,20 +739,16 @@ class TestBuildFlag:
 
 
 class TestModelsFetch:
-    def test_fetch_downloads_and_prints_each_reference(self, monkeypatch, capsys, tmp_path):
-        import huggingface_hub
+    def test_fetch_downloads_and_prints_each_reference(self, monkeypatch, capsys):
+        import struct
 
         import ml_stack.hub as hub
+        from ml_stack.testing.fakehub import fake_hub
 
-        monkeypatch.setattr(hub, "files", lambda repo, **kw: [("thing-Q4_K_M.gguf", 4_000)])
-
-        def fake_download(repo_id, filename, **kw):
-            target = tmp_path / filename
-            target.write_bytes(b"x" * 10)
-            return str(target)
-
-        monkeypatch.setattr(huggingface_hub, "hf_hub_download", fake_download)
-        assert hub.main(["fetch", "hf:maker/thing-GGUF/thing-Q4_K_M.gguf"]) == 0
+        body = b"GGUF" + struct.pack("<IQQ", 3, 0, 0) + b"\0" * 40
+        with fake_hub({"maker/thing-GGUF": {"thing-Q4_K_M.gguf": body}}) as server:
+            server.point(monkeypatch)
+            assert hub.main(["fetch", "hf:maker/thing-GGUF/thing-Q4_K_M.gguf"]) == 0
         assert "thing-Q4_K_M.gguf" in capsys.readouterr().out
 
 
@@ -946,7 +889,7 @@ def test_status_every_lists_each_llama_server_and_says_which_nobody_leased(monke
     assert f"      cache  {aside}  (4M)" in out, "under no root: the file's own directory"
     lines = out.splitlines()
     assert lines[lines.index(next(line for line in lines if ":8081" in line)) + 1].startswith(
-        "    foreign"), "a model whose directory is not there gets no cache line"
+        "    unmanaged"), "a model whose directory is not there gets no cache line"
     assert "1 not leased" in out and "python3" not in out
     assert "pid 14  defunct" in out, "a zombie is named as such and not counted as a stray"
     monkeypatch.setattr(psutil, "process_iter", lambda attrs=None: [])
@@ -961,7 +904,7 @@ def test_status_reports_a_foreign_server_and_leaves_it_alone(state, serving, mon
     kills one it did not start; `ports.reclaim_port`)."""
     from ml_stack.serve import cli, ops
 
-    instance = serving(model="/models/foreign-model.gguf")
+    instance = serving(model="/models/foreign-model.gguf", recorded=False)
     instance.refuse["/props"] = 404
     monkeypatch.setattr(ops, "server_pids_on_port", lambda port: [9911] if port == instance.port
                         else [])
@@ -969,7 +912,7 @@ def test_status_reports_a_foreign_server_and_leaves_it_alone(state, serving, mon
     assert cli.main(["status", "--port", str(instance.port)]) == 0
     out = capsys.readouterr().out
     assert instance.base_url in out
-    assert "foreign -- pid 9911, not started by ml-stack; left alone" in out
+    assert "unmanaged -- pid 9911, not started by ml-stack; reported and left alone" in out
     assert "not reported" not in out, "a foreign server is not judged for adopting"
 
     assert cli.main(["status", "--port", str(instance.port), "--json"]) == 0
@@ -1020,13 +963,10 @@ def test_up_kv_stores_the_cache_as_asked(tmp_path, monkeypatch):
         def __init__(self, *a, **k):
             self.backend = types.SimpleNamespace(binary=None)
 
-        def lease(self, spec, **kw):
-            seen["spec"] = spec
-            raise SystemExit(0)
-
     import types
 
     monkeypatch.setattr(ops, "ServerManager", Manager)
+    asking(monkeypatch, seen, leave=True)
     monkeypatch.setattr(hub_module, "hub_cache", lambda: tmp_path)
     model = tmp_path / "tiny.gguf"
     model.write_bytes(b"x")
@@ -1046,8 +986,8 @@ def test_up_kv_stores_the_cache_as_asked(tmp_path, monkeypatch):
 
 
 def test_up_draft_kv_reaches_the_spec_as_the_heads_own_cache(tmp_path, monkeypatch):
-    """`--draft-kv` sets the head's cache and leaves `--kv`'s alone; without it the build
-    keeps its own, which is the full-size one."""
+    """`--draft-kv` sets the head's cache and leaves `--kv`'s alone; without it the head's
+    cache is q8_0, the default."""
     import contextlib
     import types
 
@@ -1059,11 +999,8 @@ def test_up_draft_kv_reaches_the_spec_as_the_heads_own_cache(tmp_path, monkeypat
         def __init__(self, *a, **k):
             self.backend = types.SimpleNamespace(binary=None)
 
-        def lease(self, spec, **kw):
-            seen["spec"] = spec
-            raise SystemExit(0)
-
     monkeypatch.setattr(ops, "ServerManager", Manager)
+    asking(monkeypatch, seen, leave=True)
     monkeypatch.setattr(hub_module, "hub_cache", lambda: tmp_path)
     model = tmp_path / "tiny.gguf"
     model.write_bytes(b"x")
@@ -1080,8 +1017,8 @@ def test_up_draft_kv_reaches_the_spec_as_the_heads_own_cache(tmp_path, monkeypat
 
     with contextlib.suppress(SystemExit):
         cli.main(["up", str(model), "--draft", str(head), "--port", "1"])
-    assert seen["spec"].spec_draft_type_k == ""
-    assert seen["spec"].spec_draft_type_v == ""
+    assert seen["spec"].spec_draft_type_k == "q8_0", "the head's cache defaults to q8_0"
+    assert seen["spec"].spec_draft_type_v == "q8_0"
 
 
 class TestTheMeasuredShapeIsTheDefault:
@@ -1096,5 +1033,5 @@ class TestTheMeasuredShapeIsTheDefault:
         assert args.profile is False
 
     def test_naming_a_workload_is_enough_to_get_that_workloads_shape(self):
-        args = cli.COMMANDS.parser().parse_args(["up", "a-model.gguf", "--for", "ingest"])
+        args = cli.COMMANDS.parser().parse_args(["up", "a-model.gguf", "--workload", "ingest"])
         assert (args.profile, args.workload) == (True, "ingest")

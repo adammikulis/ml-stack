@@ -106,7 +106,8 @@ def _panel(doc: Mapping[str, Any], key: str, title: str, unit: str,
            groups: Sequence[tuple[str, list[float | None]]], *, places: int | None = None,
            line: Mapping[str, Any] | None = None, note: str = "") -> dict[str, Any]:
     built = [{"label": label,
-              "bars": [_bar(doc, c, v, _num(v, places)) for c, v in zip(doc["configs"], vs)]}
+              "bars": [_bar(doc, c, v, _num(v, places))
+                       for c, v in zip(doc["configs"], vs, strict=False)]}
              for label, vs in groups]
     every = [v for _, vs in groups for v in vs]
     if line:

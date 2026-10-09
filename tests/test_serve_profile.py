@@ -20,7 +20,7 @@ from conftest import write_gguf
 from ml_stack.asking import Asking
 from ml_stack.client import Reply
 from ml_stack.graph.conversation import converse
-from ml_stack.serve import cli as serve_cli, ops as serve_ops, profile as prof
+from ml_stack.serve import cli as serve_cli, holding, ops as serve_ops, profile as prof
 from ml_stack.serve.fit import Fit
 from ml_stack.serve.profile import Profile, add, asking_for, profile_for, profiles, record, said
 
@@ -146,6 +146,7 @@ def test_the_record_is_the_whole_serving_and_the_lease_it_becomes():
     assert serving.lease() == {"port": 8099, "context": 65536, "parallel": 1,
                              "cache_type_k": "q8_0", "cache_type_v": "q8_0",
                              "draft": HEAD, "spec_type": "draft-mtp", "spec_draft_max": 4,
+                             "spec_draft_type_k": "q8_0", "spec_draft_type_v": "q8_0",
                              "mmproj": "auto", "reasoning_budget": 0,
                              "extra_args": ("-ub", "2048", "--spec-draft-p-min", "0.5")}
 
@@ -163,7 +164,7 @@ def test_the_serving_uses_the_reference_asked_for_and_the_slots_asked_for():
 def test_a_head_recorded_by_file_name_is_looked_for_where_this_machine_keeps_models(
         monkeypatch):
     monkeypatch.setattr("ml_stack.hub.located", lambda name: Path(f"/models/{name}"))
-    assert measured().serving(resolve=True).draft == f"/models/{HEAD}"
+    assert measured().serving(resolve=True).draft == str(Path(f"/models/{HEAD}"))
 
     monkeypatch.setattr("ml_stack.hub.located", lambda name: None)
     assert measured().serving(resolve=True).draft == "", "a head not on this machine is not served"
@@ -312,7 +313,14 @@ def leases(monkeypatch, tmp_path):
             return SimpleNamespace(base_url=f"http://127.0.0.1:{spec.port}", port=spec.port,
                                    pid=None, adopted=True)
 
+    def up(spec, *, manager, **kw):
+        seen.append(spec)
+        return holding.Hold(id="lease", shape="s", model=str(spec.model), context=spec.context,
+                            parallel=spec.parallel, status="ready", port=spec.port or 1,
+                            base_url=f"http://127.0.0.1:{spec.port or 1}", adopted=True)
+
     monkeypatch.setattr(serve_ops, "ServerManager", Manager)
+    monkeypatch.setattr(holding, "up", up)
     monkeypatch.setattr("ml_stack.hub.located", lambda name, **k: Path(f"/models/{name}"))
     return seen
 
@@ -328,7 +336,7 @@ def test_up_with_a_profile_fills_every_flag_that_was_not_given(leases, tmp_path)
     spec = leases[0]
     assert spec.context == 65536 and spec.parallel == 1, \
         "one slot holding the whole cache the record measured across two"
-    assert str(spec.draft) == f"/models/{HEAD}" and spec.spec_type == "draft-mtp"
+    assert str(spec.draft) == str(Path(f"/models/{HEAD}")) and spec.spec_type == "draft-mtp"
     assert spec.spec_draft_max == 4
     assert spec.cache_type_k == spec.cache_type_v == "q8_0"
     assert spec.reasoning_budget == 0
@@ -769,7 +777,7 @@ def test_up_for_a_workload_serves_that_workloads_record(leases, tmp_path):
     add(measured(workload="ask", mmproj="", spec_draft_max=4))
     add(measured(workload="ingest", mmproj="", spec_draft_max=2, build="hollowmere",
                  slot_context=8192))
-    assert serve_cli.main(upped("--profile", "--for", "ingest", root=tmp_path)) == 0
+    assert serve_cli.main(upped("--profile", "--workload", "ingest", root=tmp_path)) == 0
 
     spec = leases[0]
     assert spec.spec_draft_max == 2, "the depth the server starts with is the ingest one"
@@ -786,7 +794,7 @@ def test_up_with_no_workload_named_serves_the_graph_asking(leases, tmp_path):
 def test_up_for_an_unmeasured_workload_says_which_record_it_fell_back_to(leases, tmp_path,
                                                                         capsys):
     add(measured(workload="ask", mmproj="", spec_draft_max=4))
-    assert serve_cli.main(upped("--profile", "--for", "ingest", root=tmp_path)) == 0
+    assert serve_cli.main(upped("--profile", "--workload", "ingest", root=tmp_path)) == 0
 
     said_out = capsys.readouterr().err
     assert "not for ingest" in said_out

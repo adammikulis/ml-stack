@@ -1,4 +1,4 @@
-"""``ml-stack-fleet``: one command makes a machine a peer, and the page's Join runs it too.
+"""``ml-stack-cluster``: one command makes a machine a peer, and the page's Join runs it too.
 
 The daemon it starts, the llama-server it fetches and the logon service it installs are the
 three things faked here -- each behind a parameter of `join_machine` -- and everything else
@@ -22,10 +22,11 @@ from pathlib import Path
 import pytest
 
 from ml_stack.checks import Finding
-from ml_stack.fleet import join as joining
+from ml_stack.fleet import join as joining, ui as fleet_ui
 from ml_stack.fleet.discovery import (
     Advertiser,
     Beacon,
+    derive_token,
     in_cluster,
     load_cluster_key,
     memberships,
@@ -42,6 +43,8 @@ from ml_stack.fleet.join import (
     table,
 )
 from ml_stack.http import Server
+from ml_stack.platform import process_group_kwargs
+from tests.cluster_support import join as join_cluster, key_for
 
 WORDS = "quince larch marlow"
 DEVICE = {"gpu": "Pellard P40", "vram_total_gb": 24.0, "vram_free_gb": 20.5,
@@ -52,7 +55,7 @@ DEVICE = {"gpu": "Pellard P40", "vram_total_gb": 24.0, "vram_free_gb": 20.5,
 
 def _free_udp() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-        s.bind(("", 0))
+        s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
 
 
@@ -67,10 +70,11 @@ class FakeDaemon:
     `join` started would do, without the daemon."""
 
     def __init__(self, port: int, key: bytes, udp: int, name: str = "larch",
-                 device: dict | None = None, machine: str = "") -> None:
+                 **more: object) -> None:
+        """``more`` may carry ``machine`` (an id) and ``device`` (what the beacon reports)."""
         self.name = name
-        machine = machine or f"id-{name}"
-        device = dict(DEVICE if device is None else device)
+        machine = more.get("machine") or f"id-{name}"
+        device = dict(more.get("device") or DEVICE)
 
         class H(BaseHTTPRequestHandler):
             def do_GET(self_) -> None:
@@ -105,6 +109,8 @@ def machine_looks_fine(monkeypatch):
         Finding(name="memory a model may use", good=True, said="96G of 128G (75%)"),
         Finding(name="models on this machine", good=True, said="2 file(s)")])
     monkeypatch.setattr(joining, "_server_here", lambda: "/opt/fake/bin/llama-server")
+    monkeypatch.setattr(joining.automatic_clusters, "ensure",
+                        lambda path, **kw: memberships(path)[0])
 
 
 @pytest.fixture
@@ -128,7 +134,7 @@ def daemons():
 # -- the join --------------------------------------------------------------------------
 class TestJoin:
     @pytest.mark.slow
-    def test_it_checks_joins_starts_announces_and_lists(self, tmp_path, key, udp, daemons):
+    def test_it_checks_joins_starts_announces_and_lists(self, tmp_path, key, udp, daemons, monkeypatch):
         tcp = _free_tcp()
         said: list[str] = []
         calls: list[tuple[int, Path, str]] = []
@@ -139,7 +145,10 @@ class TestJoin:
             daemons.append(FakeDaemon(port, load_cluster_key(key), udp, name="larch"))
             return 4242
 
+
         assert not in_cluster(key)
+        monkeypatch.setattr(joining, "join_by_passphrase",
+                            lambda words, group, path, **kw: join_cluster(words, group=group, path=path))
         joined = join_machine(name="larch", passphrase=WORDS, group="home", port=tcp,
                               root=tmp_path / "root", cluster_key_path=key, start=start,
                               discovery_port=udp, say=said.append)
@@ -165,22 +174,12 @@ class TestJoin:
         assert f"discovery port {udp}" in text
         assert "larch" in text and "quince-2b.gguf:8099" in text, "it prints what the fleet sees"
 
-    def test_no_cluster_and_no_passphrase_is_a_refusal_not_a_daemon(self, tmp_path, key, udp):
-        started = []
-        with pytest.raises(JoinError) as left:
-            join_machine(passphrase="", port=_free_tcp(), root=tmp_path, cluster_key_path=key,
-                         start=lambda *a: started.append(a) or 1, discovery_port=udp,
-                         say=lambda s: None)
-        assert "passphrase" in str(left.value)
-        assert started == [], "nothing may start on a machine that cannot announce"
-
     @pytest.mark.slow
 
     def test_a_running_daemon_is_reused_and_enrolled_through(self, tmp_path, key, udp, daemons):
         """Writing the key file under a running daemon leaves it announcing the old set;
         the cluster has to go in through the daemon, which re-reads them."""
         tcp = _free_tcp()
-        from ml_stack.fleet.discovery import join as join_cluster
 
         # Already in a cluster, already running, before `join` is asked for a second one.
         join_cluster(WORDS, group="home", path=key)
@@ -202,7 +201,6 @@ class TestJoin:
     @pytest.mark.slow
 
     def test_already_in_a_cluster_needs_no_passphrase(self, tmp_path, key, udp, daemons):
-        from ml_stack.fleet.discovery import join as join_cluster
 
         join_cluster(WORDS, group="home", path=key)
         tcp = _free_tcp()
@@ -231,9 +229,11 @@ class TestJoin:
         # the fake logon service never brings a daemon up, so the first wait runs its
         # deadline out on purpose; the FakeDaemon `start` puts up answers on the first poll,
         # so a short deadline measures the same fall-through in three seconds instead of twenty
-        joined = join_machine(passphrase=WORDS, persist=True, port=tcp, root=tmp_path,
+
+        join_cluster(WORDS, path=key)
+        joined = join_machine(persist=True, port=tcp, root=tmp_path,
                               cluster_key_path=key, start=start, persist_with=installs,
-                              discovery_port=udp, say=lambda s: None, wait_s=3.0)
+                              discovery_port=udp, say=lambda s: None, wait_s=3.0, group="ml-stack")
         assert asked == ["login"] and joined.persisted and joined.persist_note == ""
 
         def refuses(mode: str, **kw) -> Autostart:
@@ -247,10 +247,12 @@ class TestJoin:
         assert "sudo cp" in joined.persist_note and "administrator" in joined.persist_note
 
     def test_a_daemon_that_never_answers_is_an_error_naming_the_log(self, tmp_path, key, udp):
+
+        join_cluster(WORDS, path=key)
         with pytest.raises(JoinError) as left:
-            join_machine(passphrase=WORDS, port=_free_tcp(), root=tmp_path / "r",
+            join_machine(port=_free_tcp(), root=tmp_path / "r",
                          cluster_key_path=key, start=lambda *a: 99, wait_s=0.6,
-                         discovery_port=udp, say=lambda s: None)
+                         discovery_port=udp, say=lambda s: None, group="ml-stack")
         assert "traind.log" in str(left.value)
 
 
@@ -324,7 +326,7 @@ class TestStatus:
         assert "asr,vad" in first and "asr,vad" not in second
 
     def test_no_peers_says_what_to_run(self):
-        assert "ml-stack-fleet join" in table([])
+        assert "ml-stack-cluster join" in table([])
 
     def test_a_tracking_peer_shows_its_commit_and_the_branch_it_follows(self):
         """A fleet half on one commit and half on another is what this column exists to
@@ -369,7 +371,6 @@ class TestStatus:
     @pytest.mark.slow
 
     def test_peers_lists_one_machine_once_across_two_clusters(self, key, udp, daemons):
-        from ml_stack.fleet.discovery import join as join_cluster
 
         join_cluster(WORDS, group="home", path=key)
         join_cluster("other words here", group="lab", path=key)
@@ -387,7 +388,6 @@ class TestStatus:
         assert sorted(rows[0]["clusters"]) == ["home", "lab"]
 
     def test_status_command_prints_json_rows(self, key, udp, daemons, monkeypatch, capsys):
-        from ml_stack.fleet.discovery import join as join_cluster
 
         join_cluster(WORDS, group="home", path=key)
         tcp = _free_tcp()
@@ -401,7 +401,6 @@ class TestStatus:
 
     def test_two_machines_of_one_name_are_listed_apart(self, key, udp, daemons,
                                                         monkeypatch, capsys):
-        from ml_stack.fleet.discovery import join as join_cluster
 
         join_cluster(WORDS, group="home", path=key)
         tcp = _free_tcp()
@@ -423,7 +422,7 @@ class TestStatus:
 
     def test_status_in_no_cluster_says_join(self, key, capsys):
         assert main(["--cluster-key", str(key), "status"]) == 1
-        assert "ml-stack-fleet join" in capsys.readouterr().err
+        assert "ml-stack-cluster join" in capsys.readouterr().err
 
     def test_join_takes_the_passphrase_name_and_cluster_from_the_environment(
             self, key, tmp_path, monkeypatch):
@@ -459,7 +458,7 @@ class TestStatus:
                                                          root=Path(kw["root"]),
                                                          group="g"))[1])
         main(["--cluster-key", str(key), "--root", str(tmp_path), "join",
-              "--passphrase", WORDS, "--name", "larchmere"])
+              "--passphrase", WORDS, "--name", "larchmere", "--group", "home"])
 
         assert asked["passphrase"] == WORDS and asked["name"] == "larchmere"
 
@@ -467,11 +466,11 @@ class TestStatus:
 # -- leaving ---------------------------------------------------------------------------
 class TestLeave:
     def test_leave_drops_the_cluster_the_service_and_the_daemon_it_started(self, tmp_path, key):
-        from ml_stack.fleet.discovery import join as join_cluster
 
         join_cluster(WORDS, group="home", path=key)
         # A process standing in for the daemon `join` started, stopped by pid, never by name.
-        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"],
+                                 **process_group_kwargs())
         root = tmp_path / "root"
         root.mkdir()
         joining.started_file(root).write_text(json.dumps({"pid": child.pid}))
@@ -490,7 +489,6 @@ class TestLeave:
                 child.kill()
 
     def test_leave_one_group_keeps_the_other(self, tmp_path, key):
-        from ml_stack.fleet.discovery import join as join_cluster
 
         join_cluster(WORDS, group="home", path=key)
         join_cluster("other words here", group="lab", path=key)
@@ -538,7 +536,7 @@ class TestThePage:
         s.ui.peer_port = s.port
         s.ui.discovery_port = udp
         s.ui.root = tmp_path / "traind"
-        s.call("/ui/setup/join", method="POST", body={"passphrase": WORDS, "group": "home"})
+        s.call("/ui/setup/join", method="POST", body={"mode": "create", "passphrase": WORDS, "group": "home"})
         _, _, headers = s.call("/ui/session", method="POST", body={"passphrase": WORDS})
         cookie = headers["Set-Cookie"].split(";")[0]
         # Another machine in the same cluster, holding two models and serving one.
@@ -560,8 +558,12 @@ class TestThePage:
 
     @pytest.mark.slow
 
-    def test_the_join_button_runs_the_same_join(self, page):
+    def test_the_join_button_runs_the_same_join(self, page, monkeypatch):
+
+        monkeypatch.setattr(fleet_ui, "join_by_passphrase",
+                            lambda words, group, path, **kw: join_cluster(words, group=group, path=path))
         s, cookie = page
+        original = memberships(s.keyfile)
         status, body, _ = s.call("/ui/fleet/join", method="POST", body={}, cookie=cookie)
         assert status == 400, "an empty form must not start anything"
 
@@ -569,7 +571,10 @@ class TestThePage:
                                  body={"passphrase": "other words here", "group": "lab"})
         assert status == 200, body
         assert body["group"] == "lab" and not body["started"], "this daemon is the daemon"
-        assert [m.group for m in memberships(s.keyfile)] == ["home", "lab"]
+        held = memberships(s.keyfile)
+        assert [m.group for m in held] == ["home", "lab"]
+        assert held[0] == original[0]
+        assert held[1].key == key_for("other words here", "lab")
         assert any("already running as 'studio'" in line for line in body["said"])
         assert {c["name"] for c in body["checks"]} >= {"llama-server"}
         assert "larch" in [p["name"] for p in body["peers"]]
@@ -658,47 +663,23 @@ class TestThePage:
 class PausableDaemon:
     """A peer with a real `Availability` behind ``/availability``, and a beacon."""
 
-    def __init__(self, port: int, key: bytes, udp: int, name: str) -> None:
+    def __init__(self, port: int, key: bytes, udp: int, name: str, root: Path) -> None:
+        from ml_stack.fleet.api import Daemon, make_handler
         from ml_stack.fleet.availability import Availability
+        from ml_stack.fleet.jobs import JobRunner
 
         self.name = name
         self.schedule = Availability()
         schedule = self.schedule
-
-        class H(BaseHTTPRequestHandler):
-            def _reply(self_, code: int, payload: dict) -> None:
-                raw = json.dumps(payload).encode()
-                self_.send_response(code)
-                self_.send_header("Content-Type", "application/json")
-                self_.send_header("Content-Length", str(len(raw)))
-                self_.end_headers()
-                self_.wfile.write(raw)
-
-            def do_GET(self_) -> None:
-                if self_.path == "/availability":
-                    self_._reply(200, schedule.public())
-                    return
-                self_._reply(200 if self_.path == "/health" else 404,
-                             {"ok": True, "name": name, "machine": f"id-{name}",
-                              "busy": False, "free": 1, "slots": 1, "queued": 0})
-
-            def do_POST(self_) -> None:
-                said = json.loads(self_.rfile.read(
-                    int(self_.headers.get("Content-Length", "0"))) or b"{}")
-                if said.get("action") == "pause":
-                    schedule.pause(minutes=said.get("minutes"),
-                                   reason=str(said.get("reason") or ""))
-                else:
-                    schedule.resume()
-                self_._reply(200, schedule.public())
-
-            def log_message(self_, *a: object) -> None:
-                pass
-
+        files = root / "files"
+        files.mkdir(parents=True)
+        self.runner = JobRunner(root, files)
+        handler = make_handler(Daemon(self.runner, files, derive_token(key), name=name,
+                                      schedule=schedule))
         def refresh(b: Beacon) -> None:
             b.device = {**DEVICE, "availability": schedule.public()}
 
-        self.httpd = Server(("127.0.0.1", port), H)
+        self.httpd = Server(("127.0.0.1", port), handler)
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
         beacon = Beacon(name=name, port=port, device=dict(DEVICE), machine=f"id-{name}")
         self.advertiser = Advertiser(beacon, key, port=udp, interval_s=0.2,
@@ -706,6 +687,7 @@ class PausableDaemon:
 
     def close(self) -> None:
         self.advertiser.stop()
+        self.runner.shutdown()
         self.httpd.shutdown()
         self.httpd.server_close()
 
@@ -713,10 +695,10 @@ class PausableDaemon:
 @pytest.fixture
 def cluster(tmp_path, key, udp):
     """Three peers on loopback in one cluster, and the root a command would keep."""
-    from ml_stack.fleet.discovery import join as join_cluster
+    from tests.cluster_support import join as join_cluster
 
     join_cluster(WORDS, group="home", path=key)
-    made = [PausableDaemon(_free_tcp(), load_cluster_key(key), udp, name=n)
+    made = [PausableDaemon(_free_tcp(), load_cluster_key(key), udp, name=n, root=tmp_path / n)
             for n in ("harrowgate", "larch", "studio")]
     yield made, key, udp, tmp_path / "root"
     for one in made:
@@ -915,9 +897,9 @@ class TestStatusSaysWhoIsPaused:
         env = {**os.environ, "ML_STACK_CLUSTER_KEY": str(key),
                "ML_STACK_DISCOVERY_PORT": str(udp),
                "PYTHONPATH": str(Path(joining.__file__).parents[2])}
-        code = ("from ml_stack.fleet.daemon import serve_forever;"
-                f"serve_forever(root={str(root)!r}, host='127.0.0.1',"
-                f" port={_free_tcp()}, name='windermere', web=False, announce=False)")
+        code = ("from ml_stack.fleet.daemon import serve, DaemonOptions;"
+                f"serve(DaemonOptions(root={str(root)!r}, host='127.0.0.1',"
+                f" port={_free_tcp()}, name='windermere', web=False, announce=False))")
         proc = subprocess.Popen([sys.executable, "-c", code], env=env,
                                 stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
         saved = root / "availability.json"
@@ -968,7 +950,7 @@ class TestWhoAPauseIsSentTo:
     """`pausing.peer_clients` builds the clients `pause_fleet` posts to."""
 
     def test_a_row_gets_a_client_holding_the_token_its_cluster_derives(self, tmp_path):
-        from ml_stack.fleet.discovery import derive_token, join as join_cluster
+        from ml_stack.fleet.discovery import derive_token
         from ml_stack.fleet.pausing import peer_clients
 
         key = tmp_path / "clusters.json"
@@ -977,28 +959,27 @@ class TestWhoAPauseIsSentTo:
         held = {m.group: m.key for m in memberships(key)}
 
         clients = peer_clients(
-            [{"name": "workshop", "base_url": "http://10.0.0.4:8770", "clusters": ["studio"]},
-             {"name": "attic", "base_url": "http://10.0.0.5:8770", "clusters": ["annex"]}],
+            [{"name": "workshop", "base_url": "https://10.0.0.4:8770", "clusters": ["studio"]},
+             {"name": "attic", "base_url": "https://10.0.0.5:8770", "clusters": ["annex"]}],
             cluster_key_path=key, timeout=12.5)
 
         assert sorted(clients) == ["attic", "workshop"]
-        assert clients["workshop"].base_url == "http://10.0.0.4:8770"
+        assert clients["workshop"].base_url == "https://10.0.0.4:8770"
         assert clients["workshop"].token == derive_token(held["studio"])
         assert clients["attic"].token == derive_token(held["annex"])
         assert clients["workshop"].token != clients["attic"].token
         assert clients["workshop"].timeout == 12.5
 
     def test_a_row_no_key_of_this_machine_reaches_gets_no_client(self, tmp_path):
-        from ml_stack.fleet.discovery import join as join_cluster
         from ml_stack.fleet.pausing import peer_clients
 
         key = tmp_path / "clusters.json"
         join_cluster("nine blue kettles", group="studio", path=key)
 
         clients = peer_clients(
-            [{"name": "workshop", "base_url": "http://10.0.0.4:8770", "clusters": ["studio"]},
-             {"name": "stranger", "base_url": "http://10.0.0.6:8770", "clusters": ["elsewhere"]},
-             {"name": "unlisted", "base_url": "http://10.0.0.7:8770"}],
+            [{"name": "workshop", "base_url": "https://10.0.0.4:8770", "clusters": ["studio"]},
+             {"name": "stranger", "base_url": "https://10.0.0.6:8770", "clusters": ["elsewhere"]},
+             {"name": "unlisted", "base_url": "https://10.0.0.7:8770"}],
             cluster_key_path=key)
 
         assert list(clients) == ["workshop"]

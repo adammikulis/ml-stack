@@ -1,7 +1,7 @@
 """``ml-stack-mcp`` -- the commands as MCP tools over stdio, for an agent to drive.
 
 Each tool calls the same function the matching command calls -- `serve.cli.look`,
-`hub.find`, `bench.underway.detach`, `fleet.join.join_machine`, `setup.look`,
+`hub.find`, `bench.underway.detach`, `setup.look`,
 `setup.look_checkouts` -- so what an agent is told is what a person at the terminal
 would be told, and nothing is reimplemented here. Anything long -- a model load, a download, a
 measurement -- never blocks the call: it is started in its own session, owned by no
@@ -22,21 +22,27 @@ or in ``.mcp.json``: ``{"mcpServers": {"ml-stack": {"command": "ml-stack-mcp"}}}
 """
 
 import argparse
-import contextlib
 import dataclasses
 import inspect
-import io
 import json
+import re
+import secrets
 import sys
 import time
 import typing
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, TextIO
 
+from ml_stack.agent import Compaction, Counter, Spill, Transcript, compact, model_summarizer
+from ml_stack.client import Client
+from ml_stack.decide import router
 from ml_stack.home import state
 from ml_stack.log import say
+from ml_stack.serve import ops, quant_guard
+from ml_stack.tool_schema import _JSON_TYPES, schema_of
+from ml_stack.workspace import tools as workspace_tools
 
 __all__ = [
     "PROTOCOL",
@@ -60,53 +66,36 @@ def mcp_home() -> Path:
 own, under its own home, because ``ml-stack-bench status`` reads them from there."""
 
 
+def _hints(*, read_only: bool, destructive: bool = False, idempotent: bool = False,
+           open_world: bool = False) -> dict[str, bool]:
+    return {"readOnly": read_only, "destructive": destructive, "idempotent": idempotent,
+            "openWorld": open_world}
+
+
+READS = _hints(read_only=True, idempotent=True)
+"""Hints for a tool that only looks."""
+
+WRITES = _hints(read_only=False)
+"""Hints for a tool that changes something and can be repeated at a cost."""
+
+
 @dataclass(frozen=True, slots=True)
 class Tool:
     name: str
     description: str
     fn: Callable[..., Any]
+    hints: dict[str, bool] = field(default_factory=lambda: dict(WRITES))
 
     def schema(self) -> dict[str, Any]:
         return schema_of(self.fn)
 
     def public(self) -> dict[str, Any]:
         return {"name": self.name, "description": self.description,
-                "inputSchema": self.schema()}
+                "inputSchema": self.schema(), "annotations": self.annotations()}
 
-
-_JSON_TYPES: dict[Any, dict[str, Any]] = {
-    str: {"type": "string"}, int: {"type": "integer"}, float: {"type": "number"},
-    bool: {"type": "boolean"},
-}
-
-
-def schema_of(fn: Callable[..., Any]) -> dict[str, Any]:
-    """A JSON schema for ``fn``'s keyword arguments, read from its type hints.
-
-    ``str``, ``int``, ``float``, ``bool`` and ``list[str]`` are what the tools take; a
-    parameter with no default is required. The same hints are what FastMCP reads, so the
-    two transports describe every tool identically.
-    """
-    hints = typing.get_type_hints(fn)
-    props: dict[str, Any] = {}
-    required: list[str] = []
-    for name, param in inspect.signature(fn).parameters.items():
-        hint = hints.get(name, str)
-        if typing.get_origin(hint) is list:
-            inner = typing.get_args(hint)[0] if typing.get_args(hint) else str
-            prop: dict[str, Any] = {"type": "array",
-                                    "items": dict(_JSON_TYPES.get(inner, {"type": "string"}))}
-        else:
-            prop = dict(_JSON_TYPES.get(hint, {"type": "string"}))
-        if param.default is inspect.Parameter.empty:
-            required.append(name)
-        else:
-            prop["default"] = param.default
-        props[name] = prop
-    out: dict[str, Any] = {"type": "object", "properties": props}
-    if required:
-        out["required"] = required
-    return out
+    def annotations(self) -> dict[str, bool]:
+        """The tool's behaviour hints under the names the protocol uses."""
+        return {f"{k}Hint": v for k, v in self.hints.items()}
 
 
 # -- detaching -------------------------------------------------------------------------
@@ -125,16 +114,6 @@ def detached(module: str, argv: list[str], *, name: str,
     return {"log": str(ran.log), "pid": ran.pid, "command": " ".join(ran.command)}
 
 
-def _captured(fn: Callable[[], int]) -> dict[str, Any]:
-    """Run a command's ``main`` in-process and hand back what it printed and its exit."""
-    out, err = io.StringIO(), io.StringIO()
-    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-        try:
-            code = int(fn() or 0)
-        except SystemExit as left:
-            code = int(left.code or 0) if isinstance(left.code, int) else 1
-    return {"exit": code, "output": out.getvalue(), "errors": err.getvalue()}
-
 
 def _plain(value: Any) -> Any:
     """Dataclasses and paths as JSON."""
@@ -149,12 +128,69 @@ def _plain(value: Any) -> Any:
     return value
 
 
+def _not_an_option(value: str, what: str) -> str:
+    """``value`` unchanged, or a refusal when a command would read it as an option."""
+    if value.lstrip().startswith("-"):
+        raise ValueError(f"{what} may not start with '-': {value!r}")
+    return value
+
+
+def _confined(path: str) -> Path:
+    """``path`` resolved, or ``ValueError`` unless it lies under the MCP home or the working directory."""
+    resolved = Path(path).expanduser().resolve()
+    for root in (mcp_home().resolve(), Path.cwd().resolve()):
+        if resolved == root or root in resolved.parents:
+            return resolved
+    raise ValueError(f"{path!r} is outside the MCP home and the working directory")
+
+
+def _local_server(url: str) -> str:
+    """``url`` when it is the address of a server this machine's broker holds, else ``ValueError``."""
+    held = {ops.base_url_for(port).rstrip("/") for port in ops.recorded_servers(ops.lease_file())}
+    if url.rstrip("/") not in held:
+        raise ValueError(f"{url!r} is not a server this machine is serving")
+    return url
+
+
+def _check_type(name: str, value: Any, hint: Any) -> None:
+    """Raise ``TypeError`` unless ``value`` is what the tool's hint for ``name`` declares."""
+    if type(None) in typing.get_args(hint):
+        hint = next(part for part in typing.get_args(hint) if part is not type(None))
+    if typing.get_origin(hint) is list:
+        inner = (typing.get_args(hint) or (str,))[0]
+        if not isinstance(value, list) or any(not _is(v, inner) for v in value):
+            raise TypeError(f"{name} must be a list of {inner.__name__}")
+    elif hint in _JSON_TYPES and not _is(value, hint):
+        raise TypeError(f"{name} must be {_JSON_TYPES[hint]['type']}, not {type(value).__name__}")
+
+
+def _is(value: Any, kind: Any) -> bool:
+    if kind is bool:
+        return isinstance(value, bool)
+    if isinstance(value, bool):
+        return False
+    return isinstance(value, (int, float)) if kind is float else isinstance(value, kind)
+
+
+def checked(fn: Callable[..., Any], arguments: dict[str, Any]) -> None:
+    """Raise ``TypeError`` for an argument ``fn`` does not take, a missing required one, or
+    one whose JSON type is not the one its hint declares."""
+    params = inspect.signature(fn).parameters
+    hints = typing.get_type_hints(fn)
+    for name, value in arguments.items():
+        if name not in params:
+            raise TypeError(f"no argument called {name!r}")
+        _check_type(name, value, hints.get(name, str))
+    missing = [n for n, p in params.items() if p.default is inspect.Parameter.empty
+               and n not in arguments]
+    if missing:
+        raise TypeError(f"missing: {', '.join(missing)}")
+
+
 # -- the tools -------------------------------------------------------------------------
 def serve_status(port: int = 8080) -> list[dict[str, Any]]:
     """What is serving on this machine: every recorded server and ``port``, each with its
     model, context, slots and lease -- what ``ml-stack-serve status`` prints."""
-    from ml_stack.serve import ops
-
     records = ops.recorded_servers(ops.lease_file())
     found = []
     for one in sorted({*records, int(port)}):
@@ -164,23 +200,30 @@ def serve_status(port: int = 8080) -> list[dict[str, Any]]:
     return found
 
 
-def serve_up(model: str, port: int = 8080, context: int = 0, parallel: int = 1,
-             draft: str = "", mmproj: str = "", extra: list[str] = [],
-             escalate: bool = False) -> dict[str, Any]:
-    """Put ``model`` (a path or ``hf:owner/repo/file.gguf``) up on ``port`` with
-    ``ml-stack-serve up``, detached; returns the log and pid, and ``serve_status`` says
-    when it is answering. ``draft`` and ``mmproj`` take a path or ``auto``. ``escalate``
-    grows a server already up on ``port`` with fewer than ``parallel`` slots rather than
-    refusing, keeping every live conversation."""
-    argv = ["up", model, "--port", str(port), "--parallel", str(parallel)]
+_NOT_A_TOOL_ARGUMENT = ("--iq", "--port", "--escalate", "--binary", "--build", "--root")
+"""``up`` flags a model may not set through ``extra``: the IQ mode is a person's, the broker
+picks the port, and growing a server, the binary and the fleet root are not a tool's to choose."""
+
+
+def serve_up(model: str, *, context: int = 0, draft: str = "",
+             mmproj: str = "", extra: list[str] | None = None) -> dict[str, Any]:
+    """Ask for a lease on a server for ``model`` (a path or ``hf:owner/repo/file.gguf``) with
+    ``ml-stack-serve up --no-wait``, detached; returns the log and pid, and ``serve_status``
+    says when it is answering. The broker picks the port, checks the memory and queues the
+    lease when it is short. ``draft`` and ``mmproj`` take a path or ``auto``."""
+    if why := quant_guard.blocked_message(model):
+        return {"started": False, "blocked": why}
+    for one in extra or []:
+        flag = str(one).split("=", 1)[0]
+        if flag in _NOT_A_TOOL_ARGUMENT or flag.startswith(("--iq-", "--iq_")):
+            raise ValueError(f"{flag} is a person's to set, not a tool argument")
+    argv = ["up", _not_an_option(model, "model"), "--no-wait", "--parallel", "1"]
     if context:
         argv += ["--context", str(context)]
     if draft:
-        argv += ["--draft", draft]
+        argv += ["--draft", _not_an_option(draft, "draft")]
     if mmproj:
-        argv += ["--mmproj", mmproj]
-    if escalate:
-        argv += ["--escalate"]
+        argv += ["--mmproj", _not_an_option(mmproj, "mmproj")]
     argv += list(extra or [])
     return detached("ml_stack.serve.cli", argv, name=f"serve-{Path(model).name}")
 
@@ -188,8 +231,6 @@ def serve_up(model: str, port: int = 8080, context: int = 0, parallel: int = 1,
 def serve_down(port: int = 8080) -> dict[str, Any]:
     """Stop the server this machine started on ``port`` (``ml-stack-serve down``); says
     whether a process was still running, and why it would not act when it would not."""
-    from ml_stack.serve import ops
-
     try:
         stopped, fleet = ops.down(int(port))
     except ops.Refused as no:
@@ -229,8 +270,34 @@ def models_files(repo: str, ending: str = ".gguf") -> list[dict[str, Any]]:
 def models_fetch(reference: str) -> dict[str, Any]:
     """Download an ``hf:owner/repo/file.gguf`` reference -- every shard -- into the cache
     without serving it (``ml-stack-models fetch``), detached; returns the log and pid."""
-    return detached("ml_stack.hub", ["fetch", reference],
+    return detached("ml_stack.hub", ["fetch", "--", _not_an_option(reference, "reference")],
                     name=f"fetch-{reference.rsplit('/', 1)[-1]}")
+
+
+_BENCH_COMMANDS = ("sweep", "run")
+_BENCH_FLAGS = frozenset({
+    "--serve", "--context", "--parallel", "--serve-draft", "--serve-kv", "--serve-kv-unified",
+    "--no-serve-kv-unified", "--profile", "--no-profile", "--serve-label", "--no-draft",
+    "--label-suffix", "--serve-mlock", "--serve-no-flash-attn", "--serve-mmproj", "--n-max",
+    "--reasoning-budget", "--plain-only", "--resume", "--shortlist", "--shortlist-for",
+    "--margin", "--smoke", "--sample", "--short", "--trace", "--no-trace", "--temperature",
+    "--top-p", "--top-k", "--min-p", "--n-predict", "--card", "--anyway", "--ceiling", "--yes",
+    "--no-selfcheck", "--no-smoke", "--per-question", "--no-queue", "--no-prefetch",
+})
+"""The ``ml-stack-bench`` subcommands and flags a tool may pass: none takes a path to run, a
+store or kept file to read or write, or an endpoint to call."""
+
+
+def _checked_bench_argv(argv: list[str]) -> list[str]:
+    """``argv`` unchanged when it is an allowed subcommand with allowed flags; else ``ValueError``."""
+    words = [str(a) for a in argv]
+    if not words or words[0] not in _BENCH_COMMANDS:
+        raise ValueError(f"bench_run takes one of {', '.join(_BENCH_COMMANDS)} first")
+    for word in words[1:]:
+        flag = word.split("=", 1)[0]
+        if word.startswith("-") and not re.fullmatch(r"-\d+(\.\d+)?", word) and flag not in _BENCH_FLAGS:
+            raise ValueError(f"{flag} is not a flag bench_run accepts")
+    return words
 
 
 def bench_run(argv: list[str]) -> dict[str, Any]:
@@ -239,7 +306,7 @@ def bench_run(argv: list[str]) -> dict[str, Any]:
     ``bench_status`` follows it."""
     from ml_stack.bench.underway import detach, measuring_file
 
-    log = detach(list(argv))
+    log = detach(_checked_bench_argv(argv))
     try:
         held = json.loads(measuring_file().read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -286,25 +353,12 @@ def bench_show(last: int = 0, since: str = "", extract: bool = False,
 
 def fleet_peers(timeout_s: float = 2.0) -> list[dict[str, Any]]:
     """Every peer on the LAN holding this machine's cluster key: what each serves, its
-    room, whether it is busy or measuring, and its commit (``ml-stack-fleet status``)."""
+    room, whether it is busy or measuring, and its commit (``ml-stack-cluster status``)."""
     from ml_stack.fleet.join import peers
     from ml_stack.fleet.launch import already_running
 
     me = already_running() or {}
     return peers(timeout_s=timeout_s, self_machine=str(me.get("machine") or ""))
-
-
-def fleet_join(passphrase: str = "", group: str = "ml-stack", name: str = "",
-               persist: bool = False) -> dict[str, Any]:
-    """Make this machine a peer (``ml-stack-fleet join``): the checks, the cluster
-    ``passphrase`` joins, the daemon started if none answers, at logon with ``persist``,
-    and the peers that answered."""
-    from ml_stack.fleet.join import join_machine
-
-    said: list[str] = []
-    joined = join_machine(name=name, passphrase=passphrase, group=group, persist=persist,
-                          say=said.append)
-    return {**joined.public(), "said": said}
 
 
 def world_make(kind: str = "company", size: str = "small", seed: int = 0,
@@ -340,24 +394,37 @@ def speech_transcribe(path: str, provider: str = "", language: str = "") -> dict
     (``ml-stack-speech transcribe``); ``language`` is guessed when it is not given."""
     from ml_stack.speech.service import transcribe
 
-    return _plain(transcribe(Path(path).expanduser(), provider=provider or None,
+    return _plain(transcribe(_confined(path), provider=provider or None,
                              language=language or None))
 
 
-def speech_say(text: str, out: str, provider: str = "", voice: str = "") -> dict[str, Any]:
-    """Speak ``text`` into the WAV file ``out`` (``ml-stack-speech say``); returns the path,
-    how long it is and the voice that said it."""
+def speech_say(text: str, provider: str = "", voice: str = "") -> dict[str, Any]:
+    """Speak ``text`` into a new WAV file under ``~/.ml-stack/mcp/speech``
+    (``ml-stack-speech say``); returns the path, how long it is and the voice that said it."""
     from ml_stack.speech.service import say
 
     spoken = say(text, provider=provider or None, voice=voice or None)
-    target = Path(out).expanduser()
+    target = mcp_home() / "speech" / f"say-{time.strftime('%Y%m%dT%H%M%S')}-{secrets.token_hex(4)}.wav"
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(spoken.to_wav())
     return {"out": str(target), "duration_s": spoken.duration_s,
             "sample_rate": spoken.sample_rate, "voice": spoken.voice}
 
 
-def doctor(repos: list[str] = []) -> list[dict[str, Any]]:
+def decide(question: str, options: list[str], *, state_text: str = "", backend: str = "auto",
+           abstain_below: float = -1.0) -> dict[str, Any]:
+    """Choose one of ``options`` (``NAME`` or ``NAME=description``) for ``question`` about
+    ``state_text`` and say how sure (``ml-stack-decide ask``); ``backend`` is ``auto``,
+    ``logprob``, ``pointer``, ``embed`` or ``rules`` using the configured chat server;
+    a positive ``abstain_below`` flags answers under that probability."""
+    named = {n.strip(): d.strip() for n, _, d in (o.partition("=") for o in options)}
+    got = router.decide(question, state_text, named,
+                        abstain_below=abstain_below if abstain_below > 0 else None,
+                        config=router.shared(backend, ""))
+    return got.public()
+
+
+def doctor(repos: list[str] | None = None) -> list[dict[str, Any]]:
     """The checkouts, the bench store and the managed llama.cpp, each finding with its fix
     (``ml-stack-doctor``, without running any fix); ``repos`` picks the checkouts."""
     from ml_stack.doctor import look_checkouts, repositories
@@ -365,10 +432,30 @@ def doctor(repos: list[str] = []) -> list[dict[str, Any]]:
     return [_plain(f) for f in look_checkouts(repositories(list(repos)) if repos else None)]
 
 
-TOOLS: list[Tool] = [
+def conversation_compact(path: str, budget: int, keep_last: int = 6, url: str = "",
+                         write: bool = False) -> dict[str, Any]:
+    """Fit the chat messages in a JSON file to ``budget`` tokens: long tool results cut,
+    repeated calls dropped, the oldest messages summarised by the model at ``url`` (removed
+    outright when there is none). ``write`` replaces the file; removed text is kept under
+    ``~/.ml-stack/compaction``."""
+    target = _confined(path)
+    client = Client(_local_server(url)) if url else None
+    messages = json.loads(target.read_text(encoding="utf-8"))
+    fitted = compact(messages, budget=budget, count=Counter(client), using=Compaction(
+        keep_last=keep_last, summarize=bool(url),
+        summarizer=model_summarizer(client) if client else None,
+        spill=Spill(Transcript())))
+    if write and fitted.strategy_used != "none":
+        target.write_text(json.dumps(fitted.messages, indent=2), encoding="utf-8")
+    return {"strategy": fitted.strategy_used, "dropped": fitted.dropped_count,
+            "tokens_before": fitted.tokens_before, "tokens_after": fitted.tokens_after,
+            "notes": list(fitted.notes), "written": write and fitted.strategy_used != "none"}
+
+
+_TOOLS: list[Tool] = [
     Tool("serve_status", "What is serving on this machine, and what a lease would do.",
          serve_status),
-    Tool("serve_up", "Put a model up on a port, detached; returns the log and pid.", serve_up),
+    Tool("serve_up", "Ask the broker for a lease on a server for a model, detached; it picks the port.", serve_up),
     Tool("serve_down", "Stop the server this machine started on a port.", serve_down),
     Tool("serve_escalate", "Grow the slots a running server holds, keeping every live "
                           "conversation.", serve_escalate),
@@ -385,20 +472,43 @@ TOOLS: list[Tool] = [
     Tool("bench_show", "Every benchmark run kept, as records: what was served, how "
          "it was asked, what it scored and what it cost.", bench_show),
     Tool("fleet_peers", "Every peer on the LAN: serving, room, busy, commit.", fleet_peers),
-    Tool("fleet_join", "Make this machine a peer: checks, cluster, daemon, announce.",
-         fleet_join),
     Tool("world_make", "Invent an organised group as a graph with people who could talk.",
          world_make),
     Tool("setup_look", "The machine facts serving depends on, with a fix for each.",
          setup_look),
     Tool("doctor", "The checkouts, the bench store and the managed llama.cpp, checked.",
          doctor),
+    Tool("conversation_compact", "Fit a chat's messages to a token budget: cut long tool "
+                                 "results, drop repeated calls, summarise the oldest.",
+         conversation_compact),
     Tool("speech_providers", "Every speech engine here: recognition, synthesis, voice "
                              "activity.", speech_providers),
     Tool("speech_transcribe", "An audio file as text, with the times of each segment.",
          speech_transcribe),
-    Tool("speech_say", "Speak text into a WAV file.", speech_say),
+    Tool("speech_say", "Speak text into a new WAV file in the state directory.", speech_say),
+    Tool("decide", "Choose one of a named set of options and report a probability for each.",
+         decide),
 ]
+_TOOLS += [Tool(name, (getattr(workspace_tools, name).__doc__ or "").split("\n\n")[0].replace("\n", " "),
+               getattr(workspace_tools, name),
+               _hints(read_only=ro, destructive=bad, idempotent=same))
+          for name, (ro, bad, same) in workspace_tools.HINTS.items()]
+_HINTS: dict[str, dict[str, bool]] = {
+    "serve_status": READS, "models_find": _hints(read_only=True, idempotent=True, open_world=True),
+    "models_files": _hints(read_only=True, idempotent=True, open_world=True),
+    "bench_status": READS, "bench_history": READS, "bench_show": READS,
+    "fleet_peers": READS, "setup_look": READS, "doctor": READS, "speech_providers": READS,
+    "speech_transcribe": READS,
+    "serve_up": _hints(read_only=False, idempotent=True, open_world=True),
+    "serve_down": _hints(read_only=False, destructive=True, idempotent=True),
+    "serve_escalate": _hints(read_only=False),
+    "models_fetch": _hints(read_only=False, idempotent=True, open_world=True),
+    "bench_run": _hints(read_only=False),
+    "world_make": _hints(read_only=False, idempotent=True),
+    "speech_say": _hints(read_only=False),
+    "conversation_compact": _hints(read_only=False, destructive=True),
+}
+TOOLS: list[Tool] = [dataclasses.replace(t, hints=_HINTS.get(t.name, t.hints)) for t in _TOOLS]
 _BY_NAME = {t.name: t for t in TOOLS}
 
 
@@ -419,6 +529,7 @@ def call(name: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
         return {"content": [{"type": "text", "text": f"no tool called {name!r}"}],
                 "isError": True}
     try:
+        checked(tool.fn, arguments or {})
         got = tool.fn(**(arguments or {}))
     except Exception as exc:  # noqa: BLE001 - the error is the answer
         return {"content": [{"type": "text", "text": f"{type(exc).__name__}: {exc}"}],
@@ -482,19 +593,25 @@ def serve(reader: TextIO, writer: TextIO) -> int:
 # -- the SDK transport -----------------------------------------------------------------
 def sdk_available() -> bool:
     try:
-        import mcp.server.fastmcp  # noqa: F401
+        import mcp.server.mcpserver  # noqa: F401
     except ImportError:
         return False
     return True
 
 
 def build_sdk_server() -> Any:
-    """A ``FastMCP`` server carrying the same tools; needs ``pip install 'ml-stack[mcp]'``."""
-    from mcp.server.fastmcp import FastMCP
+    """An ``MCPServer`` carrying the same tools, with their behaviour hints and structured
+    results; needs ``pip install 'ml-stack[mcp]'`` (mcp 2.3 or later)."""
+    from mcp.server.mcpserver import MCPServer
+    from mcp_types import ToolAnnotations
 
-    app = FastMCP("ml-stack")
+    app = MCPServer("ml-stack")
     for tool in TOOLS:
-        app.add_tool(tool.fn, name=tool.name, description=tool.description)
+        hints = tool.hints
+        app.add_tool(tool.fn, name=tool.name, description=tool.description,
+                     annotations=ToolAnnotations(
+                         read_only_hint=hints["readOnly"], destructive_hint=hints["destructive"],
+                         idempotent_hint=hints["idempotent"], open_world_hint=hints["openWorld"]))
     return app
 
 
@@ -503,11 +620,19 @@ def main(argv: list[str] | None = None) -> int:
         prog="ml-stack-mcp",
         description="The ml-stack commands as MCP tools over stdio. Register it with "
                     "'claude mcp add ml-stack -- ml-stack-mcp'.")
+    ap.add_argument("--workspace-only", action="store_true", help="expose authenticated workspace messaging tools only")
     ap.add_argument("--list", action="store_true", help="print the tools and exit")
     ap.add_argument("--builtin", action="store_true",
                     help="speak the protocol with the built-in loop even when the mcp SDK "
                          "is installed")
     args = ap.parse_args(argv)
+    if args.workspace_only:
+        global TOOLS, _BY_NAME
+        names = {"workspace_inbox", "workspace_send", "workspace_thread", "workspace_claim",
+                 "workspace_who_owns", "workspace_announce", "workspace_ack", "workspace_status",
+                 "workspace_reputation"}
+        TOOLS = [tool for tool in TOOLS if tool.name in names]
+        _BY_NAME = {tool.name: tool for tool in TOOLS}
     if args.list:
         for tool in TOOLS:
             required = tool.schema().get("required", [])

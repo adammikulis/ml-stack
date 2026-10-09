@@ -40,7 +40,7 @@
   FM.shortName = (f) => FM.labelOf(f).replace(/-0*\d+-of-0*\d+/, "");
 
   // A colour per record, stable across every redraw, legible on both themes.
-  FM.COLOURS = ["#35d6c3", "#f2b544", "#5b8dd6", "#f2685c", "#4ad07f", "#c58af9",
+  FM.COLOURS = ["#2de2e6", "#ffd166", "#ff5fa2", "#ff8a3d", "#8df0cd", "#c58af9",
                 "#e08b4c", "#7fd8cd", "#9aa7f5", "#d97fb0"];
 
   const NS = "http://www.w3.org/2000/svg";
@@ -65,8 +65,8 @@
   };
 
   // -------------------------------------------------- which of the three fit screens is showing
-  FM.VIEWS = [["fit", "What fits"], ["rates", "What it cost to be right"],
-              ["telemetry", "What it has spent"]];
+  FM.VIEWS = [["fit", "Capacity"], ["rates", "Quality & speed"],
+              ["telemetry", "Usage history"]];
   const watchers = [];
   FM.view = "fit";
 

@@ -1,13 +1,46 @@
+<style>
+cluster-view { display:contents; }
+cluster-view #cluster { padding:calc(28px * var(--ui-density,1)) calc(32px * var(--ui-density,1)); max-width:1500px; width:100%; }
+cluster-view .pool-heading { display:flex; align-items:center; gap:16px; margin-bottom:20px; }
+cluster-view .pool-heading h1 { margin:0 0 4px; font-size:1.714rem; } cluster-view .pool-heading p { margin:0; color:var(--muted); }
+cluster-view #cluster-stat { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin-bottom:24px; }
+cluster-view #cluster-stat > div { background:var(--bg-raised); border:1px solid var(--line); padding:calc(18px * var(--ui-density,1)); border-radius:12px; }
+cluster-view #cluster-stat .n { font-size:1.857rem; } cluster-view #cluster-stat .k { color:var(--muted); font-size:0.857rem; margin-top:5px; }
+cluster-view .pool-layout { display:grid; grid-template-columns:minmax(0,1fr) 320px; align-items:start; gap:24px; }
+cluster-view #cluster-cards .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:16px; }
+cluster-view .peer { border:1px solid var(--line); border-radius:16px; background:var(--bg-raised); padding:calc(22px * var(--ui-density,1)); min-width:0; }
+cluster-view .peer.self { border-top:4px solid var(--poolside-cyan); }
+cluster-view .peer .name { font-size:1.214rem; font-weight:700; }
+cluster-view .peer .url { font-size:0.786rem; color:var(--muted); margin-top:5px; }
+cluster-view .peer .loaded-models { padding:calc(14px * var(--ui-density,1)) 0; margin:14px 0; border-top:1px solid var(--line); border-bottom:1px solid var(--line); }
+cluster-view .peer .loaded-models h3 { font-size:0.857rem; margin:0 0 8px; }
+cluster-view .pool-control { background:var(--bg-raised); border:1px solid var(--line); border-radius:16px; padding:calc(22px * var(--ui-density,1)); }
+cluster-view #cluster-pause { margin:0; padding:0; border:0; }
+cluster-view #cluster-pause h2 { margin-top:0; font-size:1.214rem; }
+cluster-view #cluster-pause .searchrow { display:flex; flex-wrap:wrap; gap:8px; margin-top:16px; }
+cluster-view #cluster-pause input,cluster-view #cluster-pause select { width:100%; min-width:0; }
+cluster-view .pool-config { margin-top:22px; padding-top:20px; border-top:1px solid var(--line); }
+cluster-view .pool-config button { width:100%; margin-top:14px; }
+cluster-view .pool-jobs { margin-top:24px; background:var(--bg-raised); border:1px solid var(--line); border-radius:16px; padding:calc(22px * var(--ui-density,1)); }
+cluster-view .pool-jobs > h2 { margin-top:0; }
+cluster-view .pool-jobs workspace-jobs > h2 { display:none; }
+cluster-view .pool-connections { margin:24px 0; border:1px solid var(--line); border-radius:12px; padding:calc(18px * var(--ui-density,1)); background:var(--bg-raised); }
+cluster-view .pool-connections summary { cursor:pointer; font-weight:600; }
+cluster-view .url,cluster-view .name,cluster-view .loaded-models { overflow-wrap:anywhere; }
+@media(max-width:1000px) { cluster-view .pool-layout { grid-template-columns:1fr; } }
+@media(max-width:600px) { cluster-view #cluster { padding:calc(20px * var(--ui-density,1)); } cluster-view #cluster-stat { grid-template-columns:repeat(2,1fr); } cluster-view .stat { flex-wrap:wrap; } }
+</style>
 <!-- cluster-view: the machines on this network, the clusters this one is in, and a sweep across them -->
 <template>
   <main id="cluster" hidden>
-    <h1>Cluster</h1>
-    <p class="sub" id="cluster-sub"></p>
+    <header class="pool-heading"><div><h1>Devices</h1><p class="sub" id="cluster-sub"></p></div></header>
     <div class="stat" id="cluster-stat"></div>
-    <div class="group" id="cluster-pause"></div>
-    <div id="cluster-cards"></div>
-    <div class="group" id="cluster-joined"></div>
-    <div class="group" id="cluster-sweep"></div>
+    <div class="pool-layout">
+      <section aria-label="Pool devices"><div id="cluster-cards"></div><section class="pool-jobs"><h2>Jobs on this device</h2><p class="hint">Training and tool jobs managed by this device. Each device card shows its pool slot usage.</p><workspace-jobs></workspace-jobs></section></section>
+      <aside class="pool-control"><div id="cluster-pause"></div><div class="pool-config"><h3>How this device contributes</h3><p class="hint">Configure startup, training capabilities, and availability in device settings.</p><button class="ghost" id="pool-device-settings" type="button">Open device settings</button></div></aside>
+    </div>
+    <details class="pool-connections" data-advanced><summary>Pool connections &amp; pairing</summary><div id="cluster-joined"></div></details>
+    <fleet-benchmark></fleet-benchmark>
   </main>
 </template>
 <script>
@@ -34,8 +67,6 @@
       el("div", { class: "meter" },
         el("div", { class: "cap" },
           el("span", {}, "jobs"),
-          // Spelled out: "0/4" beside the word "idle" reads as "none of four
-          // available", which is the opposite of what it means.
           el("b", {}, running === 0
             ? `none running · ${slots} slot${slots === 1 ? "" : "s"} free`
             : `${running} running of ${slots}${queued ? ` · ${queued} waiting` : ""}`)),
@@ -44,42 +75,26 @@
 
     if (d.ram_gb) {
       const used = d.ram_used_gb;
-      const pct = used === undefined ? null
-        : Math.max(0, Math.min(100, (used / d.ram_gb) * 100));
-      meters.push(el("div", { class: "meter" },
-        el("div", { class: "cap" },
-          el("span", {}, "memory"),
-          el("b", {}, used === undefined ? `${gb(d.ram_gb)} total`
-            : `${gb(used)} of ${gb(d.ram_gb)} in use`)),
-        pct === null ? null
-          : el("div", { class: "track" },
-              el("div", { class: "fill", style: `width:${pct}%` }))));
+      meters.push(M.ui("ml-meter", {
+        label: "memory", capacity: d.ram_gb, unit: "GB", compact: true,
+        ...(used === undefined ? { caption: `${gb(d.ram_gb)} total` }
+          : { value: Math.max(0, used), caption: `${gb(used)} of ${gb(d.ram_gb)} in use` }) }));
     }
 
     if (d.cpu_pct !== undefined) {
-      meters.push(el("div", { class: "meter" },
-        el("div", { class: "cap" },
-          el("span", {}, "processors"),
-          el("b", {}, `${Math.round(d.cpu_pct)}% busy`)),
-        el("div", { class: "track" },
-          el("div", { class: "fill util",
-                      style: `width:${Math.min(100, d.cpu_pct)}%` }))));
+      meters.push(M.ui("ml-meter", {
+        label: "processors", capacity: 100, value: Math.min(100, d.cpu_pct), compact: true,
+        caption: `${Math.round(d.cpu_pct)}% busy` }));
     }
 
-    if (d.vram_total_gb) {
+    if (d.vram_total_gb && !d.unified_memory && d.vendor !== "apple") {
       const used = d.vram_total_gb - (d.vram_free_gb ?? d.vram_total_gb);
-      const pct = Math.max(0, Math.min(100, (used / d.vram_total_gb) * 100));
-      meters.push(el("div", { class: "meter" },
-        el("div", { class: "cap" },
-          el("span", {}, d.vendor === "apple" ? "unified memory" : "video memory"),
-          el("b", {}, `${gb(d.vram_free_gb)} free of ${gb(d.vram_total_gb)}`)),
-        el("div", { class: "track" },
-          el("div", { class: "fill vram", style: `width:${pct}%` }))));
+      meters.push(M.ui("ml-meter", {
+        label: "video memory",
+        capacity: d.vram_total_gb, value: Math.max(0, used), compact: true,
+        caption: `${gb(d.vram_free_gb)} free of ${gb(d.vram_total_gb)}` }));
     }
 
-    // Temperature, clock and power, when a vendor tool or metal-smi reported them.
-    // A card clocking down looks exactly like a bad hyperparameter from a loss curve,
-    // and the measured rates would record the box as slow and send it less work.
     const chips = [];
     if (d.temp_c !== undefined) {
       const hot = d.temp_c >= 85 ? " hot" : d.temp_c >= 75 ? " warm" : "";
@@ -91,12 +106,9 @@
     if (chips.length) meters.push(el("div", { class: "chips" }, chips));
 
     if (d.gpu_util_pct !== undefined) {
-      meters.push(el("div", { class: "meter" },
-        el("div", { class: "cap" },
-          el("span", {}, "gpu"),
-          el("b", {}, `${Math.round(d.gpu_util_pct)}% busy`)),
-        el("div", { class: "track" },
-          el("div", { class: "fill util", style: `width:${Math.min(100, d.gpu_util_pct)}%` }))));
+      meters.push(M.ui("ml-meter", {
+        label: "gpu", capacity: 100, value: Math.min(100, d.gpu_util_pct), compact: true,
+        caption: `${Math.round(d.gpu_util_pct)}% busy` }));
     }
 
     const held = (d.availability || {}).paused;
@@ -110,7 +122,7 @@
       el("div", { class: "row" },
         el("div", {},
           el("div", { class: "name" }, p.name),
-          el("div", { class: "url" }, p.base_url || p.host || ""))),
+          el("div", { class: "url" }, p.display_url || p.base_url || p.host || ""))),
       el("div", { class: "row", style: "margin-top:10px;gap:6px;flex-wrap:wrap" },
         el("span", { class: `badge ${v.key}` }, el("span", { class: "chip" }), v.text),
         d.gpu ? el("span", { class: "label" }, d.gpu) : null,
@@ -123,11 +135,17 @@
       (d.labels || []).length
         ? el("div", { class: "labels" }, d.labels.map((l) => el("span", { class: "label" }, l)))
         : null,
-      (p.serving || []).length
-        ? el("div", { class: "labels" },
-            el("span", { class: "why" }, "serving"),
-            p.serving.map((s) => el("span", { class: "label" }, s)))
-        : null,
+      el("div", { class: "loaded-models" },
+        el("h3", {}, "Serving models"),
+        ...(d.serving || []).length
+          ? d.serving.flatMap((server) => (server.models || []).map((model) =>
+              el("div", { class: "row" },
+                el("b", {}, model),
+                el("span", { class: "why" },
+                  [(server.slot_context || server.context) ? `${Number(server.slot_context || server.context).toLocaleString()} tokens` : "",
+                    server.draft_status === "active" ? "MTP active" : server.spec_type === "draft-mtp" ? "MTP configured" : "", `${server.slots || 1} slot(s)`]
+                    .filter(Boolean).join(" · ")))))
+          : [el("div", { class: "hint" }, "No models serving · start one from Studio")] ),
       ...meters,
       el("div", { class: "state" },
         el("span", { class: `pulse ${state.cls}` }),
@@ -140,7 +158,10 @@
       if (this.wired) return;
       this.wired = true;
       this.box = this.querySelector("#cluster");
-      // What the sweep form holds, kept across the 4s redraw so a tick is not lost to it.
+      this.querySelector("#pool-device-settings").onclick = () => {
+        M.go("settings");
+        document.querySelector("settings-view").selectSection("compute");
+      };
       this.sweep = { models: new Set(), peers: new Set(), sample: "", label: "", note: "" };
       M.onRoute((route) => {
         const on = route === "cluster";
@@ -158,15 +179,15 @@
       const peers = r.peers || [];
       this.peers = peers;
       const totalSlots = peers.reduce((a, p) => a + (p.slots || 1), 0);
-      const busy = peers.reduce((a, p) => a + ((p.slots || 1) - (p.free ?? 0)), 0);
+      const busy = peers.reduce((a, p) => a + ((p.slots || 1) - (p.free ?? (p.busy ? 0 : (p.slots || 1)))), 0);
 
       this.querySelector("#cluster-sub").textContent =
-        peers.length === 1 ? "One machine." : `${peers.length} machines on this network.`;
+        peers.length === 1 ? "One device ready to share compute." : `${peers.length} devices sharing compute in this pool.`;
       const paused = peers.filter((p) => ((p.device || {}).availability || {}).paused);
       this.drawPause(peers.length, paused.length);
       this.querySelector("#cluster-stat").replaceChildren(
         el("div", {}, el("div", { class: "n" }, peers.length),
-           el("div", { class: "k" }, "machines")),
+           el("div", { class: "k" }, "devices")),
         el("div", {}, el("div", { class: "n" }, `${busy}/${totalSlots}`),
            el("div", { class: "k" }, "slots in use")),
         el("div", {}, el("div", { class: "n" }, `${paused.length}/${peers.length}`),
@@ -180,22 +201,24 @@
         peers.length ? el("div", { class: "grid" }, peers.map(peerCard)) : null,
         alone
           ? el("div", { class: "empty" },
-              el("div", { class: "big" }, "Just this machine so far"),
-              el("div", {}, "Install ml-stack on another machine and open it."),
-              el("div", {}, "Type the same passphrase, and it appears here on its own."))
+              el("div", { class: "big" }, "Your pool starts here"),
+              el("div", {}, "Install Poolside on another device to add its spare compute."),
+              el("div", {}, "Dev connects trusted devices automatically. You can also pair manually below."))
           : null));
 
       const nav = document.querySelector("fleet-nav");
       if (nav && nav.paint) nav.paint("cluster");
 
-      api("/ui/clusters").then((c) => this.drawClusters(c.clusters || []));
+      Promise.all([api("/ui/clusters"), api("/ui/setup")]).then(([c, setup]) => {
+        this.clusterMode = setup.cluster_mode; this.deviceName = setup.name;
+        this.drawClusters(c.clusters || []);
+      });
       this.drawSweep(r);
 
       clearTimeout(this.timer);
       this.timer = setTimeout(() => this.draw(), 4000);
     }
 
-    // Stopping every machine at once, and what each one said.
     drawPause(total, paused) {
       if (this.pauseNote === undefined) this.pauseNote = null;
       const span = el("select", { id: "pause-for" },
@@ -236,13 +259,13 @@
         note.replaceChildren(this.pauseNote);
         this.draw();
       };
-      const stop = el("button", { class: "ghost small" }, "Pause every machine");
+      const stop = el("button", { class: "ghost small" }, "Pause pool");
       stop.onclick = () => send(false, stop);
-      const go = el("button", { class: "ghost small" }, "Take work again");
+      const go = el("button", { class: "ghost small" }, "Resume pool");
       go.onclick = () => send(true, go);
 
       this.querySelector("#cluster-pause").replaceChildren(
-        el("h2", {}, "Everyone's machines"),
+        el("h2", {}, "Pool availability"),
         el("div", { class: "hint" },
           paused
             ? `${paused} of ${total} machine${total === 1 ? "" : "s"} ${paused === 1 ? "is" : "are"} paused.`
@@ -252,169 +275,42 @@
         note);
     }
 
-    // Which clusters this machine is in, and the way in and out of one.
     drawClusters(rows) {
+      const signature = JSON.stringify([this.clusterMode, rows.map(c => [c.group, c.mode, c.selection])]);
+      if (signature === this.clusterSignature) return;
+      this.clusterSignature = signature;
       const joined = this.querySelector("#cluster-joined");
-      const words = el("input", { type: "password", id: "words", placeholder: "passphrase" });
-      const named = el("input", { type: "text", id: "cname", placeholder: "name (optional)" });
-      const note = el("div");
-      const persist = el("input", { type: "checkbox", id: "persist" });
-      const add = el("button", { class: "ghost small" }, "Join");
-      // The same `join` as `ml-stack-fleet join`: the checks, the cluster, the daemon
-      // (this one), at logon if ticked, and then what the fleet sees.
-      add.onclick = async () => {
-        const said = words.value.trim();
-        if (said && said.length < M.MIN_PASS) {
-          note.replaceChildren(el("div", { class: "err" },
-            `A passphrase needs at least ${M.MIN_PASS} characters.`));
-          return;
-        }
-        add.disabled = true;
-        note.replaceChildren(el("div", { class: "hint" }, el("span", { class: "spin" }),
-          " Joining…"));
-        const got = await api("/ui/fleet/join", { method: "POST",
-          body: JSON.stringify({ passphrase: said, group: named.value.trim(),
-                                 persist: persist.checked }) });
-        add.disabled = false;
-        if (got.error) {
-          note.replaceChildren(el("div", { class: "err" }, got.error));
-          return;
-        }
-        words.value = ""; named.value = "";
-        note.replaceChildren(
-          el("div", { class: "ok" }, `Joined ${got.group}`
-            + (got.persisted ? ", and it starts at logon." : ".")),
-          el("pre", { class: "cmd" }, (got.said || []).join("\n")));
-        api("/ui/clusters").then((c) => this.drawClusters(c.clusters || []));
+      const refresh = async () => {
+        this.drawClusters((await api("/ui/clusters")).clusters || []);
         this.draw();
       };
-
       joined.replaceChildren(
-        el("h2", {}, "Clusters"),
-        el("div", { class: "hint" },
-          "This machine answers to every cluster listed. Machines find each other by "
-          + "sharing a passphrase."),
-        ...(rows.length
-          ? rows.map((c, i) =>
-              el("div", { class: "row" },
-                el("span", {}, el("b", {}, c.group),
-                  el("span", { class: "why" },
-                    i === 0 ? "this machine answers as this one" : "also in this one")),
-                el("button", { class: "ghost small",
-                  onclick: async () => {
-                    const left = await api("/ui/clusters", { method: "DELETE",
-                      body: JSON.stringify({ group: c.group }) });
-                    this.drawClusters(left.clusters || []);
-                    this.draw();
-                  } }, "Leave")))
-          : [el("div", { class: "hint" }, "In no cluster. Join one below.")]),
-        el("div", { class: "searchrow" }, words, named, add),
-        el("label", { class: "opt", for: "persist" }, persist,
-          el("span", {}, el("b", {}, "Start at logon"),
-            el("span", { class: "why" },
-              "so this machine is back in the fleet after a restart"))),
-        note);
+        el("h2", {}, "Pool connections"),
+        el("div", { class: "hint" }, "This device shares compute with each pool listed here."),
+        ...M.kids((rows[0]?.mode || this.clusterMode) === "dev" ? el("button", { class: "ghost small", onclick: async () => {
+          const state = await api("/ui/setup");
+          const result = await api("/ui/setup/initial", { method: "POST", body: JSON.stringify({
+            name: state.name, cluster_mode: "dev", automatic: true }) });
+          if (result.error) { joined.append(el("div", { class: "err" }, result.error)); return; }
+          await refresh();
+        } }, !rows.length || rows[0].selection === "manual" ? "Connect automatically" : "Automatic connection enabled") : null),
+        ...(rows.length ? rows.map((c, i) =>
+          el("div", { class: "row" },
+            el("span", {}, el("b", {}, c.group),
+              el("span", { class: "why" }, i === 0 ? "Primary pool" : "Also joined")),
+            el("button", { class: "ghost small", onclick: async () => {
+              const left = await api("/ui/clusters", { method: "DELETE",
+                body: JSON.stringify({ group: c.group }) });
+              if (left.error || left.ok === false) { joined.append(el("div", { class: "err", role: "alert" }, left.error || "Could not leave this pool.")); return; }
+              await refresh();
+            } }, "Leave"))) : [el("div", { class: "hint" }, "No pool joined.")]),
+        M.clusterForm({ endpoint: "/ui/clusters", groups: rows.map(c => c.group), group: rows[0]?.group || "default", onComplete: refresh }));
     }
 
-    // A sweep across the fleet: the models the peers hold, one job each, detached.
-    drawSweep(r) {
-      const sweep = this.sweep;
-      const bench = r.bench || {};
-      const held = r.models || [];
-      const peers = r.peers || [];
-      const names = peers.map((p) => p.name);
-      const command = () => {
-        const parts = ["ml-stack-bench sweep --fleet"];
-        for (const m of held) if (sweep.models.has(m)) parts.push(`--serve ${m}`);
-        const chosen = names.filter((n) => sweep.peers.has(n));
-        if (chosen.length && chosen.length < names.length) parts.push(`--peers ${chosen.join(",")}`);
-        if (sweep.sample) parts.push(`--sample ${sweep.sample}`);
-        if (sweep.label) parts.push(`--label ${sweep.label}`);
-        return parts.join(" ");
-      };
-      const shown = el("pre", { class: "cmd" }, command());
-      const tick = (set, key, on) => {
-        if (on) set.add(key); else set.delete(key);
-        shown.textContent = command();
-      };
-      const box = (set, key, label, why) => {
-        const input = el("input", { type: "checkbox", id: `tick-${key}` });
-        input.checked = set.has(key);
-        input.onchange = () => tick(set, key, input.checked);
-        return el("label", { class: "opt", for: `tick-${key}` }, input,
-          el("span", {}, el("b", {}, label), why ? el("span", { class: "why" }, why) : null));
-      };
-      const heldBy = (m) => peers.filter((p) => (p.models || []).includes(m)).map((p) => p.name);
-      const sampleBox = el("input", { type: "text", id: "sample",
-        placeholder: "questions (all)", value: sweep.sample });
-      sampleBox.oninput = () => {
-        sweep.sample = sampleBox.value.replace(/\D/g, "");
-        shown.textContent = command();
-      };
-      const labelBox = el("input", { type: "text", id: "label",
-        placeholder: "label (optional)", value: sweep.label });
-      labelBox.oninput = () => { sweep.label = labelBox.value.trim(); shown.textContent = command(); };
-      const sweepNote = el("div", {}, sweep.note ? el("div", { class: "hint" }, sweep.note) : null);
-      const start = el("button", { class: "ghost small" }, "Run across fleet");
-      start.disabled = !held.some((m) => sweep.models.has(m)) || !!(bench.measuring);
-      start.onclick = async () => {
-        start.disabled = true;
-        const got = await api("/ui/bench/sweep", { method: "POST",
-          body: JSON.stringify({ models: held.filter((m) => sweep.models.has(m)),
-                                 peers: names.filter((n) => sweep.peers.has(n)),
-                                 sample: Number(sweep.sample || 0), label: sweep.label }) });
-        if (got.error) {
-          sweep.note = "";
-          sweepNote.replaceChildren(el("div", { class: "err" }, got.error));
-          start.disabled = false;
-          return;
-        }
-        sweep.note = `Started (pid ${got.pid}); log ${got.log}`;
-        this.draw();
-      };
-      const stop = bench.measuring
-        ? el("button", { class: "ghost small", onclick: async () => {
-            const got = await api("/ui/bench/stop", { method: "POST",
-              body: JSON.stringify({ pid: bench.measuring.pid }) });
-            sweep.note = got.error || got.stopped || "";
-            this.draw();
-          } }, "Stop")
-        : null;
-      const history = el("div", { class: "hint" }, "Loading…");
-      api("/ui/bench/history").then((h) => {
-        const rows = (h.history || []).slice(0, 8);
-        history.replaceChildren(...(rows.length
-          ? rows.map((e) => el("div", { class: "row" },
-              el("span", {}, el("b", {}, `${e.subcommand} ${e.name}`),
-                el("span", { class: "why" },
-                  `${e.started} · ${e.exit}${e.seconds ? ` · ${Math.round(e.seconds)}s` : ""}`
-                  + `${e.questions ? ` · ${e.questions} questions` : ""}`))))
-          : [el("div", { class: "hint" }, h.error || "Nothing has been measured yet.")]));
-      });
-
-      this.querySelector("#cluster-sweep").replaceChildren(
-        el("h2", {}, "Run across the fleet"),
-        el("div", { class: "hint" },
-          bench.available === false ? bench.text
-          : "Each model is measured on a machine that holds it, one job per model, and the "
-            + "runs are gathered here. Every machine must be on this checkout's commit."),
-        held.length
-          ? el("div", { class: "two" },
-              el("div", {}, el("h2", {}, "models"),
-                held.map((m) => box(sweep.models, m, m, `on ${heldBy(m).join(", ")}`))),
-              el("div", {}, el("h2", {}, "machines"),
-                peers.map((p) => box(sweep.peers, p.name, p.name,
-                  p.commit && p.commit !== "?" ? p.commit : "")),
-                el("div", { class: "hint" },
-                  "None ticked means whichever the fleet plans over.")))
-          : el("div", { class: "hint" }, "No machine has a model yet. Get one under Models."),
-        el("div", { class: "searchrow" }, sampleBox, labelBox, start, stop),
-        shown,
-        el("pre", { class: "cmd" }, bench.text || ""),
-        sweepNote,
-        el("h2", {}, "History"),
-        history);
+    drawSweep(fleet) {
+      this.querySelector("fleet-benchmark").update(fleet);
     }
+
   }
   customElements.define("cluster-view", ClusterView);
 })();

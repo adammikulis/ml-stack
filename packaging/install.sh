@@ -8,12 +8,12 @@
 #
 #   (default)   the app: the release zip for this machine, a window, updates from releases
 #   --headless  a venv under ~/.ml-stack, console scripts on PATH, no window
-#   --dev       a git checkout with an editable install, following main
+#   --dev       a git checkout with an immutable install, following 0.2dev
 #   --system    --headless, per machine: starts at boot, no login, as the user who ran it
 #   --uninstall takes it off, and leaves the model cache alone
 #
 # Every step past the install is an ml-stack command, not shell: `ml-stack-serve build`,
-# `ml-stack-setup`, `ml-stack-models fetch`, `ml-stack-fleet join`, `ml-stack-doctor`.
+# `ml-stack-setup`, `ml-stack-models fetch`, `ml-stack-cluster join`, `ml-stack-doctor`.
 # Nothing here reimplements what one of those already does.
 #
 # Answer every prompt with the environment and it runs unattended (a machine with no
@@ -31,7 +31,7 @@ REPO="${ML_STACK_REPO:-adammikulis/ml-stack}"
 API="https://api.github.com/repos/$REPO/releases/latest"
 GIT_URL="https://github.com/$REPO"
 PYTHON="3.13"
-EXTRAS="store,hub,web,plot,graph"
+EXTRAS="store,hub,web,plot,graph,coordinator,agents"
 MODE="${ML_STACK_MODE:-app}"
 MODELS="${ML_STACK_MODELS:-}"
 REF="${ML_STACK_REF:-}"
@@ -80,6 +80,25 @@ esac
 [ "$OS" = linux ] && ARCH=x86_64
 KEY="ml-stack-$OS-$ARCH"
 
+# -- what was downloaded -------------------------------------------------------
+# The sha256 GitHub reports for the release asset whose download URL contains $1, read from
+# the release JSON on stdin; empty when there is none.
+release_digest() {
+  tr ',' '\n' | awk -v key="$1" '
+    /"name"/ { d = "" }
+    /"digest"/ { d = $0; sub(/.*"sha256:/, "", d); sub(/".*/, "", d) }
+    /browser_download_url/ && index($0, key) { print d; exit }'
+}
+
+# Succeeds when the file $1 has the sha256 $2.
+verify_sha256() {
+  if have sha256sum; then got=$(sha256sum "$1" | cut -d' ' -f1)
+  elif have shasum; then got=$(shasum -a 256 "$1" | cut -d' ' -f1)
+  else die "this needs sha256sum or shasum to check the download"
+  fi
+  [ "$got" = "$2" ]
+}
+
 # -- python -------------------------------------------------------------------
 # Say how to get one; never install a system Python behind somebody's back.
 find_python() {
@@ -108,27 +127,31 @@ install_app() {
       | tr ',' '\n' | grep 'browser_download_url' | grep "$KEY" \
       | sed -n 's/.*"\(https[^"]*\)".*/\1/p' | head -1)
     [ -n "${URL:-}" ] || die "release ${TAG:-latest} has no download for $KEY"
+    DIGEST=$(printf '%s' "$JSON" | release_digest "$KEY")
+    case "$DIGEST" in
+      [0-9a-f]*) [ "${#DIGEST}" -eq 64 ] || DIGEST="" ;;
+      *) DIGEST="" ;;
+    esac
+    [ -n "$DIGEST" ] || die "release ${TAG:-latest} reports no sha256 for $KEY, so it cannot be checked"
     say "downloading $TAG"
     curl -fL# -o "$TMP/pkg.zip" "$URL" || die "download failed"
+    verify_sha256 "$TMP/pkg.zip" "$DIGEST" || die "the download does not match the sha256 GitHub reports for it"
   fi
   have unzip || die "this needs unzip"
   unzip -q "$TMP/pkg.zip" -d "$TMP/out" || die "the download could not be unpacked"
 
-  if [ "$OS" = macos ] && [ -d "$TMP/out/ml-stack.app" ]; then
+  if [ "$OS" = macos ] && [ -d "$TMP/out/Poolside.app" ]; then
     DEST="${ML_STACK_DEST:-/Applications}"
     [ -w "$DEST" ] || DEST="$HOME/Applications"
     mkdir -p "$DEST"
-    rm -rf "$DEST/ml-stack.app"
-    cp -R "$TMP/out/ml-stack.app" "$DEST/ml-stack.app"
-    [ -d "$DEST/ml-stack.app" ] || die "$KEY could not be copied into $DEST"
-    # Downloads are quarantined; without this macOS refuses to open it at all.
-    xattr -dr com.apple.quarantine "$DEST/ml-stack.app" 2>/dev/null || true
+    rm -rf "$DEST/Poolside.app"
+    cp -R "$TMP/out/Poolside.app" "$DEST/Poolside.app"
+    [ -d "$DEST/Poolside.app" ] || die "$KEY could not be copied into $DEST"
     say ""
-    say "Installed to $DEST/ml-stack.app"
-    say "Open it, and type the same passphrase you used on your other machines."
-    say "It downloads gemma-4-E2B on first run (2.6G, about 1.5s a question) and offers"
-    say "the bigger models this machine has room for."
-    open "$DEST/ml-stack.app" 2>/dev/null || true
+    say "Installed to $DEST/Poolside.app"
+    say "Open it to name this device and choose Dev or Prod."
+    say "Setup downloads continue in the background while you finish onboarding."
+    open "$DEST/Poolside.app" 2>/dev/null || true
   else
     DEST="${ML_STACK_DEST:-$HOME/.local/bin}"
     mkdir -p "$DEST"
@@ -220,7 +243,7 @@ link_scripts() {
   TO="${ML_STACK_DEST:-$HOME/.local/bin}"
   [ "$MODE" = system ] && TO="${ML_STACK_DEST:-/usr/local/bin}"
   mkdir -p "$TO" 2>/dev/null || true
-  for name in ml-stack ml-stack-traind ml-stack-fleet ml-stack-peers ml-stack-serve \
+  for name in ml-stack ml-stack-traind ml-stack-cluster ml-stack-peers ml-stack-serve \
               ml-stack-models ml-stack-bench ml-stack-setup ml-stack-doctor ml-stack-mcp; do
     [ -x "$FROM/$name" ] || continue
     ln -sf "$FROM/$name" "$TO/$name" 2>/dev/null || true
@@ -232,25 +255,29 @@ link_scripts() {
   esac
 }
 
-# -- dev: a checkout that follows main ----------------------------------------
+# -- dev: a checkout that follows development ----------------------------------------
 install_dev() {
   step "developer"
   have git || die "this needs git"
+  TRACK="${ML_STACK_TRACK:-0.2dev}"
   SRC="${ML_STACK_SRC:-$HOME/.local/share/ml-stack/src}"
   if [ -d "$SRC/.git" ]; then
+    [ "$(git -C "$SRC" branch --show-current)" = "$TRACK" ] \
+      || die "$SRC must be on $TRACK; choose a separate ML_STACK_SRC for this install"
     say "updating $SRC"
-    git -C "$SRC" pull --ff-only || say "  it has commits main does not; left alone"
+    git -C "$SRC" pull --ff-only || die "could not fast-forward $SRC"
   else
     say "cloning into $SRC"
     mkdir -p "$(dirname "$SRC")"
-    git clone "$GIT_URL" "$SRC" || die "could not clone $GIT_URL"
+    git clone --branch "$TRACK" "$GIT_URL" "$SRC" || die "could not clone $GIT_URL"
   fi
   make_venv "$(venv_root)"
-  say "editable install of $SRC"
-  (cd "$SRC" && "$BIN/pip" install --quiet -e ".[$EXTRAS]") \
+  say "immutable install of $SRC"
+  (cd "$SRC" && "$BIN/pip" install --quiet ".[$EXTRAS]") \
     || die "pip could not install $SRC"
+  "$BIN/python" -c 'import sys; from pathlib import Path; from ml_stack.fleet.runtime_wheel import install_checkout; code, note = install_checkout(Path(sys.argv[1]), timeout=1800); print(note); raise SystemExit(code)' "$SRC" \
+    || die "could not install the committed runtime from $SRC"
   link_scripts "$BIN"
-  TRACK="${ML_STACK_TRACK:-main}"
 }
 
 # -- per machine: at boot, as the user who installed it -----------------------
@@ -293,7 +320,7 @@ choose_model() {
   WANT="$MODELS"
   if [ -z "$WANT" ]; then
     case "$MODE" in
-      app) WANT=default ;;   # gemma-4-E2B: the smallest that still answers
+      app) WANT=default ;;   # the recommended model for this machine
       *)   WANT=auto ;;      # headless and system are power users: the best that fits
     esac
   fi
@@ -356,7 +383,7 @@ fetch_models() {
 
 join_fleet() {
   step "joining the fleet"
-  [ -x "$BIN/ml-stack-fleet" ] || { say "skipped: no ml-stack-fleet"; return 0; }
+  [ -x "$BIN/ml-stack-cluster" ] || { say "skipped: no ml-stack-cluster"; return 0; }
   set -- join --persist
   [ -n "${ML_STACK_NAME:-}" ] && set -- "$@" --name "$ML_STACK_NAME"
   [ -n "${ML_STACK_CLUSTER:-}" ] && set -- "$@" --group "$ML_STACK_CLUSTER"
@@ -365,10 +392,10 @@ join_fleet() {
     set -- "$@" --passphrase "$ML_STACK_PASSPHRASE"
   elif ! interactive; then
     say "no passphrase, and no terminal to ask at. Set ML_STACK_PASSPHRASE and re-run,"
-    say "or run:  ml-stack-fleet join --persist"
+    say "or run:  ml-stack-cluster join --persist"
     return 0
   fi
-  "$BIN/ml-stack-fleet" "$@" || say "  join did not finish; 'ml-stack-fleet join' retries"
+  "$BIN/ml-stack-cluster" "$@" || say "  join did not finish; 'ml-stack-cluster join' retries"
 }
 
 what_came_with_it() {

@@ -103,7 +103,13 @@ def test_help_lists_the_subcommands(fake, capsys):
 
 def test_bare_and_its_flags_reach_the_app(fake, monkeypatch):
     seen: list = []
-    monkeypatch.setattr("ml_stack.fleet.launch.main", lambda argv: seen.append(argv) or 0)
+    from ml_stack.cli.daemon import main as daemon_main
+
+    def app(argv, **services):
+        assert services["daemon_main"] is daemon_main
+        return seen.append(argv) or 0
+
+    monkeypatch.setattr("ml_stack.fleet.launch.main", app)
     assert cli.main([]) == 0
     assert cli.main(["--port", "8771", "--no-browser"]) == 0
     assert seen == [[], ["--port", "8771", "--no-browser"]]
@@ -151,12 +157,19 @@ def test_help_lists_every_command_and_hands_a_named_one_its_own_help(capsys):
 
     assert cli.help_main([]) == 0
     out = capsys.readouterr().out
-    assert "bench" in out and "do" in out and "usage: ml-stack help" in out and "asks itself" not in out
+    assert "bench" in out and "chat" in out and "usage: ml-stack help" in out and "asks itself" not in out
     code = cli.help_main(["bench"])
     assert code == 0 and "usage: ml-stack-bench" in capsys.readouterr().out
-    assert cli.main(["help", "do"]) == 0
-    assert "usage: ml-stack-do" in capsys.readouterr().out
+    assert cli.main(["help", "chat"]) == 0
+    assert "usage: ml-stack-chat" in capsys.readouterr().out
     assert cli.help_main(["benc"]) == 2
     assert "not a command" in capsys.readouterr().err
     with pytest.raises(SystemExit):
         cli.help_main(["--help"])
+
+
+def test_cluster_is_the_public_device_group_command(monkeypatch):
+    monkeypatch.setattr(cli, "PYPROJECT", REPO / "pyproject.toml")
+    registered = cli.commands()
+    assert registered["cluster"] == "ml_stack.fleet.join:main"
+    assert "fleet" not in registered

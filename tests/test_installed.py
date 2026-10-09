@@ -12,6 +12,8 @@ from importlib.metadata import version
 from pathlib import Path
 
 import pytest
+from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
 from packaging.version import Version
 
 from ml_stack import installed
@@ -32,13 +34,13 @@ def test_every_extra_a_full_install_asks_for_is_one_pip_can_install():
 
 
 def test_the_module_each_extra_is_read_by_is_one_that_extra_installs():
-    """The import stands in for the extra. A module no requirement provides reads as
-    missing on a machine that has everything."""
+    """Each capability import is provided by a distribution declared in its extra."""
     have = offered()
+    distributions = {"agents": "openai-agents", "machineid": "py-machineid"}
     for one in STANDARD:
-        named = {req.split(">")[0].split("<")[0].split("[")[0].strip().replace("-", "_")
-                 for req in have[one.extra]}
-        assert one.module in named, f"[{one.extra}] does not install {one.module}"
+        named = {canonicalize_name(Requirement(req).name) for req in have[one.extra]}
+        package = canonicalize_name(distributions.get(one.module, one.module))
+        assert package in named, f"[{one.extra}] does not install {one.module} through {package}"
 
 
 def test_a_module_that_is_here_reads_as_present():
@@ -123,6 +125,20 @@ def test_a_requirement_naming_another_extra_is_not_looked_up():
 def test_the_pins_are_read_from_the_installed_distributions_own_metadata():
     """A wheel carries no pyproject.toml, so a real machine reads them from here."""
     assert set(installed.declared()) >= {c.extra for c in installed.STANDARD}
+
+
+def test_a_requirement_whose_marker_excludes_this_interpreter_is_not_unmet():
+    assert installed.unmet({"x": ['pytest>=999; python_version < "3.0"']}) == []
+    assert [row[1] for row in installed.unmet({"x": ['pytest>=999; python_version >= "3.0"']})] == [
+        "pytest"]
+
+
+def test_a_pin_whose_marker_excludes_this_interpreter_is_not_declared(monkeypatch):
+    monkeypatch.setattr(installed, "requires", lambda _name: [
+        'old>=1; python_version < "3.0" and extra == "plot"',
+        'new>=1; python_version >= "3.0" and extra == "plot"',
+    ])
+    assert installed.declared() == {"plot": ["new>=1"]}
 
 
 def test_the_store_says_which_macos_it_needs_when_this_one_is_older(monkeypatch):

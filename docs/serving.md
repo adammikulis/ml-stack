@@ -21,6 +21,19 @@ caches it on first use, so there is no separate fetching step.
 
 ## Serving a model
 
+Managed serving uses `q8_0` for both K and V caches, including the prediction head.
+`--kv f16` and `--draft-kv f16` select full precision explicitly. These settings do not
+change the model weights' quantization.
+
+Memory estimates read the GGUF's KV head count, key and value dimensions, attention
+layers and recurrent state sizes. The first-run Qwen3.8 27B offer uses its published
+[text configuration](https://huggingface.co/unsloth/Qwen3.8-27B/blob/main/config.json):
+64 layers, 16 full-attention layers, 4 KV heads, and 256 values per head. Its 48 linear
+attention layers hold fixed recurrent states instead of growing token caches. Q8 stores
+34 bytes per 32 values, including its scale. Model weights, prediction-head weights and
+cache, recurrent states, and compute buffers are counted separately. Runtime estimates
+remain approximate; measured fit records take precedence.
+
 What makes this part worth having is the lifecycle, not the launcher. Every model server on
 a machine goes through one manager: it is written down *before* the process exists (the
 record carries the port, the model and the owner; the pid is filled in when the server
@@ -36,17 +49,38 @@ remembered. The commands below are the surface of that.
 From a shell:
 
 ```
-ml-stack-serve up model.gguf --context 32768
+ml-stack-serve up Qwen3.8-27B-UD-Q4_K_XL.gguf --context 256k --kv q8_0
 ml-stack-serve up hf:unsloth/gemma-4-E4B-it-qat-GGUF/gemma-4-E4B-it-qat-Q4_K_M.gguf
 ml-stack-serve status
-ml-stack-serve down
+ml-stack-serve down Qwen3.8-27B
 ```
 
-`status` prints the port, the model, the context each slot gets, how many slots there are
-and which process holds the lease. `--json` gives a script the same, and it exits non-zero
-when nothing is serving. `up` adopts a server already serving that model with those settings
-instead of starting a second one, and prints the base URL. `down` stops only a server
-started on this machine.
+**`up` is a lease from the broker, and nothing else starts a server.** The command resolves
+what was asked (the measured profile where there is one, the shape the broker would use
+where there is not, and it says which), then asks the machine's broker for a lease with that
+shape and holds it in a small detached process that outlives the terminal. The broker does
+the rest: it estimates the memory (weights, KV cache at that context and cache type, draft
+head, runtime), **queues** the lease behind the others when memory is short (`up` prints
+`queued, #N of M: ...` and waits; `--no-wait` returns with the lease queued, `--patience`
+bounds the wait), **refuses** a shape that cannot fit even on an empty machine with one
+line (what it needs, what a model may use here, the longest context that does fit, and the
+command a *person* runs to raise the limit, `ml-stack-serve memory --for MODEL --ctx N
+--apply`; nothing ever raises it for you), and **picks the port**. `--port` is a request:
+the broker uses it when it is free and picks another when it is not; a port held by another
+process is never killed or fought over.
+
+`up` for a shape that is already held adopts that lease (no second server). `status` lists
+the leases (id, model, context, port or queued, holder pid, memory, since) above the
+servers, `--json` gives a script the same, and it exits non-zero when nothing is serving.
+`down [LEASE|PORT|MODEL]` releases the lease; the server is stopped only when no other
+lease uses it, and says when one still does. `--idle 10m` (default: `ml-stack-serve limits
+--idle`, else held until `down`) releases the lease once the server has been unused that
+long. `ml-stack-claude`, `ml-stack-agent` and `agent start` take their servers through the
+same broker. The low-level start (`ServerManager`, `LlamaServerBackend.start`) needs a
+`Lease`, and a `Lease` cannot be made outside the broker's grant (`ml_stack.serve.grant`):
+calling it by hand raises `NoGrant`. `tests/test_serve_no_bypass.py`, the hard
+`server-starts` gate in `scripts/budgets` and the bash guard (`scripts/hooks/claude-bash-guard`
+refuses `llama-server` by hand and any `up` flag that would skip the lease) keep it that way.
 
 From Python:
 
@@ -62,6 +96,30 @@ with serve("model.gguf", port=8899) as server:
 
 `serve` adopts a healthy server that is already running rather than starting a second one,
 and leaves an adopted server alone on exit. It only stops what it started.
+
+**Embedding it in another program.** Importing `ml_stack.serve`, `ml_stack.client` or
+`ml_stack.fleet` prints nothing, opens no socket and writes no file. State goes under
+`ML_STACK_HOME` (default `~/.ml-stack`) and the cache under `ML_STACK_CACHE`; set both
+before the first call to keep everything inside a directory the program owns. `ServerManager`
+reports through the `ml_stack.serve` loggers, or through the `say=` callback `lease` takes. A
+`ServerManager` is a context manager: `with ServerManager() as manager:` stops every server
+it started when the block ends and leaves adopted ones running, and `manager.close()` does
+the same. A manager is safe
+to call from several threads (one lock per port).
+
+A server a `ServerManager` starts stops when the program that started it ends: at exit, on
+SIGTERM, SIGINT and SIGHUP (the handler a program already had still runs first), and, when the
+program is killed outright, through a small watchdog process that stops the server's tree once
+its host is gone. Nothing is registered at import; the first server a process starts installs
+the exit hook and the handlers. `ServerManager(stop_on_exit=False)` leaves the servers running,
+and `ml-stack-serve up` does that itself, since it exits and the server is meant to stay. The
+first lease a manager makes also stops every server on the machine whose leasing process has
+gone, but only one whose record proves the pid is still that server (its start time and a
+digest of its command line). Server logs under `ML_STACK_HOME/logs` are kept to 60 files, 256 MB
+and 30 days across every port (`ML_STACK_LOG_FILES`, `ML_STACK_LOG_MB`, `ML_STACK_LOG_DAYS`;
+0 is no limit). A server is started without this process's tokens and keys in its
+environment; one that downloads weights is given the Hugging Face token the credentials
+resolve to and nothing else (`docs/credentials.md`).
 
 **One serving per port, written down once.** llama.cpp serves a model one way at a time, so
 two parts of a program that lease it differently are not two clients of one server:
@@ -106,6 +164,132 @@ A port already serving something else is refused, with the field that differs na
 the model, the number of slots, or the context each slot gets. Adopting a server started with
 the wrong settings hands back a lease that cannot do what was asked of it.
 
+### Who holds a server, and why
+
+Every lease records a **reason** (one line) and a **requester**, and the broker records the rest
+itself from the process that took it, so nothing about who or where depends on what the caller
+says:
+
+| recorded | from |
+|---|---|
+| reason | `ml-stack-serve up MODEL --for 'text'`; the `--for` of `ml-stack-claude`, `ml-stack-codex`, `ml-stack-chat` and `ml-stack-workspace agent start`; `$ML_STACK_LEASE_FOR` (which leads the reason when the caller also gives one); the reason an in-repo caller passes (`broker_wire.lease(..., reason=)`, `ServerManager.lease(..., reason=)`, `serve(..., reason=)`). A lease with none reads `(no reason given)`. |
+| requester | the workspace agent name (`$ML_STACK_WORKSPACE_AGENT`) when one is set, else the program that took the lease |
+| process | the connecting pid and its start time, and the command lines of it and up to three parents, with tokens, keys and `--password`-style values masked |
+| place | the working directory and the git worktree and branch it sits in |
+| time | when the lease was taken |
+
+A holder that joins a server already up (a second `up` for the same shape, or another lease
+for the same model) is recorded with its own reason, so every holder of a server is listed.
+
+```
+ml-stack-serve status            each lease with why, who, where, and the others using its server
+ml-stack-serve leases [--json]   every server the broker holds, each holder with the above
+ml-stack-serve queue             holders and waiting asks, with reason and requester
+ml-stack-serve history [--model NAME] [--since 2026-10-01|3d|2h] [--json]
+```
+
+When a lease ends (released, dropped, or its process gone) a row goes into a graph kept beside
+the lease record (`lease-history.ladybug` under the state root): one `lease` node with the
+model, reason, requester, branch, worktree, when it was taken and ended and the duration, joined
+to a `model` node and a `branch` node. `history` reads it back.
+
+### Making room for a model (Apple silicon)
+
+A model, its KV cache and its compute buffers must fit under `iogpu.wired_limit_mb`, which is
+about 75% of installed memory until it is raised. `ml-stack-serve memory --for MODEL` works out
+the limit one model needs and what that leaves for the rest of the machine:
+
+```
+ml-stack-serve memory --for Qwen3.8-Flash-Next-UD-Q4_K_XL --ctx 262144 --kv q8_0
+```
+
+* `--for MODEL` takes an installed model's id, name or path; `--ctx N` is the context in
+  tokens (default 131072), `--kv q8_0|f16|q4_0` the cache type (default q8_0), `--no-mtp` leaves
+  the multi-token-prediction head out (it is on by default).
+* It counts, from the GGUF header: the weights, the KV cache at that context and cache type,
+  the recurrent state, the compute buffers, and a safety margin of the larger of 2 GiB and 3%.
+  The MTP head shares the main model's weights and cache, so only what it adds is counted: its
+  own file when it ships separately, its layer's share of the KV cache, and a compute buffer.
+  The output says which was counted.
+* The rest of the machine always keeps at least 8 GiB, so the limit never goes above installed
+  memory less 8 GiB; a model that does not fit is said so, with the longest context that would
+  and a table of context against what it needs and what it leaves. Leaving under 12 GiB is
+  allowed with a warning that the rest of the machine may swap.
+* The parts that grow with use are shown apart and are ordinary host RAM, not wired memory: the
+  prompt cache (`--cache-ram`, default 8192 MiB, capped), context checkpoints (32 per slot) and
+  the ngram-mod table (fixed, 16 MiB). The `ngram-cache` dynamic file has no size option in
+  llama.cpp. `--cache-ram MB` sets the prompt-cache cap used in the estimate.
+* `--apply [MB]` sets the limit for this boot (`sudo sysctl` at a terminal; macOS's own
+  administrator dialog otherwise). `--persist [MB]` also installs the boot-time
+  `stack.ml.wired-limit` LaunchDaemon in one administrator prompt (`--print` prints the old
+  manual steps instead); it runs at device startup before anyone logs in, so it covers login
+  too. `--unpersist` removes it. `--reset` puts the limit back to what it was before the first
+  change (recorded in the state directory) and removes the daemon. No sudoers rule is used.
+
+Changing the limit is a system setting, so it is for a person only: an agent's process, a
+role, a tool call, an access token and another machine are all refused, the number is checked
+as an integer within range and is the only variable part of the privileged command. The same
+control is a slider in Settings (and in the first-run setup, skippable), and a "Device memory
+controls" panel on the Models screen: choose the model, context and cache type, and the
+slider marks where it fits.
+
+### IQ quantisations on Apple silicon
+
+A lease for an IQ-family GGUF (IQ1_S, IQ1_M, IQ2_XXS/XS/S/M, IQ3_XXS/XS/S/M, IQ4_NL, IQ4_XS)
+on a Mac with an arm64 CPU goes ahead with one warning per process: it MAY be slower and less
+accurate than a K-quant of the same model on Metal, the evidence is thin, and the K-quant
+builds of the same model found on disk are listed. Each such lease also emits a sentinel event
+`serve.iq_warning` (model, quant, who) and marks its lease record, and `ml-stack-serve status`
+shows a `WARNING` line for the server while it runs. Linux, Windows, CPU-only leases
+(`n_gpu_layers` 0) and engines other than llama.cpp are never affected.
+
+`ML_STACK_IQ=block|warn|off` (default `warn`) and `ml-stack-serve up --iq block|warn|off`
+set the mode, and `iq=` on `ServerManager.lease` and `serve` does the same for one lease.
+`block` refuses with `BlockedQuant` (`up` exits 3); `off` gives no warning and records nothing.
+
+**Evidence, and its limits.** Qwen3.8-Flash-Next answering `plain` with thinking on and no
+draft head on Metal (`docs/architectures/qwen4exp.md`, `docs/report-2026-09-23.md`):
+`UD-IQ4_XS` took 70.1 s a question at 54% F1 over ten questions, `UD-Q4_K_XL` 43.7 s at 64%
+over nine. That is one model, one machine, one run each. The same report points the other
+way or shows the noise: the identical `UD-Q4_K_XL` asking also ran 27.6 s at 81% F1 over nine
+questions; `UD-IQ4_XS` `plain` thinking on over 34 questions ran 40.0 s at 59% (65.1 s at 55%
+in another run); `UD-IQ4_XS` `plain+tight` with thinking off scored 85% F1 at 36.6 s over nine
+questions, the best F1 the K-quant reached too. Run-to-run spread on one configuration is
+larger than the gap in the pair. The IQ4_XS build is 87.6G against 104.0G. No other
+IQ against K-quant speed measurement exists in `docs/model-ranking.md`, `docs/fit.md` or the
+bench store code. `docs/experiments/iq-vs-kquant-metal.md` is the pre-registered protocol
+that settles it.
+
+**How a file is judged IQ** (`ml_stack.serve.quant_guard.iq_quant`, header only): its
+`general.file_type` is an IQ type, or IQ tensors hold more than half of the weight bytes over
+all shards. One IQ tensor does not make a file IQ: an unsloth `UD-Q4_K_XL` carries an IQ4_NL
+lookup table of about a quarter of its bytes. The file name decides only for a model that is
+not a file here yet (`hf:` references). The check runs in `ServerManager._start_server`, which
+every lease passes (`lease`, `serve`, `up`, the Broker's `start` and ask paths, bench, fleet,
+ingest, the guard judge).
+
+**The mode is the person's.** No tool, request or model can change it. `serve_up` (MCP and
+chat) rejects an `--iq` word in `extra`, reports a strict refusal instead of starting a
+process, and `up` takes no abbreviation of its flags. The Broker wire drops an `iq` option, so
+a broker uses its own `ML_STACK_IQ`; a client's strict mode is applied in the client before the
+call, and a client's `off` or `warn` never reaches a broker. A spec or ask carrying `iq` is
+refused. `suggest`, `recommend` and the chat default rank an IQ build after an otherwise equal
+build on Apple silicon (a tie-break, never an exclusion) and its note says it may be slower on
+Metal.
+
+### Thinking, per use
+
+`ml_stack.client.thinking` decides whether a request asks the model to think, from the
+person's `ML_STACK_THINK=off|on|auto` (default `auto`). Decisions (the decide, judge and guard
+logprob paths) never think. Agent turns and short answers think only when the person sets
+`on`; under `auto` a prompt thinks only when it contains a phrase that asks for reasoning
+("think step by step", "show your reasoning") or the use is `reasoning`. The agent loop and
+the logprob decider send the family's template flag (`enable_thinking` for Qwen and Gemma,
+`reasoning_effort` for gpt-oss) accordingly, and `ml-stack-serve up` prints the policy.
+`ml-stack-chat` sends `think=False` on every turn itself; a `/think` command and `--think`
+there, and the policy's header line, are not wired (chat.py was out of bounds for this
+change). A bench run's thinking is recorded as its thinking column (`--reasoning-budget`).
+
 ### The settings a model scored best with, for one kind of work
 
 The `Serving` above was typed out by hand, and every value in it came from a bench run
@@ -125,7 +309,7 @@ is what it means when nothing is said.
 ml-stack-serve profile
 ml-stack-serve profile Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf
 ml-stack-serve profile Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf --for ingest
-ml-stack-serve up model.gguf --profile --for ingest
+ml-stack-serve up model.gguf --profile --workload ingest
 ml-stack-bench report --profile
 ```
 
@@ -315,6 +499,114 @@ Where the n-gram table lives depends on the kind. `ngram-simple`, `ngram-map-k`,
 and nothing touches the disk. `ngram-cache` is the exception: `--lookup-cache` is written as
 it generates, so what was learnt answering one question can speculate the next.
 
+### Multi-token prediction
+
+A model is served with multi-token prediction (`--spec-type draft-mtp`) whenever it has a
+prediction layer and the build can use it, through `ServerManager.lease`, `serve()`, the
+Broker and `ml-stack-serve up` alike. The lease says what it did: `ServerInfo.mtp` is
+`embedded`, a head's file name, or empty, `ServerInfo.mtp_note` is the one-line reason, the
+lease record keeps both, and `ml-stack-serve status` prints the head with the share of
+drafted tokens the model kept (read from the server's `/metrics`).
+
+Where the layer comes from, in order:
+
+1. **The weights carry it.** Tensors named `blk.N.nextn.*` in the GGUF (Qwen3.8-27B,
+   Qwen3.5-2B-MTP): `--spec-type draft-mtp` and no second file.
+2. **A head file beside the weights.** `hub.heads_for` lists the `mtp-` files in the model's
+   own Hub repository (any snapshot, `MTP/` folder) or the same folder on disk; a head that
+   borrows the target's embeddings (`shared`) counts only when the serving build is a fork
+   that loads one. Among those, the `Q8_0` head, else the smallest, whose header passes
+   `serve.mtp.mismatch`: same architecture, embedding width, block count (or one more),
+   tokenizer model and prefix, vocabulary size, and a prediction layer in the head.
+3. **Trust.** A head from any other repository is not used unless sentinel holds a pin a
+   download made for it (`source` other than `first-use`). A head the default picks is
+   checked against its sentinel pin before the weights load; a mismatch quarantines it as it
+   does a model, and the lease goes on without it. A head named with `draft=` is checked the
+   same way and a mismatch refuses the lease.
+
+Served without, with the reason in `mtp_note` and the log, never as a failure:
+
+| reason | why |
+| --- | --- |
+| `ML_STACK_MTP=off` (also `0`, `no`, `false`, `none`) | the machine-wide opt-out |
+| `ServerSpec(mtp=False)`, `Serving(mtp=False)`, `up --no-mtp`, `up --draft none`, `up --spec none` | the per-lease opt-out |
+| `--spec-type` has no `draft-mtp` in this build's `--help` | the build cannot |
+| `draft`, `spec_type` or tree decoding already chosen by the caller | the caller's choice stands |
+| `slot_save_path` set, or a lease that may escalate | slot save writes the target's cache and tokens only (`llama_state_seq_save_file(ctx_tgt, ...)`), so a restored slot would draft from nothing |
+| embedding server, MLX engine | nothing to draft |
+| the server exits while loading with the head | started again without it for this lease, and not tried again for that model and build in this process |
+
+The guard's judge lease (`guard/native.py`) asks for `mtp=False`: it reads the probabilities
+of one token (`max_tokens=1`), so there is nothing to draft, and in the build checked
+(`b11380`) tokens accepted from a draft carry no `logprobs` (`TODO: set result.probs` in
+`server-context.cpp`), so any scoring that reads more than the first token must not be
+served drafted. The bench's no-head arms and `ml-stack-draft`'s `none` arm set `mtp=False` too, so
+a baseline is a baseline.
+
+#### What has been measured
+
+Draft depth: a model whose architecture is in `serve.mtp.DEPTH` is started at that depth
+unless the lease names one; every other model gets the server's own default (3). The table
+is `gemma4: 2` only.
+
+Measured on this repo's own runs (`ml-stack-bench` store, 2026-09-01 to 2026-09-06, Mac;
+`docs/report-2026-09-23.md`, "Draft heads, per model", and `docs/llama-cpp-per-request-speculative.md`).
+Speed is the head's seconds-per-question against the same model's undrafted run on the same
+build; accept is the share of drafted tokens kept. A head cannot change an answer, so the F1
+columns of the report are not evidence about speed. The report prints the build only for the
+fit records (gemma-4: `3466812`, the per-request-depth patch on b10751; Flash-Next:
+`92cedc867`, unsloth `b10715-mix-86bd2d3`); the draft rows carry none, and a `shared` head
+loads only on the fork.
+
+| model, head | depth | accept | speed against no head |
+| --- | --- | --- | --- |
+| Flash-Next UD-IQ4_XS, Q8_0 (shared or not) | n2 / n4 / n8 | 74-79% / 58-59% / 39-42% | 1.13-1.43x / 1.46-1.73x / 0.73-0.95x |
+| Flash-Next UD-Q4_K_XL, shared Q8_0 | n2 / n3 / n4 | 86-87% / 79-85% / 72-78% | 1.25-1.51x / 1.24-1.48x / 1.27-1.32x |
+| same | n5 / n6 / n7 / n8 | 68-73% / 61-62% / 59% / 54% | 1.29-1.51x / 1.28-1.60x / 1.14-1.74x / 0.99-1.07x |
+| gemma-4-E2B, Q4_0 | n2 / n4 | 69-82% / 54-67% | 1.15-1.29x / 0.99-1.30x |
+| gemma-4-E2B, per-request depth sweep (tokens/s) | n1 / n2 / n4 / n8 | 76 of 150 kept at n8 | 169.6 / 176.3 / 176.6 / 141.3 |
+| gemma-4-E4B, Q4_0 / Q8_0 / BF16 | n2 / n4 / n8 / n16 | 66-71% / 50-57% / 30-37% / 16-20% | 0.99-1.09x / 0.85-0.94x / 0.64-0.75x / 0.56-0.66x |
+| gemma-4-26B-A4B | n4 | 65-84% | no undrafted run: no speed |
+| Qwen3.8-27B, own layer | | | no drafted run: memory records only |
+| gpt-oss-120b / 20b, eagle3 (not MTP) | n2 / n4 | 42-65% | 0.71-0.82x, a loss; never selected by the default |
+
+Reading it: depth 8 and above lost or broke even everywhere it was tried; gemma-4 is best at
+2 (E2B flat from 2 to 4, E4B loses from 4 up), which is the one row of
+`DEPTH`. Flash-Next has no single best depth in these runs (n4 beats n2 on IQ4_XS, n2 to n7
+sit inside each other's spread on Q4_K_XL, the same depth varies 1.14-1.74x between runs),
+so it keeps the server's 3, which lies inside the good range. The E4B gain at n2 and the E2B
+gain are inside the report's own s/q noise. Head precision on gemma-4-E4B (Q4_0, Q8_0, BF16)
+is within 3% at equal accept, and shared against non-shared Flash-Next is within 1%, so the
+order "Q8_0, else the smallest" is not contradicted. No run compares an embedded layer with a
+detached head.
+
+Published or claimed elsewhere, not measured here (`docs/research/qwen38-flash-next-mtp.md`,
+2026-09-01):
+
+| source | what it says |
+| --- | --- |
+| llama.cpp #27836, M3 Max, Flash-Next IQ4_XS | 27.4 -> 37.2 tok/s (+36%, 89% accept) at n2; +42% (86%) at n3 |
+| unsloth fork PR #144, B200, Q4_K_XL | 1.67x, 66% accept; bf16 and Q8_0 heads equal; concurrency 8 is 0.81-0.87x |
+| a #144 comment, RTX PRO 6000 | 1.94x with the non-shared Q8_0 head, 8% faster than shared |
+| unsloth `MTP/README.md` | 1.3-1.7x at low concurrency, n2, not for concurrent serving |
+| #27836 thread, M5 Pro / M5 Max | -12% to +5% at n2-n3; +13-68% with n6 and `p-min 0.7` |
+| #27836 thread, Vulkan and dual-GPU CUDA | 2-4x slower despite 85-95% accept, until #28123 (rollback) |
+
+No in-repo run shows a multi-GPU or Vulkan loss, so there is no automatic off for them; the
+opt-outs above are the remedy. Concurrency above one slot is likewise published only.
+
+**Flash-Next on the managed build.** The tracked build `b11380` (`eec18f5d3`) contains the
+qwen4exp MTP graph (`llama_model_qwen4exp::graph_mtp`) and the `blk.N.nextn.hc_head_*`
+tensors, and has no `nextn_shared_target_tensors`, so it can run a head but cannot borrow the
+target's embeddings: the default offers it the non-shared `mtp-...-Q8_0.gguf` only. Whether it
+loads that head-only file as `-md` is not known without loading it. The one check, on a quiet
+machine (loads the 87G model once per arm):
+
+    ml-stack-draft Qwen3.8-Flash-Next-UD-IQ4_XS-00001-of-00003.gguf --depth 2 --depth 3 --depth 4
+
+An arm that cannot load prints the server's error; a loading head prints accept and speed
+against the no-head arm, which are the first numbers for this build.
+
 **A release lags master by an architecture or two.** Checked on this machine: the newest
 homebrew bottle (`brew outdated` empty) reads `gemma4` and `qwen3moe` but not `qwen4exp`, so
 Qwen3.8-Flash-Next exits with "unknown model architecture" on it. `ml-stack-serve build`
@@ -335,6 +627,10 @@ without compiling or downloading anything; a compile already running keeps going
 and only switches `current` itself once it goes on to verify. `ml-stack-setup` names the fix
 directly when an architecture or a flag is missing. A one-off binary from somewhere else
 still works: `ml-stack-serve up --binary /path/to/llama-server`.
+
+`ml-stack-serve llama-cpp status|update|rollback|pin|list|prune` is the flow that follows upstream
+with a pinned commit, a sandboxed compile, a smoke test before a build is trusted, and a pin
+sentinel verifies every time the binary is found; see [llama-cpp-tracking.md](llama-cpp-tracking.md).
 
 Verifying by architecture *name* is only as precise as the name: measured for real, a
 build's `libllama` read `phi4` and looked exactly like a missing architecture next to a
@@ -368,7 +664,7 @@ itself — `ml-stack-models files` prints it under the draft line it already rep
 publisher's warning is read before a load, not guessed at after one fails.
 
 **Some heads need a fork, and one chooser — told which binary will serve — decides.**
-Measured for real: every `mtp-` head under `unsloth/Qwen3.8-Flash-Next-GGUF/MTP/` fails on
+Measured for real on 2026-09-01 (mainline `3466812`; the managed `b11380` is covered under "What has been measured"): every `mtp-` head under `unsloth/Qwen3.8-Flash-Next-GGUF/MTP/` fails on
 mainline llama.cpp master with `check_tensor_dims: tensor 'output_hc_norm.weight' not
 found` — mainline loads a draft as a whole model, and those heads carry only the head,
 borrowing the trunk's embeddings from the target — and the repository's own `MTP/README.md`
@@ -410,11 +706,26 @@ Measured on this machine 2026-09-01, from the newest unsloth release
 --name unsloth`. `--build unsloth` then preflights Qwen3.8-Flash-Next
 (`UD-IQ4_XS`) with `mtp-Qwen3.8-Flash-Next-shared-Q8_0.gguf`, `--spec draft-mtp
 --spec-draft-n-max 2` cleanly — architecture, shards and every flag check pass — without
-ever serving it. For the later measurement itself (not yet run): unsloth's own recommended
-`--spec-draft-n-max` is 2, other reports found 3 or 6 better depending on platform and
+ever serving it. The measurement was run later (see "What has been measured"). Unsloth's own
+recommended `--spec-draft-n-max` is 2, other reports found 3 or 6 better depending on platform and
 `--spec-draft-p-min` (0.7 is the value used alongside them); `--ctx-checkpoints 0` is
 needed for a byte-identical comparison at all, because **greedy output with a head on is
 not byte-identical on Metal at n-max ≥ 3** (also seen on HIP) — so a bench comparing heads
 on this machine must watch its own F1 for a real quality change, not assume decoding stayed
 identical just because sampling is greedy.
 
+
+### Broker runtime provenance
+
+`ml-stack-serve queue --json` includes a `runtime` object. A newly started broker
+records the same object in its private registration and returns it through ping and
+status: wire protocol, actual PID and process birth, OS owner, claimed requester,
+loaded package location/version, Python interpreter/prefix, source commit and dirty
+state when running from that source checkout. Installed or frozen packages without
+source receipts report the source commit as unknown. No environment secrets are included.
+
+Clients report older brokers without these fields as `unknown`; they do not infer a
+commit from the client's checkout. An explicitly incompatible protocol permits
+status inspection and refuses mutations with an owned-broker upgrade instruction.
+Upgrade only an owned broker at a quiescent boundary, preserving foreign holders.
+A reused PID or a socket reporting another PID does not validate the registration.

@@ -203,11 +203,18 @@ def test_the_modules_this_repository_cannot_measure_are_countable() -> None:
     assert all((REPO / path).is_file() for path in blind)
 
 
-def test_the_scoreboard_prints_the_caveat_under_the_table() -> None:
-    done = subprocess.run([sys.executable, str(REPO / "scripts" / "budgets")],
-                          capture_output=True, text=True, check=False)
-    assert "counts recorded survivors, not every mutation the tests would miss" in done.stdout
-    assert "were not mutated" not in done.stdout.split("mutation-survivors counts")[0]
+def test_the_scoreboard_prints_the_caveat_under_the_table(monkeypatch, capsys) -> None:
+    """The real table printer with no findings: measuring every metric (pyright included) and
+    collecting the suite for the floor is what made this one test cost forty seconds, and neither
+    is what it is about."""
+    from test_budget_rises import scoreboard
+
+    module = scoreboard()
+    monkeypatch.setattr(module, "floor_rows", lambda least: ([], 0))
+    module.table({}, {})
+    out = capsys.readouterr().out
+    assert "counts recorded survivors, not every mutation the tests would miss" in out
+    assert "were not mutated" not in out.split("mutation-survivors counts")[0]
 
 
 def test_this_repository_records_the_campaigns_behind_its_count() -> None:
@@ -216,18 +223,31 @@ def test_this_repository_records_the_campaigns_behind_its_count() -> None:
         "scripts/gates/survivors.txt records no campaign; the count covers nothing"
 
 
-def test_a_verify_with_nothing_to_re_run_says_so_rather_than_printing_nothing() -> None:
+def test_a_verify_with_nothing_to_re_run_says_so_rather_than_printing_nothing(capsys) -> None:
     """Silence reads as a pass. The ledger being empty is a fact about the ledger."""
-    done = subprocess.run([sys.executable, str(REPO / "scripts" / "mutate"), "--verify"],
-                          capture_output=True, text=True, check=False)
-    assert done.returncode == 0, done.stdout + done.stderr
-    if not [e for e in mutation_survivors.entries(REPO) if e.state == "survivor"]:
-        assert "records no survivor to re-run" in done.stdout
-        assert "That is the ledger, not the tree" in done.stdout
+    import argparse
+    import importlib.machinery
+    import importlib.util
+
+    if [e for e in mutation_survivors.entries(REPO) if e.state == "survivor"]:
+        # a survivor to re-run needs the mutation tree: the real script, in a real process
+        done = subprocess.run([sys.executable, str(REPO / "scripts" / "mutate"), "--verify"],
+                              capture_output=True, text=True, check=False)
+        assert done.returncode == 0, done.stdout + done.stderr
+        return
+    loader = importlib.machinery.SourceFileLoader("mutate_script", str(REPO / "scripts" / "mutate"))
+    spec = importlib.util.spec_from_loader("mutate_script", loader)
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    assert module.verify(REPO, None, argparse.Namespace(tests=2, timeout=1.0)) == 0
+    out = capsys.readouterr().out
+    assert "records no survivor to re-run" in out
+    assert "That is the ledger, not the tree" in out
 
 
 def _mini(root: Path, test_body: str) -> None:
     (root / "src" / "ml_stack" / "toy").mkdir(parents=True)
+    (root / "src" / "ml_stack" / "__init__.py").write_text('', encoding="utf-8")
     (root / "src" / "ml_stack" / "toy" / "count.py").write_text(
         "def over(n):\n    if n > 3:\n        return 'many'\n    return 'few'\n", encoding="utf-8")
     (root / "tests").mkdir()

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Every pre-commit check, in order: no data file, no person's name, no growth in any budget,
+# Every pre-commit check, in order: no agent commit in the primary checkout, no data file, no person's name, no growth in any budget,
 # and no raised number in budgets.json.
 set -e
 
@@ -13,7 +13,8 @@ while [ -L "$self" ]; do
 done
 here=$(cd "$(dirname "$self")" && pwd)
 
-"$here/no-data-files"
+"${PYTHON:-python3}" "$here/primary-only"
+"${PYTHON:-python3}" "$here/no-data-files"
 "$here/no-real-names" "$@"
-"$here/budgets" "$@"
-"$here/budgets-only-fall" "$@"
+"${PYTHON:-python3}" "$here/budgets" "$@"
+"${PYTHON:-python3}" "$here/budgets-only-fall" "$@"

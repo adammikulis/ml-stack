@@ -1,20 +1,39 @@
 <!doctype html>
+<html lang="en" data-theme="light">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ml-stack</title>
+<title>Poolside</title>
+<link rel="stylesheet" href="/ui/ml-ui/ml-ui.css">
 <link rel="stylesheet" href="/ui/static/style.css">
+<script type="module" src="/ui/ml-ui/ml-ui.js"></script>
+<script src="/ui/ml-ui/marked.umd.js"></script>
+<script src="/ui/ml-ui/purify.min.js"></script>
 __STYLES__
 <div id="root">
   <fleet-model></fleet-model>
   <sign-in></sign-in>
+  <launch-needed></launch-needed>
   <first-run></first-run>
   <div class="app" id="app" hidden>
+    <a class="skip-link" href="#workspace">Skip to content</a>
     <fleet-nav></fleet-nav>
+    <div class="workspace" id="workspace" tabindex="-1">
     <cluster-view></cluster-view>
     <chat-view></chat-view>
+    <board-view></board-view>
+    <history-view></history-view>
+    <tasks-view></tasks-view>
     <models-view></models-view>
+    <projects-view></projects-view>
     <settings-view></settings-view>
+    <data-view></data-view>
+    <knowledge-view></knowledge-view>
+    <training-view></training-view>
+    <gym-view></gym-view>
+    <benchmarks-view></benchmarks-view>
+    <tools-view></tools-view>
     <fit-view></fit-view>
+    </div>
   </div>
   <close-sheet></close-sheet>
 </div>

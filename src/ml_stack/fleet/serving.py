@@ -6,16 +6,40 @@ import json
 import socket
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
+from http.client import HTTPException
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
+from ml_stack import lock
+from ml_stack.client.counters import read_speculative
+from ml_stack.client.health import is_healthy, reported_models, serving_params
 from ml_stack.client.settings import Transport
 from ml_stack.files import write_json
+from ml_stack.hub.capabilities import capabilities
+from ml_stack.hub.probe import machine_memory
+from ml_stack.serve import LlamaServerBackend, ServerManager, ServerSpec, free_port
+from ml_stack.serve.estimate import DEFAULT_KV, Setup, estimate, verdict
+from ml_stack.serve.preflight import read_gguf_header
+from ml_stack.serve.process import every_server
 from ml_stack.units import human_bytes
 
-__all__ = ["Endpoint", "Hosting", "NoRoom", "Served", "Serving", "Started",
-           "discover_serving", "start_model", "stop_model"]
+from . import model_components
+from .models import draft_beside
+
+__all__ = [
+    "Endpoint",
+    "Hosting",
+    "NoRoom",
+    "ServeSettings",
+    "Served",
+    "Serving",
+    "Started",
+    "discover_serving",
+    "start_model",
+    "stop_model",
+]
 
 # Each health path waits this long, and the beacon rebuilds the list every 10s.
 PROBE_TIMEOUT = 1.0
@@ -31,6 +55,13 @@ class Served:
     models: list[str] = field(default_factory=list)
     slots: int = 1
     started_at: float = field(default_factory=time.time)
+    context: int | None = None
+    slot_context: int | None = None
+    draft: str = ""
+    spec_type: str = ""
+    draft_status: str = "unknown"
+    aliases: list[str] = field(default_factory=list)
+    capabilities: dict[str, Any] = field(default_factory=dict)
 
     def public(self) -> dict[str, Any]:
         return asdict(self)
@@ -47,12 +78,14 @@ class Serving:
                  slots: int = 1) -> Served:
         served = Served(port=port, models=[_name(m) for m in (models or [])],
                         slots=slots)
-        current = [s for s in self.all() if s.port != port]
-        self._write([*current, served])
+        with lock.only_one(self.path.with_suffix(".lock"), timeout=5, announce=lambda text: None):
+            current = [s for s in self.all() if s.port != port]
+            self._write([*current, served])
         return served
 
     def unregister(self, port: int) -> None:
-        self._write([s for s in self.all() if s.port != port])
+        with lock.only_one(self.path.with_suffix(".lock"), timeout=5, announce=lambda text: None):
+            self._write([s for s in self.all() if s.port != port])
 
     def all(self) -> list[Served]:
         if not self.path.exists():
@@ -64,10 +97,18 @@ class Serving:
         out = []
         for row in raw if isinstance(raw, list) else []:
             try:
-                out.append(Served(port=int(row["port"]),
+                port = row["port"]
+                if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
+                    continue
+                out.append(Served(port=port,
                                   models=list(row.get("models") or []),
                                   slots=int(row.get("slots") or 1),
-                                  started_at=float(row.get("started_at") or 0)))
+                                  started_at=float(row.get("started_at") or 0),
+                                  context=row.get("context"), slot_context=row.get("slot_context"),
+                                  draft=str(row.get("draft") or ""), spec_type=str(row.get("spec_type") or ""),
+                                  draft_status=str(row.get("draft_status") or "unknown"),
+                                  aliases=list(row.get("aliases") or []),
+                                  capabilities=row.get('capabilities') if isinstance(row.get('capabilities'), dict) else {}))
             except (KeyError, TypeError, ValueError):
                 continue
         return out
@@ -81,7 +122,18 @@ class Serving:
         age, cached = self._live
         if not force and time.time() - age < LIVE_CACHE_S:
             return cached
-        found = [s for s in self.all() if answers(s.port)]
+        snapshot = self.all()
+        running = {row["port"]: row for row in every_server()}
+        verified = {served.port: _identity(served, running.get(served.port, {})) for served in snapshot}
+        found = [served for served, answering in verified.values() if answering]
+        if any(verified[served.port][0] != served for served in snapshot):
+            with lock.only_one(self.path.with_suffix(".lock"), timeout=5, announce=lambda text: None):
+                old = {served.port: served for served in snapshot}
+                current = self.all()
+                reconciled = [verified[served.port][0] if served == old.get(served.port) else served for served in current]
+                kept = [served for served in reconciled if served is not None]
+                if kept != current:
+                    self._write(kept)
         self._live = (time.time(), found)
         return found
 
@@ -109,40 +161,57 @@ class Started:
     served: Served | None = None
 
 
-def start_model(root: Path | str, model_path: Path | str, *, name: str | None = None,
-                context: int = 8192, parallel: int = 1, manager: Any = None,
-                serving: Serving | None = None, port: int | None = None,
-                escalate: bool = False) -> Started:
-    """Run ``model_path`` on this machine with ``parallel`` slots of ``context`` tokens.
-    Registers the port when given a ``Serving``.
+@dataclass(frozen=True, slots=True)
+class ServeSettings:
+    """Model identity, context, slots, memory room and escalation preferences."""
 
-    ``escalate=True`` grows a server already up on ``port`` with fewer slots than
-    ``parallel`` asks for, rather than refusing -- see
-    :meth:`~ml_stack.serve.ServerManager.escalate`.
-    """
-    from ml_stack.serve import LlamaServerBackend, ServerManager, ServerSpec, free_port
+    name: str = ''
+    context: int = 8192
+    parallel: int = 1
+    room: int = 0
+    port: int | None = None
+    escalate: bool | None = None
 
+
+def start_model(root: Path | str, model_path: Path | str, *, settings: ServeSettings | None = None,
+                manager: Any = None, serving: Serving | None = None) -> Started:
+    """Lease the configured model and optionally register its serving endpoint."""
+    settings = settings or ServeSettings()
     if manager is None:
         from .llama import ensure_server
         manager = ServerManager(
             backend=LlamaServerBackend(binary=ensure_server(root)))
 
-    from .models import draft_beside
-
-    if port is None:
-        port = free_port()
-    parallel = max(1, int(parallel))
-    extra: tuple[str, ...] = ()
+    port = free_port() if settings.port is None else settings.port
+    parallel = max(1, int(settings.parallel))
+    context = int(settings.context)
+    original_path = Path(model_path)
+    model_path = str(model_components.effective(original_path))
+    projector = (model_components.linked(original_path, "vision")
+                 or model_components.linked(Path(model_path), "vision"))
     draft = draft_beside(Path(model_path))
+    kind = ""
     if draft is not None:
-        # -md is what this build calls --spec-draft-model.
-        extra = ("-md", str(draft), "-ngld", "99")
+        found = read_gguf_header(draft)
+        arch = found.get("general.architecture")
+        if found.get(f"{arch}.nextn_predict_layers"):
+            kind = "draft-mtp"
+    sizing = estimate(model_path, Setup(context=int(context), parallel=parallel, draft=draft, mmproj=projector,
+                                       draft_cache_type=DEFAULT_KV))
+    if verdict(sizing, machine_memory()) == "red":
+        raise NoRoom(f"{Path(model_path).name}: not enough free memory for the model, head and context")
     lease = manager.lease(ServerSpec(model=model_path, port=port, context=int(context),
-                                     parallel=parallel, extra_args=extra),
-                          escalate=escalate)
+                                     parallel=parallel, draft=str(draft) if draft else None,
+                                     mmproj=str(projector) if projector else None,
+                                     cache_type_k=DEFAULT_KV, cache_type_v=DEFAULT_KV,
+                                     spec_draft_type_k=DEFAULT_KV if draft else "",
+                                     spec_draft_type_v=DEFAULT_KV if draft else "",
+                                     spec_type=kind, spec_draft_ngl=99 if draft else None),
+                          escalate=bool(settings.escalate),
+                          reason=f"fleet serving of {Path(model_path).name}")
     served = None
     if serving is not None:
-        served = serving.register(port, [name or Path(model_path).name], slots=parallel)
+        served = serving.register(port, [settings.name or Path(model_path).name], slots=parallel)
     return Started(port=port, lease=lease, manager=manager, served=served)
 
 
@@ -188,25 +257,20 @@ class Hosting:
         return (f"{human_bytes(need)} for {parallel} slot(s) at {context} tokens; "
                 f"this machine has {human_bytes(room)}")
 
-    def start(self, model_path: Path | str, *, name: str = "", context: int = 8192,
-              parallel: int = 1, room: int = 0, escalate: bool = True) -> Served:
-        """Serve ``model_path`` here, or raise `NoRoom`.
-
-        ``escalate`` (on by default: a pool is exactly the place more than one
-        conversation is expected) grows a server already up with fewer slots than
-        ``parallel`` asks for rather than refusing.
-        """
-        name = name or Path(model_path).name
-        why = self.fits_in(name, context=int(context), parallel=int(parallel), room=int(room))
+    def start(self, model_path: Path | str, settings: ServeSettings | None = None) -> Served:
+        """Serve the configured model, admitting its memory and slot requirements."""
+        settings = settings or ServeSettings()
+        name = settings.name or Path(model_path).name
+        why = self.fits_in(name, context=int(settings.context), parallel=int(settings.parallel), room=int(settings.room))
         if why:
             raise NoRoom(f"{name} does not fit: {why}")
-        started = start_model(self.root, model_path, name=name, context=int(context),
-                              parallel=int(parallel), manager=self.manager,
-                              serving=self.serving, escalate=escalate)
+        configured = replace(settings, name=name, escalate=True if settings.escalate is None else settings.escalate)
+        started = start_model(self.root, model_path, settings=configured,
+                              manager=self.manager, serving=self.serving)
         self.manager = started.manager
         self.leases[started.port] = started.lease
         return started.served or Served(port=started.port, models=[name],
-                                        slots=max(1, int(parallel)))
+                                        slots=max(1, int(settings.parallel)))
 
     def stop(self, port: int) -> None:
         """Release the server on ``port``; a port this process did not start is only
@@ -227,10 +291,46 @@ def stop_model(started: Started, serving: Serving | None = None) -> None:
         serving.unregister(started.port)
 
 
+def _identity(served: Served, process: dict) -> tuple[Served | None, bool]:
+    try:
+        with socket.create_connection(("127.0.0.1", served.port), timeout=CONNECT_TIMEOUT):
+            pass
+    except OSError:
+        return None, False
+    def local_only(url: str) -> str:
+        target = urlsplit(url)
+        if target.scheme != "http" or target.hostname != "127.0.0.1" or target.port != served.port:
+            raise ValueError("model metadata must stay on its registered local endpoint")
+        return url
+
+    try:
+        names = reported_models(f"http://127.0.0.1:{served.port}", timeout=PROBE_TIMEOUT, guard=local_only)
+    except (OSError, ValueError, HTTPException):
+        return served, False
+    if not names:
+        return served, False
+    base = f"http://127.0.0.1:{served.port}"
+    try:
+        params = serving_params(base, timeout=PROBE_TIMEOUT, guard=local_only)
+        counts = read_speculative(base, timeout=PROBE_TIMEOUT, guard=local_only)
+    except (OSError, ValueError, HTTPException):
+        params, counts = None, None
+    slots = params.total_slots if params and type(params.total_slots) is int and params.total_slots > 0 else served.slots
+    slot_context = params.n_ctx if params and type(params.n_ctx) is int and params.n_ctx > 0 else None
+    context = slot_context * slots if slot_context else None
+    spec_type = str(process.get("spec_type") or "")
+    draft = str(process.get("draft") or "")
+    state = "active" if counts and counts.drafted > 0 else "configured" if spec_type else "unknown"
+    model = next((Path(name) for name in names if Path(name).is_absolute()), None)
+    if model is None and params and params.model and Path(params.model).is_absolute():
+        model = Path(params.model)
+    observed = capabilities(model, embedding=process.get('embedding'))
+    return Served(served.port, [_name(name) for name in names], slots, served.started_at,
+                  context, slot_context, Path(draft).name if draft else "", spec_type, state, names, observed), True
+
+
 def answers(port: int, *, timeout: float = PROBE_TIMEOUT) -> bool:
     """Whether a model server on ``port`` of this machine is up."""
-    from ml_stack.client.health import is_healthy
-
     try:
         with socket.create_connection(("127.0.0.1", port),
                                       timeout=min(timeout, CONNECT_TIMEOUT)):

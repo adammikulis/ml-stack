@@ -49,7 +49,7 @@ def build_body(model: str | None, messages: list[dict[str, Any]], request: Reque
     extra = dict(extra)
     think = extra.pop("think", None)
     response_format = extra.pop("response_format", None)
-    options: dict[str, Any] = {**request.sampling(), "num_predict": request.n_predict}
+    options: dict[str, Any] = {**request.sampling(), "num_predict": request.n_predict if request.n_predict is not None else -1}
     if request.context is not None:
         options["num_ctx"] = int(request.context)
     rest: dict[str, Any] = {}
@@ -57,7 +57,7 @@ def build_body(model: str | None, messages: list[dict[str, Any]], request: Reque
         if key in ("id_slot", "cache_prompt", "grammar", "chat_template_kwargs", "tool_choice"):
             continue
         if key == "n_predict":
-            options["num_predict"] = value
+            options["num_predict"] = value if value is not None else -1
         elif key in _OPTION_KEYS:
             options[key] = value
         else:

@@ -1,30 +1,4 @@
-"""The handful of places a daemon or a server has to do one thing on Windows and another
-everywhere else, gathered so each is decided once.
-
-Every helper reads ``platform.system()`` at call time rather than at import, so a test on
-one operating system can stand in for the other. None of them is a guess about Windows:
-each names the Windows call it makes, and the test that proves it is only ever a test of
-*this module's branch*, run on whatever machine the tests run on. The Windows calls
-themselves are exercised the first time a Windows machine runs the daemon, which is what
-the checklist at the end of ``README.md``'s Windows paragraph is for.
-
-What differs, and what Windows gets instead:
-
-- a job started in its own process group so a stop reaches it and nothing else:
-  ``start_new_session=True`` on POSIX, ``creationflags=CREATE_NEW_PROCESS_GROUP`` on
-  Windows (``process_group_kwargs``); the same with ``DETACHED_PROCESS`` as well for a job
-  that outlives the terminal, which on Windows also means leaving its console
-  (``detached_kwargs``);
-- asking a job to stop so it can checkpoint: ``SIGTERM`` on POSIX, ``CTRL_BREAK_EVENT``
-  on Windows -- the one console signal that can be aimed at a single process group,
-  which is why the group above matters -- falling back to ``TerminateProcess`` when the
-  job has no console to receive it (``stop_gently``);
-- the signals that mean "shut down cleanly": ``SIGTERM`` on POSIX, ``SIGBREAK`` as well
-  on Windows (``quit_signals``, ``on_quit``);
-- a file only this user may read: ``chmod 0o600`` on POSIX, which on Windows only flips
-  the read-only attribute and protects nothing, so there the file's ACL is cut to the
-  owner with ``icacls`` instead (``private_file``).
-"""
+"""Platform process, signal, file, and desktop operations."""
 
 from __future__ import annotations
 
@@ -35,19 +9,23 @@ import signal
 import subprocess
 import sys
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
 __all__ = [
     "detached_kwargs",
+    "is_apple_silicon",
     "is_windows",
+    "launch",
     "on_quit",
     "private_file",
     "process_group_kwargs",
     "quit_signals",
+    "start_process",
     "stop_gently",
     "stop_pid",
+    "terminate_process_group",
 ]
 
 # subprocess only defines these on Windows; the values are Win32's own and do not change.
@@ -61,7 +39,35 @@ def is_windows() -> bool:
     return _platform.system() == "Windows"
 
 
+def is_apple_silicon() -> bool:
+    """Read when asked: a Mac with an arm64 CPU, the machines llama.cpp's Metal backend runs on."""
+    return _platform.system() == "Darwin" and _platform.machine() == "arm64"
+
+
+def applescript_quote(text: str) -> str:
+    """``text`` safe inside an AppleScript string literal."""
+    return text.replace("\\", "\\\\").replace('"', '\\"')
+
+
 # -- starting and stopping a child -----------------------------------------------------
+def launch(argv: Sequence[str], *, stdin: int | None = None) -> subprocess.Popen[bytes]:
+    """Start an owned child process with the requested input handle."""
+    return subprocess.Popen(argv, stdin=stdin)
+
+
+def start_process(argv, **kwargs):
+    """Start a child in its own platform process group."""
+    return subprocess.Popen(argv, **process_group_kwargs(), **kwargs)
+
+
+def terminate_process_group(proc, *, force=False):
+    """Terminate a child and its process group."""
+    if is_windows():
+        proc.kill() if force else proc.terminate()
+    else:
+        os.killpg(proc.pid, signal.SIGKILL if force else signal.SIGTERM)
+
+
 def process_group_kwargs() -> dict[str, Any]:
     """The ``Popen`` keywords that put a child in a process group of its own.
 

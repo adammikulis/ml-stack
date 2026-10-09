@@ -13,12 +13,13 @@ usage() {
   cat <<'HELP'
 scripts/test-on-linux [--single] [--rebuild] [--platform P] [pytest args...]
 
-Runs this worktree's tests inside a Linux container, with the extras ci.yml installs,
+Runs explicit reviewed selectors inside an isolated Linux container, with test extras,
 and prints what pytest prints. Arguments after the script's own flags go to pytest:
 
-    scripts/test-on-linux tests/test_serve.py -q
-    scripts/test-on-linux --single tests/test_graph_thread.py
-    scripts/test-on-linux -q --slow
+    scripts/test-on-linux tests/test_layers.py -q
+    scripts/test-on-linux --single tests/test_cli_reference.py
+
+Selectors and fixture resources must be admitted by the maintained test supervisor.
 
   --single        run in one process (-n 0), so an order-dependent test is not hidden
                   by xdist scattering the file across workers
@@ -28,11 +29,11 @@ and prints what pytest prints. Arguments after the script's own flags go to pyte
                   Linuxes catch a pass that is only macOS's, and an emulated run is
                   several times slower.
 
-The container gets a clone of this worktree with the working tree copied over it, so
+The supervisor stages tracked source files into an immutable container image, so
 the tests that read a real repository have one and nothing the run writes lands in
 yours. The dependencies live in a docker volume, keyed by a hash of pyproject.toml and
 the installed set, and are rebuilt only when that hash changes. Each run then makes its
-own throwaway venv inside the container for the editable install of this checkout, so
+own throwaway venv inside the container for an immutable wheel of this checkout, so
 two runs sharing the volume never see each other's install in progress.
 
 Docker credentials: on macOS the desktop credential helper can hang an image pull
@@ -54,113 +55,36 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-DCFG="$(mktemp -d)"
-STAGE="$(mktemp -d)"
-trap 'rm -rf "$DCFG" "$STAGE"' EXIT
-printf '{"auths":{}}' > "$DCFG/config.json"
-docker() { command docker --config "$DCFG" "$@"; }
-
-if ! docker info >/dev/null 2>&1; then
-  echo "scripts/test-on-linux: \`docker info\` failed, so there is no Linux to run in." >&2
-  echo "Start Docker Desktop, or install docker, and run it again." >&2
+PYTEST_ARGS=("$@")
+if [ ${#PYTEST_ARGS[@]} -eq 0 ]; then
+  echo "scripts/test-on-linux: explicit reviewed selectors are required" >&2
   exit 2
 fi
-
-git clone -q --no-hardlinks "$REPO" "$STAGE/repo"
-(cd "$REPO" && tar -cf - --exclude .git .) | (cd "$STAGE/repo" && tar -xf -)
-
-PYTEST_ARGS=("$@")
-[ ${#PYTEST_ARGS[@]} -eq 0 ] && PYTEST_ARGS=(tests/ -q)
-[ -n "$SINGLE" ] && PYTEST_ARGS+=(-n 0)
-
-# --init: without a real pid 1 the suite's own parent is pid 0, and a server owned by a
-# process that does not exist is an orphan to stop.
-exec docker run --rm -i --init \
-  ${PLATFORM:+--platform "$PLATFORM"} \
-  -v "$STAGE/repo":/src:ro \
-  -v "$VOLUME":/venv \
-  -e PIP_DISABLE_PIP_VERSION_CHECK=1 \
-  -e PIP_CACHE_DIR=/venv/pipcache \
-  -e IMAGE="$IMAGE" \
-  -e REBUILD="$REBUILD" \
-  -w /work \
-  "$IMAGE" \
-  bash -s -- "${PYTEST_ARGS[@]}" <<'INNER'
-set -euo pipefail
-
-# Same set as ci.yml's "install test dependencies", and the same reasons.
-DEPS='pytest pytest-xdist pyyaml numpy psutil pillow networkx gguf safetensors'
-# The runners have cmake; the image has not, and tests/test_serve_build.py configures a
-# checkout with it. PyPI's wheel carries the binary, so it caches with the venv.
-DEPS="$DEPS cmake"
-EXTRAS='.[store,hub,web,plot,privacy]'
-
-mkdir -p /work
-tar -C /src -cf - --exclude __pycache__ . | tar -C /work -xf -
-git config --global --add safe.directory /work
-
-# Keyed by the stamp, so a concurrent run needing a different one builds a sibling
-# instead of deleting the env this run may be using.
-HASH="$( { echo "$DEPS $EXTRAS $IMAGE"; cat /work/pyproject.toml; } | sha256sum | cut -d' ' -f1)"
-ENV_DIR="/venv/$HASH/env"
-STAMP="/venv/$HASH/stamp"
-mkdir -p /venv
-[ -n "${REBUILD:-}" ] && rm -f "$STAMP"
-
-# flock serialises two runs that both need this stamp; the stamp is written last so a
-# build another run started, and has not finished, is never read as done.
-exec 9>"/venv/$HASH.lock"
-flock 9
-if [ ! -f "$STAMP" ]; then
-  echo "test-on-linux: building the shared venv for this stamp (a few minutes; cached after this)" >&2
-  rm -rf "$ENV_DIR"
-  python -m venv "$ENV_DIR"
-  "$ENV_DIR/bin/pip" install -q --upgrade pip build
-  "$ENV_DIR/bin/pip" install -q $DEPS
-  "$ENV_DIR/bin/pip" install -q torch --index-url https://download.pytorch.org/whl/cpu
-  "$ENV_DIR/bin/pip" install -q -e "/work/$EXTRAS"
-  "$ENV_DIR/bin/python" -m spacy download en_core_web_sm
-  # Only the dependencies belong in the shared env; this run's own editable install of
-  # ml-stack goes in its private venv below.
-  "$ENV_DIR/bin/pip" uninstall -y -q ml-stack
-  touch "$STAMP"
-fi
-flock -u 9
-exec 9>&-
-
-# Sibling envs for a stamp nobody has used in days, taken non-blocking so a build another
-# run is doing right now is left alone.
-for dir in /venv/*/; do
-  dir="${dir%/}"
-  sibling="$(basename "$dir")"
-  [[ "$sibling" =~ ^[0-9a-f]{64}$ ]] || continue
-  [ "$sibling" = "$HASH" ] && continue
-  [ -f "$dir/stamp" ] || continue
-  [ -z "$(find "$dir/stamp" -mtime +4)" ] && continue
-  exec 8>"/venv/$sibling.lock"
-  flock -n 8 && rm -rf "$dir" "/venv/$sibling.lock"
-  exec 8>&-
+export PYTHONPATH="$REPO/src:$REPO/scripts"
+WANT=0
+[ -n "$SINGLE" ] && WANT=1
+# The scheduler owns the process count; explicit pytest values are ceilings.
+CLEAN_ARGS=()
+while [ ${#PYTEST_ARGS[@]} -gt 0 ]; do
+  ARG="${PYTEST_ARGS[0]}"
+  PYTEST_ARGS=("${PYTEST_ARGS[@]:1}")
+  case "$ARG" in
+    -n|--numprocesses)
+      WANT="${PYTEST_ARGS[0]}"; PYTEST_ARGS=("${PYTEST_ARGS[@]:1}") ;;
+    -n[0-9]*|--numprocesses=*) WANT="${ARG#*=}"; WANT="${WANT#-n}" ;;
+    *) CLEAN_ARGS+=("$ARG") ;;
+  esac
 done
-
-# This run's own venv, outside the shared volume, seeing the shared env's dependencies
-# through a .pth file. Its editable install of ml-stack, and the entry points that
-# registers, belong to this run alone.
-PRIV=/priv-venv
-python -m venv "$PRIV"
-PURELIB='import sysconfig; print(sysconfig.get_path("purelib"))'
-SHARED_SITE="$("$ENV_DIR/bin/python" -c "$PURELIB")"
-PRIV_SITE="$("$PRIV/bin/python" -c "$PURELIB")"
-echo "$SHARED_SITE" > "$PRIV_SITE/shared-env.pth"
-"$PRIV/bin/pip" install -q --no-deps -e /work
-
-# As a person runs it, and as CI runs it. Root ignores a 0o500 directory, so the tests
-# that check a refusal on an unwritable path see no refusal.
-mkdir -p /home/tester
-chown -R 1000:1000 /work /home/tester "$PRIV"
-export HOME=/home/tester
-# A fake server the tests write into a temp directory runs `python3` off PATH; the
-# private venv is the one with pytest and the rest of the deps, ahead of the shared env's
-# own bin, which still needs to be reachable for a dependency's console script (cmake).
-export PATH="$PRIV/bin:$ENV_DIR/bin:$PATH"
-exec setpriv --reuid=1000 --regid=1000 --clear-groups "$PRIV/bin/python" -m pytest "$@"
-INNER
+case "$WANT" in
+  auto) WANT=0 ;;
+  0) [ -z "$SINGLE" ] || WANT=1 ;;
+esac
+[ -n "$SINGLE" ] && WANT=1
+BROKER="${DEV_TEST_SLOTS_DIR:-$HOME/.cache/dev-test-slots}"
+mkdir -p "$BROKER"
+BROKER="$(cd "$BROKER" && pwd)"
+export DEV_TEST_SLOTS_DIR="$BROKER"
+export ML_STACK_LINUX_IMAGE="$IMAGE" ML_STACK_LINUX_VOLUME="$VOLUME" ML_STACK_LINUX_PLATFORM="$PLATFORM"
+export ML_STACK_LINUX_SINGLE="$SINGLE" ML_STACK_LINUX_REBUILD="$REBUILD"
+python3 "$REPO/scripts/testslots.py" pytest --container --want "$WANT" --min 1 --label "ml-stack: Linux tests" -- \
+  "$(python3 -c 'import sys; print(sys.executable)')" -m pytest "${CLEAN_ARGS[@]}"

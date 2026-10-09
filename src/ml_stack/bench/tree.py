@@ -304,7 +304,8 @@ def llama_arms(args: argparse.Namespace) -> tuple[list[Sample], list[dict[str, A
                            "spec_type": "draft-mtp", "spec_draft_max": args.draft_max})]
     samples, served = [], []
     for arm, spec in arms:
-        grant = broker_wire.lease("bench-tree", [args.gguf], spec=spec, timeout=1800.0)
+        grant = broker_wire.lease("bench-tree", [args.gguf], reason=f"tree decoding bench, arm {arm}",
+                                  spec=spec, timeout=1800.0)
         try:
             pid = next(int(s["pid"]) for s in broker_wire.status()["servers"]
                        if s["port"] == grant.port)

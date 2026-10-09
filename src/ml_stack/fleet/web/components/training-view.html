@@ -1,0 +1,379 @@
+<style>
+training-view .workspace{max-width:none;padding:calc(28px * var(--ui-density,1)) calc(32px * var(--ui-density,1))}
+training-view .training-heading{display:flex;justify-content:space-between;gap:24px;align-items:center;margin-bottom:28px}
+training-view .training-heading h1{font-size:1.714rem;letter-spacing:-.03em;margin:0}
+training-view .training-layout{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:24px;align-items:start}
+training-view .training-form{padding:0;border:1px solid var(--line);border-radius:20px;background:var(--bg-raised,#fff);overflow:hidden}
+training-view .training-workflow{display:flex;align-items:center;gap:16px;padding:16px 28px;border-bottom:1px solid var(--line)}
+training-view .training-workflow label{margin:0;font-weight:700}
+training-view .training-workflow select{width:auto;flex:1;min-width:0;max-width:360px}
+training-view .training-steps{display:flex;gap:4px;padding:16px;background:var(--bg-sunken);border-bottom:1px solid var(--line)}
+training-view .training-steps button{flex:1;border:0;background:transparent;color:var(--muted);text-align:left;padding:12px;border-radius:12px}
+training-view .training-steps button[aria-current=step]{background:var(--poolside-orange,#ff8a3d);color:var(--poolside-orange-ink,var(--poolside-navy,#1b1f3a));font-weight:750}
+training-view .training-steps span{display:inline-grid;place-items:center;background:color-mix(in srgb,currentColor 12%,transparent);border-radius:50%;width:24px;height:24px;margin-right:8px}
+training-view .training-pane{padding:28px;min-height:280px}
+training-view .training-pane h2{font-size:23px;margin:0 0 8px}
+training-view .training-pane .intro{margin:0 0 20px;line-height:1.6}
+training-view .training-form input,training-view .training-form select{width:100%;box-sizing:border-box}
+training-view .training-form details{margin-top:20px}
+training-view .training-form textarea{min-height:90px}
+training-view .training-form .error{color:var(--bad)}
+training-view .training-form [aria-busy=true]{opacity:.75}
+training-view .training-footer{display:flex;justify-content:space-between;padding:16px 28px;border-top:1px solid var(--line);gap:12px}
+training-view .training-footer button:last-child{background:var(--poolside-orange,#ff8a3d);color:var(--poolside-orange-ink,var(--poolside-navy,#1b1f3a));border-color:transparent;font-weight:700}
+training-view .training-aside{border-radius:20px;background:var(--bg-raised);border:1px solid var(--line);padding:22px}
+training-view .training-aside h2{font-size:17px;margin:0 0 16px}
+training-view .run-summary{margin:0;display:grid;gap:16px}
+training-view .run-summary dt{font-size:12px;color:var(--muted)}
+training-view .run-summary dd{margin:4px 0 0;font-weight:650;overflow-wrap:anywhere}
+training-view .training-help{margin-top:22px;padding:16px;border-radius:12px;background:#ffd16635;line-height:1.6;font-size:13px}
+training-view .run-monitor{margin-top:24px;padding:24px;border-radius:20px;border:1px solid var(--line);background:var(--bg-raised)}
+training-view .run-monitor .job-list{grid-template-columns:repeat(auto-fit,minmax(240px,1fr));max-height:220px;overflow:auto}
+training-view .training-form .status{margin:0;padding:0 28px 16px;min-height:0}
+training-view .training-form .status:empty{display:none}
+training-view .training-runtime{background:var(--bg-sunken);color:var(--text);border-left:4px solid var(--poolside-yellow,#ffd166);padding:12px 16px;border-radius:8px;line-height:1.6}
+training-view .training-review-actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:24px}
+@media(max-width:1050px){training-view .training-layout{grid-template-columns:1fr}training-view .training-aside{display:none}}
+@media(max-width:650px){training-view .workspace{padding:20px}training-view .training-heading{gap:12px}training-view .training-mark{display:none}training-view .training-pane{padding:20px}training-view .training-steps button{font-size:12px;padding:8px}}
+</style>
+<template>
+  <section class="workspace" hidden>
+    <header class="training-heading"><div><h1>Fine-tuning</h1></div></header>
+    <div class="training-layout">
+      <div class="training-form" id="config">
+        <div class="training-workflow" id="training-workflow"></div>
+        <nav class="training-steps" aria-label="Fine-tuning steps"><button type="button" data-step="0"><span>1</span>Dataset</button><button type="button" data-step="1"><span>2</span>Model &amp; recipe</button><button type="button" data-step="2"><span>3</span>Review &amp; run</button></nav>
+        <div class="training-pane" id="training-dataset"><h2>Give your model examples</h2><p class="intro">Choose a dataset already in your files, or prepare one in Data.</p><button type="button" id="browse-data">Open dataset library</button></div>
+        <div class="training-pane" id="training-recipe" hidden><h2>Choose what it will learn</h2><p class="intro">A recipe supplies sensible defaults. Tune the essentials here and explore advanced controls when you need them.</p></div>
+        <div class="training-pane" id="training-review" hidden><h2>Ready to train?</h2><p class="intro">Try a short validation run first, or train a checkpoint. Work enters the same managed queue as your other jobs.</p><p id="training-runtime" class="training-runtime" role="status" hidden></p></div>
+        <div class="training-footer"><button type="button" id="training-back">Back</button><button type="button" id="training-next">Continue to model &amp; recipe →</button></div>
+      </div>
+      <aside class="training-aside"><h2>Your run</h2><dl class="run-summary" id="run-summary"></dl><p class="training-help">A short training smoke runs 20 steps without saving a checkpoint. Full training saves to your chosen output directory.</p><button type="button" id="open-gym">Explore RL worlds →</button></aside>
+    </div>
+    <section class="run-monitor" aria-label="Training run activity"><workspace-jobs></workspace-jobs></section>
+  </section>
+</template>
+<script>
+(function () {
+  const M = window.fleetModel, W = window.workspaceModel, E = M.el;
+  class TrainingView extends HTMLElement {
+    connectedCallback() {
+      if (this.wired) return;
+      this.wired = true;
+      this.host = this.querySelector('section');
+      this.form = this.querySelector('#config');
+      this.runtimeNote = this.querySelector('#training-runtime');
+      this.querySelector('#browse-data').onclick = () => M.go('data');
+      this.querySelector('#open-gym').onclick = () => M.go('gym');
+      const b = this.querySelector('#training-recipe');
+      const dataset = this.querySelector('#training-dataset');
+      const review = this.querySelector('#training-review');
+      this.mode = W.field(this.querySelector('#training-workflow'), 'Workflow', 'select');
+      [['recipe', 'Supervised / tool calling'], ['decider', 'Decision model'],
+       ['rl', 'Reinforcement learning']].forEach(([value, text]) => this.mode.append(E('option', {value}, text)));
+      this.recipe = W.field(b, 'Recipe', 'select');
+      this.size = W.field(b, 'Model size', 'select');
+      this.framework = W.field(b, 'Training backend', 'select');
+      this.framework.append(E('option', {value:'torch'}, 'Torch · Hugging Face'), E('option', {value:'mlx'}, 'MLX · Apple silicon'));
+      this.framework.onchange = () => { this.frameworkChoice = this.framework.value; this.paintActions(); };
+      this.requirements = E('p', {class:'intro'});
+      this.parameters = E('div');
+      b.append(this.requirements, this.parameters);
+      this.data = W.field(dataset, 'Dataset path (relative to files root)', 'input', {placeholder:'datasets/examples.jsonl'});
+      this.out = W.field(review, 'Output directory (relative to files root)', 'input', {value:'models/my-run'});
+      this.name = W.field(review, 'Run name', 'input', {value:'my-run'});
+      this.advanced = E('details', {class:'aside', 'data-advanced':''}, E('summary', {}, 'Advanced options'));
+      this.expert = E('div');
+      this.advanced.append(this.expert);
+      b.append(this.advanced);
+      this.options = W.field(this.advanced, 'Additional CLI arguments (JSON array)', 'textarea');
+      this.options.value = '[]';
+      this.lora = W.field(b, 'Fine-tuning strategy', 'select');
+      this.lora.append(E('option', {value:'adapter'}, 'LoRA adapter'), E('option', {value:'full'}, 'All model weights'));
+      this.dry = W.field(review, 'Run mode', 'select');
+      this.dry.append(E('option', {value:'true'}, '20-step training smoke'), E('option', {value:'false'}, 'Train model'));
+      this.preview = E('pre', {}, 'Review the command before starting.');
+      this.reviewDetails = E('details', {class:'aside'}, E('summary', {}, 'Command preview'), this.preview);
+      this.note = E('p', {class:'status', role:'status', 'aria-live':'polite'});
+      this.reviewButton = W.button('Review command', () => this.review());
+      this.startButton = W.button('Queue 20-step training smoke', () => this.start());
+      this.retryButton = W.button('Retry loading workflows', () => this.load());
+      this.retryButton.hidden = true;
+      review.append(E('div', {class:'training-review-actions'}, this.reviewButton, this.startButton, this.retryButton), this.reviewDetails);
+      this.form.append(this.note);
+      this.step = 0;
+      this.querySelectorAll('[data-step]').forEach(button => button.onclick = () => this.showStep(Number(button.dataset.step)));
+      this.querySelector('#training-back').onclick = () => this.showStep(this.step - 1);
+      this.querySelector('#training-next').onclick = () => this.showStep(this.step + 1);
+      this.form.addEventListener('input', () => { this.invalidateReview(); this.updateSummary(); });
+      this.form.addEventListener('change', () => { this.invalidateReview(); this.updateSummary(); });
+      this.showStep(0);
+      this.mode.onchange = () => { this.buildOptions(); this.showStep(this.mode.value === 'rl' ? 1 : this.data.value.trim() ? this.step : 0); };
+      this.recipe.onchange = () => this.buildFields();
+      this.size.onchange = () => this.buildFields();
+      this.dry.onchange = () => this.paintActions();
+      W.route(this.host, 'training', () => {
+        this.load();
+        const chosen = sessionStorage.getItem('ml-stack-dataset');
+        if (chosen) { this.data.value = chosen; this.showStep(1); }
+        this.querySelector('workspace-jobs').refresh();
+      });
+    }
+
+    openRun({workflow = 'recipe', dataset = ''} = {}) {
+      if (![...this.mode.options].some(option => option.value === workflow)) throw Error('Choose a supported training workflow.');
+      M.go('training');
+      this.invalidateReview();
+      this.mode.value = workflow;
+      if (dataset) this.data.value = dataset;
+      this.buildOptions();
+      this.showStep(this.data.value.trim() || workflow === 'rl' ? 1 : 0);
+    }
+
+    showStep(step) {
+      step = Math.max(this.mode.value === 'rl' ? 1 : 0, Math.min(2, step));
+      if (step > 0 && this.mode.value !== 'rl' && !this.data.value.trim()) {
+        this.report(Error('Choose a dataset before continuing.'));
+        this.data.focus(); return;
+      }
+      this.step = step;
+      ['training-dataset', 'training-recipe', 'training-review'].forEach((id, index) => {
+        this.querySelector('#' + id).hidden = index !== step;
+      });
+      this.querySelectorAll('[data-step]').forEach(button => {
+        if (Number(button.dataset.step) === step) button.setAttribute('aria-current', 'step');
+        else button.removeAttribute('aria-current');
+      });
+      this.querySelector('[data-step="0"]').hidden = this.mode.value === 'rl';
+      this.querySelector('[data-step="1"]').replaceChildren(E('span', {}, this.mode.value === 'rl' ? '1' : '2'), this.mode.value === 'rl' ? 'World & policy' : 'Model & recipe');
+      this.querySelector('[data-step="2"]').replaceChildren(E('span', {}, this.mode.value === 'rl' ? '2' : '3'), 'Review & run');
+      this.querySelector('#training-back').disabled = step === 0 || step === 1 && this.mode.value === 'rl';
+      this.querySelector('#training-next').hidden = step === 2;
+      this.querySelector('#training-next').textContent = step === 0 ? 'Continue to model & recipe →' : 'Review this run →';
+      this.updateSummary();
+    }
+
+    invalidateReview() {
+      this.reviewVersion = (this.reviewVersion || 0) + 1;
+      this.reviewDetails.open = false;
+      this.preview.textContent = 'Review the command before starting.';
+      if (!this.pending) { this.note.textContent = ''; this.note.classList.remove('error'); }
+    }
+
+    updateSummary() {
+      const rows = [['Dataset', this.mode.value === 'rl' ? 'Generated by the environment' : this.data.value || 'Choose your examples'],
+        ['Workflow', this.mode.selectedOptions[0]?.textContent || 'Loading'],
+        ['Recipe', this.recipe.selectedOptions[0]?.textContent || 'Choose a recipe'],
+        ['Run', this.mode.value === 'rl' ? 'PPO policy training' : this.dry.value === 'true' ? this.mode.value === 'decider' ? 'Configuration check' : 'Short validation run' : 'Save a trained checkpoint'],
+        ['Output', this.mode.value === 'rl' ? 'Managed Gym checkpoints' : this.out.value || 'Choose a directory']];
+      this.querySelector('#run-summary').replaceChildren(...rows.flatMap(([label, value]) => [E('dt', {}, label), E('dd', {}, value)]));
+      this.querySelector('.training-help').textContent = this.mode.value === 'rl'
+        ? 'PPO learns from the environment. Training saves a policy in the managed Gym cache; load it in Worlds to explore its decisions.'
+        : this.mode.value === 'decider' ? 'A configuration check validates settings without training. Full training saves and registers a decision checkpoint.'
+        : 'A short training smoke runs 20 steps without saving a checkpoint. Full training saves to your chosen output directory.';
+    }
+
+    async load() {
+      this.pending = true;
+      this.paintActions();
+      this.note.textContent = 'Loading training workflows…';
+      this.note.classList.remove('error');
+      this.retryButton.hidden = true;
+      try {
+        const result = await W.api('/ui/workspace/recipes');
+        this.recipes = result.recipes || [];
+        try { this.libraries = (await W.api('/ui/libraries')).libraries || []; this.libraryError = ''; }
+        catch (error) { this.libraries = []; this.libraryError = error.message; this.retryButton.hidden = false; }
+        try { this.environments = (await W.api('/ui/gym/catalogue')).environments || []; this.environmentError = ''; }
+        catch (error) { this.environmentError = error.message; this.environments = []; }
+        this.buildOptions();
+        this.note.textContent = '';
+      } catch (error) {
+        this.report(error);
+        this.retryButton.hidden = false;
+      } finally { this.pending = false; this.paintActions(); }
+    }
+
+    buildOptions() {
+      this.recipe.previousElementSibling.textContent = this.mode.value === 'rl' ? 'Environment' : 'Recipe';
+      this.name.previousElementSibling.textContent = this.mode.value === 'decider' ? 'Model name' : 'Run name';
+      W.visible(this.dry, this.mode.value !== 'rl');
+      const current = this.recipe.value || (this.mode.value === 'recipe' ? 'text-lm' : '');
+      const entries = this.mode.value === 'recipe' ? this.recipes || [] : this.mode.value === 'rl'
+        ? this.environments || [] : [{id:'strands', title:'Pointer-head decision model'}];
+      this.recipe.replaceChildren(...entries.map(item => E('option', {value:item.id}, item.title)));
+      if (entries.some(item => item.id === current)) this.recipe.value = current;
+      this.buildFields();
+    }
+
+    chooseBackend() {
+      const recipe = (this.recipes || []).find(item => item.id === this.recipe.value);
+      const chosen = recipe?.sizes?.[this.size.value]?.framework;
+      this.framework.value = this.frameworkChoice || chosen || 'torch';
+    }
+
+    buildFields() {
+      this.drafts ||= new Map();
+      if (this.fieldKey && this.inputs) this.drafts.set(this.fieldKey,
+        Object.fromEntries(Object.entries(this.inputs).map(([key, input]) => [key, input.value])));
+      this.parameters.replaceChildren();
+      this.expert.replaceChildren();
+      this.inputs = {};
+      const rl = this.mode.value === 'rl';
+      W.visible(this.data, !rl); W.visible(this.out, !rl); W.visible(this.name, !rl);
+      W.visible(this.size, this.mode.value === 'recipe');
+      W.visible(this.lora, this.mode.value === 'recipe' && this.recipe.value === 'tool-calls');
+      W.visible(this.framework, this.mode.value === 'recipe' && this.recipe.value === 'tool-calls');
+      let fields = [];
+      if (this.mode.value === 'recipe') {
+        const recipe = (this.recipes || []).find(item => item.id === this.recipe.value);
+        if (!recipe) { this.requirements.textContent = 'No training recipes are available. Retry loading workflows.'; this.paintActions(); return; }
+        const chosen = this.size.value;
+        this.size.replaceChildren(...Object.entries(recipe.sizes || {}).map(([key, size]) =>
+          E('option', {value:key}, `${key} · ${size.needs_gb} GB`)));
+        if ([...this.size.options].some(option => option.value === chosen)) this.size.value = chosen;
+        this.chooseBackend();
+        this.requirements.textContent = `${recipe.blurb} Dataset fields: ${recipe.data.fields.join(', ')}. Minimum ${recipe.data.min_rows} rows.`;
+        const defaults = recipe.sizes[this.size.value]?.defaults || {};
+        fields = recipe.fields.filter(field => field.name !== 'lora').map(field => ({...field, default:defaults[field.name] ?? field.default}));
+      } else if (rl) {
+        const environment = (this.environments || []).find(item => item.id === this.recipe.value);
+        this.requirements.textContent = environment?.available
+          ? 'Train a CPU PPO policy with Stable-Baselines3. Checkpoints are saved in the Gym cache. Use Gym for live-world training.'
+          : environment ? `Install ${environment.library} in Settings → Libraries. Missing: ${(environment.missing || []).join(', ')}.`
+          : this.environmentError || 'No simulation environments are available.';
+        fields = [{name:'timesteps', label:'Training timesteps', type:'int', default:2048, min:1},
+                  {name:'seed', label:'Training seed', type:'int', default:0},
+                  {name:'checkpoint', label:'Resume checkpoint path', type:'text', default:''},
+                  {name:'config', label:'Environment configuration (JSON)', type:'json', default:'{}'}];
+      } else {
+        this.requirements.textContent = 'Fine-tune and calibrate a pointer-head decision model, then register its checkpoint.';
+        fields = [{name:'steps', label:'Training steps', type:'int', default:60, min:1},
+                  {name:'batch_size', label:'Batch size', type:'int', default:4, min:1},
+                  {name:'lr', label:'Learning rate', type:'float', default:.0002, min:.000001},
+                  {name:'rank', label:'LoRA rank', type:'int', default:16, min:1},
+                  {name:'seed', label:'Seed', type:'int', default:0}];
+      }
+      for (const field of fields) {
+        const host = ['steps', 'epochs', 'timesteps', 'base'].includes(field.name) ? this.parameters : this.expert;
+        let input;
+        if (field.type === 'bool') {
+          input = W.field(host, field.label, 'select');
+          input.append(E('option', {value:'false'}, 'Disabled'), E('option', {value:'true'}, 'Enabled'));
+          input.value = String(field.default);
+        } else if (field.type === 'json') {
+          input = W.field(host, field.label, 'textarea'); input.value = field.default;
+        } else input = W.field(host, field.label, 'input', {
+          type:['int', 'float'].includes(field.type) ? 'number' : 'text', value:field.default,
+          min:field.min, max:field.max, step:field.type === 'float' ? 'any' : '1',
+          required:['int', 'float'].includes(field.type) ? '' : null});
+        if (field.help) host.append(E('p', {class:'intro'}, field.help));
+        this.inputs[field.name] = input;
+      }
+      this.fieldKey = `${this.mode.value}:${this.recipe.value}:${this.mode.value === 'recipe' ? this.size.value : ''}`;
+      const saved = this.drafts.get(this.fieldKey);
+      if (saved) for (const [key, value] of Object.entries(saved)) if (this.inputs[key]) this.inputs[key].value = value;
+      this.paintActions();
+    }
+
+    paintActions() {
+      const rl = this.mode.value === 'rl';
+      const recipe = this.mode.value === 'recipe';
+      this.dry.options[0].textContent = recipe ? '20-step training smoke' : 'Check configuration';
+      const available = !rl || (this.environments || []).some(item => item.id === this.recipe.value && item.available);
+      this.reviewButton.disabled = this.startButton.disabled = !!this.pending || !this.recipe.value || !available;
+      const mlx = this.mode.value === 'recipe' && this.recipe.value === 'tool-calls' && this.framework.value === 'mlx';
+      const contract = (this.recipes || []).find(item => item.id === this.recipe.value);
+      const libraryId = mlx ? contract?.requires?.libraries?.mlx : '';
+      const library = (this.libraries || []).find(item => item.name === libraryId);
+      const missing = mlx && library?.installed !== true;
+      this.startButton.disabled ||= missing;
+      this.runtimeNote.hidden = available && !missing;
+      this.runtimeNote.textContent = missing ? library
+        ? `Install ${library.title} in Settings → Libraries before training this adapter.`
+        : this.libraryError ? 'Could not verify the MLX fine-tuning runtime. Open Settings → Libraries or retry loading workflows.'
+        : 'MLX fine-tuning is not available on this device. Choose Torch or a supported Apple device.'
+        : available ? '' : this.requirements.textContent;
+      this.lora.options[1].disabled = mlx;
+      if (mlx) this.lora.value = 'adapter';
+      this.form.setAttribute('aria-busy', String(!!this.pending));
+      this.updateSummary();
+      this.startButton.textContent = this.pending ? 'Working…'
+        : !rl && this.dry.value === 'true' ? (recipe ? 'Queue 20-step training smoke' : 'Queue configuration check') : 'Start training';
+    }
+
+    revealField(input) {
+      this.showStep(1);
+      for (let parent = input.parentElement; parent && parent !== this.form; parent = parent.parentElement) {
+        if (parent.tagName === 'DETAILS') parent.open = true;
+      }
+      input.focus(); input.scrollIntoView({block:'center'});
+    }
+
+    spec() {
+      for (const input of Object.values(this.inputs)) if (!input.checkValidity()) {
+        this.revealField(input); input.reportValidity();
+        throw Error('Check the highlighted training option.');
+      }
+      let extra;
+      try {
+        extra = JSON.parse(this.options.value);
+        if (!Array.isArray(extra) || extra.some(item => typeof item !== 'string')) throw Error('Additional arguments must be a JSON array of strings.');
+      } catch (error) { this.revealField(this.options); throw error; }
+      let command, args;
+      if (this.mode.value !== 'rl' && !this.data.value.trim()) throw Error('Choose a dataset path before starting.');
+      if (this.mode.value !== 'rl' && (!this.out.value.trim() || !this.name.value.trim())) throw Error('Choose an output directory and run name before starting.');
+      if (this.mode.value === 'decider') {
+        command = 'ml-stack-decide'; args = ['train', '--data', this.data.value, '--name', this.name.value, '--out', this.out.value];
+      } else if (this.mode.value === 'rl') {
+        try {
+          const config = JSON.parse(this.inputs.config.value);
+          if (!config || Array.isArray(config) || typeof config !== 'object') throw Error('Environment configuration must be a JSON object.');
+        } catch (error) { this.revealField(this.inputs.config); throw error; }
+        command = 'ml-stack-gym'; args = ['train', this.recipe.value, '--timesteps', this.inputs.timesteps.value,
+          '--seed', this.inputs.seed.value, '--config', this.inputs.config.value];
+        if (this.inputs.checkpoint.value) args.push('--checkpoint', this.inputs.checkpoint.value);
+      } else { command = 'ml-stack-train-run'; args = ['--recipe', this.recipe.value, '--data', this.data.value, '--out', this.out.value]; }
+      if (this.mode.value === 'recipe') {
+        if (this.recipe.value === 'tool-calls' && this.lora.value === 'adapter') args.push('--lora');
+        if (this.size.value) args.push('--size', this.size.value);
+        for (const [key, input] of Object.entries(this.inputs)) args.push('--set', `${key}=${input.value}`);
+        if (this.recipe.value === 'tool-calls') args.push('--set', `lora=${this.lora.value === 'adapter'}`, '--set', `framework=${this.framework.value}`);
+      }
+      if (this.mode.value === 'decider') for (const [key, input] of Object.entries(this.inputs)) args.push('--' + key.replaceAll('_', '-'), input.value);
+      if (this.dry.value === 'true' && this.mode.value !== 'rl') args.push('--dry-run');
+      return {command, args:[...args, ...extra], name:this.name.value,
+        metadata:{workflow:this.mode.value, dataset:this.data.value, output:this.out.value, recipe:this.recipe.value}};
+    }
+
+    report(error) { this.note.classList.add('error'); W.status(this.note, error); }
+
+    async perform(preview) {
+      if (this.pending) return;
+      try {
+        const spec = this.spec();
+        const revision = this.reviewVersion;
+        this.pending = true; this.paintActions(); this.note.classList.remove('error');
+        this.note.textContent = preview ? 'Preparing command preview…' : 'Submitting to the training queue…';
+        const result = await W.post('/ui/workspace/jobs', {...spec, ...(preview ? {preview:true} : {})});
+        if (preview) {
+          if (revision !== this.reviewVersion) { this.note.textContent = 'Options changed. Review the updated run before starting.'; return; }
+          this.preview.textContent = result.command; this.reviewDetails.open = true;
+          this.note.textContent = this.mode.value === 'recipe' && this.dry.value === 'true'
+            ? 'Command preview ready. The smoke run trains for 20 steps and saves no checkpoint.'
+            : 'Command preview ready.';
+        } else {
+          this.note.textContent = `Queued ${result.id}. Follow progress in Runs.`;
+          this.querySelector('workspace-jobs').selected = result.id;
+          this.querySelector('workspace-jobs').details.open = true;
+          this.querySelector('workspace-jobs').refresh();
+        }
+      } catch (error) { this.report(error); }
+      finally { this.pending = false; this.paintActions(); }
+    }
+    review() { return this.perform(true); }
+    start() { return this.perform(false); }
+  }
+  customElements.define('training-view', TrainingView);
+})();
+</script>
