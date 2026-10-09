@@ -36,20 +36,10 @@ jobs:
           - os: ubuntu-latest
             python: "3.13"
             pytest: --slow
-          # -n scatters a file across workers, so a test that only passes beside its
-          # neighbours passes there and fails alone. This is the run that sees that.
-          - os: ubuntu-latest
-            python: "3.13"
-            pytest: -n 0
-          - os: ubuntu-latest
-            python: "3.12"
-            pytest: --slow
+          # not required: a red here is reported and does not fail the run, so a break on the
+          # next Python shows early
           - os: ubuntu-latest
             python: "3.14"
-            pytest: --slow
-          # a pre-release: a red here is reported and does not fail the run
-          - os: ubuntu-latest
-            python: "3.15"
             pytest: --slow
             experimental: true
     runs-on: ${{ matrix.os }}

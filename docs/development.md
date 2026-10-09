@@ -67,9 +67,9 @@ rules file instead of the shipped one.
 
 ## Python versions
 
-The library imports and its suite runs on 3.12 to 3.14; CI runs each, and 3.15 as an
-experiment that may fail. The app builds its own environment on 3.13 (`fleet.environment.PYTHON`,
-the installers). Code in `src/` and `tests/` uses nothing newer than 3.12:
+Development and the required CI jobs use Python 3.13 (`.python-version`). The library supports
+3.12 and later (`requires-python`); one CI job runs the suite on 3.14, may fail, and shows breakage
+early. The app builds its own environment on 3.13 (`fleet.environment.PYTHON`, the installers). Code in `src/` and `tests/` uses nothing newer than 3.12:
 
 - generics use PEP 695 (`class C[T]`, `def f[T]`, `type X[T] = ...`), not `Generic` and `TypeVar` (ruff UP046, UP047)
 - `os.waitid` is missing on macOS before 3.13
