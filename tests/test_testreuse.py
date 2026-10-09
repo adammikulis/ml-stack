@@ -75,7 +75,7 @@ def launcher(root: Path, runs: list):
 def attempt(root: Path, store: storage.Store, *files: str, **options):
     """Run ``files`` (default tests/test_a.py) through a Session; returns (report, pytest launches).
 
-    Options: ``draw`` (the canary draw, default no canary), ``events``, ``reuse_on`` and ``extra`` pytest flags.
+    Options: ``draw`` (the canary draw, default no canary), ``events``, ``reuse_on``, ``record`` and ``extra`` pytest flags.
     """
     named = list(files or (FILE,))
     command = [sys.executable, "-m", "pytest", "-q", *options.get("extra", ()), *named]
@@ -83,7 +83,7 @@ def attempt(root: Path, store: storage.Store, *files: str, **options):
     draw = options.get("draw", 1.0)
     session.draw = lambda: draw
     launches: list = []
-    report = session.run(launcher(root, launches), "treehash0001", options.get("reuse_on", True))
+    report = session.run(launcher(root, launches), "treehash0001", options.get("reuse_on", True), options.get("record", True))
     return report, launches
 
 
@@ -365,3 +365,14 @@ def test_selectors_name_files_only(project):
     assert run.selectors([*command, f"{FILE}::test_a"], project) is None
     assert run.selectors([sys.executable, "-m", "pytest", "tests"], project) is None
     assert run.selectors([sys.executable, "-m", "pytest", "-q"], project) is None
+
+
+def test_a_run_that_does_not_record_judges_as_one_that_does_and_stores_nothing(project, tmp_path):
+    kept, plain = storage.Store(tmp_path / "kept"), storage.Store(tmp_path / "plain")
+    recording, _ = attempt(project, kept, reuse_on=False)
+    silent, _ = attempt(project, plain, reuse_on=False, record=False)
+    assert (recording.status, hows(recording)) == (silent.status, hows(silent)) == (0, ["ran"])
+    assert attempt(project, kept)[1] == [] and len(attempt(project, plain)[1]) == 1
+    (project / FILE).write_text(TEST_A.replace("== 1", "== 2"))
+    failing, quiet = attempt(project, kept, reuse_on=False), attempt(project, plain, reuse_on=False, record=False)
+    assert failing[0].status == quiet[0].status != 0

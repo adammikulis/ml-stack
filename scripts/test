@@ -53,6 +53,7 @@ if _status:
     raise SystemExit(_text)
 
 import affected
+import gaterun
 import gatescope
 import testhistory
 import testjobs
@@ -89,13 +90,14 @@ def pytest_command(workers: int, *rest: str) -> list[str]:
 
 
 def run(command: list[str], env: dict[str, str] | None = None, tier: str = "", *, artifact_output: bool = False) -> int:
-    """Run pytest; named test files reuse earlier passes, and a tier or gate run refreshes the store."""
+    """Run pytest; named test files reuse earlier passes and a tier run refreshes the store; the gate stores nothing (gaterun)."""
     if env is not None or tier not in testreuse_run.TIERS:
         return launch(command, env, tier, artifact_output=artifact_output)
     files = testreuse_run.selectors(command, ROOT)
     reuse = REUSE["on"] and files is not None and tier != "gate"
     session = testreuse_run.Session(ROOT, command, files, reuse_store(), REUSE["events"])
-    report = session.run(lambda shown: launch(shown, env, tier, artifact_output=artifact_output), lambda: tree_hash(ROOT), reuse)
+    report = session.run(lambda shown: launch(shown, env, tier, artifact_output=artifact_output), lambda: tree_hash(ROOT),
+                         reuse, record=tier != "gate")
     REUSE["report"] = report
     print("\n".join(report.lines()), flush=True)
     return report.status
@@ -414,23 +416,44 @@ STALE_HINTS = {"command reference": "docs/commands.md is stale: run `scripts/ref
                "redteam coverage": "docs/redteam/coverage.json is stale: run `scripts/redteam_coverage.py --write` and commit it"}
 
 
+def script_status(name: str, command: list[str]) -> int:
+    """Run a check script and show its whole output as one block, so a lane running beside pytest does not interleave."""
+    clean_env = {k: v for k, v in os.environ.items() if k not in ("DEV_TEST_REUSE_RECORD", "DEV_TEST_REUSE_ROOT")}
+    done = subprocess.run(command, cwd=ROOT, check=False, capture_output=True, text=True, env=clean_env)
+    text = (done.stdout + done.stderr).rstrip()
+    if text:
+        print(f"gate: {name} output\n{text}", flush=True)
+    return done.returncode
+
+
+def gate_lanes(args: argparse.Namespace, named: list[tuple[str, list[str]]]) -> list[list[gaterun.Step]]:
+    """The structure tests in the first lane (they need the main thread and the broker's slots) and the scripts beside them."""
+    steps = []
+    for name, command in named:
+        identity = [w for i, w in enumerate(command) if w != "-n" and command[i - 1:i] != ["-n"]]
+        if "pytest" in command:
+            steps.append(gaterun.Step(name, lambda c=command: run(c, tier="gate", artifact_output=args.artifact_output),
+                                      identity))
+        else:
+            steps.append(gaterun.Step(name, lambda n=name, c=command: script_status(n, c), identity))
+    tests = [s for s in steps if s.name == "structure tests"]
+    return [tests, [s for s in steps if s.name != "structure tests"]]
+
+
 def gate(args: argparse.Namespace, rest: list[str]) -> int:
-    """The structural checks a merge is gated on, in this order, all of them reported."""
-    failed = []
+    """The structural checks a merge is gated on, run side by side, all of them reported."""
     reason = "" if args.full else gatescope.unreached(ROOT, args.base)
     if reason:
         print(f"gate: skipped: {reason}; `--full` runs it anyway")
         return 0
-    for name, command in gate_steps(args.workers, rest):
-        began = time.monotonic()
-        print(f"gate: {name}", flush=True)
-        status = (run(command, tier="gate", artifact_output=args.artifact_output) if "pytest" in command
-                  else subprocess.run(command, cwd=ROOT, check=False).returncode)
-        print(f"gate: {name} {'ok' if status == 0 else 'FAILED'} in {time.monotonic() - began:.0f} s")
-        if status:
-            failed.append(name)
-            if name in STALE_HINTS:
-                print(f"gate: {STALE_HINTS[name]}")
+    held = gaterun.Gate(ROOT, gatescope.base_ref(ROOT, args.base), reuse_store().folder / "gate-steps", REUSE["on"])
+    named = gate_steps(args.workers, rest)
+    outcomes = held.run(gate_lanes(args, named))
+    order = [name for name, _ in named]
+    failed = [o.name for o in sorted(outcomes, key=lambda o: order.index(o.name)) if o.status]
+    for name in failed:
+        if name in STALE_HINTS:
+            print(f"gate: {STALE_HINTS[name]}")
     print("gate: " + ("every structural check passed" if not failed else "failed: " + ", ".join(failed)))
     return 1 if failed else 0
 
