@@ -253,6 +253,7 @@ markers = [
     "redteam: needs the redteam extra (PyRIT); left out unless --redteam is given",
     "live_api: calls a paid or quota-limited remote API; runs only when ML_STACK_LIVE_API=1",
     "live_net: reaches a public endpoint; runs only when ML_STACK_LIVE_NET=1",
+    "seatbelt: runs sandbox-exec itself, so it cannot run under the real-state write denial; listed in tests/seatbelt-modules.txt",
     "heavy: runs in the default tier and costs seconds a test; `scripts/test fast` leaves it out",
 ]
 

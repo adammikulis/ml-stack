@@ -1,0 +1,18 @@
+# Test modules that run `sandbox-exec` themselves (directly, or through the sandbox backend, an MCP stdio
+# server or a served model). A process under the real-state write denial (scripts/testwritedeny.py)
+# cannot apply a second sandbox profile (`sandbox-exec: sandbox_apply: Operation not permitted`), so these
+# run in a pass of their own without the denial, and only the after-the-fact check watches them.
+# One file name per line. A module that fails under the denial with that message belongs here;
+# tests/test_test_write_deny.py fails when a module that names the Seatbelt backend is missing.
+test_agent.py
+test_sandbox_gpu.py
+test_sandbox_integration.py
+test_sandbox_policy.py
+test_sandbox_redteam.py
+test_sandbox_seatbelt.py
+test_sentinel_score_wiring.py
+test_sentinel_screens_wired.py
+test_serve_llamacpp.py
+test_serve_llamacpp_ccache.py
+test_test_kernel_isolation.py
+test_test_write_deny.py

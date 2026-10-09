@@ -1249,13 +1249,23 @@ def heavy_modules() -> frozenset[str]:
                      if line.split("#")[0].strip())
 
 
+def seatbelt_modules() -> frozenset[str]:
+    """The test modules listed in ``tests/seatbelt-modules.txt``: they run `sandbox-exec` themselves,
+    which a process under the real-state write denial cannot do (scripts/testwritedeny.py)."""
+    listed = (Path(__file__).parent / "seatbelt-modules.txt").read_text(encoding="utf-8")
+    return frozenset(line.split("#")[0].strip() for line in listed.splitlines()
+                     if line.split("#")[0].strip())
+
+
 def pytest_collection_modifyitems(config, items) -> None:
-    """Mark the modules in ``heavy-modules.txt``, skip the live tests nobody switched on, leave
+    """Mark the modules in ``heavy-modules.txt`` and ``seatbelt-modules.txt``, skip the live tests nobody switched on, leave
     the slow tests out unless --slow, and the redteam tests out unless --redteam."""
-    heavy = heavy_modules()
+    heavy, seatbelt = heavy_modules(), seatbelt_modules()
     for item in items:
         if Path(str(item.fspath)).name in heavy:
             item.add_marker(pytest.mark.heavy)
+        if Path(str(item.fspath)).name in seatbelt:
+            item.add_marker(pytest.mark.seatbelt)
         reason = live.skip_reason((m.name for m in item.iter_markers()), os.environ)
         if reason:
             item.add_marker(pytest.mark.skip(reason=reason))
