@@ -44,7 +44,7 @@ HTML_COMMENT = re.compile(r"<!--.*?-->", re.S)
 MD_TITLE = re.compile(r"(\]\([^)\s]+)\s+(\"[^\"]*\"|'[^']*')\s*\)")
 INVISIBLE = re.compile(
     "[­͏؜ᅟᅠ឴឵᠋-᠏​-‏‪-‮"
-    "⁠-⁯ㅤ︀-︎﻿ﾠ\U000e0000-\U000e007f\U000e0100-\U000e01ef]")
+    "⁠-⁯ㅤ︀-︎﻿ﾠ]|[\U000e0000-\U000e007f]|[\U000e0100-\U000e01ef]")
 FENCE_MARK = re.compile(r"<<<")
 DEFANG = chr(0x2039) * 3
 MOST_URLS = 5000

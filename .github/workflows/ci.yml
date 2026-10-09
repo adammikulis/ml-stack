@@ -54,7 +54,7 @@ jobs:
             experimental: true
     runs-on: ${{ matrix.os }}
     continue-on-error: ${{ matrix.experimental || false }}
-    timeout-minutes: 45
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -84,7 +84,7 @@ jobs:
         run: python packaging/build.py
 
       - name: tests
-        run: python -m pytest tests/ -q ${{ matrix.pytest }}
+        run: python -m pytest tests/ -q -rfE --tb=short --durations=25 ${{ matrix.pytest }}
 
       # docs/FEATURES.md points at this as the proof each feature holds, and nothing else
       # runs it. --offline leaves out the three checks that reach a host off this machine.

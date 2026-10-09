@@ -18,6 +18,7 @@ import threading
 import time
 import urllib.request
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -162,7 +163,7 @@ def open_page(browser, vendored):
                 r.fulfill(body=json.dumps({"ok": True, "problems": []}
                                           if r.request.method == "POST" else review),
                           content_type="application/json")
-            elif "fonts.googleapis.com" in url:
+            elif urlsplit(url).hostname == "fonts.googleapis.com":
                 r.fulfill(body="", content_type="text/css")
             else:
                 r.abort()

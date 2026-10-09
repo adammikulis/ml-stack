@@ -15,7 +15,7 @@ WORDS = "nine blue lanterns together"
 
 def test_native_named_hint_then_authenticated_join(tmp_path, monkeypatch):
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
-        probe.bind(("", 0))
+        probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
     monkeypatch.setenv("ML_STACK_DISCOVERY_PORT", str(port))
     from test_fleet_handshake import Machine
@@ -108,7 +108,7 @@ def password_cluster(tmp_path, serving):
     from test_fleet_handshake import Machine
 
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
-        probe.bind(("", 0))
+        probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
     serving.ui.discovery_port = port
     host = Machine(tmp_path, port)
@@ -181,7 +181,7 @@ def random_cluster(tmp_path, serving, monkeypatch):
     from ml_stack.fleet import recovery
 
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
-        probe.bind(("", 0))
+        probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
     serving.ui.discovery_port = port
     keyfile = tmp_path / "random-host.key"

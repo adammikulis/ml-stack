@@ -1012,7 +1012,7 @@ _FLEET_LLAMA_META = {
 
 def _free_port(kind: int = socket.SOCK_STREAM) -> int:
     with socket.socket(socket.AF_INET, kind) as s:
-        s.bind(("127.0.0.1" if kind == socket.SOCK_STREAM else "", 0))
+        s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
 
 

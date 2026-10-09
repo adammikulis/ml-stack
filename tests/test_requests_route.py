@@ -132,7 +132,7 @@ def test_the_page_has_no_inline_script_a_strict_policy_and_serves_only_its_own_f
     _status, headers, page = live.call("GET", "/requests", headers={"Cookie": live.cookie})
     text = page.decode()
     assert "default-src 'none'" in headers["Content-Security-Policy"] and "script-src 'self'" in headers["Content-Security-Policy"]
-    assert re.findall(r"<script[^>]*>", text) == ['<script type="module" src="/requests/assets/ml-requests.js">']
+    assert re.findall(r"<script[^>]*>", text, re.I) == ['<script type="module" src="/requests/assets/ml-requests.js">']
     assert "</script>" in text and text.count("<script") == 1 and "onclick" not in text
     assert live.call("GET", "/requests/assets/ml-requests.js")[0] == 200
     for name in ("../../graph/guard.py", "ml-ui.js", "gallery.html", "..%2f..%2fcli.py"):

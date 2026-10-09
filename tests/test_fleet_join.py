@@ -55,7 +55,7 @@ DEVICE = {"gpu": "Pellard P40", "vram_total_gb": 24.0, "vram_free_gb": 20.5,
 
 def _free_udp() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-        s.bind(("", 0))
+        s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
 
 
