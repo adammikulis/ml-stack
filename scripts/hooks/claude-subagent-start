@@ -17,10 +17,6 @@ ALIASES = {"sonnet": "claude-sonnet-5-5", "opus": "claude-opus-5-5", "haiku": "c
            "fable": "claude-fable-5-1"}
 
 
-def label_of(event: dict) -> str:
-    return f"{event.get('agent_type') or 'subagent'}-{str(event.get('agent_id') or '')[:6]}".strip("-").lower()
-
-
 def definition_model(event: dict) -> str:
     """The model id an agent definition's `model:` names, or an empty string when it inherits."""
     kind = str(event.get("agent_type") or "")
@@ -39,7 +35,7 @@ def definition_model(event: dict) -> str:
 
 
 def workspace_brief(event: dict) -> str:
-    label = label_of(event)
+    label = workspace_hook.label_of(event)
     environment = workspace_hook.session_environment(event, "SubagentStart")
     if environment is None:
         return ""

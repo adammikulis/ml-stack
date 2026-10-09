@@ -39,7 +39,8 @@ def test_announcement_duplicates_precede_announcement_quota_and_do_not_deadlock(
     kit.limits(announce_per_window=1, sends_per_window=1)
     first = kit.ws.announce(kit.sender, 'done', 'Worker stopped', label='runtime')
     assert kit.ws.send(kit.sender, '*', 'done', 'Worker stopped', label='runtime') == first
-    kit.ws.announce(kit.sender, 'done', 'A different report', label='runtime')
+    second = kit.ws.announce(kit.sender, 'done', 'A different report', label='runtime')
+    assert second != first
     assert len(kit.ws.bus.outbox('reporter')) == 2
 
 
