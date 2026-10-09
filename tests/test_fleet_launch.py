@@ -238,3 +238,40 @@ def test_a_port_nothing_listens_on_starts_the_daemon(monkeypatch):
     assert launch.main(["--no-browser", "--port", str(_free_port())],
                        daemon_main=lambda argv: calls.append(argv) or 0) == 0
     assert calls
+
+
+def test_the_restart_the_autostart_path_builds_is_accepted_by_the_launcher_and_the_daemons_parser(monkeypatch):
+    import argparse
+    import sys
+    from types import SimpleNamespace
+
+    from ml_stack import jobs, runtime
+    from ml_stack.fleet import daemon
+
+    detached = []
+    monkeypatch.setattr(runtime, 'available', lambda: SimpleNamespace(prefix='/elsewhere'))
+    monkeypatch.setattr(sys, 'argv', ['ml-stack', '--port', '8770'])
+    monkeypatch.setattr(jobs, 'detach', lambda module, argv, **_kw: detached.append((module, argv)))
+    assert autostart.restart() == 'launcher'
+    module, argv = detached[0]
+    assert module == 'ml_stack.fleet.launch'
+
+    class Parsed(Exception):
+        pass
+
+    parse = argparse.ArgumentParser.parse_args
+
+    def parse_then_stop(self, args=None, namespace=None):
+        if self.prog != 'ml-stack-traind':
+            return parse(self, args, namespace)
+        raise Parsed(parse(self, args, namespace))
+
+    monkeypatch.setattr(argparse.ArgumentParser, 'parse_args', parse_then_stop)
+    monkeypatch.setattr(launch, 'already_running', lambda _port: {'commit': 'a' * 40})
+    monkeypatch.setattr(launch, 'state', lambda: {'commit': 'a' * 40})
+    monkeypatch.setattr(launch, 'request_replacement', lambda *_a, **_kw: {})
+    monkeypatch.setattr(launch, '_wait_for_exit', lambda _port: True)
+    monkeypatch.setattr(launch, '_open_when_ready', lambda *_args: None)
+    with pytest.raises(Parsed) as accepted:
+        launch.main(argv, daemon_main=daemon.run)
+    assert accepted.value.args[0].port == 8770
