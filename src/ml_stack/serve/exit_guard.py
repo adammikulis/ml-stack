@@ -13,7 +13,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from ml_stack.platform import process_group_kwargs
+from ml_stack.platform import start_process
 from ml_stack.serve.process import kill_process_tree, started_at
 
 logger = logging.getLogger(__name__)
@@ -122,9 +122,9 @@ def _watch(pid: int, created: float) -> None:
     me = os.getpid()
     argv = [sys.executable, str(WATCHDOG), str(me), str(started_at(me)), str(pid), str(created)]
     try:
-        _watchdogs[pid] = subprocess.Popen(argv, stdin=subprocess.DEVNULL,
-                                           stdout=subprocess.DEVNULL,
-                                           stderr=subprocess.DEVNULL, **process_group_kwargs())
+        _watchdogs[pid] = start_process(argv, stdin=subprocess.DEVNULL,
+                                        stdout=subprocess.DEVNULL,
+                                        stderr=subprocess.DEVNULL)
     except OSError as exc:
         logger.warning("no watchdog for server pid %s; it will outlive a killed host: %s",
                        pid, exc)
