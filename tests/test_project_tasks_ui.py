@@ -55,6 +55,10 @@ def test_tasks_refuse_foreign_project_metadata_and_agent_owner(project_board):
     ws = workspaces[PROJECT]
     owner = tokens.read_file(tokens.directory(ws.base) / tokens.OWNER_FILE)
     tokens.store(ws.base, tokens.OWNER_FILE, ws.mint(owner, 'another-worker'))
+    assert task_call(project_board)[0] == 200  # the person is the registry binding, not the owner file
+    agents = ws.registry._load()
+    agents['demo-owner']['revoked'] = True
+    ws.registry._save(agents)
     assert task_call(project_board)[0] == 403
     projects[OTHER].board_host = 'http://foreign:8770'
     assert task_call(project_board, OTHER)[0] == 409
