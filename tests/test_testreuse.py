@@ -323,7 +323,10 @@ def test_a_waiter_runs_the_file_itself_when_the_owner_dies_without_a_result(proj
     result = {}
     waiter = threading.Thread(target=lambda: result.update(report=attempt(project, store, events=events)))
     waiter.start()
-    time.sleep(0.4)
+    deadline = time.monotonic() + 60
+    while ("waiting", FILE) not in events.seen and waiter.is_alive() and time.monotonic() < deadline:
+        time.sleep(0.02)
+    assert ("waiting", FILE) in events.seen, f"the waiter never waited on the live owner: {events.seen}"
     owner.kill()
     owner.wait()
     waiter.join(60)
