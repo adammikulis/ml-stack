@@ -27,7 +27,7 @@ def weights(path, name, size=1024 * 1024, modified=100):
     return path
 
 
-def test_library_uses_canonical_discovery_without_changing_transfer_files(tmp_path):
+def test_library_uses_model_discovery_without_changing_transfer_files(tmp_path):
     first = weights(tmp_path / 'Qwen3-27B-Q4_K_M-00001-of-00002.gguf', 'Qwen3-27B')
     second = weights(tmp_path / 'Qwen3-27B-Q4_K_M-00002-of-00002.gguf', 'Qwen3-27B')
     weights(tmp_path / 'mmproj-Qwen3-27B-F16.gguf', 'Projector')
