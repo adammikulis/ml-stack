@@ -24,7 +24,7 @@ LAYERS: tuple[tuple[str, tuple[str, ...]], ...] = (
               "runtime", "runtime_launchers",
               "lock", "log", "macauth", "sealing",
               "markup", "sandbox",
-              "deciders", "desktop", "media", "messages", "net", "paths", "platform", "safenames", "redact", "scrape", "sentinel",
+              "deciders", "desktop", "media", "messages", "net", "node_health", "node_pool", "paths", "platform", "safenames", "redact", "scrape", "sentinel",
               "records", "requests", "person", "private_path", "safetext", "serverkeys",
               "subscribers", "taint", "tar_libraries", "telemetry", "tool_schema", "ui", "units", "win32", "windows_private", "worktreerules")),
     ("model", ("client", "decide", "gguf", "hub", "spec", "speech", "vision")),
@@ -32,7 +32,7 @@ LAYERS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("machine", ("doctor", "fleet", "gym", "serve", "setup")),
     ("tools", ("agent", "bench", "chat", "chatpolicy", "claude", "cli", "codex", "coding", "datasheet", "decide_cli",
                "do", "draft", "guard", "harness", "harness_claims", "harnessid", "harnessing", "harnesshook", "harnesspolicy", "mcp", "memory", "reputation", "inbox", "roles", "rules",
-               "surface", "testing", "train", "walk", "web", "workspace", "pi", "node_binary", "node_build", "node_health", "node_launch", "node_pool", "node_pool_check", "node_supervise", "runtime_board", "runtime_cli", "runtime_coalesce", "runtime_deploy", "runtime_host", "runtime_stale", "runtime_store", "runtime_trust")),
+               "surface", "testing", "train", "walk", "web", "workspace", "pi", "node_binary", "node_build", "node_join", "node_join_check", "node_launch", "node_supervise", "runtime_board", "runtime_cli", "runtime_coalesce", "runtime_deploy", "runtime_host", "runtime_stale", "runtime_store", "runtime_trust")),
     ("dev", ("redteam",)),
 )
 

@@ -5,7 +5,7 @@
 use std::path::Path;
 
 const MARKER: &str = "// ---- OPT-IN BELOW";
-const NETWORK: [&str; 6] = ["0.0.0.0:", "UNSPECIFIED", "239.", "BROADCAST", "\"--network\"", "local_address"];
+const NETWORK: [&str; 6] = ["0.0.0.0:", "UNSPECIFIED", "239.", "BROADCAST", "\"--lan\"", "local_address"];
 
 fn sources(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
     for entry in std::fs::read_dir(dir).unwrap() {

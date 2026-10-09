@@ -65,7 +65,7 @@ pub fn take_policy(node: &mut Node, v: &Value) -> Result<()> {
 
 fn hello(node: &Node, standing: Standing) -> Value {
     let boards: Vec<&String> = if standing == Standing::Active { node.boards.keys().collect() } else { Vec::new() };
-    json!({"pool": node.members.id, "policy": node.members.policy.name(), "fingerprint": node.cert.fingerprint(),
+    json!({"pool": node.members.id, "policy": node.members.policy.name(), "fingerprint": node.cert.fingerprint(), "project": node.members.project,
            "board_fingerprint": crate::device::fingerprint(&node.key), "member": standing == Standing::Active, "boards": boards})
 }
 

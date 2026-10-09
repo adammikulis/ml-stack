@@ -7,7 +7,7 @@
     scripts/pool-join-check --policy secure       only check that the node starts, listens and beacons; enrol nobody
 
 Run it on each of the two devices (within a minute or so of each other). Every step prints PASS, FAIL with the one
-change that fixes it, or SKIP. It starts the node with its network on (TCP 47321, UDP beacon 47322), sets join policy
+change that fixes it, or SKIP. It starts the node with its network on (TCP 7447, UDP beacon 7448), sets join policy
 `open` (devices on this network enrol one another, each enrolment recorded and revocable), and leaves the node running.
 No secret is printed. Exit status 0 when every step passed.
 """
@@ -21,9 +21,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from ml_stack import node_pool  # noqa: E402
+from ml_stack import node_join  # noqa: E402
 from ml_stack.node_launch import default_state  # noqa: E402
-from ml_stack.node_pool_check import Check, summary, walk  # noqa: E402
+from ml_stack.node_join_check import Check, summary, walk  # noqa: E402
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -32,15 +32,13 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--binary", default="", help="run this poolside-node binary (default: the selected runtime's, else one built here)")
     ap.add_argument("--wait", type=float, default=90.0, help="seconds to wait for the other device at each step that needs it")
     ap.add_argument("--yes", action="store_true", help="agree to turning the network on without being asked")
-    ap.add_argument("--policy", choices=node_pool.POLICIES, default="open")
-    ap.add_argument("--port", type=int, default=node_pool.DEFAULT_PORT)
-    ap.add_argument("--beacon-port", type=int, default=node_pool.DEFAULT_BEACON_PORT)
+    ap.add_argument("--policy", choices=node_join.POLICIES, default="open")
     args = ap.parse_args(argv)
-    check = Check(state=Path(args.state) if args.state else default_state(), port=args.port, beacon_port=args.beacon_port,
+    check = Check(state=Path(args.state) if args.state else default_state(), port=node_join.DEFAULT_PORT, beacon_port=node_join.DEFAULT_BEACON_PORT,
                   wait_s=args.wait, policy=args.policy, binary=Path(args.binary).resolve() if args.binary else None)
     try:
-        node_pool.consent(args.port, args.beacon_port, yes=args.yes)
-    except node_pool.PoolError as exc:
+        node_join.consent(node_join.DEFAULT_PORT, node_join.DEFAULT_BEACON_PORT, yes=args.yes)
+    except node_join.PoolError as exc:
         print(exc)
         return 1
     ok = walk(check)

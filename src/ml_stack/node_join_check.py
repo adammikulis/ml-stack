@@ -15,7 +15,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ml_stack import node_binary, node_pool, runtime
+from ml_stack import node_binary, node_join, runtime
 from ml_stack.node_health import call
 
 WSLCONFIG = r"%UserProfile%\.wslconfig"
@@ -110,7 +110,7 @@ def step_binary(c: Check) -> Step:
             return Step("binary", False, str(exc)[:200], "install Rust (https://rustup.rs) and run: cargo build --release -p poolside-node (in app/), then pass --binary app/target/release/poolside-node")
     if c.binary is not None:
         try:
-            node_pool.pin_binary(c.state, c.binary)
+            node_join.pin_binary(c.state, c.binary)
         except OSError as exc:
             return Step("binary", False, str(exc), "pass --binary with the poolside-node you built")
     return Step("binary", True, str(c.binary or "the selected runtime's node"))
@@ -118,14 +118,14 @@ def step_binary(c: Check) -> Step:
 
 def step_node(c: Check) -> Step:
     try:
-        health = node_pool.start(c.state, port=c.port, beacon_port=c.beacon_port)
+        health = node_join.start(c.state)
     except OSError as exc:
         return Step("node", False, str(exc), f"read {c.state / 'node.log'} for why it did not start")
     return Step("node", True, f"pid {health.get('pid')}, state {c.state}")
 
 
 def step_listening(c: Check) -> Step:
-    c.shown = node_pool.status(c.state)
+    c.shown = node_join.status(c.state)
     if not c.shown.get("listen") or not c.shown.get("beacon"):
         return Step("listening", False, f"listen={c.shown.get('listen')} beacon={c.shown.get('beacon')}", f"stop the node and run this again: python -m ml_stack.node_launch stop --state {c.state}")
     return Step("listening", True, f"{c.shown['listen']} (beacon on UDP {c.beacon_port})")
@@ -146,7 +146,7 @@ def step_beacon_receive(c: Check) -> Step:
 
 
 def step_policy(c: Check) -> Step:
-    done = node_pool.set_policy(c.state, c.policy)
+    done = node_join.set_policy(c.state, c.policy)
     return Step("policy", True, f"join policy is {done['policy']}" + (" (devices on this network enrol one another; revoke one with member_revoke)" if c.policy == "open" else ""))
 
 
@@ -159,8 +159,8 @@ def step_peer_beacon(c: Check) -> Step:
 
 
 def step_enrolled(c: Check) -> Step:
-    shown = _until(c, lambda s: bool(node_pool.others(s)), c.wait_s)
-    others = node_pool.others(shown)
+    shown = _until(c, lambda s: bool(node_join.others(s)), c.wait_s)
+    others = node_join.others(shown)
     if not others:
         why = (shown.get("last_join") or {}).get("error") or "no enrolment was attempted"
         return Step("enrolled", False, why, "both devices must be on policy open and on the same network; a device that already has members does not change pool")
@@ -181,14 +181,14 @@ def step_converge(c: Check) -> Step:
 
     _until(c, other_wrote, c.wait_s)
     if not seen:
-        return Step("converge", False, "the other device's message did not arrive", "run the check on the other device too, then sync: python -m ml_stack.node_pool status")
+        return Step("converge", False, "the other device's message did not arrive", "run the check on the other device too, then sync: python -m ml_stack.node_join status")
     return Step("converge", True, f"received: {seen[0]}")
 
 
 def _until(c: Check, ready: Callable[[dict], bool], seconds: float) -> dict:
     end = time.monotonic() + seconds
     while True:
-        c.shown = node_pool.status(c.state)
+        c.shown = node_join.status(c.state)
         if ready(c.shown) or time.monotonic() >= end:
             return c.shown
         time.sleep(1.0)
@@ -226,5 +226,5 @@ def summary(c: Check) -> str:
         return "NOT READY: fix the first FAIL above and run this again."
     if c.policy != "open":
         return "READY: the node runs with its network on and beacons; policy secure enrols nobody without a pairing code."
-    return (f"READY: this device and {len(node_pool.others(c.shown))} other(s) share pool {c.shown.get('pool')}. "
-            f"Close the door again with: python -m ml_stack.node_pool join --policy secure --state {c.state}")
+    return (f"READY: this device and {len(node_join.others(c.shown))} other(s) share pool {c.shown.get('pool')}. "
+            f"Close the door again with: python -m ml_stack.node_join join --policy secure --state {c.state}")

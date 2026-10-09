@@ -138,36 +138,3 @@ fn two_processes_join_by_multicast_beacon_on_the_loopback_interface() {
     assert!(a.status()["beacon_own"].as_u64().unwrap() > 0, "a node hears its own beacon on the group: {}", a.status());
 }
 
-/// The production path: every real interface, the group, the broadcast address, no test flags.
-/// Whether a machine lets this binary receive on its network is the machine's to say (macOS asks the
-/// person once for Local Network access); when the node does not hear its own beacon the test says so and stops.
-#[test]
-#[ignore = "binds every interface and multicasts: macOS asks the person for Local Network permission; run only with --ignored, at the machine"]
-fn two_processes_on_the_real_network_join_by_beacon() {
-    if poolside_node::beacon::local_address().is_none() {
-        eprintln!("skipped: this machine has no address on a network");
-        return;
-    }
-    let beacon_port = free_udp();
-    let args = |tcp: u16| {
-        ["--network", "--port", &tcp.to_string(), "--beacon-port", &beacon_port.to_string(), "--beacon-ms", "300", "--sync-ms", "300"]
-            .iter().map(|s| s.to_string()).collect::<Vec<_>>()
-    };
-    let a = Proc::start(&args(free_tcp()), "x");
-    let b = Proc::start(&args(free_tcp()), "y");
-    eventually("the node to send a beacon", 10, || a.status()["beacon_sent"].as_u64().unwrap() > 0);
-    std::thread::sleep(Duration::from_millis(1500));
-    if a.status()["beacon_own"].as_u64().unwrap() == 0 {
-        eprintln!("skipped: this machine does not deliver the node's own beacon back to it (a privacy setting or a firewall): {}", a.status());
-        return;
-    }
-    a.say("from a");
-    b.say("from b");
-    open(&a);
-    open(&b);
-    converge(&a, &b);
-}
-
-fn free_tcp() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
-}

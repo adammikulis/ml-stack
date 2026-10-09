@@ -229,12 +229,29 @@ on one fingerprint, scoped, logged and revocable (graduated autonomy).
 
 ### 3.7 What `open` is allowed to do when the device is alone
 
-The capture case (attack 15): a lone device must not adopt the first `open` pool. Proposal: a lone
-device in `open` joins a pool only if the person has seen and confirmed it once (the pool's id, name
-and device count are shown), or the pool's id equals one the device was told at install. After that,
-`open` enrolment is automatic for further devices. This does not cost the common case: the first
-pairing of a household is a human act anyway; the second and later devices are the automatic ones.
-[analysis; the owner's own question 4 in section 7]
+The capture case (attack 15): a lone device adopting the first `open` pool it hears. The owner
+decided (section 7, decision 4: (c), auto-adopt) that a lone device does adopt one, limited to a
+pool of the same project. [owner decision]
+
+- **Project.** A pool belongs to one project, a 16-hex-digit key (`projectid.rs`) taken from the
+  repository that uses the node: the normalised `origin` remote (`github.com/owner/repo`, the same
+  from every clone and spelling), else `local/<name of the main working tree>`. The owner can name
+  a project instead (`--project NAME`). The key is a hash, so a remote URL is never put on the
+  network. For this repository the project is ml-stack itself.
+- **Start.** A node with a project and a beacon takes the project for its pool of one, stays quiet
+  for the settle window (4 s) and joins the first `open` pool of the same project it hears. If it
+  hears none, it makes its pool `open` and beacons it. No key file and no code is involved.
+- **What is heard.** A beacon carries the project and whether the sender is alone. A pool of
+  another project, a pool with no project and a `secure` pool are ignored (the joiner also checks
+  the project and policy in the pool's own `hello`, so a beacon cannot lie about either).
+- **Convergence.** Two lone devices keep the id ordering (the one with the larger pool id joins the
+  smaller). A lone device joins any pool whose sender is not alone, whatever its id, so a device
+  starting beside an established pool always joins it. Two devices that start at once both make a
+  pool after the window and meet by the id ordering.
+- **What this costs.** The residual risk is attack 15 for one project: anyone on the segment who
+  can claim the project's key can host the pool a lone device adopts. The key is derived from a
+  public remote, so it is a label and not a secret. The defence is what follows adoption: the
+  device is in probation (3.1) and the detectors (3.3) watch it, and the person can set `secure`.
 
 ### 3.8 Sentinel crash and absence
 
@@ -360,9 +377,10 @@ Each is one question, ranked options, my recommendation first.
    (a) No: devices 3 and later are automatic, with probation and one notice [recommended; the point
    of `open` is no clicks]; (b) yes for the third device only; (c) yes for each, i.e. `open` becomes
    `secure` with a button.
-4. **May a lone device adopt an `open` pool it hears?** (a) Only with a one-time confirmation of pool
-   id and device list [recommended]; (b) only when it was given the pool id at install; (c) yes
-   (current behaviour; attack 15 is then real).
+4. **May a lone device adopt an `open` pool it hears?** Decided by the owner: (c), yes, auto-adopt,
+   limited to a pool for the same project (3.7). Options were: (a) only with a one-time
+   confirmation of pool id and device list; (b) only when it was given the pool id at install;
+   (c) yes.
 5. **Default for probation caps.** (a) 20 rows a minute, 5 MiB a day, 4 boards [recommended, tunable
    per pool]; (b) stricter (5 rows a minute, 1 MiB a day); (c) no caps beyond the pool quotas.
 6. **When the sentinel is down, what do new `open` enrolments do?** (a) Refuse them after three

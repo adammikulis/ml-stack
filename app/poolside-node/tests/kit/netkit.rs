@@ -18,7 +18,7 @@ pub struct Dev {
 }
 
 pub fn config(beacon: Option<BeaconConfig>) -> NetConfig {
-    NetConfig { listen: "127.0.0.1:0".parse().unwrap(), beacon, sync_every: None }
+    NetConfig { listen: "127.0.0.1:0".parse().unwrap(), beacon, sync_every: None, project: None, settle: Duration::ZERO }
 }
 
 /// A device with a session registered on board `demo`.

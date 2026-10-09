@@ -1,164 +1,51 @@
-"""Join this device to a pool by the beacon: start the node with its network on, set the join policy, and show who is in.
+"""The node's pool of devices, for a machine that joined it without a cluster key.
 
-    python -m ml_stack.node_pool join [--policy open|secure] [--state DIR] [--binary PATH] [--wait SECONDS]
-    python -m ml_stack.node_pool status [--state DIR]
-
-Under policy `open` two devices on the same network, each with its node running, hear each other's signed beacon and enrol
-one another on first contact; each enrolment is recorded (by `open`, with the certificate fingerprint) and can be revoked
-with `member_revoke`. Under `secure` nothing enrols without a pairing code. `pool-join-check` (scripts/) walks every step
-of this on one device and says which fails and what to change.
+The node (``poolside-node run --lan``) takes the project of the repository it runs in, listens for an open pool of that
+project, joins the one it hears and makes one when it hears none (docs/sentinel-open-join.md, 3.7). Nothing here asks for
+a key file: this reads who is in that pool from the running node.
 """
 
 from __future__ import annotations
 
 import json
-import sys
-import time
 from pathlib import Path
 
-from ml_stack import node_binary, node_supervise
-from ml_stack.command import Group, flag
-from ml_stack.log import say, warn
-from ml_stack.node_health import call, node_health
-from ml_stack.node_launch import NodeUnavailable, default_state, ensure_node, stop_node
+from ml_stack import node_health
+from ml_stack.home import state as state_root
 
-DEFAULT_PORT = 47321
-DEFAULT_BEACON_PORT = 47322
-BOARD = "pool"
-SESSION = "pool-join"
-POLICIES = ("open", "secure")
-POLL_S = 1.0
+LAN = "--lan"
 
 
-class PoolError(OSError):
-    """The node could not be made to join, and the message says what to do."""
+def network_args(*, project: str = "", project_dir: str = "") -> list[str]:
+    """The arguments that make a node reach its pool on the LAN: ``ensure_node(state, extra=network_args())``.
 
-
-EXPLANATION = """\
-This turns on the node's network so this device can find and join another one on the same network.
-  What:  the node listens on TCP {port} and sends and listens for a small signed beacon on UDP {beacon_port}.
-  Why:   so two of your devices on the same wifi or cable can pool without a code (join policy open),
-         or be paired with one (secure). Nothing leaves this network.
-  What you will see: your computer may ask to allow this program to find devices on your local network
-         (macOS: Local Network; Windows: a firewall prompt). Allow it. It asks once, only now.
-  Undo:  python -m ml_stack.node_pool join --policy secure, or stop the node with python -m ml_stack.node_launch stop.
-"""
-
-
-def consent(port: int, beacon_port: int, *, yes: bool, ask=input, interactive: bool | None = None) -> None:
-    """Show what turning the network on does and get a yes from the person; PoolError when there is none to give.
-
-    Nothing that runs without a person (a test, an install, a first run) calls this or turns the network on.
+    The project is that of the repository the node is started in; ``project`` names one instead and ``project_dir``
+    takes the repository from another directory.
     """
-    say(EXPLANATION.format(port=port, beacon_port=beacon_port))
-    if yes:
-        return
-    if not (sys.stdin.isatty() if interactive is None else interactive):
-        raise PoolError("turning the network on needs a person to agree: run it in a terminal, or pass --yes after reading the above")
-    if ask("Turn the network on? [y/N] ").strip().lower() not in ("y", "yes"):
-        raise PoolError("the network stays off")
+    return [LAN, *(["--project", project] if project else []), *(["--project-dir", project_dir] if project_dir else [])]
 
 
-def network_args(port: int = DEFAULT_PORT, beacon_port: int = DEFAULT_BEACON_PORT) -> list[str]:
-    """The arguments that turn the node's network on, on these ports."""
-    return ["--network", "--port", str(port), "--beacon-port", str(beacon_port)]
-
-
-def pin_binary(state: Path, binary: Path) -> None:
-    """Make the node of ``state`` run ``binary`` (recorded with its checksum, checked at every start)."""
-    if not binary.is_file():
-        raise PoolError(f"{binary} is not a file; build it with: cargo build --release -p poolside-node (in app/)")
-    node_supervise.point(state, binary, node_binary.sha256(binary))
-
-
-def status(state: Path) -> dict:
-    """The node's `pool_status`: the pool, the policy, the members, and what the beacon has sent and heard."""
-    return call(state, "pool_status")
-
-
-def _token(state: Path) -> str:
-    """A session on the board `pool` (the same one each time); changing the pool needs a registered session."""
-    return call(state, "register", {"model": "claude-sonnet-5-5", "harness": "poolside-pool", "session": SESSION}, board=BOARD)["token"]
-
-
-def set_policy(state: Path, policy: str) -> dict:
-    """Set the join policy of this device's pool; `open` or `secure`."""
-    if policy not in POLICIES:
-        raise PoolError(f"the join policy is open or secure, not {policy!r}")
-    return call(state, "set_join_policy", {"policy": policy}, token=_token(state))
-
-
-def _wants_restart(state: Path, port: int) -> bool:
-    """Whether a running node has its network off, or on another port than the one asked for."""
+def status(state: Path | None = None) -> dict | None:
+    """The pool the node of ``state`` belongs to (id, project, policy, members), or None when no node answers."""
     try:
-        listen = status(state).get("listen")
+        return node_health.call(state or state_root("node"), "pool_status")
     except (OSError, ValueError):
-        return False
-    return not listen or not str(listen).endswith(f":{port}")
+        return None
 
 
-def start(state: Path, *, port: int = DEFAULT_PORT, beacon_port: int = DEFAULT_BEACON_PORT, binary: Path | None = None,
-          extra: list[str] | None = None) -> dict:
-    """The node's health once it runs with its network on, restarting it when it ran without."""
-    if binary is not None:
-        pin_binary(state, binary)
-    if node_health(state) is not None and _wants_restart(state, port):
-        stop_node(state)
-    try:
-        return ensure_node(state, extra=[*network_args(port, beacon_port), *(extra or [])])
-    except (NodeUnavailable, node_binary.NodeBinaryError) as exc:
-        raise PoolError(f"{exc}; build the node with: cargo build --release -p poolside-node (in app/), then pass --binary") from exc
+def rows(pool: dict) -> list[dict]:
+    """One row per active member of a pool status: name, fingerprint, address, whether it is this machine or connected."""
+    return [{"name": m.get("name") or m["fingerprint"][:12], "fingerprint": m["fingerprint"], "addr": m.get("addr") or "",
+             "state": "this machine" if m.get("self") else "connected" if m.get("connected") else "known"}
+            for m in pool.get("members", []) if m.get("status") == "active"]
 
 
-def others(shown: dict) -> list[dict]:
-    """The active members other than this device."""
-    return [m for m in shown.get("members", []) if m.get("status") == "active" and not m.get("self")]
-
-
-def join(state: Path, *, policy: str = "open", wait_s: float = 0.0, **start_args) -> dict:
-    """Start the node with its network on, set the policy and wait up to ``wait_s`` for another device; the pool status."""
-    start(state, **start_args)
-    set_policy(state, policy)
-    end = time.monotonic() + wait_s
-    while True:
-        shown = status(state)
-        if others(shown) or time.monotonic() >= end:
-            return shown
-        time.sleep(POLL_S)
-
-
-def _run(handler):
-    def command(args) -> int:
-        state = Path(args.state) if args.state else default_state()
-        try:
-            result = handler(state, args)
-        except OSError as exc:
-            warn(f"pool: {exc}")
-            return 1
-        say(json.dumps(result))
-        return 0
-    return command
-
-
-STATE = flag("--state", default="", help="the node's state directory (default: the machine's)")
-GROUP = Group("ml_stack.node_pool", "Join this device to a pool by the beacon.")
-def _join(state: Path, a) -> dict:
-    consent(a.port, a.beacon_port, yes=a.yes)
-    return join(state, policy=a.policy, wait_s=a.wait, port=a.port, beacon_port=a.beacon_port, binary=Path(a.binary) if a.binary else None)
-
-
-GROUP.add("join", _run(_join),
-    help="start the node with its network on and set the join policy",
-    options=[STATE, flag("--policy", default="open", choices=POLICIES, help="open: devices on this network enrol by themselves; secure: a pairing code"),
-             flag("--wait", type=float, default=0.0, help="seconds to wait for another device to appear"),
-             flag("--port", type=int, default=DEFAULT_PORT, help="the TCP port the node listens on"),
-             flag("--beacon-port", type=int, default=DEFAULT_BEACON_PORT, help="the UDP port of the beacon"),
-             flag("--yes", action="store_true", help="agree to turning the network on without being asked"),
-             flag("--binary", default="", help="run this poolside-node binary instead of the selected runtime's")])
-GROUP.add("status", _run(lambda state, a: status(state)), help="the pool, its members and the beacon's counts", options=[STATE])
-
-main = GROUP.run
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+def render(pool: dict, *, as_json: bool) -> str:
+    """The text `ml-stack-peers ls` prints for a pool."""
+    if as_json:
+        return json.dumps({"pool": pool.get("pool"), "project": pool.get("project"), "policy": pool.get("policy"),
+                           "members": rows(pool)}, indent=2)
+    lines = [f"pool {pool.get('pool')}  project {pool.get('project') or '-'}  join policy {pool.get('policy')}",
+             f"{'NAME':<20} {'STATE':<13} {'ADDRESS':<24} FINGERPRINT"]
+    lines += [f"{r['name']:<20} {r['state']:<13} {r['addr']:<24} {r['fingerprint'][:16]}" for r in rows(pool)]
+    return "\n".join(lines)
