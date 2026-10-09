@@ -1088,6 +1088,7 @@ import sys
 import time
 from pathlib import Path
 
+from ml_stack.serve import grant
 from ml_stack.serve.backend import ServerSpec
 from ml_stack.serve.manager import ServerManager
 
@@ -1106,7 +1107,8 @@ ServerManager._load = slow_read
 manager = ServerManager(state_file=state)
 while time.time() < start_at:
     time.sleep(0.01)
-manager._pending(ServerSpec(model="/models/quince-2b.gguf", port=port))
+with grant.broker_grant():  # a Lease, which `_pending` hands back, exists only inside the broker's grant
+    manager._pending(ServerSpec(model="/models/quince-2b.gguf", port=port))
 time.sleep(2.0)
 """
 
