@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 
-@pytest.mark.skipif(sys.version_info[:2] != (3, 12), reason="setup provisions Python 3.12")
+@pytest.mark.skipif(sys.version_info[:2] != (3, 13), reason="setup provisions Python 3.13")
 @pytest.mark.skipif(shutil.which("bash") is None, reason="bash is required")
 def test_setup_wsl_dev_persists_cuda_compiler_in_environment(tmp_path: Path) -> None:
     repo = Path(__file__).resolve().parents[1]
@@ -66,7 +66,7 @@ def test_setup_wsl_dev_persists_cuda_compiler_in_environment(tmp_path: Path) -> 
         text=True,
     )
 
-    nvcc = venv / "lib/python3.12/site-packages/nvidia/cu13/bin/nvcc"
+    nvcc = venv / "lib/python3.13/site-packages/nvidia/cu13/bin/nvcc"
     nvcc.parent.mkdir(parents=True)
     nvcc.write_text("#!/bin/sh\necho 'Cuda compilation tools, release 13.0, V13.0.88'\n")
     nvcc.chmod(0o755)
@@ -86,8 +86,8 @@ def test_setup_wsl_dev_persists_cuda_compiler_in_environment(tmp_path: Path) -> 
         text=True,
     )
     assert sourced.stdout.splitlines() == [
-        str(venv / "lib/python3.12/site-packages/nvidia/cu13"),
-        str(venv / "lib/python3.12/site-packages/nvidia/cu13"),
+        str(venv / "lib/python3.13/site-packages/nvidia/cu13"),
+        str(venv / "lib/python3.13/site-packages/nvidia/cu13"),
         str(nvcc),
         str(venv / "bin/ffmpeg"),
         "Cuda compilation tools, release 13.0, V13.0.88",

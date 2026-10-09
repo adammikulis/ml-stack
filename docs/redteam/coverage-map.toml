@@ -12,7 +12,7 @@
 
 [ratchet]
 uncovered = 53
-partial = 197
+partial = 196
 
 [[group]]
 match = ["spawn:fleet/shard_run.py:checkout"]
@@ -353,6 +353,18 @@ tests = [
 ]
 note = "Persisted registrations are claims: identity comes from the bounded local endpoint, invalid ports never probe, malformed bodies never advertise, and redirects cannot move metadata to another endpoint"
 
+# -- the person's Board behind the Fleet UI ---------------------------------------------------
+[[group]]
+match = ["route:workspace/fleet_routes.py:/ui/board/*"]
+status = "covered"
+tests = [
+  "tests/test_fleet_board_routes.py::test_foreign_browser_cannot_send_as_person",
+  "tests/test_fleet_board_routes.py::test_malformed_or_impersonating_post_does_not_deliver",
+  "tests/test_fleet_board_routes.py::test_oversized_post_and_unsupported_methods_do_not_mutate",
+  "tests/test_fleet_board_routes.py::test_joined_session_is_required_before_owner_identity_is_used",
+]
+note = "A foreign origin, a forged identity, a malformed or oversized body and an unjoined session never post as the person"
+
 # -- saved Coding conversations -------------------------------------------------------------
 [[group]]
 match = ["route:workspace/coding_routes.py:/ui/coding/*", "parser:workspace/coding_routes.py",
@@ -637,9 +649,9 @@ note = "raising the GPU wiring limit is person-only: agent processes, tokens, fo
 
 # -- the Board ------------------------------------------------------------------------------
 [[group]]
-match = ["parser:workspace/boardroute.py", "route:workspace/fleet_routes.py:/ui/board/*"]
+match = ["parser:workspace/boardroute.py"]
 status = "covered"
-count = 2
+count = 1
 tests = [
   "tests/test_fleet_board_routes.py::test_local_person_posts_dm_and_thread_without_exposing_credentials",
   "tests/test_fleet_board_routes.py::test_joined_session_is_required_before_owner_identity_is_used",

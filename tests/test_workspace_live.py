@@ -29,12 +29,14 @@ from ml_stack.workspace import wake
 woke = []
 real_sleep = wake.Waiter.sleep
 def stamped(self, seconds):
+    if not woke:
+        print("waiting", flush=True)  # about to block on the pipe: a send now is the one being timed
     real_sleep(self, seconds)
     woke.append(time.time())  # when the pipe's signal reached this process, before it reads anything
 wake.Waiter.sleep = stamped
 ws = Workspace(Path(sys.argv[1]))
 print("ready", flush=True)
-got = ws.wait(sys.argv[2], 30.0, ack=True)
+got = ws.wait(sys.argv[2], 600.0, ack=True)  # the test kills it; this is never the limit
 print(woke[-1] if woke else time.time(), len(got), flush=True)
 """
 P50_MS, P99_MS = 50.0, 150.0
@@ -69,7 +71,8 @@ def latencies(kit, count: int, board: bool) -> list[float]:
     try:
         for p in procs:
             assert p.stdout.readline().strip() == "ready"
-        time.sleep(0.5)
+        for p in procs:
+            assert p.stdout.readline().strip() == "waiting"  # however long a loaded host takes to get here
         # The clock starts when the send has returned: signing, the chain write and the fsync are the
         # sender's own cost and depend on the disk, not on how fast a waiter wakes. A waiter woken
         # before the send returned has no lag left to measure.

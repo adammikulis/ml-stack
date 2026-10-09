@@ -21,6 +21,7 @@ if os.name == "posix":
 else:
     resource = None
 
+from ml_stack.platform import start_process
 from ml_stack.sandbox.backend import Backend, SandboxUnavailable
 from ml_stack.sandbox.bubblewrap import Bubblewrap
 from ml_stack.sandbox.policy import AllowUnsandboxed, Limits, Policy
@@ -166,10 +167,10 @@ def run(argv: Sequence[str], policy: Policy, *,  # noqa: PLR0913 - one keyword p
         cwd = (policy.write or policy.read or ("/",))[0]
     began = time.time()
     try:
-        proc = subprocess.Popen(
+        proc = start_process(
             full, stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=HOOKS.environment(policy.env), cwd=cwd,
-            start_new_session=True, preexec_fn=_limits(limits))
+            preexec_fn=_limits(limits))
     except OSError as exc:
         raise SandboxUnavailable(f"{policy.name}: could not start {argv[0]}: {exc}") from exc
     out, err = _Capture(proc.stdout, limits.output_bytes), _Capture(proc.stderr, limits.output_bytes)

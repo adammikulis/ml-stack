@@ -1,7 +1,6 @@
 """Fakes with the real signatures, so what the real thing refuses, the fake refuses too.
 
-`mirrors` diffs each against the real one; ``tests/test_testing_fakes.py`` runs it over
-`MIRRORED`.
+`mirrors` diffs each against the real one; ``tests/test_testing_fakes.py`` runs it over `MIRRORED`.
 
 - `FakeClient` / `ScriptedModel`: a `Client` that reaches no server; a scripted model.
 - `FakeServe` / `fake_serve` / `Yielding`: `serve()` that starts nothing.
@@ -494,11 +493,10 @@ def metrics_text(counted: Speculative | None) -> str:
 class Served:
     """What a fake llama-server is holding, and what it says when asked.
 
-    ``counted`` standing in for the draft head llama.cpp reports nothing else about:
-    None is a server with no head and no speculative counters on ``/metrics``.
-    ``metrics`` False is a server started without ``--metrics``, which answers 501 there.
-    ``answer`` is the reply a completion comes back with, or a callable given the request
-    body; ``pieces`` is how a streamed one is broken up and ``gap`` the seconds between.
+    ``counted`` standing in for the draft head llama.cpp reports nothing else about: None is a server with no head
+    and no speculative counters on ``/metrics``. ``metrics`` False is a server started without ``--metrics``, which
+    answers 501 there. ``answer`` is the reply a completion comes back with, or a callable given the request body;
+    ``pieces`` is how a streamed one is broken up and ``gap`` the seconds between.
     """
 
     model: str = "quince-2b.gguf"
@@ -654,11 +652,20 @@ def _json(payload: Any, *, status: int = 200) -> tuple[int, str, bytes]:
     return status, "application/json", json.dumps(payload).encode()
 
 
+class _Quiet(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+    log_message = lambda self, *args: None  # noqa: E731
+
+
+def http_handler(route: Callable[[BaseHTTPRequestHandler], None]) -> type[BaseHTTPRequestHandler]:
+    """A quiet HTTP/1.1 handler class that hands every GET and HEAD to ``route``."""
+    return type("_Routed", (_Quiet,), dict.fromkeys(("do_GET", "do_HEAD"), lambda self: route(self)))
+
+
 def _routes(fake: FakeLlamaServer) -> type[BaseHTTPRequestHandler]:
     """A handler class answering ``fake``'s routes."""
 
-    class _H(BaseHTTPRequestHandler):
-        protocol_version = "HTTP/1.1"
+    class _H(_Quiet):
 
         def _unauthorised(self) -> bool:
             """Answer 401 and return True when ``fake.api_key`` is set and not presented."""
@@ -707,9 +714,6 @@ def _routes(fake: FakeLlamaServer) -> type[BaseHTTPRequestHandler]:
                         time.sleep(fake.served.gap)
             except (BrokenPipeError, ConnectionResetError):
                 fake.disconnected.set()
-
-        def log_message(self, *args: object) -> None:
-            pass
 
     return _H
 

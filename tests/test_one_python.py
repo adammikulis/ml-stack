@@ -2,9 +2,8 @@
 
 The two installers, the Linux container, the release workflow and
 `ml_stack.fleet.environment` name one interpreter, `PYTHON`: the app builds its own
-environment and chooses it. `pyproject.toml` and the CI test matrix name the range the
-library is imported under, which is every release the suite runs on. A release newer than the
-newest tested one is run as an experiment that may fail.
+environment and chooses it. `pyproject.toml` names the range the library is imported under. The required CI
+tests run on that one interpreter; the next release runs as an experiment that may fail.
 """
 
 from __future__ import annotations
@@ -67,12 +66,12 @@ def test_neither_installer_offers_to_run_on_something_older(script):
     assert "version_info" not in body, "an installer that probes a version accepts a range"
 
 
-def test_the_ci_test_matrix_runs_every_supported_python_and_other_jobs_the_app_python():
+def test_the_ci_test_matrix_requires_the_one_python_and_tries_the_next_as_an_experiment():
     ci = workflow("ci.yml")
     entries = ci["jobs"]["test"]["strategy"]["matrix"]["include"]
-    assert {e["python"] for e in entries if not e.get("experimental")} == SUPPORTED
+    assert {e["python"] for e in entries if not e.get("experimental")} == {PYTHON}
     experimental = {e["python"] for e in entries if e.get("experimental")}
-    assert experimental == {f"3.{int(NEWEST.split('.')[1]) + 1}"}
+    assert experimental == {f"3.{int(PYTHON.split('.')[1]) + 1}"}
     assert ci["jobs"]["test"]["continue-on-error"] == "${{ matrix.experimental || false }}"
     pinned = [str(step.get("with", {}).get("python-version", ""))
               for name, job in ci["jobs"].items() if name != "test" for step in job["steps"]]

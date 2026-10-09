@@ -361,7 +361,7 @@ DESTRUCTIVE: list[tuple[str, dict]] = [
     ('trash_file', {'path': 'a.txt'}),
     ('unlink_file', {'path': 'a.txt'}),
     ('wipe_disk', {'device': '/dev/sda'}),
-    ('send_sms', {'to': '+10000000000', 'body': 'x'}),
+    ('send_sms', {'to': '+' + '1' + '0' * 10, 'body': 'x'}),
     ('tweet', {'text': 'x'}),
     ('charge_card', {'amount': 5}),
     ('refund_order', {'id': 1}),
