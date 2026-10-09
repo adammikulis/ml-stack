@@ -3,6 +3,7 @@
 from urllib.parse import urlencode
 
 import pytest
+from rail import reach
 from test_fleet_ui import Serving
 
 from ml_stack.graph.store import GraphStore
@@ -85,7 +86,7 @@ def test_graph_browser_navigation_search_and_neighbor(daemon, tmp_path, playwrig
         errors = []
         page.on('pageerror', lambda error: errors.append(str(error)))
         page.goto(f'http://127.0.0.1:{daemon.port}/ui')
-        page.locator('fleet-nav a[href="#knowledge"]').click()
+        reach(page, 'knowledge')
         page.get_by_role('button', name='Graph · knowledge.db', exact=True).click()
         page.get_by_label('Search nodes').fill('Alpha')
         page.locator('knowledge-view').get_by_role('button', name='Search', exact=True).click()

@@ -1,5 +1,5 @@
 <style>
-chat-view .chatmain { color:var(--text); font-family:var(--sans,var(--ml-font)); font-size:1rem; display:grid; gap:0; grid-template-columns:260px minmax(0,1fr); height:calc(100dvh - var(--header-height,88px)); min-height:520px; overflow:hidden; padding:0; }
+chat-view .chatmain { color:var(--text); font-family:var(--sans,var(--ml-font)); font-size:1rem; display:grid; gap:0; grid-template-columns:260px minmax(0,1fr); grid-template-rows:minmax(0,1fr); height:calc(100dvh - var(--header-height,88px)); min-height:0; overflow:hidden; padding:0; }
 chat-view .chats { display:flex; flex-direction:column; overflow-y:auto; padding:calc(20px * var(--ui-density,1)) calc(12px * var(--ui-density,1)); background:color-mix(in srgb,var(--poolside-pink) 10%,var(--bg-raised)); border-right:1px solid var(--line); gap:calc(12px * var(--ui-density,1)); }
 chat-view .conversation-space { display:flex; align-items:center; gap:calc(10px * var(--ui-density,1)); padding:0 calc(8px * var(--ui-density,1)) calc(8px * var(--ui-density,1)); }
 chat-view .conversation-space strong { display:block; font-size:1.286rem; }
@@ -18,7 +18,7 @@ chat-view .chatrow { display:flex; align-items:center; border-radius:7px; margin
 chat-view .chatrow a { min-width:0; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 chat-view .chat-row-menu { padding-right:7px; }
 chat-view .conversation-coordination { margin-top:auto; padding:calc(10px * var(--ui-density,1)); font-size:0.8571rem; }
-chat-view #conversation-team { min-width:0; height:100%; background:var(--bg-raised); }
+chat-view #conversation-team { min-width:0; min-height:0; overflow:hidden; height:100%; background:var(--bg-raised); }
 chat-view #conversation-team ml-board { height:100%; min-height:0; }
 chat-view .chatmain .talk { width:100%; max-width:none; margin:0; gap:0; display:flex; flex-direction:column; min-height:0; min-width:0; background:var(--bg-raised); }
 chat-view .chat-toolbar { display:flex; justify-content:space-between; align-items:center; flex:none; padding:calc(16px * var(--ui-density,1)) calc(28px * var(--ui-density,1)); min-height:77px; border-bottom:1px solid var(--line); gap:calc(12px * var(--ui-density,1)); }
@@ -63,7 +63,7 @@ chat-view .hint { color:var(--muted); font-size:0.8571rem; line-height:1.6; }
 chat-view #ask:focus { outline:none; box-shadow:none; }
 chat-view .conversation-mobile-nav { display:none; }
 @media(max-width:850px) { chat-view .chatmain { grid-template-columns:210px minmax(0,1fr); } chat-view .chat-toolbar { padding:calc(12px * var(--ui-density,1)) calc(16px * var(--ui-density,1)); } chat-view .chat-starters { grid-template-columns:1fr; } }
-@media(max-width:600px) { chat-view .chatmain { grid-template-columns:1fr; overflow:auto; height:auto; } chat-view .conversation-mobile-nav { display:block; padding:calc(12px * var(--ui-density,1)) calc(16px * var(--ui-density,1)); width:100%; text-align:left; background:color-mix(in srgb,var(--poolside-pink) 10%,var(--bg-raised)); border:0; border-radius:0; } chat-view .chats { display:none; max-height:300px; } chat-view .chatmain[data-sidebar=true] .chats { display:flex; } chat-view .talk { min-height:65vh; } chat-view .conversation-actions { flex-wrap:wrap; } chat-view .chat-welcome { margin:calc(10px * var(--ui-density,1)) auto; } }
+@media(max-width:600px) { chat-view .chatmain { grid-template-columns:1fr; grid-template-rows:auto auto minmax(0,1fr); overflow:hidden; } chat-view .conversation-mobile-nav { grid-row:1; display:block; padding:calc(12px * var(--ui-density,1)) calc(16px * var(--ui-density,1)); width:100%; text-align:left; background:color-mix(in srgb,var(--poolside-pink) 10%,var(--bg-raised)); border:0; border-radius:0; } chat-view .chats { grid-row:2; display:none; max-height:min(300px,40dvh); } chat-view .chatmain[data-sidebar=true] .chats { display:flex; } chat-view #conversation-team,chat-view .talk { grid-row:3; min-height:0; } chat-view .conversation-actions { flex-wrap:wrap; } chat-view .chat-welcome { margin:calc(10px * var(--ui-density,1)) auto; } }
 </style>
 <script>
 customElements.define('board-view', class extends HTMLElement {});

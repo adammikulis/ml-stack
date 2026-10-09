@@ -1,0 +1,42 @@
+<script>
+(function () {
+  const M = window.fleetModel;
+  // A model's reply is untrusted. It is shown as text and formatting only: nothing in it can
+  // fetch an address, submit a form or take the window somewhere, so a link or an image the
+  // model writes appears as the words and the address it names, and does nothing.
+  const FORBID_TAGS = ["a", "img", "picture", "source", "video", "audio", "track", "map", "area",
+    "form", "input", "button", "select", "option", "textarea", "label", "fieldset",
+    "iframe", "frame", "frameset", "object", "embed", "applet", "link", "meta", "base", "style",
+    "script", "noscript", "svg", "math", "template", "slot"];
+  const FORBID_ATTR = ["src", "srcset", "href", "xlink:href", "action", "formaction", "poster",
+    "background", "ping", "data", "srcdoc", "style", "target", "rel", "name", "id", "class"];
+  const shown = (node, text) => {
+    const written = document.createElement("samp");
+    written.textContent = text;
+    node.replaceWith(written);
+  };
+
+  M.safeMarkdown = function (text) {
+    // a template's contents are inert: nothing in them loads while they are rewritten
+    const inert = document.createElement("template");
+    inert.innerHTML = marked.parse(text, { breaks: true, gfm: true });
+    for (const link of [...inert.content.querySelectorAll("a")]) {
+      const address = link.getAttribute("href") || "";
+      const words = link.textContent.trim();
+      shown(link, !address || words === address ? words || address : `${words} (${address})`);
+    }
+    for (const image of [...inert.content.querySelectorAll("img")]) {
+      const address = image.getAttribute("src") || "";
+      shown(image, `[image: ${image.getAttribute("alt") || "no description"}${address ? ` ${address}` : ""}]`);
+    }
+    return DOMPurify.sanitize(inert.innerHTML, {
+      USE_PROFILES: { html: true }, FORBID_TAGS, FORBID_ATTR, ALLOW_DATA_ATTR: false,
+      ALLOW_ARIA_ATTR: false, KEEP_CONTENT: true,
+    });
+  };
+  M.renderMarkdown = function (node, text) {
+    node.innerHTML = M.safeMarkdown(text);
+    node.classList.add("markdown");
+  };
+})();
+</script>

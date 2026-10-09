@@ -15,6 +15,7 @@ from . import llama
 from .session import parse_cookie
 
 ACTIVE = {"queued", "installing"}
+PENDING = ACTIVE | {"waiting"}
 LIMIT = 32
 
 
@@ -59,25 +60,29 @@ class Jobs:
     def _enqueue(self, kind, request, operation, *, provenance=None):
         with self._mutex, only_one(self.root / "setup-jobs.lock"), self._store() as graph:
             rows = [node["attrs"] for node in graph.nodes("setup-job")]
-            existing = next((row for row in rows if row["kind"] == kind and row["request"] == request and row["state"] in ACTIVE), None)
+            existing = next((row for row in rows if row["kind"] == kind and row["request"] == request and row["state"] in PENDING), None)
             if existing:
                 return existing
-            active = [row for row in rows if row["state"] in ACTIVE]
+            active = [row for row in rows if row["state"] in PENDING]
             if len(active) >= LIMIT:
                 raise ValueError("The setup installation queue is full; wait for a job to finish.")
-            finished = sorted((row for row in rows if row["state"] not in ACTIVE), key=lambda row: row["created"])
+            finished = sorted((row for row in rows if row["state"] not in PENDING), key=lambda row: row["created"])
             for row in finished[:max(0, len(rows) - LIMIT + 1)]:
                 graph.query("MATCH (n:Node {id:$id}) DETACH DELETE n", {"id": row["id"]})
-            row = {"id": uuid.uuid4().hex, "kind": kind, "request": request, "provenance": provenance or {}, "state": "queued", "note": "Waiting to install", "error": "", "result": {}, "created": time.time(), "pid": os.getpid(), "born": started_at(os.getpid())}
+            row = {"id": uuid.uuid4().hex, "kind": kind, "request": request, "provenance": provenance or {}, "state": "queued" if operation else "waiting", "note": "Waiting to install", "error": "", "result": {}, "created": time.time(), "pid": os.getpid(), "born": started_at(os.getpid())}
             self._save(graph, row)
-            self._pending.append((row, operation))
-            if self._worker is None or not self._worker.is_alive():
-                self._worker = threading.Thread(target=self._run, daemon=True, name="setup-installations")
-                self._worker.start()
+            if operation:
+                self._pending.append((row, operation))
+                if self._worker is None or not self._worker.is_alive():
+                    self._worker = threading.Thread(target=self._run, daemon=True, name="setup-installations")
+                    self._worker.start()
             return dict(row)
 
     def _update(self, row, **changes):
         with self._mutex, only_one(self.root / "setup-jobs.lock"), self._store() as graph:
+            latest = next((node["attrs"] for node in graph.nodes("setup-job") if node["id"] == row["id"]), None)
+            if latest is not None:
+                row.update(latest)
             row.update(changes)
             self._save(graph, row)
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from rail import reach
 from test_fleet_ui import Serving
 
 pytestmark = pytest.mark.slow
@@ -18,7 +19,7 @@ def test_dataset_upload_preview_and_specialist_help(tmp_path, monkeypatch, playw
         errors = []
         page.on('pageerror', lambda error: errors.append(str(error)))
         page.goto(f'http://127.0.0.1:{served.port}/ui')
-        page.locator('fleet-nav a[href="#data"]').click()
+        reach(page, 'data')
         page.get_by_label('Destination relative to files root').fill('datasets/demo.jsonl')
         page.get_by_label('Or paste dataset content').fill('{"label":"stop"}\n')
         page.get_by_role('button', name='Upload', exact=True).click()
@@ -26,7 +27,7 @@ def test_dataset_upload_preview_and_specialist_help(tmp_path, monkeypatch, playw
         pw.expect(page.locator('data-view #preview')).to_contain_text('"label":"stop"')
         page.get_by_role('button', name='Use for training', exact=True).click()
         assert page.get_by_label('Dataset path (relative to files root)').input_value() == 'datasets/demo.jsonl'
-        page.locator('fleet-nav a[href="#tools"]').click()
+        reach(page, 'tools')
         page.get_by_role('tab', name='Command library', exact=True).click()
         page.get_by_label('Installed command').select_option('ml-stack-doctor')
         page.get_by_role('button', name='Review', exact=True).click()
@@ -37,7 +38,7 @@ def test_dataset_upload_preview_and_specialist_help(tmp_path, monkeypatch, playw
         assert parsed.recipe == 'text-lm'
         assert parsed.data == 'datasets/demo.jsonl'
         check_training_controls(page, pw)
-        page.locator('fleet-nav a[href="#gym"]').click()
+        reach(page, 'gym')
         page.get_by_label('Controller', exact=True).select_option('ppo')
         page.get_by_label('PPO checkpoint path').fill('/tmp/policy.zip')
         pw.expect(page.get_by_role('button', name='Apply controller', exact=True)).to_be_disabled()
@@ -66,7 +67,7 @@ def test_dataset_upload_preview_and_specialist_help(tmp_path, monkeypatch, playw
 def check_training_controls(page, pw):
     from ml_stack.train.run import _parser
 
-    page.locator('fleet-nav a[href="#training"]').click()
+    reach(page, 'training')
     page.get_by_label('Recipe', exact=True).select_option('tool-calls')
     assert page.get_by_label('Base model ID or local directory').count() == 1
     page.get_by_label('Base model ID or local directory').fill('models/demo-base')

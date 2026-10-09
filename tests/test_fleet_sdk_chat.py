@@ -90,7 +90,7 @@ def test_browser_sends_sdk_chat_and_reloads_saved_answer(tmp_path, sdk_playwrigh
     try:
         page = browser.new_page()
         page.goto(f"http://127.0.0.1:{served.port}/ui#chat")
-        page.locator('#chat-options > summary').click()
+        page.click('#conversation-details')
         page.locator('#chat-output-tokens').fill('32000')
         page.get_by_role("textbox", name="Message", exact=True).fill("Say hello")
         page.get_by_role("textbox", name="Message", exact=True).press("Enter")

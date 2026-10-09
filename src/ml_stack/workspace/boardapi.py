@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from ml_stack.workspace import board_graph_merge, coordination_access, plain
+from ml_stack.workspace.board_pages import page
 from ml_stack.workspace.boards import ANNOUNCE, ANNOUNCE_MARK, GENERAL, MODES, STYPES, Boards
 from ml_stack.workspace.bus import TYPES
 from ml_stack.workspace.identity import AGENT, HUMAN, Denied, Identity, valid_id
@@ -346,21 +347,23 @@ class BoardApi:
             self.store.mark(who.id, name, out[-1]["seq"])
         return out
 
-    def ui_read(self, token: str, name: str, after: int = 0, limit: int = 100) -> dict[str, Any]:
-        """Plain, bounded messages of ``name`` for a page; reading marks nothing."""
+    def ui_read(self, token: str, name: str, after: int = 0, limit: int = 100,
+                before: int = 0) -> dict[str, Any]:
+        """A cursor and byte bounded channel page; reading marks nothing."""
         who = self._who(token)
         self.require_read(who, name)
-        rows = [r for r in self._rows(name) if r["seq"] > after][-max(limit, 0):]
-        return {"board": name, "messages": [self._plain(r) for r in rows]}
+        rows = self._rows(name) if limit else []
+        return {"board": name, **page(rows, self._plain, limit, after, before)}
 
-    def ui_thread(self, token: str, root: int) -> dict[str, Any]:
-        """Plain, bounded messages of one thread for a page."""
+    def ui_thread(self, token: str, root: int, limit: int = 100,
+                  after: int = 0, before: int = 0) -> dict[str, Any]:
+        """A cursor and byte bounded thread page."""
         who = self._who(token)
         rows = self.ws.bus.thread(root)
         if not rows:
             raise ValueError(f"no thread {root}")
         self._thread_access(who, rows)
-        return {"root": root, "messages": [self._plain(r) for r in rows[:200]]}
+        return {"root": root, **page(rows, self._plain, limit, after, before)}
 
     # -- direct conversations -------------------------------------------------------------
     def _pair_ok(self, who: Identity, a: str, b: str) -> None:
@@ -398,6 +401,16 @@ class BoardApi:
         self._pair_ok(who, a, b)
         return [{**self._plain(r), "direction": "sent" if r["from"] == a else "received"}
                 for r in self._pair_rows(a, b)[-max(limit, 0):]]
+
+    def ui_dm_page(self, token: str, a: str, b: str, window: tuple[int, int, int] = (100, 0, 0)) -> dict[str, Any]:
+        """A cursor and byte bounded direct conversation page."""
+        who = self._who(token)
+        if not (valid_id(a) and valid_id(b)):
+            raise ValueError("name two agent ids")
+        self._pair_ok(who, a, b)
+        limit, after, before = window
+        rows = self._pair_rows(a, b) if limit else []
+        return {"a": a, "b": b, **page(rows, self._plain, limit, after, before)}
 
     def dm_list(self, token: str) -> list[dict[str, Any]]:
         """The caller's discoverable addressed and shared project conversations."""

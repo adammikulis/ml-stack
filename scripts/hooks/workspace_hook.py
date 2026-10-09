@@ -8,6 +8,7 @@ import shlex
 import stat
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'src'))
@@ -177,3 +178,64 @@ def hook_notice(environment: dict, source: Path | None = None) -> str:
         warning('SessionStart', f'hook check: {error}')
         return ''
     return hookcheck.context(repo, problems) if problems else ''
+
+
+def state_dir() -> Path:
+    """Where hooks keep their small per-session memory (labels given, attention shown); private to the user."""
+    named = os.environ.get('ML_STACK_HOOK_STATE')
+    path = Path(named) if named else Path(tempfile.gettempdir()) / f'ml-stack-hooks-{os.getuid()}'
+    path.mkdir(parents=True, exist_ok=True, mode=0o700)
+    return path
+
+
+def plain_label(event: dict) -> str:
+    """The label a subagent event names by itself: agent type and the first six characters of its id."""
+    return f"{event.get('agent_type') or 'subagent'}-{str(event.get('agent_id') or '')[:6]}".strip('-').lower()
+
+
+def spawner(event: dict) -> str:
+    """The label of the subagent that started this one, or an empty string when the main session did.
+
+    The event itself may name it (`parent_agent_id`); otherwise the subagent's meta file in its session
+    directory names the tool use that started it (`toolUseId`, with `spawnDepth`), and the transcript that
+    holds that tool use is the spawner's.
+    """
+    if event.get('parent_agent_id'):
+        return plain_label({'agent_type': event.get('parent_agent_type'), 'agent_id': event['parent_agent_id']})
+    session, agent = Path(str(event.get('transcript_path') or '')), str(event.get('agent_id') or '')
+    if not session.name or not agent:
+        return ''
+    folder = session.with_suffix('') / 'subagents'
+    try:
+        meta = json.loads((folder / f'agent-{agent}.meta.json').read_text())
+        if int(meta.get('spawnDepth') or 1) <= 1 or not meta.get('toolUseId'):
+            return ''
+        for other in sorted(folder.glob('agent-*.jsonl')):
+            if other.stem != f'agent-{agent}' and meta['toolUseId'] in other.read_text(errors='replace'):
+                found = other.stem.removeprefix('agent-')
+                kind = json.loads(other.with_suffix('.meta.json').read_text()).get('agentType') if \
+                    other.with_suffix('.meta.json').exists() else ''
+                return plain_label({'agent_type': kind, 'agent_id': found})
+    except (OSError, ValueError, TypeError):
+        return ''
+    return ''
+
+
+def label_of(event: dict) -> str:
+    """The board label of a subagent: `PARENT.CHILD` when another subagent started it, else its own; remembered so start and stop agree."""
+    agent = str(event.get('agent_id') or '')
+    memory = state_dir() / 'labels' / (agent if agent.isalnum() else 'none')
+    try:
+        return memory.read_text().strip() or plain_label(event)
+    except OSError:
+        pass
+    label = plain_label(event)
+    parent = spawner(event)
+    if parent:
+        label = f"{parent.rpartition('.')[2]}.{label}"[-48:].lstrip('.-_')
+    try:
+        memory.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        memory.write_text(label)
+    except OSError as error:
+        warning('label', error)
+    return label

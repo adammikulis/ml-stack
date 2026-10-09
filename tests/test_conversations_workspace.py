@@ -10,6 +10,62 @@ chat_browser = chat_fixtures.chat_browser
 pytestmark = pytest.mark.slow
 
 
+def test_team_composer_survives_history_failure_and_retries_authenticated_send(chat_browser, monkeypatch, tmp_path):
+    from playwright.sync_api import expect
+
+    kit = Kit(clean_env(monkeypatch, tmp_path / 'workspace'))
+    kit.limits(sends_per_window=1000)
+    helper = kit.agent('research-helper')
+    tokens.store(kit.base, tokens.OWNER_FILE, kit.owner)
+    kit.ws.board.create(helper, '#research')
+    for number in range(105):
+        kit.ws.send(helper, '#research', 'note', f'Existing research message {number}')
+    served, page = chat_browser
+    page.goto(f'http://127.0.0.1:{served.port}/ui#board')
+    page.get_by_label('Workspace', exact=True).select_option('local')
+    page.locator('#conversation-channels').get_by_role('button', name='#research').click()
+    board = page.locator('chat-view ml-board')
+    editor = board.get_by_role('textbox', name='Message', exact=True)
+    expect(editor).to_be_visible()
+    editor.fill('Keep this research draft')
+    editor.evaluate('(node) => { window.retainedTeamEditor = node; }')
+    observed = []
+
+    def fail_history(route):
+        observed.append(editor.is_visible())
+        observed.append(editor.evaluate('(node) => node === window.retainedTeamEditor'))
+        route.abort('failed')
+
+    page.route('**/board/messages?**', fail_history)
+    board.get_by_role('button', name='Messages', exact=True).click()
+    expect(board.get_by_role('alert')).to_be_visible()
+    expect(editor).to_have_value('Keep this research draft')
+    assert observed == [True, True]
+    assert editor.evaluate('(node) => node === window.retainedTeamEditor')
+    page.unroute('**/board/messages?**', fail_history)
+    board.get_by_role('button', name='Retry', exact=True).click()
+    expect(board.locator('.msg').first).to_be_visible()
+
+    def fail_send(route):
+        route.fulfill(status=503, content_type='application/json', body='{"error":"Send temporarily unavailable"}')
+
+    page.route('**/board/post', fail_send)
+    board.get_by_role('button', name='Send', exact=True).click()
+    expect(board.get_by_role('alert')).to_contain_text('Send temporarily unavailable')
+    expect(editor).to_have_value('Keep this research draft')
+    page.unroute('**/board/post', fail_send)
+    board.get_by_role('button', name='Send', exact=True).click()
+    expect(editor).to_have_value('')
+    expect(board.locator('.msg pre').last).to_contain_text('Keep this research draft')
+    assert kit.ws.board.ui_read(kit.owner, '#research')['messages'][-1]['body'] == 'Keep this research draft'
+    board.get_by_role('button', name='Reply in thread').last.click()
+    editor.fill('Authenticated thread reply')
+    board.get_by_role('button', name='Send', exact=True).click()
+    expect(board.locator('.msg pre').last).to_contain_text('Authenticated thread reply')
+    assert any(row['body'] == 'Authenticated thread reply'
+               for row in kit.ws.board.ui_read(kit.owner, '#research')['messages'])
+
+
 def test_shared_sidebar_routes_channels_dms_threads_and_saved_model_chats(chat_browser, monkeypatch, tmp_path):
     from playwright.sync_api import expect
 
@@ -40,18 +96,25 @@ def test_shared_sidebar_routes_channels_dms_threads_and_saved_model_chats(chat_b
     assert any(message['body'] == 'Use the held-out dataset.' for message in kit.ws.board.ui_read(kit.owner, '#experiments')['messages'])
     board.get_by_role('button', name='Reply in thread').first.click()
     expect(board.get_by_role('button', name='Back to #experiments')).to_be_visible()
+    expect(editor).to_be_in_viewport()
+    expect(board.get_by_role('button', name='Send', exact=True)).to_be_in_viewport()
     from ml_stack.workspace.agent_display import metadata
 
     worker_id = kit.ws.auth(worker).id
     worker_label = metadata(kit.ws.registry, worker_id)['display_name']
-    peer = sidebar.get_by_role('button', name=worker_label, exact=True)
+    peer = sidebar.locator(f'button[title="{worker_id}"]')
+    expect(peer).to_contain_text(worker_label)
     expect(peer).to_have_attribute('title', worker_id)
     peer.click()
     assert board.evaluate('(node) => node.target().to') == worker_id
     expect(board.locator('.msg pre')).to_contain_text('Review the experiment criteria.')
+    expect(editor).to_be_in_viewport()
+    expect(board.get_by_role('button', name='Send', exact=True)).to_be_in_viewport()
     sidebar.get_by_role('link', name='Experiment plan', exact=True).click()
     expect(page.locator('#conversation-model')).to_be_visible()
     expect(page.locator('#chat-messages')).to_contain_text('Compare the two evaluation runs.')
+    expect(page.locator('#conversation-model').get_by_role('textbox', name='Message', exact=True)).to_be_in_viewport()
+    expect(page.locator('#chat-send')).to_be_in_viewport()
     expect(sidebar).to_be_visible()
     page.screenshot(path='/private/tmp/poolside-unified-conversations.png', full_page=True)
 
@@ -100,6 +163,7 @@ def test_new_dm_from_model_chat_opens_full_child_identity_and_survives_reload(ch
     expect(page.locator('#conversation-model')).to_be_hidden()
     board = page.locator('chat-view ml-board')
     expect(board.locator('.msg pre')).to_contain_text('Ready to review this experiment.')
+    assert board.evaluate("node => [...node.feed.childNodes].filter(child => child.nodeType === Node.TEXT_NODE).map(child => child.textContent.trim()).filter(Boolean)") == []
     assert board.evaluate('node => node.view.b') == identity
     board.get_by_label('Message', exact=True).fill('Review the held-out dataset.')
     board.get_by_role('button', name='Send', exact=True).click()
@@ -202,7 +266,7 @@ def test_unshared_workspace_is_selected_and_team_messages_render(chat_browser, m
     board = page.locator('chat-view ml-board')
     assert board.get_attribute('endpoint') == f'/ui/projects/{project}/board'
     expect(page.locator('#conversation-channels').get_by_role('button', name='Join workspace as person')).to_be_visible()
-    expect(page.locator('#conversation-direct')).to_have_text('Agents and direct messages appear here.')
+    expect(page.locator('#conversation-direct')).to_have_text('No direct messages yet.')
     page.locator('#conversation-channels').get_by_role('button', name='Join workspace as person').click()
     expect(board.get_by_role('button', name='Join workspace as person')).to_be_visible()
     assert all('person_project' not in row for row in ws.registry._load().values())
@@ -211,3 +275,159 @@ def test_unshared_workspace_is_selected_and_team_messages_render(chat_browser, m
     assert registry.get(project).shared is False
     assert registry.list() == []
     assert not (tmp_path / 'registry' / 'project-bundles').exists()
+
+
+def _existing_dm_directory(monkeypatch, tmp_path):
+    from ml_stack.workspace.agent_display import metadata
+
+    kit = Kit(clean_env(monkeypatch, tmp_path / 'workspace'))
+    kit.limits(sends_per_window=1000)
+    agents = [kit.agent(f'helper-{number}') for number in range(43)]
+    worker = agents[0]
+    worker_id = kit.ws.auth(worker).id
+    worker_label = metadata(kit.ws.registry, worker_id)['display_name']
+    tokens.store(kit.base, tokens.OWNER_FILE, kit.owner)
+    kit.ws.board.create(worker, '#experiments')
+    kit.ws.send(worker, 'owner', 'note', 'Existing experiment discussion.')
+    return kit, agents, worker_id, worker_label
+
+
+def test_sidebar_keeps_agent_directory_in_new_dm_and_searches_existing_conversations(chat_browser, monkeypatch, tmp_path):
+    from playwright.sync_api import expect
+
+    expect.set_options(timeout=30000)  # each of the 43 sessions opens its own store when listed
+    kit, agents, worker_id, worker_label = _existing_dm_directory(monkeypatch, tmp_path)
+    served, page = chat_browser
+    saved = served.ui.conversations.start(model='model-a', title='Experiment plan')
+    served.ui.conversations.append(saved.id, 'assistant', 'Recorded model conversation.')
+    page.set_viewport_size({'width': 1440, 'height': 900})
+    page.goto(f'http://127.0.0.1:{served.port}/ui#chat')
+    page.get_by_label('Workspace', exact=True).select_option('local')
+    direct = page.locator('#conversation-direct')
+    expect(direct.locator(':scope > button')).to_have_count(1)
+    expect(direct.locator('[aria-label="1 unread messages"]')).to_be_visible()
+    expect(page.locator('#chat-list').get_by_role('link', name='Experiment plan', exact=True)).to_be_visible()
+    expect(page.locator('#conversation-models').get_by_role('button', name='● model-a', exact=True)).to_be_in_viewport()
+    page.screenshot(path='/private/tmp/poolside-sidebar-existing-dms.png', full_page=True)
+    search = page.get_by_label('Search conversations and channels', exact=True)
+    expect(search).to_have_attribute('placeholder', 'Search chats & channels')
+    search.fill('Experiment')
+    expect(page.locator('#conversation-channels').get_by_role('button', name='#experiments', exact=True)).to_be_visible()
+    expect(direct.locator(':scope > button')).to_have_count(0)
+    expect(page.locator('#chat-list').get_by_role('link', name='Experiment plan', exact=True)).to_be_visible()
+    search.fill(worker_label)
+    expect(direct.locator(':scope > button')).to_have_count(1)
+    expect(page.locator('#conversation-channels > button')).to_have_count(0)
+    search.fill('')
+    direct.locator('summary').click()
+    directory = direct.get_by_label('Message an agent', exact=True)
+    assert directory.locator('option').count() >= 44
+    selected_id = kit.ws.auth(agents[-1]).id
+    directory.select_option(selected_id)
+    direct.get_by_role('button', name='Open', exact=True).click()
+    board = page.locator('chat-view ml-board')
+    expect(page.locator('#conversation-team')).to_be_visible()
+    assert board.evaluate('node => node.target().to') == selected_id
+    expect(direct.locator(':scope > button')).to_have_count(2)
+    active = direct.locator(f':scope > button[title="{selected_id}"]')
+    expect(active).to_have_attribute('aria-current', 'true')
+    assert len(kit.ws.board.dm_list(kit.owner)) == 1
+    page.reload()
+    expect(active).to_have_attribute('aria-current', 'true')
+    expect(direct.locator(':scope > button')).to_have_count(2)
+    assert len(kit.ws.board.dm_list(kit.owner)) == 1
+    direct.locator(f':scope > button[title="{worker_id}"]').click()
+    expect(board.locator('.msg pre')).to_contain_text('Existing experiment discussion.')
+    page.reload()
+    expect(direct.locator(':scope > button')).to_have_count(1)
+    expect(board.locator('.msg pre')).to_contain_text('Existing experiment discussion.')
+
+
+def test_channel_history_scrolls_with_composer_visible_at_all_viewport_sizes(chat_browser, monkeypatch, tmp_path):
+    from playwright.sync_api import expect
+
+    kit = Kit(clean_env(monkeypatch, tmp_path / 'workspace'))
+    kit.limits(sends_per_window=1000)
+    worker = kit.agent('history-helper')
+    tokens.store(kit.base, tokens.OWNER_FILE, kit.owner)
+    for number in range(24):
+        kit.ws.send(worker, '#general', 'note', f'History message {number}\nRecorded experiment details.\nRecorded evaluation details.')
+    served, page = chat_browser
+    page.goto(f'http://127.0.0.1:{served.port}/ui#chat')
+    page.get_by_label('Workspace', exact=True).select_option('local')
+    page.locator('#conversation-channels').get_by_role('button', name='#general', exact=False).click()
+    board = page.locator('chat-view ml-board')
+    expect(board.locator('.msg pre')).to_have_count(24)
+    composer = board.get_by_role('textbox', name='Message', exact=True)
+    for width, height in [(1360, 900), (1360, 640), (1360, 420), (390, 844)]:
+        page.set_viewport_size({'width': width, 'height': height})
+        expect(composer).to_be_in_viewport()
+        expect(board.get_by_role('button', name='Send', exact=True)).to_be_in_viewport()
+        bounds = composer.bounding_box()
+        assert bounds['y'] >= 0 and bounds['y'] + bounds['height'] <= height
+        geometry = board.evaluate('node => ({history:node.feed.scrollHeight, visible:node.feed.clientHeight, height:node.getBoundingClientRect().height})')
+        assert 0 < geometry['visible'] < geometry['history']
+        assert geometry['height'] <= height
+        assert page.evaluate('document.documentElement.scrollHeight <= innerHeight')
+        board.evaluate('node => { node.feed.scrollTop = node.feed.scrollHeight; }')
+        expect(board.locator('.msg pre').last).to_be_in_viewport()
+        expect(composer).to_be_in_viewport()
+        composer.fill('Unsent channel draft')
+        page.screenshot(path=f'/private/tmp/poolside-channel-fixed-{width}-{height}.png')
+        composer.fill('')
+
+    page.get_by_role('button', name='Channels and model chats ▾').click()
+    expect(page.locator('chat-view .chats')).to_be_visible()
+    expect(composer).to_be_in_viewport()
+    expect(board.get_by_role('button', name='Send', exact=True)).to_be_in_viewport()
+    assert page.evaluate('document.documentElement.scrollHeight <= innerHeight')
+    page.screenshot(path='/private/tmp/poolside-channel-fixed-mobile-expanded.png')
+
+def test_bounded_history_navigation_keeps_message_nodes_scroll_and_draft(chat_browser, monkeypatch, tmp_path):
+    from playwright.sync_api import expect
+
+    from ml_stack.workspace.board_pages import page as message_page
+
+    kit = Kit(clean_env(monkeypatch, tmp_path / 'workspace'))
+    tokens.store(kit.base, tokens.OWNER_FILE, kit.owner)
+    served, browser = chat_browser
+    rows = [{'seq': seq, 'from': 'owner', 'role': 'human', 'type': 'note',
+             'ts': 1, 'body': f'Message {seq}'} for seq in range(1, 100001)]
+    calls = []
+
+    def messages(route):
+        from urllib.parse import parse_qs, urlsplit
+        query = parse_qs(urlsplit(route.request.url).query)
+        after = int(query.get('after', ['0'])[0])
+        before = int(query.get('before', ['0'])[0])
+        calls.append((after, before))
+        route.fulfill(json=message_page(rows, lambda row: row, 100, after, before))
+
+    browser.route('**/ui/board/messages?*', messages)
+    browser.goto(f'http://127.0.0.1:{served.port}/ui#chat')
+    browser.get_by_label('Workspace', exact=True).select_option('local')
+    browser.locator('#conversation-channels').get_by_role('button', name='#general').click()
+    board = browser.locator('chat-view ml-board')
+    expect(board.locator('.msg')).to_have_count(100)
+    editor = board.get_by_role('textbox', name='Message', exact=True)
+    editor.fill('Keep this draft while reading history.')
+    board.evaluate('node => { node.retained = node.feed.querySelector("[data-seq=\\"99901\\"]"); node.feed.scrollTop = 90; node.anchor = [...node.feed.querySelectorAll("[data-seq]")].find(item => item.offsetTop >= node.feed.scrollTop); node.anchorDelta = node.anchor.offsetTop - node.feed.scrollTop; }')
+    board.get_by_role('button', name='Load older messages').click()
+    expect(board.locator('.msg')).to_have_count(200)
+    assert board.evaluate('node => node.retained === node.feed.querySelector("[data-seq=\\"99901\\"]")')
+    expect(editor).to_have_value('Keep this draft while reading history.')
+    assert board.evaluate('node => Math.abs(node.anchor.offsetTop - node.feed.scrollTop - node.anchorDelta)') <= 1, board.evaluate('node => ({top:node.feed.scrollTop,height:node.feed.clientHeight,total:node.feed.scrollHeight,anchor:node.anchor.offsetTop,delta:node.anchorDelta,main:node.main.clientHeight,host:node.clientHeight})')
+    board.get_by_role('button', name='Load older messages').click()
+    expect(board.locator('.msg').first).to_contain_text('Message 99701')
+    expect(board.locator('.msg')).to_have_count(200)
+    board.evaluate('node => node.load()')
+    expect(board.locator('.msg').first).to_contain_text('Message 99701')
+    expect(board.locator('.msg').last).to_contain_text('Message 99900')
+    board.get_by_role('button', name='Load newer messages').click()
+    expect(board.locator('.msg').last).to_contain_text('Message 100000')
+    expect(board.locator('.msg').first).to_contain_text('Message 99801')
+    assert (99900, 0) in calls
+    board.get_by_role('button', name='Jump to latest').click()
+    expect(board.locator('.msg').last).to_contain_text('Message 100000')
+    browser.locator('#chat-new').click()
+    assert board.evaluate('node => node.stopped')

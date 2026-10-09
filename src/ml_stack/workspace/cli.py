@@ -22,6 +22,7 @@ from ml_stack.sentinel import human
 from ml_stack.sentinel.human import HumanRequired
 from ml_stack.workspace import (
     agent_filter,
+    attention_cli,
     authority_cli,
     automatic_connection,
     autostart_status,
@@ -295,15 +296,7 @@ def _send(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
 
 
 def _inbox(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
-    if not args.children:
-        roll = None if args.json else ws.board.rollup(token, args.ack)
-        if roll:
-            say(_text(roll))
-        return ws.inbox(token, args.ack, args.limit, args.raw, args.all)
-    if args.ack:
-        raise ValueError("--children shows some of the unread messages, so it cannot --ack")
-    me = ws.auth(token).id
-    return [m for m in ws.inbox(token, False, 0, args.raw, True) if m["from"].startswith(me + "/")]
+    return attention_cli.inbox(args, ws, token, _label(args))
 
 
 def _wait(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
@@ -409,6 +402,7 @@ def _brief(args: argparse.Namespace, ws: Workspace) -> int:
     context, token = _context(args)
     me = context.auth(token).id
     say(onboard.brief(args.name, me, args.registered), end="")
+    attention_cli.helper_brief(context, me, args.name, context.auth(token))
     return 0
 
 
@@ -456,7 +450,7 @@ def _subscribe(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
 
 
 def _digest(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
-    return ws.board.digest(token, args.ack, args.thread)
+    return attention_cli.digest(args, ws, token)
 
 
 def _ttl(text: str) -> float:
@@ -612,6 +606,7 @@ TABLE: tuple[tuple[str, str, list[Any], Handler], ...] = (
     ("task-integrate", "gate, land and clean an independently accepted committed native task", [flag("id")],
      lambda a, w, t: task_integration.integrate(w, t, a.id)),
     *task_source_recovery.TABLE,
+    *attention_cli.TABLE,
     ("inbox", "unread messages, fenced as data", [
         *READ, FOR_AGENT,
         flag("--children", action="store_true", help="only messages from your delegates")],
@@ -648,7 +643,8 @@ TABLE: tuple[tuple[str, str, list[Any], Handler], ...] = (
         flag("--session", default=""), flag("--limit", type=int, default=50)],
      lambda a, w, t: person_view.listing(a.limit, a.session)),
     ("digest", "a bounded summary of digest subscriptions, or of --thread N", [
-        FOR_AGENT, flag("--thread", type=int, default=0), flag("--ack", action="store_true")], _digest),
+        FOR_AGENT, flag("--thread", type=int, default=0), flag("--ack", action="store_true"),
+        attention_cli.STATUS], _digest),
     ("wait", "block until a message arrives", [
         *READ, flag("--timeout", type=float, default=60.0)], _wait),
     ("outbox", "messages you sent, each provisional until every paired device holds it", [FOR_AGENT],

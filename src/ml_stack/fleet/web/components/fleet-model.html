@@ -144,6 +144,9 @@ cluster-view, chat-view, models-view, settings-view, fit-view, data-view, traini
   M.kids = (...nodes) => nodes.flat()
     .filter((n) => n !== null && n !== undefined && n !== false);
 
+  /** The most rows of a list the page carries: every node costs a frame, so a list is cut here, before it is drawn. */
+  M.LIST_MAX = 100;
+
   M.row = (label, why) => el("span", {},
     el("b", {}, label), why ? el("span", { class: "why" }, why) : null);
 

@@ -1,5 +1,5 @@
 """Read-only access to person-enrolled device account membership."""
-from ml_stack.graph.store import GraphStore
+from ml_stack.graph.store import GraphStore, StoreNeedsUpgrade
 from ml_stack.workspace.chain import held
 
 
@@ -14,6 +14,14 @@ def account_in(graph, identity):
 
 
 def account_for(ws, identity):
-    """Absent persisted person bindings remain absent."""
-    with held(ws.base / "device-accounts.lock"), GraphStore(ws.base / "device-accounts.db") as graph:
-        return account_in(graph, identity)
+    """Absent persisted person bindings remain absent; the store is opened read-only, so a lookup writes nothing."""
+    database = ws.base / "device-accounts.db"
+    if not database.exists():
+        return None
+    with held(ws.base / "device-accounts.lock"):
+        try:
+            graph = GraphStore(database, read_only=True)
+        except StoreNeedsUpgrade:
+            graph = GraphStore(database)
+        with graph:
+            return account_in(graph, identity)

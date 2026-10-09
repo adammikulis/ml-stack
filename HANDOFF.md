@@ -17,6 +17,12 @@
 - **`authority_machine` removal (`4ee616e7`) is unverified on two real machines**: discovery, certificate pinning and the host-address path are covered by fakes and in-process TLS only. The Projects and Tasks pages were not driven in a browser (browser tests fail on this machine). `board_host` is self-declared and tied to a device only by the pinned certificate.
 - **Owner has not reviewed the `AGENTS.md` rules changes** (authority registry, GPU rule, "The agents push; the owner does not").
 - **Not built, discussed:** attested instructions (one-time hash on UserPromptSubmit, taint tracking for delegated gates) and decision-model screening of board messages at ingest.
+- **Home pool, slices 1-12 not started** (`docs/home-pool.md`, section 3): tailnet IPv4 route display, device capability block with a `Requires` filter, board-fed landing queue, phone person credential, remote test runner, mesh board stage 1, remote-broker lease, phone capabilities, pool MCP tools, Tailscale prepare/verify, PWA client, wake and idle unload. Start with slices 1, 2 and 3 (independent). The tailnet IPv4 admission in `Invitations.mint`, `companion_routes` and `invite_routes` is fixed; the route display per device is not.
+- **Pool encryption slices not started, in this order** (`docs/pool-encryption.md`, section 5, decisions 8.1): remove `ML_STACK_FLEET_TLS=off` and `http://` LAN project hosts and seal streams (1); per-device keys, signed membership and per-device revocation (2); TLS 1.3 mutual with pinned per-device certificates (2b); end-to-end DMs and notes via HPKE (4); encrypted-at-rest for the cluster key, TLS key and board graph (3); guest tenancy G1-G5 (Level 1 only unless attestation hardware is bought).
+- **Blocked until the product takes off: anything needing a paid Apple developer account** (owner constraint 2026-10-08): app attest or a signed helper, Level 2 guest tenancy on Apple silicon, secure enclave keys through a signed app, notarized or signed macOS and iOS builds for others, a native iPhone app, TestFlight, APNs push. Unblocked: PWA over HTTPS over Tailscale for phones, sideloaded Android app, unsigned local Mac builds, Level 1 guest tenancy (`docs/pool-encryption.md` section 8.1).
+- **Fleet jobs cannot run tests** (the `fleet/commands.py` allowlist has no test kind) and there is no pool-wide test dispatch; `docs/home-pool.md` slice 5 is the design.
+- **No idle unload and no Wake-on-LAN** for pool devices (`docs/home-pool.md` slice 12).
+- **A phone needs a person-credentialed device kind**: person-session routes are loopback-only (`host_ok` refuses a DNS Host and a `tailscale serve` proxy arrives as loopback), so slice 4 must add the kind before the PWA or a remote phone can command anything.
 
 - **The agent sandbox is staged, not installed or measured** (`docs/agent-sandbox.md`, `scripts/agent-sandbox`). The owner runs the fifteen acceptance steps; every sandboxed result in the compatibility matrix is predicted. Open design gaps: the workspace CLI writes `~/.ml-stack/workspace` from the agent's own process, so a sandboxed agent that may announce may also edit board files (needs the CLI to go through the daemon with `workspace/` read-only to agents); `testslots_rpc` binds an ephemeral loopback port that Linux and WSL cannot allow-list (needs a configurable fixed port); Codex's workspace-write cannot deny `.git/config` and `.git/hooks` in the shared git directory.
 
@@ -42,6 +48,20 @@
   - Three `project_connection` / remote failures still need tracing (see the baseline list in the batch 2 report).
   - Hook diagnostics `post.reader-timeout` and `host not authenticated by cluster discovery` entries are untouched.
 - **Runtime cost.** `ml-stack runtime ensure --settle` has not run end to end on a real checkout.
+
+## Deferred by the third landing batch (2026-10-08)
+
+- **UI publication stack.**
+  - `GET /ui/board/agents` takes 4-8 s for 43 agents because `registered()` opens a store per agent; board routes are still O(N) in the verified log read.
+  - The python launcher `_health` accepts any JSON dict.
+  - `fix/poolside-chat-capabilities` was not brought in.
+  - Not driven for real: the Tauri window, an MLX run in Studio, runtime repair.
+  - The Development pool sign-in (the `local-session` route, its screen and pool scoping) was dropped because launch tickets replaced it; a pool choice after sign-out needs a new design on the ticket model.
+  - About 22 older UI browser tests drift from the current page (credentials, invites, model_tasks, pool_browser, sdk_chat, simple_controls, workspace_browser, startup_model_page, tasks_ui, agent_controls, workspace_board_ui).
+- **Disk writes (`docs/disk-writes.md`, "What remains").** `claude-edit-guard` rewrites its whole index (4.5 s, 0.75 MB) after any `src/ml_stack` edit and agents may not edit it, so the HEAD-keyed index is the owner's change; bytes per SQLite/ladybug touch need `fs_usage` under sudo; `HEARTBEAT_S` for task leases needs a liveness decision.
+- **Earned trust (`docs/earned-trust.md`).** Section 8 slices (landing record M1, reviewer concentration M7, suspension rules, signed-head anchor in the keystore, coordinator eligibility from the ledger) are not built; the owner decisions are recorded in section 9 and its wording for AGENTS.md (section 10) is not yet added.
+- **Service and home pool (`docs/service.md`, `docs/home-pool.md`, `docs/pool-encryption.md`).** Plans only; the section 8 checklist items marked Violates (one cluster key, one account per device, no tenant id) are open.
+- **Coordination plumbing.** The lead-answer rule is in AGENTS.md; whether the claude-lead-attention hook nudges often enough is unmeasured.
 
 ## Autostart units (prepare and install)
 

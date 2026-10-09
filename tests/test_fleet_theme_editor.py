@@ -22,7 +22,7 @@ def test_theme_selector_preview_save_reload_reset_and_delete(joined, open_page):
     page, errors = open_page(joined, cookie=joined.cookie, path='/ui/#settings')
     mount_editor(page)
     page.get_by_role('button', name='Poolside Light', exact=True).click()
-    page.wait_for_function("document.querySelector('theme-editor select').value === 'light'")
+    page.wait_for_function("() => document.querySelector('theme-editor select').value === 'light'")
     page.locator('theme-editor summary').click()
     page.get_by_label('Pink accent', exact=True).fill('#aa3377')
     page.get_by_label('Interface font size').fill('17')
@@ -35,7 +35,7 @@ def test_theme_selector_preview_save_reload_reset_and_delete(joined, open_page):
     _, current, _ = joined.call('/ui/settings', cookie=joined.cookie)
     assert current['settings']['appearance']['active_theme'] == 'light'
     page.get_by_role('button', name='Save theme', exact=True).click()
-    page.wait_for_function("document.querySelector('theme-editor select').value === 'custom-1'")
+    page.wait_for_function("() => document.querySelector('theme-editor select').value === 'custom-1'")
     _, saved, _ = joined.call('/ui/settings', cookie=joined.cookie)
     assert saved['resolved_theme']['colors']['pink'] == '#aa3377'
     assert saved['resolved_theme']['font_size'] == 17
@@ -50,12 +50,12 @@ def test_theme_selector_preview_save_reload_reset_and_delete(joined, open_page):
     _, unchanged, _ = joined.call('/ui/settings', cookie=joined.cookie)
     assert unchanged['settings']['appearance'] == saved['settings']['appearance']
     page.get_by_role('button', name='Reset to preset', exact=True).click()
-    page.wait_for_function("document.querySelector('theme-editor select').value === 'light'")
+    page.wait_for_function("() => document.querySelector('theme-editor select').value === 'light'")
     assert page.get_by_label('Pink accent', exact=True).input_value() == '#ff5fa2'
     page.get_by_label('Saved theme').select_option('custom-1')
     page.get_by_role('button', name='Delete custom theme', exact=True).wait_for()
     page.get_by_role('button', name='Delete custom theme', exact=True).click()
-    page.wait_for_function("document.querySelector('theme-editor select').value === 'light'")
+    page.wait_for_function("() => document.querySelector('theme-editor select').value === 'light'")
     _, deleted, _ = joined.call('/ui/settings', cookie=joined.cookie)
     assert deleted['settings']['appearance']['saved_themes'] == []
     assert not errors

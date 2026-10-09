@@ -263,3 +263,19 @@ def test_android_device_controls_reject_foreign_authority_without_revocation(enr
     assert ui_route(route)
     assert replies[-1][0] == (400 if change == "oversize" else 405 if change == "method" else 403)
     assert store.authorize(grant["token"])
+
+
+@pytest.mark.parametrize("address,accepted", [("100.101.1.2", True), ("fd7a:115c:a1e0::1", True), ("8.8.8.8", False)])
+def test_tailnet_address_enrolls_and_connects_but_public_does_not(enrolled, address, accepted):
+    store, grant, _, _ = enrolled
+    host = f"[{address}]" if ":" in address else address
+    tailnet = Invitations(lambda: [Membership("lab", CLUSTER_KEY)], lambda: (f"https://{host}:8770", "a" * 64))
+    if accepted:
+        assert tailnet.mint("lab", "android")["invite"]
+    else:
+        with pytest.raises(ValueError, match="reachable LAN TLS listener"):
+            tailnet.mint("lab", "android")
+    request = handler(grant)
+    request.client_address = (address, 4)
+    assert companion_routes.answer(ui(store), request)
+    assert (request.replies[0][0] == 200) is accepted

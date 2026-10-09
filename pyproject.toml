@@ -61,6 +61,7 @@ memory = ["cryptography>=50", "keyring>=24"]
 # through their own layer classes
 spec = ["mlx>=0.32.2", "mlx-lm>=0.31.3", "mlx-vlm>=0.7.1", "numpy>=1.24", "huggingface_hub>=1.32"]
 train = ["numpy>=1.24", "safetensors>=0.4"]
+train-mlx = ["ml-stack[train,mlx]", "mlx-lm>=0.31.3", "huggingface_hub>=1.32"]
 # a LoRA rather than a full fine-tune: two small matrices on each projection, the
 # base frozen. What makes an 8B tool caller trainable on one machine, where a full
 # fine-tune of it would need ~128G of optimizer state.

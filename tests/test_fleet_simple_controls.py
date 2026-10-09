@@ -91,7 +91,7 @@ def test_interactive_chat_command_is_given_to_the_person_without_a_job(joined, o
     runner.locator('details summary').click()
     runner.get_by_label('Arguments as JSON array',exact=True).fill('[]')
     runner.get_by_role('button',name='Run command',exact=True).click()
-    page.wait_for_function("document.querySelector('tools-view #runner pre').textContent.includes('Run this command in your own terminal')")
+    page.wait_for_function("() => document.querySelector('tools-view #runner pre').textContent.includes('Run this command in your own terminal')")
     assert 'ml-stack-chat' in runner.locator('pre').inner_text()
     assert runner.locator('#runner-status').is_visible()
     assert 'human-only' in runner.locator('#runner-status').inner_text()

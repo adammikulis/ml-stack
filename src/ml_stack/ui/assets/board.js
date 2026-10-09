@@ -2,10 +2,13 @@
    Every string from the route is shown as text after control and bidirectional characters are
    removed; nothing is parsed as markup and the only link is a file's download (an attachment, never shown inline). The page holds no token. */
 import { MlElement, define, h } from "./base.js";
+import { loadPage, messageRoute, pageControls, renderFeed } from "./board-pages.js";
 import { INTEGRATED_STYLES } from "./board-styles.js";
+import "./composer.js";
 
 const HIDDEN = /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff]/g;
 const BODY_MAX = 4000;
+const NAV_MAX = 100; // every node costs a frame: a list is cut before it is drawn, never after
 const LINE_MAX = 200;
 const POLL_MIN = 3000;
 const POLL_MAX = 60000;
@@ -109,7 +112,8 @@ class MlBoard extends MlElement {
     this.nav = h("nav", { "aria-label": "Boards and conversations" });
     this.feed = h("div", { "aria-live": "polite" });
     this.compose = h("div", {});
-    this.main = h("main", {}, this.feed, this.compose);
+    this.history = h("div", {class:"history"});
+    this.main = h("main", {}, this.feed, this.history, this.compose);
     this.root.append(h("div", { class: "shell" }, this.nav, this.main));
   }
 
@@ -125,6 +129,17 @@ class MlBoard extends MlElement {
     this.loadRevision = (this.loadRevision || 0) + 1;
     clearTimeout(this.timer);
     for (const controller of this.requests) controller.abort();
+  }
+
+  setActive(active) {
+    if (this.stopped === !active) return;
+    this.stopped = !active;
+    clearTimeout(this.timer);
+    if (!active) {
+      this.loadRevision = (this.loadRevision || 0) + 1; this.viewRevision++;
+      for (const controller of this.requests) controller.abort();
+    }
+    else { this.load(); this.schedule(); }
   }
 
   base() {
@@ -168,6 +183,9 @@ class MlBoard extends MlElement {
 
   async request(route, params = {}, document = null) {
     const controller = new AbortController();
+    if (["messages", "threads", "thread", "dm"].includes(route)) {
+      this.viewRequest?.abort(); this.viewRequest = controller;
+    }
     this.requests.add(controller);
     const query = new URLSearchParams(params).toString();
     try {
@@ -218,6 +236,7 @@ class MlBoard extends MlElement {
       this.boards = b.boards ?? [];
       this.dms = d.conversations ?? [];
       try { this.agents = (await this.get("agents")).agents || []; } catch { this.agents = []; }
+      if (revision !== this.loadRevision || this.stopped) return;
       this.error = "";
       this.personSetupRequired = false;
       const view = this.view.kind === "none" && this.boards.length
@@ -243,11 +262,14 @@ class MlBoard extends MlElement {
     if (render) { this.loading = true; this.items = []; this.update(); }
     try {
       let items = [];
-      if (view.kind === "board") items = this.channelTab === "messages"
-        ? (await this.get("messages", {board:view.name})).messages
-        : (await this.get("threads", {board:view.name})).threads;
-      else if (view.kind === "thread") items = (await this.get("thread", {root:view.root})).messages;
-      else if (view.kind === "dm") items = (await this.get("dm", {a:view.a, b:view.b})).messages;
+      if (messageRoute(this)) {
+        if (render || !this.page?.has_newer) {
+          await loadPage(this, !render && this.items.length ? "newer" : "latest");
+        }
+        items = this.items;
+      } else if (view.kind === "board") {
+        items = (await this.get("threads", {board:view.name})).threads;
+      }
       if (revision !== this.viewRevision) return;
       this.items = items || [];
       this.error = "";
@@ -274,28 +296,35 @@ class MlBoard extends MlElement {
 
   update() {
     if (!this.nav) return;
-    this.emit("board-navigation", {boards:this.boards, dms:this.dms, agents:this.agents,
-      me:this.me, view:this.view, personSetupRequired:this.personSetupRequired === true, error:this.error || ""});
+    const navigation = {boards:this.boards, dms:this.dms, agents:this.agents,
+      me:this.me, view:this.view, personSetupRequired:this.personSetupRequired === true, error:this.error || ""};
+    const navigationKey = JSON.stringify(navigation);
+    if (navigationKey !== this.navigationKey) {
+      this.navigationKey = navigationKey; this.emit("board-navigation", navigation);
+    }
     const item = (label, count, current, onclick, title = "") => h("button", {title,
       type: "button", "aria-current": current ? "true" : null, onclick },
     h("span", {}, line(label, 160)), count ? h("span", { class: "count" }, String(count)) : null);
     this.nav.replaceChildren(
       h("h3", {}, "Channels"),
-      ...this.boards.map((b) => item(b.name, b.unread, this.view.name === b.name || this.view.board === b.name,
+      ...this.boards.slice(0, NAV_MAX).map((b) => item(b.name, b.unread, this.view.name === b.name || this.view.board === b.name,
         () => this.open({ kind: "board", name: b.name }))),
       h("h3", {}, "Direct messages"),
       ...(this.readonly || !this.me ? [] : [this.newDm()]),
-      ...this.dms.map((c) => item(`${c.a} and ${c.b}`, c.unread,
+      ...this.dms.slice(0, NAV_MAX).map((c) => item(`${c.a} and ${c.b}`, c.unread,
         this.view.kind === "dm" && this.view.a === c.a && this.view.b === c.b,
         () => this.open({ kind: "dm", a: c.a, b: c.b }))),
-      ...(this.agents.length ? [h("h3", {}, "Agents"), ...this.agents.map(agent =>
+      ...(this.agents.length ? [h("h3", {}, "Agents"), ...this.agents.slice(0, NAV_MAX).map(agent =>
         item(agent.display_name || agent.id, 0, this.view.kind === "dm" && [this.view.a, this.view.b].includes(agent.id),
           () => this.open({kind:"dm", a:this.me, b:agent.id}), `${agent.id} · ${agent.device?.verification || "unknown"}`))] : []));
-    this.feed.replaceChildren(...this.pane());
-    const key = JSON.stringify([this.target(), this.readonly, this.draft.error, Boolean(this.error), this.loading]);
+    renderFeed(this, this.pane());
+    const controls = pageControls(this);
+    this.history.replaceChildren(...(controls ? [controls] : []));
+    // the draft a conversation was opened with decides the composer too: one built before it was read is stale
+    const key = JSON.stringify([this.target(), this.readonly, this.draft.error, this.draftKey]);
     if (key !== this.composerKey) {
       this.composerKey = key;
-      const node = this.error ? null : this.composer();
+      const node = this.composer();
       this.compose.replaceChildren(...(node ? [node] : []));
     }
   }
@@ -326,26 +355,29 @@ class MlBoard extends MlElement {
 
   composer() {
     const to = this.target();
-    if (this.readonly || !to || this.loading) return null;
+    if (this.readonly || !to) return null;
     const text = h("textarea", { "aria-label": "Message", maxlength: String(POST_MAX) });
     text.value = this.draft.body;
     text.addEventListener("input", () => { this.draft.body = text.value; this.rememberDraft(); });
     const subject = this.view.kind === "board" ? h("input", { type: "text", maxlength: "200", "aria-label": "Subject",
       placeholder: "subject (optional)", value: this.draft.subject }) : null;
     subject?.addEventListener("input", () => { this.draft.subject = subject.value; this.rememberDraft(); });
-    const go = h("button", { type: "button" }, "Send");
+    const go = h("button", { type: "button", "data-composer-send":"" }, "Send");
     const post = async () => {
       if (go.disabled || !text.value.trim()) return;
       const targetKey = JSON.stringify(to);
+      const submitted = {body:text.value, subject:subject ? subject.value : ""};
       go.disabled = true; go.textContent = "Sending…";
       try {
-        await this.send({ ...to, body: text.value, subject: subject ? subject.value : "" });
-        const cleared = {body:"", subject:"", error:""};
+        await this.send({...to, ...submitted});
+        const saved = this.drafts.get(targetKey) || submitted;
+        const cleared = saved.body === submitted.body && saved.subject === submitted.subject
+          ? {body:"", subject:"", error:""} : {...saved, error:""};
         this.drafts.set(targetKey, cleared);
         if (JSON.stringify(this.target()) === targetKey) this.draft = cleared;
         this.rememberDraft();
-        text.value = "";
-        if (subject) subject.value = "";
+        text.value = cleared.body;
+        if (subject) subject.value = cleared.subject;
         go.disabled = false; go.textContent = "Send";
         await this.load();
       } catch (e) {
@@ -356,10 +388,11 @@ class MlBoard extends MlElement {
         this.update();
       }
     };
-    go.addEventListener("click", post);
-    text.addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); post(); } });
-    return h("div", { class: "composer" }, subject, text, go,
+    const node = h("ml-composer", {class:"composer", recipient:this.view.kind === "thread"
+      ? `Reply in ${to.to}` : `Message ${to.to}`}, subject, text, go,
       this.draft.error ? h("div", { class: "err", role: "alert" }, this.draft.error) : null);
+    node.addEventListener("composer-send", post);
+    return node;
   }
 
   pane() {
@@ -385,7 +418,7 @@ class MlBoard extends MlElement {
         `Back to ${line(v.board, 60)}`) : null;
     const display = id => this.agents.find(agent => agent.id === id)?.display_name || id;
     const title = v.kind === "dm" ? `${line(display(v.a), 160)} and ${line(display(v.b), 160)}` : `Thread ${Number(v.root) || ""}`;
-    return [back, this.title(title, this.readonly ? "read only" : "live", v.kind === "dm" ? `${v.a} and ${v.b}` : ""),
+    return [...(back ? [back] : []), this.title(title, this.readonly ? "read only" : "live", v.kind === "dm" ? `${v.a} and ${v.b}` : ""),
       ...this.messages(v.kind === "dm" ? v.a : "")];
   }
 
@@ -405,7 +438,7 @@ class MlBoard extends MlElement {
 
   messages(first) {
     if (!this.items.length) return [h("p", { class: "state" }, "No messages.")];
-    return this.items.map((m) => h("article", { class: `msg${first && m.from === first ? " sent" : ""}` },
+    return this.items.map((m) => h("article", { class: `msg${first && m.from === first ? " sent" : ""}`, "data-seq":String(m.seq) },
       h("div", { class: "who", title:m.from }, `${line(m.display_name || m.from, 160)}`,
         m.role === "human" ? null : h("span", { class: "meta" }, ` (${m.model ? `${line(m.model, 80)}, ${line(m.model_state, 12)}` : "model unknown"})`),
         h("span", { class: "meta" }, `  ${line(m.type, 16)}, ${when(m.ts)}${m.held ? ", held in quarantine" : ""}`)),
