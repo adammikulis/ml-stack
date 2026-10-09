@@ -2,6 +2,7 @@
 
 import contextlib
 import http.client as httpclient
+import ipaddress
 import socket
 import ssl
 import threading
@@ -58,7 +59,7 @@ class Relay:
     def __init__(self, target: tuple[str, int]) -> None:
         self.target, self.seen = target, bytearray()
         self.sock = socket.socket()
-        self.sock.bind((target[0], 0))
+        self.sock.bind((str(ipaddress.ip_address(target[0])), 0))
         self.sock.listen(8)
         self.port = self.sock.getsockname()[1]
         threading.Thread(target=self._accept, daemon=True).start()

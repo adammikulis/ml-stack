@@ -77,7 +77,7 @@ class EndpointBank:
     def reserve(self, kind: str, address: str) -> None:
         listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
-            listener.bind((address, 0))
+            listener.bind((str(ipaddress.ip_address(address)), 0))
             listener.listen(16)
         except BaseException:
             listener.close()

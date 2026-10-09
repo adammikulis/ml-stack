@@ -1,7 +1,9 @@
 """Finding pairable machines: announcements in, a bounded and aging list out."""
 
+import ipaddress
 import json
 
+import pytest
 from onboard_support import Clock, Recorder
 
 from ml_stack.fleet.onboard import nearby as near
@@ -40,6 +42,16 @@ def test_announcement_over_real_udp_sockets_on_loopback():
     finally:
         sender.close()
         listener.close()
+
+
+def test_no_address_given_listens_on_the_unspecified_ipv4_address_and_a_bad_one_is_refused():
+    open_ear = near.UdpTransport(port=0, destinations=[])
+    try:
+        assert open_ear.sock.getsockname()[0] == str(ipaddress.IPv4Address(0))
+    finally:
+        open_ear.close()
+    with pytest.raises(ValueError):
+        near.UdpTransport(bind="not-an-address", port=0, destinations=[])
 
 
 def test_the_address_is_the_datagrams_source_never_a_claimed_one():

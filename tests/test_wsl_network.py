@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import socket
 import threading
@@ -26,7 +27,7 @@ def bridge(monkeypatch):
     if not target_host or target_host.startswith("127."):
         pytest.skip("the relay test needs a locally assigned LAN IPv4 address")
     with socket.socket() as reserved:
-        reserved.bind((target_host, 0))
+        reserved.bind((str(ipaddress.ip_address(target_host)), 0))
         target = reserved.getsockname()
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as reserved:
         reserved.bind(("127.0.0.1", 0))
@@ -34,6 +35,11 @@ def bridge(monkeypatch):
     with wsl_network.NetworkBridge("127.0.0.1", target, discovery.DEFAULT_GROUP, port, native_socket) as service:
         monkeypatch.setenv(wsl_network.ENV, service.config)
         yield service
+
+
+def test_a_bridge_without_a_lan_address_refuses_to_listen_on_every_interface():
+    with pytest.raises(ValueError):
+        wsl_network.NetworkBridge("", ("127.0.0.1", 9), discovery.DEFAULT_GROUP, 0, native_socket).start()
 
 
 def test_udp_bridge_preserves_payload_and_peer_address(bridge):
