@@ -17,6 +17,8 @@ from ml_stack.fleet.framing import LimitedServer
 from ml_stack.fleet.jobs import JobRunner
 from ml_stack.fleet.pool_roster import Pool
 
+SPARE = macauth.PREFIX + "a-secret-no-cluster-key-made"
+"""A request secret the daemon accepts that is derived from no cluster, so only the certificate decides."""
 GONE = (ssl.SSLError, OSError, httpclient.HTTPException, http.ServerUnreachable)
 
 
@@ -96,7 +98,7 @@ def served(tmp_path):
     (root / "files").mkdir(parents=True)
     runner = JobRunner(root)
     daemon = Daemon(runner, root / "files", derive_token(key), name="server", cluster_key_path=keyfile,
-                    tokens=lambda: {derive_token(m.key) for m in memberships(keyfile)}, members=pool)
+                    tokens=lambda: {derive_token(m.key) for m in memberships(keyfile)} | {SPARE}, members=pool)
     handler = make_handler(daemon)
     handler.protocol_version = "HTTP/1.1"
     httpd = LimitedServer(("127.0.0.1", 0), handler, tls=tls.member_context(server.ident, pool))
@@ -168,6 +170,15 @@ def test_a_revoked_device_is_refused_at_its_next_request_on_a_live_session(serve
     assert status == 403 and "not a member" in answer["error"]
 
 
+def test_the_certificate_alone_refuses_a_revoked_device_when_the_secret_names_no_cluster(served, tmp_path):
+    one = enrolled(served, tmp_path, "alpha")
+    conn = served.connect(one)
+    assert served.get(conn, "/fleet/v1/self", secret=SPARE)[0] == 200
+    served.pool.revoke(one.ident.fingerprint, "owner")
+    status, answer = served.get(conn, "/fleet/v1/self", secret=SPARE)
+    assert status == 403 and "not a member" in answer["error"]
+
+
 def test_a_revoked_device_fails_the_next_handshake_too(served, tmp_path):
     one = enrolled(served, tmp_path, "alpha")
     first = served.connect(one)
@@ -214,6 +225,8 @@ def test_a_stale_peer_cannot_bring_a_revoked_device_back(served, tmp_path):
     stale = [d.public() for d in served.pool.roster("lab").devices()]
     served.pool.revoke(one.ident.fingerprint, "owner")
     assert served.pool.merge("lab", stale, "peer") == 0
+    later = [{**row, "at": row["at"] + 3600} for row in stale]
+    assert served.pool.merge("lab", later, "peer") == 0
     assert not served.pool.is_active(one.ident.fingerprint)
 
 
