@@ -8,7 +8,6 @@ with the new tip and re-gated before it is tried again.
 
 from __future__ import annotations
 
-import fcntl
 import os
 from pathlib import Path
 
@@ -17,6 +16,7 @@ import land_finish
 import land_git as lg
 import land_run
 
+from ml_stack import lock as filelock
 from ml_stack.activity.gate import tree_hash
 
 PUSH_TRIES = 3
@@ -30,36 +30,33 @@ class RunnerLock:
         folder = lg.common_dir(root) / "land"
         folder.mkdir(exist_ok=True)
         self.path = folder / "runner.lock"
-        self.handle = None
+        self.fd: int | None = None
 
     def acquire(self) -> bool:
         """Take the lock; false when another runner process holds it. Idempotent for the holder."""
-        if self.handle is not None:
+        if self.fd is not None:
             return True
-        handle = self.path.open("a+")
-        try:
-            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
-            handle.close()
+        fd = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o644)
+        if not filelock.take(fd):
+            os.close(fd)
             return False
-        handle.seek(0)
-        handle.truncate()
-        handle.write(f"{os.getpid()}\n")
-        handle.flush()
-        self.handle = handle
+        os.ftruncate(fd, 0)
+        os.write(fd, f"pid {os.getpid()}".encode())
+        self.fd = fd
         return True
 
     def release(self) -> None:
         """Give the lock up."""
-        if self.handle is not None:
-            self.handle.close()
-            self.handle = None
+        if self.fd is not None:
+            os.ftruncate(self.fd, 0)
+            filelock.release(self.fd)
+            os.close(self.fd)
+            self.fd = None
 
 
 def holder(root: Path) -> str:
-    """The pid written by the process that holds the runner lock, for a message."""
-    path = lg.common_dir(root) / "land" / "runner.lock"
-    return path.read_text(encoding="utf-8").strip() if path.exists() else ""
+    """Who holds the runner lock, as ``pid N``, for a message."""
+    return filelock.held_by(lg.common_dir(root) / "land" / "runner.lock")
 
 
 def sweep(root: Path) -> list[str]:

@@ -202,7 +202,7 @@ class Runner:
         """One pass over the queue; a summary of what happened."""
         who = self.ws.auth(self.token).id
         if not self.lock.acquire():
-            return {"status": "runner-held", "owner": f"another runner process, pid {recover.holder(self.root)}"}
+            return {"status": "runner-held", "owner": f"another runner process ({recover.holder(self.root)})"}
         try:
             self.ws.claim(self.token, *landing.runner_claim(self.ws, self.target), pid=os.getpid())
         except Conflict as held:

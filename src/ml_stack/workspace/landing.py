@@ -7,16 +7,19 @@ names one branch and one exact commit; a new request for the same branch superse
 
 from __future__ import annotations
 
+import json
 import re
+from pathlib import Path
 from typing import Any
 
 from ml_stack.devbranch import development_branch
 from ml_stack.workspace.chain import ChainLog, held
+from ml_stack.workspace.claims import alive
 from ml_stack.workspace.identity import AGENT, HUMAN, LEAD, Denied, Identity
 from ml_stack.workspace.model_tiers import tier_of
 
 __all__ = ["Queue", "beat", "brake", "cancel", "eligible", "fold", "identity_of", "log",
-           "request", "review", "runner_claim", "standing", "status_lines", "transition"]
+           "request", "review", "runner_claim", "standing", "status_lines", "supervisor_state", "transition"]
 
 SHA = re.compile(r"[0-9a-f]{40}")
 NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,127}")
@@ -24,6 +27,7 @@ OPEN = ("queued", "needs-review", "running")
 TERMINAL = ("landed", "landed-unpushed", "failed", "needs-human", "refused", "cancelled", "superseded")
 MAX_SELECTORS = 64
 MAX_TEXT = 400
+SUPERVISOR_STATUS = "land-runner.json"
 
 
 def log(ws) -> ChainLog:
@@ -255,6 +259,28 @@ def standing(ws, req: dict[str, Any]) -> str:
     return "" if "accept" in live.values() else "needs review: no live independent accept"
 
 
+def supervisor_state(base: Path) -> dict[str, Any]:
+    """What the runner's supervisor last recorded in the workspace at ``base``, with ``alive`` from its pid.
+
+    Empty when no supervisor ever started here.
+    """
+    try:
+        row = json.loads((base / SUPERVISOR_STATUS).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    pid = int(row.get("supervisor") or 0)
+    return {**row, "alive": pid > 0 and alive(pid)}
+
+
+def supervisor_line(base: Path) -> str:
+    """One line for ``digest --status``: whether the runner is kept alive, and how to start it."""
+    now = supervisor_state(base)
+    if not now.get("alive"):
+        return "Runner supervisor: NOT RUNNING; start it with scripts/land up"
+    return f"Runner supervisor: up (pid {now['supervisor']}), {now.get('restarts', 0)} restarts, " \
+           f"{now.get('state', '')}; log {now.get('log', '')}"
+
+
 def status_lines(ws) -> list[str]:
     """The queue and the current gate as plain lines for ``digest --status``."""
     queue = fold(ws)
@@ -266,4 +292,4 @@ def status_lines(ws) -> list[str]:
     rows = [f"{r['id']} {r['branch']}@{r['sha'][:8]} by {r['by']}: {r['status']}"
             f"{' - ' + r['detail'] if r['detail'] else ''}"
             for r in queue.requests.values() if r["status"] in OPEN or r["status"] == "needs-human"]
-    return [head, *(rows or ["(queue empty)"])]
+    return [head, supervisor_line(ws.base), *(rows or ["(queue empty)"])]

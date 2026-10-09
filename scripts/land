@@ -5,6 +5,9 @@
     scripts/land run [--dry-run] BRANCH...    merge in an integration worktree, verify once, eject failures
     scripts/land finish [--apply]             fast-forward the target from the verified batch, clean up
     scripts/land serve [--once]               the board-fed runner: lands reviewed land-requests, pushes only the target
+    scripts/land up                           start the runner under a restart-on-crash supervisor, detached; safe to repeat
+    scripts/land down                         stop the supervisor and the runner cleanly
+    scripts/land status                       whether the supervisor is alive, its restarts and its log
 
 run and plan also take --entries FILE (JSON list of {branch, tip}) and refuse a branch whose tip moved.
 
@@ -29,6 +32,7 @@ import land_finish
 import land_git as lg
 import land_plan
 import land_run
+import land_supervise
 
 from ml_stack.devbranch import development_branch
 
@@ -56,10 +60,25 @@ def show_plan(plan: land_plan.Plan) -> dict:
             "covered": [e.branch for e in plan.covered], "empty": plan.empty, "dirty": plan.dirty}
 
 
+def supervise_command(args: argparse.Namespace, root: Path) -> int:
+    """The supervisor commands; they act on this workspace's runner, not on a branch."""
+    from ml_stack.workspace import Workspace
+
+    base = Workspace().base
+    flags = {"interval": args.interval, "stall_minutes": args.stall_minutes, "remote": args.remote,
+             "target": args.target}
+    if args.command == "supervise":
+        return land_supervise.supervise(base, land_supervise.serve_argv(root, flags))
+    done = {"up": lambda: land_supervise.up(base, root, flags), "down": lambda: land_supervise.down(base),
+            "status": lambda: land_supervise.status(base)}[args.command]()
+    print(land_check.summary_json({"command": args.command, **done}))
+    return 0 if args.command == "status" or done.get("alive") == (args.command == "up") else 1
+
+
 def main() -> int:
     """Parse the command and run it."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", choices=["plan", "run", "finish", "serve"])
+    parser.add_argument("command", choices=["plan", "run", "finish", "serve", "up", "down", "status", "supervise"])
     parser.add_argument("branches", nargs="*")
     parser.add_argument("--cover", action="store_true", help="plan: every local branch with a worktree")
     parser.add_argument("--dry-run", action="store_true", help="run: plan and predict, change nothing")
@@ -76,6 +95,8 @@ def main() -> int:
     args = parser.parse_args()
     root = lg.toplevel(args.repo)
     args.target = args.target or development_branch(root)
+    if args.command in ("up", "down", "status", "supervise"):
+        return supervise_command(args, root)
     if args.command == "serve":
         flags = {"once": args.once, "interval": args.interval, "remote": args.remote,
                  "stall_minutes": args.stall_minutes}
