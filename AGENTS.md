@@ -246,8 +246,11 @@ git worktree add -b <branch> ../ml-stack-<branch> "$(git -C ../ml-stack branch -
 A new worktree has no `dist/`, and one test builds a real environment out of it: run
 `python packaging/build.py` there before trusting a full test run.
 
-Never use an editable install. Live runtimes use an immutable built wheel or pinned runtime tree
-with matching distribution metadata. Never point a running worker at a changing checkout.
+The development Python (plain `python3`, tests, scripts) may be an editable install of the primary
+checkout, so it follows what is merged; pip rewrites the `ml-stack*` launchers when it installs, so
+restore them from a backup or with `ml-stack runtime ensure`. Live runtimes use an immutable built wheel
+or pinned runtime tree with matching distribution metadata. Never point a running worker at a changing
+checkout.
 Replace only owned processes at a coordinated safe boundary, preserving their identity and
 setup; do not interrupt another process's active work.
 
