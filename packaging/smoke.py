@@ -76,12 +76,17 @@ def first_run(page: Page, name: str, passphrase: str, group: str) -> None:
 
 
 def sign_in(page: Page, passphrase: str) -> None:
-    """Types the passphrase if the page asks for it, and waits for the cluster screen."""
-    page.wait_for_selector("#signin:not([hidden]), #cluster:not([hidden])")
+    """Types the passphrase if the page asks for it, and waits for a screen of the signed-in app.
+
+    Finishing setup leaves the page signed in on the chat screen; a page that was signed out
+    asks for the passphrase first.
+    """
+    signed_in = "#chat:not([hidden]), #cluster:not([hidden])"
+    page.wait_for_selector(f"#signin:not([hidden]), {signed_in}")
     if page.locator("#signin:not([hidden])").count():
         page.fill("#p", passphrase)
         page.click("#signin-go")
-    page.wait_for_selector("#cluster:not([hidden])")
+    page.wait_for_selector(signed_in)
 
 
 def every_screen(page: Page) -> None:
