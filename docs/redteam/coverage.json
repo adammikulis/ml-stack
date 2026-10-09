@@ -1,8 +1,8 @@
 {
- "surfaces": 841,
+ "surfaces": 843,
  "by_status": {
   "covered": 516,
-  "partial": 197,
+  "partial": 199,
   "uncovered": 53,
   "n/a": 75,
   "unmapped": 0
@@ -101,7 +101,7 @@
   },
   "spawn": {
    "covered": 64,
-   "partial": 60,
+   "partial": 62,
    "uncovered": 0,
    "n/a": 2,
    "unmapped": 0
@@ -11591,6 +11591,18 @@
    "note": "Pi runs offline with ml-stack's tool-policy extension and an explicit local model endpoint"
   },
   {
+   "id": "spawn:platform.py:_windows_sid",
+   "kind": "spawn",
+   "source": "platform.py:_windows_sid",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "partial",
+   "tests": [
+    "tests/test_redteam_spawn.py::test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line"
+   ],
+   "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
+  },
+  {
    "id": "spawn:platform.py:launch",
    "kind": "spawn",
    "source": "platform.py:launch",
@@ -11608,6 +11620,18 @@
    "id": "spawn:platform.py:open_path",
    "kind": "spawn",
    "source": "platform.py:open_path",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "partial",
+   "tests": [
+    "tests/test_redteam_spawn.py::test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line"
+   ],
+   "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
+  },
+  {
+   "id": "spawn:platform.py:private_dir",
+   "kind": "spawn",
+   "source": "platform.py:private_dir",
    "trust": "arguments built from model output, peer messages or file names",
    "attacker": "attacker text becomes a command line, environment or working directory",
    "status": "partial",
