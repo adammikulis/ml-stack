@@ -38,9 +38,9 @@ rules in AGENTS.md, "The main session and its agents".
 ## Subagents and the Agent tool
 
 The Agent tool's worktree isolation provides the worktree half of a subagent brief; the brief
-still names the branch. The `SubagentStart` and `SubagentStop` hooks join and release a
-subagent's workspace access under the lead's identity, so a subagent prompt carries the
-workspace line from AGENTS.md and needs no invite or token. The
+still names the branch. The SubagentStart hook registers the subagent as its own identity under a
+board-assigned name and delivers it in the brief; SubagentStop announces done as the subagent and
+retires it. A subagent prompt carries the workspace line from AGENTS.md and needs no invite or token. The
 `.claude/agents/branch-worker.md` agent is the one-branch worker: it reads AGENTS.md and this
 file, announces, works in its worktree, commits named files and reports. The harness confines it
 to that fresh tree, so `.claude/agents/branch-finisher.md` (no isolation) is the one for a branch

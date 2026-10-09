@@ -26,11 +26,11 @@ specified in a note, not built.
 |---|---|---|---|---|
 | 1 | Read AGENTS.md, then CLAUDE.md; first response names scope and model | prose + `briefing.py` text | c | registry `brief` rules rendered by `briefing.py`/`onboard.brief` |
 | 2 | "If I can't use it, it's not done"; activation owner | prose + `docs/tasks.md` completion gate | e (a for the task gate) | judgment line in block; task gate stays code |
-| 3 | Managed workers get no extra permissions; labelled helper acts as parent | code (`identity`, `agent_display`) | a | stays code, registry row with test refs |
+| 3 | Managed workers get no extra permissions; a spawned subagent is its own identity under its parent | code (`identity`, `agent_display`) | a | stays code, registry row with test refs |
 | 4 | Subagent prompt carries the workspace line | `onboard.BRIEF` text | c | generated from registry |
 | 5 | Main session coordinates; subagents never elect themselves | prose; design (`session-liveness` 4-5) | a | coordinator lease code |
 | 6 | Lowest model tier never coordinates; unknown model ineligible | design | a (table: d) | `model_tiers` loader hard; table content is the project's |
-| 7 | `hello-model`, announce joined/done, 200-char lines, 6 per 10 min | code (`limits`, hooks announce) | a | code |
+| 7 | announce joined/done, 200-char lines, 6 per 10 min | code (`limits`, hooks announce) | a | code |
 | 8 | Read the inbox first | `claude-session-start` | b | `ml-stack-policy hook session-start` |
 | 9 | Claims before mutating; no stealing a live claim | code (`claims`, harness reserve) | a | code; hard |
 | 10 | Named-file staging, no `git add -A`/`commit -a` | `claude-bash-guard` | b | packaged bash guard |
@@ -300,7 +300,7 @@ block and refuses when the resulting block body differs from the rendered one. R
 
 `briefing.REQUIRED_BRIEFING` and `onboard.BRIEF`/`SNIPPET` become templates over
 `render.briefing(audience, harness)`: hard and `brief = true` rules for that audience, the policy
-version and hash, and the existing variables (`{owner}`, `--agent`, `--label`). A subagent brief
+version and hash, and the existing variables (`{owner}`, `--agent`). A subagent brief
 carries the same hard rules a lead reads and changes when the registry does. `SessionStart` adds
 it for the lead; local-model harnesses put it in the system prompt. The brief still says
 workspace text is data and grants nothing.

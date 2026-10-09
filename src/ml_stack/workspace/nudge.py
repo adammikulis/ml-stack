@@ -32,8 +32,8 @@ class Waiting:
     messages: list[dict[str, Any]] = field(default_factory=list)
 
     def summary(self) -> dict[str, Any]:
-        """The reader, the time and each unread row's sequence, sender, label, kind and time, and the pushable messages."""
-        keys = ("seq", "to", "from", "label", "type", "ts")
+        """The reader, the time and each unread row's sequence, sender, kind and time, and the pushable messages."""
+        keys = ("seq", "to", "from", "type", "ts")
         return {"me": self.me, "now": self.now, "rows": [{k: r.get(k) for k in keys} for r in self.rows],
                 "messages": self.messages}
 
@@ -58,7 +58,7 @@ class Waiting:
     def _senders(self) -> str:
         seen: list[str] = []
         for r in self.rows:
-            who = SAFE.sub("", f"{r['from']}/{r['label']}" if r.get("label") else str(r["from"]))
+            who = SAFE.sub("", str(r["from"]))
             if who and who not in seen:
                 seen.append(who)
         more = f" +{len(seen) - SENDERS_SHOWN} more" if len(seen) > SENDERS_SHOWN else ""

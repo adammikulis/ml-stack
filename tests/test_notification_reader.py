@@ -143,7 +143,7 @@ def test_unbound_notification_does_not_block_completed_tools(saved, monkeypatch,
     monkeypatch.setattr(harnesshook.worktree_lifecycle, 'checkpoint', lambda *a: None)
     monkeypatch.setattr(harnesshook, '_reader_run', lambda *a, **kw:
                         SimpleNamespace(returncode=1, stdout='', stderr='notification session has no authenticated saved binding'))
-    assert harnesshook.run(['post', '--label', 'codex'], io.StringIO('{"session_id":"child-thread"}'), io.StringIO()) == 0
+    assert harnesshook.run(['post', '--agent', 'codex'], io.StringIO('{"session_id":"child-thread"}'), io.StringIO()) == 0
     assert 'no authenticated saved binding' in capsys.readouterr().err
 
 
@@ -152,7 +152,7 @@ def test_explicit_parent_hook_preserves_launcher_root(monkeypatch):
     captured = []
     monkeypatch.setattr(harnesshook.harness_remote, 'context', lambda *a, **kw: (_ for _ in ()).throw(Denied('offline')))
     monkeypatch.setattr(harnesshook, 'nudge', lambda label, rail: captured.append((label, rail.roots)) or '')
-    assert harnesshook.run(['post', '--label', 'project-parent', '--root', '/launcher-root'],
+    assert harnesshook.run(['post', '--agent', 'project-parent', '--root', '/launcher-root'],
                            io.StringIO('{"cwd":"/unrelated"}'), io.StringIO()) == 0
     assert captured == [('project-parent', ['/launcher-root'])]
 

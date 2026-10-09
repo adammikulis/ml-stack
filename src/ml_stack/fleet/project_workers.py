@@ -5,6 +5,10 @@ from urllib.parse import urlparse
 
 from . import project_enrollment
 
+IDENTITY_HEADERS = ("X-ML-Stack-Agent", "X-ML-Stack-Sender", "X-ML-Stack-From", "X-ML-Stack-Parent",
+                    "X-ML-Stack-Name", "X-ML-Stack-Label")
+"""Headers that would name a sender: a project call is attributed to its token alone."""
+
 
 def answer(handler, host, body, cluster_key_path):
     match = re.fullmatch(r"/workspace/v1/projects/([a-f0-9]{32})/(join|board|ensure|enroll|renew|worker)",
@@ -12,7 +16,10 @@ def answer(handler, host, body, cluster_key_path):
     if not match:
         return False
     opening = handler._sealing()
-    if host is None:
+    if any(handler.headers.get(name) for name in IDENTITY_HEADERS):
+        handler._send(400, {"error": "a project call is attributed to its token; it carries no sender, "
+                                     "parent, name or label header"})
+    elif host is None:
         handler._send(501, {"error": "project workspace hosting is unavailable"})
     elif opening is None or not opening[2]:
         handler._send(403, {"error": "project agent capabilities require sealed fleet requests"})

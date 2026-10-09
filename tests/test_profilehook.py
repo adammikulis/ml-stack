@@ -65,7 +65,7 @@ def test_notification_failure_never_blocks_and_redacts_credentials(monkeypatch, 
         raise RuntimeError(f'daemon unavailable {secret}')
 
     monkeypatch.setattr(profilehook, 'send', unavailable)
-    assert profilehook.run(['observe', '--label', 'alice', '--root', '/tmp'],
+    assert profilehook.run(['observe', '--agent', 'alice', '--root', '/tmp'],
                            io.StringIO(json.dumps(payload(effort={'level': 'high'})))) == 0
     output = capsys.readouterr()
     assert output.out == ''
@@ -76,7 +76,7 @@ def test_notification_failure_never_blocks_and_redacts_credentials(monkeypatch, 
 @pytest.mark.parametrize('body', ['{', 'x' * (profilehook.MAX_INPUT + 1)], ids=('malformed', 'oversized'))
 def test_notification_parser_is_bounded_and_fails_open(body, monkeypatch, capsys):
     monkeypatch.setattr(profilehook, 'send', lambda *_args: pytest.fail('invalid metadata transported'))
-    assert profilehook.run(['observe', '--label', 'alice', '--root', '/tmp'], io.StringIO(body)) == 0
+    assert profilehook.run(['observe', '--agent', 'alice', '--root', '/tmp'], io.StringIO(body)) == 0
     assert capsys.readouterr().out == ''
 
 
@@ -122,8 +122,8 @@ def test_claude_metadata_hooks_use_supported_command_schema_and_keep_auth_hooks(
     for event in profilehook.EVENTS:
         metadata = hooks[event][-1]['hooks'][0]
         assert metadata == {'type': 'command', 'command': 'observe', 'timeout': 2, 'async': True}
-    command = harnessing.hook_command('observe', role='read-only', label='alice', root=Path('/tmp'), protect=[])
-    assert 'ml_stack.workspace.profilehook' in command and '--label alice' in command
+    command = harnessing.hook_command('observe', role='read-only', agent='alice', root=Path('/tmp'), protect=[])
+    assert 'ml_stack.workspace.profilehook' in command and '--agent alice' in command
 
 
 @pytest.mark.slow
@@ -133,7 +133,7 @@ def test_standalone_metadata_hook_command_records_actual_fixture_session(monkeyp
     tokens.store(kit.base, 'alice', token)
     root = tmp_path / 'project'
     root.mkdir()
-    command = harnessing.hook_command('observe', role='read-only', label='alice', root=root, protect=[])
+    command = harnessing.hook_command('observe', role='read-only', agent='alice', root=root, protect=[])
     environment = {**os.environ, 'ML_STACK_WORKSPACE_HOME': str(kit.base),
                    'PYTHONPATH': str(Path(__file__).resolve().parents[1] / 'src')}
     completed = subprocess.run(shlex.split(command), input=json.dumps(payload(effort={'level': 'high'})),

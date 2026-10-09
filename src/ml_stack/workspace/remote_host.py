@@ -18,6 +18,7 @@ from ml_stack.workspace import (
     onboard,
     remote_tasks,
     remote_workers,
+    spawn,
     task_routes,
     tokens,
 )
@@ -36,6 +37,7 @@ from ml_stack.workspace.service import Workspace
 from ml_stack.workspace.work_reputation import standings
 
 MAX_REPLY = 512 * 1024
+BOARD_KEYS = frozenset({"agent_token", "operation", "args", "kwargs", "cluster"})
 
 
 def _reputation(ws, token, args, kwargs):
@@ -278,6 +280,9 @@ class WorkspaceHost:
                 return 201, {"id": name, "token": token, "project_id": project_id}
             if action != "board":
                 return 404, {"error": "no such workspace operation"}
+            if set(body) - BOARD_KEYS:
+                raise ValueError("a board call carries its token, operation, args, kwargs and cluster only; "
+                                 "the sender, parent, name and label come from the token")
             token = str(body.get("agent_token") or "")
             device_sessions.check(ws, token, device, self.projects)
             who = self._identity(ws, project_id, token, admission=admission)
@@ -318,6 +323,8 @@ class WorkspaceHost:
                 result = self._native_claims(ws, current, project_id, (token, operation, args, kwargs))
         elif operation == "delegate":
             result = self._delegate(ws, who, project_id, args, kwargs)
+        elif operation == "spawn":
+            result = self._spawn(ws, who, project_id, (token, args, kwargs))
         elif operation == "revoke_self":
             if args or kwargs:
                 raise ValueError("self revocation takes no target")
@@ -349,6 +356,15 @@ class WorkspaceHost:
         else:
             raise Denied("this operation is unavailable to remote agents")
         return result
+
+    def _spawn(self, ws, who, project_id, request):
+        token, args, kwargs = request
+        if len(args) != 3 or kwargs or not all(isinstance(item, str) for item in args):
+            raise ValueError("spawn takes a harness, a native session id and a model")
+        made = spawn.spawn(ws, token, *args)
+        ws.board.place(made["id"], ws.registry.info(ws.registry.root_of(who.id))["project"])
+        ws.audit("remote.spawn", who.id, child=made["id"], project_id=project_id)
+        return made
 
     def _delegate(self, ws, who, project_id, args, kwargs):
         if len(args) != 1 or kwargs:
@@ -407,11 +423,11 @@ class WorkspaceHost:
             return {**gone, "key": key}
         if len(args) != 1 or not isinstance(args[0], list) or not 1 <= len(args[0]) <= 128:
             raise ValueError("native reservation takes 1-128 resource pairs")
-        if set(kwargs) - {"label"}:
-            raise ValueError("native reservation accepts only a label")
-        label = kwargs.get("label", "")
-        if not isinstance(label, str) or len(label) > 200 or any(ord(char) < 32 for char in label):
-            raise ValueError("native reservation label is bounded text")
+        if set(kwargs) - {"note"}:
+            raise ValueError("native reservation accepts only a note")
+        note = kwargs.get("note", "")
+        if not isinstance(note, str) or len(note) > 200 or any(ord(char) < 32 for char in note):
+            raise ValueError("native reservation note is bounded text")
         resources, originals = [], {}
         for resource in args[0]:
             if not isinstance(resource, (list, tuple)) or len(resource) != 2:
@@ -421,7 +437,7 @@ class WorkspaceHost:
             resources.append((kind, mapped))
             originals[(kind, normal(kind, mapped))] = key
         try:
-            made = ws.claims.reserve(who, resources, {"note": label})
+            made = ws.claims.reserve(who, resources, {"note": note})
         except Conflict as exc:
             raise Conflict("a requested project resource belongs to another worker", {}) from exc
         ws.audit("remote.native.reserve", who.id, project_id=project_id, resources=len(made))

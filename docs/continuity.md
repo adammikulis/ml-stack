@@ -36,7 +36,7 @@ Verified against code. "Stranded" means the data exists but nothing reads it for
 | Running test jobs | `scripts/testjobs.py` runs detached; spec records `owner.id`; cancel is limited to the owner or secret holder; a whole-tier job blocks the next. [V `testjobs.py:111-125,160-170`] | Run to completion, owner unreachable: nobody may read or cancel the result by name. |
 | Reviews owed | A task in `review` names no reviewer until `review` is called; `_reviewer(who, task)` decides. [V `task_actions.py:133-150`] A reviewer that vanishes leaves the task in `review` with the work intact. | Stranded, silently. |
 | Identity registry | Entries are kept after revocation (`info` returns `revoked`). `_add` refuses only a **live** name; a revoked or expired name may be minted again. [V `identity.py:496-499`, `:403-407`] | Names are not tombstoned (goal 6 fails today), except session names. |
-| What runs at session end | `SessionEnd` is wired to `claude-user-prompt` (records the person's words); `SubagentStop` only runs `hello-model` and `announce done` and revokes nothing. A killed terminal runs neither. [V `.claude/settings.json`, `claude-subagent-stop:36-49`] | No departure record is written by any hook. |
+| What runs at session end | `SessionEnd` is wired to `claude-user-prompt` (records the person's words); `SubagentStop` records the model, announces `done` as the subagent and retires its identity (token revoked, claims released) when `done` was accepted. A killed terminal runs neither. [V `.claude/settings.json`, `claude-subagent-stop:36-49`] | No departure record is written by any hook. |
 | Credit | `task_credit.verify_task` awards the proposal's `worker`, bound by proposal and review hashes, once per task; `work_agent` is keyed by registry identity. [V `task_credit.py:25-60`; D `docs/earned-trust.md` 1.3] | Credit already follows the identity that submitted; it will not be misattributed unless we copy it. |
 
 Consequence: continuity is mostly a *join and offer* problem, plus three data-loss fixes.
@@ -212,7 +212,7 @@ If any of 1 to 5 fails, `takeover` still succeeds (the CAS and re-pointing happe
 
 ## 8. Subagents of a departed parent
 
-Facts: a child is live only while its parent is live and for at most `child_ttl_s` (8 h); `SubagentStop` revokes nothing. [V `identity.py:275-280`]
+Facts: a child is live only while its parent is live and for at most `child_ttl_s` (8 h); `SubagentStop` retires the subagent's own identity after an accepted `done`. [V `identity.py:275-280`]
 
 - A subagent whose parent died is **itself orphaned** when the liveness design's cascade revokes it (`docs/session-liveness.md` 3.2, "child tokens die with the parent
   session"). Its dossier is created as for any agent, with `parent` retained.

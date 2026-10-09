@@ -5,7 +5,77 @@ entry as one batch with `scripts/land`. The batch mechanics (plan, merge, one co
 verification, ejection, finish) exist; this document is the design of the board side and the exact
 cut between the two.
 
-## Cut line
+## What is implemented (phase 2)
+
+The queue lives on the board and a runner lands from it. Phase 1 (`scripts/land plan|run|finish`)
+still knows nothing of the board; `scripts/land_board.py` is the only bridge.
+
+- `src/ml_stack/workspace/landing.py`: one hash-chained log, `landing.jsonl`, in the workspace.
+  Rows are stamped with the authenticated identity; the queue is a fold of the log. Requests,
+  independent reviews, cancels, pause and resume, runner states and progress beats are all rows,
+  and each also writes an audit row.
+- Commands (`src/ml_stack/workspace/landing_cli.py`): `land-request BRANCH SHA --test SELECTOR ...
+  --replaces TEXT`, `land-review REQUEST SHA --verdict accept|reject`, `land-cancel`, `land-pause`,
+  `land-resume`, `land-queue`. `digest --status` also prints the queue, the runner holder and the
+  age and text of the last gate step.
+- Runner: `scripts/land serve [--once] [--interval S] [--stall-minutes 20] [--remote origin]`, run by
+  the coordinator (or any lead) on any device that has the checkout. It is a process, not a unit:
+  the runner takes the `branch 0.2dev` claim (the claim task integration also takes, so the two
+  never land at once), and a second runner is told who holds it. An always-on form may use the
+  autostart prepare flow later; none is installed.
+- `scripts/land run --entries FILE` (JSON list of `{branch, tip}`, `scripts/land_entries.py`) refuses
+  a branch whose tip is not the requested SHA, that does not exist, or that shares no history with
+  `origin/<target>`.
+
+### One pass of the runner
+
+1. Claim the runner role; stop when paused.
+2. For each waiting request, re-derive standing from the registry (below) and re-check the tip
+   against the requested SHA. A request that fails is settled (`refused`) or left waiting
+   (`needs-review`) with the reason, and its requester gets a message.
+3. Batch up to eight remaining requests, oldest first, and run `scripts/land run --entries`: one
+   integration worktree cut from fetched `origin/0.2dev`, merges with the recorded policy (a
+   conflict ejects that request as `needs-human`; `HANDOFF.md` and log conflicts keep both sides),
+   one combined gate through `scripts/test`. A failing check is re-run on a clean checkout of the
+   base and bisected: a failure also red on plain `0.2dev` is reported as such and does not block;
+   a failure only on the batch ejects the branch that introduced it (`failed`, naming the test
+   files and the baseline-red checks) and the rest are re-verified.
+4. On a green batch, `scripts/land finish --apply` fast-forwards the local development branch and
+   removes the worktrees and branches of landed requests when `git cherry` shows nothing unique
+   and nothing is dirty. Then a normal push of `0.2dev:refs/heads/0.2dev`. It refuses any
+   protected target, never forces, never pushes `main`, tags or deletions, and goes through the
+   repository's `pre-push` hook unchanged. A rejected push leaves the requests `landed-unpushed`
+   and an announced `blocked`.
+5. Messages: each requester gets a direct message per state (`handoff` for failure and
+   `needs-human`, `status` otherwise); an announcement marks a landing (`milestone`), a batch not
+   landed or a stuck gate (`blocked`).
+
+### Eligibility, review and brakes
+
+- Only a landing-level identity may request: a person, a lead, or a top-level (not delegated) agent
+  with a live token, the right to send and a verified model above the lowest tier (the coordinator
+  bar). A delegated helper, a lowest-tier model and an unverified model are refused. `main` and
+  `master` are never a branch or target.
+- A request needs an independent accept recorded at its exact SHA by another landing-level identity
+  that is neither the requester nor a delegate or parent of it. Without it the request is
+  `needs-review` and the runner will not land it. The runner re-derives requester and reviewer
+  standing at landing time (a revoked reviewer no longer counts; any standing reject blocks).
+- Pause and resume: a person, a lead or the runner. Cancel: the requester or those. A cancel of a
+  running request stops the gate and queues the others again. A new request for the same branch
+  supersedes the older one (a new SHA means a new review).
+- Stuck gate: no output from `scripts/land run` for `--stall-minutes` (default 20) announces
+  `blocked`, SIGTERMs the gate's process group (SIGKILL only after a minute of ignoring it), sets
+  the batch's requests to `needs-human` and moves on to the next pass. Nothing is pushed.
+
+### Not built
+
+See the HANDOFF entry "Landing queue phase 2 leftovers": the task-lifecycle entry path, the
+SessionStart suggestion line, the async `scripts/test submit` path for the gate, requests from a
+device that does not hold the branch, and the blocked-finish retry.
+
+## Original design (the parts above supersede where they differ)
+
+### Cut line
 
 Built: `scripts/land plan|run|finish` and the `scripts/land_*.py` modules (docs/test-execution.md,
 "Landing a batch"). They take branch names and a repository path, know nothing about the board, and

@@ -53,18 +53,16 @@ def _storage(base: Path, *, write: bool = False):
         shutil.rmtree(staging)
 
 
-def scopes(base: Path, owner: str, label: str = '', *, exact: bool = False) -> list[dict]:
+def scopes(base: Path, owner: str) -> list[dict]:
     database = base / 'worktree-lifecycle.db'
     if not database.exists():
         return []
     with _storage(base) as graph:
         return [row['attrs'] for row in graph.nodes('worktree-lifecycle')
-                if row['attrs']['owner'] == owner
-                and (row['attrs']['label'] == label if exact
-                     else not label or row['attrs']['label'] in ('', label))]
+                if row['attrs']['owner'] == owner]
 
 
-def remember(base: Path, owner: str, label: str, path: str) -> None:
+def remember(base: Path, owner: str, path: str) -> None:
     """Record an authenticated worker's reserved or materialized coding checkout."""
     found = worktreerules.checkouts(path)
     if (found and found[0] == found[1]) or (not found and Path(path).exists()):
@@ -74,10 +72,10 @@ def remember(base: Path, owner: str, label: str, path: str) -> None:
     branch = repo.git(checkout, 'branch', '--show-current') if found else ''
     if found and not branch:
         raise Denied('coding worktree ownership requires a named branch')
-    key = 'worktree-lifecycle:' + hashlib.sha256(f'{owner}:{label}:{checkout}'.encode()).hexdigest()
+    key = 'worktree-lifecycle:' + hashlib.sha256(f'{owner}:{checkout}'.encode()).hexdigest()
     commit = repo.git(checkout, 'rev-parse', 'HEAD') if found else ''
     development = repo.git(primary, 'branch', '--show-current') if primary else ''
-    value = {'owner': owner, 'label': label, 'path': str(checkout),
+    value = {'owner': owner, 'path': str(checkout),
              'primary': str(primary) if primary else '', 'branch': branch, 'development': development}
     def merged(graph) -> tuple[dict, dict]:
         previous = next((row['attrs'] for row in graph.nodes('worktree-lifecycle') if row['id'] == key), {})
@@ -95,7 +93,7 @@ def remember(base: Path, owner: str, label: str, path: str) -> None:
             return                    # already recorded: the checkpoint rewrite is the whole cost
     with _storage(base, write=True) as graph:
         attrs = merged(graph)[1]
-        graph.upsert_node({'id': key, 'kind': 'worktree-lifecycle', 'label': label, 'attrs': attrs})
+        graph.upsert_node({'id': key, 'kind': 'worktree-lifecycle', 'label': owner, 'attrs': attrs})
 
 
 def checkpoint(base: Path, owner: str) -> None:
@@ -103,7 +101,7 @@ def checkpoint(base: Path, owner: str) -> None:
     for scope in scopes(base, owner):
         path = Path(scope['path'])
         if path.exists():
-            remember(base, owner, scope['label'], str(path))
+            remember(base, owner, str(path))
 
 
 def record_cleanup(base: Path, path: Path, proof: tuple[str, str],
@@ -154,26 +152,25 @@ def cleanup(base: Path, owner: str, path: str, claims, *, claim_owner: str = '')
     return {'path': str(target), 'commit': commit, 'landed': landed, 'cleanup_verified': True}
 
 
-def pending(base: Path, owner: str, label: str = '', *, exact: bool = False) -> list[dict]:
+def pending(base: Path, owner: str) -> list[dict]:
     """Inspect the worker's durable scopes without removing files or Git references."""
     result = []
-    for scope in scopes(base, owner, label, exact=exact):
+    for scope in scopes(base, owner):
         path = Path(scope['path'])
         if scope['primary'] and path.exists():
-            remember(base, scope['owner'], scope['label'], str(path))
-            scope = next(row for row in scopes(base, owner, label, exact=exact) if row['path'] == str(path)
-                         and row['label'] == scope['label'])
+            remember(base, scope['owner'], str(path))
+            scope = next(row for row in scopes(base, owner) if row['path'] == str(path))
         if not scope['primary']:
             found = worktreerules.checkouts(path)
             if not found or found[0] == found[1]:
                 if path.exists():
                     result.append({**scope, 'reasons': ['reserved checkout path remains']})
                 continue
-            remember(base, scope['owner'], scope['label'], scope['path'])
+            remember(base, scope['owner'], scope['path'])
             with _storage(base) as graph:
                 scope = next(row['attrs'] for row in graph.nodes('worktree-lifecycle')
                              if row['attrs']['path'] == str(found[0])
-                             and all(row['attrs'][key] == scope[key] for key in ('owner', 'label')))
+                             and row['attrs']['owner'] == scope['owner'])
             path = Path(scope['path'])
         primary = Path(scope['primary'])
         registered = repo.git(primary, 'worktree', 'list', '--porcelain').splitlines()
@@ -198,12 +195,10 @@ def pending(base: Path, owner: str, label: str = '', *, exact: bool = False) -> 
     return result
 
 
-def require_clean(base: Path, owner: str, label: str = '', *, exact: bool = False,
-                  within: tuple[str, ...] = ()) -> None:
+def require_clean(base: Path, owner: str, *, within: tuple[str, ...] = ()) -> None:
     """Refuse completion while this worker's own attributed checkout, registration or branch
-    remains. With ``exact`` only the scopes of this very label count, and with ``within`` only
-    the checkouts at or around those roots: another worker's checkout never blocks it."""
-    scopes = pending(base, owner, label, exact=exact)
+    remains. With ``within`` only the checkouts at or around those roots: another worker's checkout never blocks it."""
+    scopes = pending(base, owner)
     if within:
         roots = [Path(r).resolve() for r in within]
         scopes = [row for row in scopes if any(

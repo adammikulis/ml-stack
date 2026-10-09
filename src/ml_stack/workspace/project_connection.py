@@ -213,13 +213,16 @@ class CanonicalWorkspace(Operations):
         who = self.remote.call("whoami", token)
         return Identity(who["id"], who["role"], who.get("parent", ""), tuple(who["can"]))
 
+    def spawn(self, token, harness, session, model=""):
+        return self.remote.spawn(self.auth(token).id, harness, session, model)
+
     def info(self, name):
         who = self.remote.call("whoami", self.token)
         if name != who["id"]:
             raise Denied("only your own capability metadata is available")
         return who
 
-    def model_of(self, name, label=""):
+    def model_of(self, name):
         info = self.info(name)
         return info.get("model", ""), info.get("model_state", "")
 

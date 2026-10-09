@@ -22,13 +22,13 @@ def user(tmp_path, monkeypatch):
 
 
 def test_prepare_stages_files_and_installs_nothing(tmp_path, user):
-    done = staged(tmp_path, platform="darwin", agent={"agent": "claude-code", "label": "lane"})
+    done = staged(tmp_path, platform="darwin", agent={"agent": "claude-code"})
     folder = done.path.parent
     assert folder.is_relative_to(home.state("autostart", "staging"))
     assert not (user / "Library").exists()
     raw = json.loads(done.path.read_text())
     assert raw["version"] == 1
-    assert raw["preparer"] == {"agent": "claude-code", "label": "lane"}
+    assert raw["preparer"] == {"agent": "claude-code"}
     assert raw["expires"] - raw["created"] == 24 * 3600
     assert raw["platform"] == "darwin" and raw["device"] == home.device_id()
     for role in raw["roles"]:

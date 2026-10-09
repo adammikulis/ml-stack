@@ -194,10 +194,9 @@ def prepare(spec: Spec) -> Prepared:
             units.append(Unit(kind, file, where, hashlib.sha256(bodies[kind]).hexdigest()))
         roles.append(replace(built, units=tuple(units)))
     ident = secrets.token_hex(6)
-    who = spec.agent or {"agent": os.environ.get("ML_STACK_WORKSPACE_AGENT", ""),
-                         "label": os.environ.get("ML_STACK_WORKSPACE_LABEL", "")}
+    who = spec.agent or {"agent": os.environ.get("ML_STACK_WORKSPACE_AGENT", "")}
     manifest = Manifest(ident, now, now + TTL_S, spec.device or home.device_id(),
-                        {k: who.get(k, "") or "unknown" for k in ("agent", "label")},
+                        {"agent": who.get("agent", "") or "unknown"},
                         platform, spec.scope, tuple(roles))
     parse(manifest.to_dict())
     root = staging_root()

@@ -26,6 +26,10 @@
 
 - **The agent sandbox is staged, not installed or measured** (`docs/agent-sandbox.md`, `scripts/agent-sandbox`). The owner runs the fifteen acceptance steps; every sandboxed result in the compatibility matrix is predicted. Open design gaps: the workspace CLI writes `~/.ml-stack/workspace` from the agent's own process, so a sandboxed agent that may announce may also edit board files (needs the CLI to go through the daemon with `workspace/` read-only to agents); `testslots_rpc` binds an ephemeral loopback port that Linux and WSL cannot allow-list (needs a configurable fixed port); Codex's workspace-write cannot deny `.git/config` and `.git/hooks` in the shared git directory.
 
+## Landing queue phase 2 leftovers (2026-10-08)
+
+- Implemented: board requests, independent review, runner, pause and cancel, push of the development branch only (`docs/landing-queue.md`, "What is implemented"). Not built: (1) the task-lifecycle entry (an accepted task enters the queue from `reviewed()`; completion and rework through the `finish` and `blocked` events); (2) the SessionStart suggestion line when the queue is non-empty and no runner holds the claim; (3) the gate runs `scripts/test` synchronously inside `land_check.execute`, not through `scripts/test submit|wait`, so a cancel kills the gate process rather than cancelling a job; (4) a request from another device lands only if the runner's checkout already has the branch (no fetch from the requester); (5) a verified batch whose fast-forward is blocked is left `needs-human` and not retried; (6) stuck detection is output silence only, not broker job state.
+
 ## Deferred by the second landing batch (2026-10-08)
 
 - **Mesh journals (signed, `docs/mesh-board.md`).**

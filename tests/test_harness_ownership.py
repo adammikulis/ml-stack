@@ -37,7 +37,7 @@ def test_actual_hook_blocks_other_owner_and_symlink_alias_before_write(kit):
     payload = {'tool_name': 'Write', 'tool_input': {'file_path': str(alias / target.name), 'content': 'hostile'},
                'cwd': str(kit.project)}
     done = subprocess.run([sys.executable, '-m', 'ml_stack.harnesshook', 'pre', '--role', 'plan-and-go',
-                           '--label', 'alpha', '--root', str(kit.project)],
+                           '--agent', 'alpha', '--root', str(kit.project)],
                           input=json.dumps(payload), text=True, capture_output=True,
                           env={**os.environ, 'PYTHONPATH': str(Path(__file__).parents[1] / 'src')},
                           timeout=10, check=True)

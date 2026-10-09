@@ -161,8 +161,8 @@ class BoardApi:
         body, cut = plain.text(row["body"], self.ws.limits.board_message_chars)
         from ml_stack.workspace.agent_display import metadata
         return {"seq": row["seq"], "type": row["type"], "from": row["from"],
-                **metadata(self.ws.registry, row["from"], row.get("label", "")),
-                "label": plain.line(row.get("label", ""), 48), "role": row["role"],
+                **metadata(self.ws.registry, row["from"]),
+                "role": row["role"],
                 "to": row["to"], "ts": row["ts"], "thread": row.get("thread") or row["seq"],
                 "reply_to": row.get("reply_to", 0), "mentions": list(row.get("mentions", [])),
                 "subject": plain.line(row["subject"], self.ws.limits.subject_chars), "body": body,
@@ -727,8 +727,7 @@ class BoardApi:
         if not rows:
             return None
         top = self.ws.limits.announce_rollup
-        lines = [f"[{r['seq']}] {r['type']} {r['from']}"
-                 f"{'/' + r['label'] if r.get('label') else ''}: {data_line(r['body'], 200)}"
+        lines = [f"[{r['seq']}] {r['type']} {r['from']}: {data_line(r['body'], 200)}"
                  for r in rows[-top:]]
         more = len(rows) - len(lines)
         if more:

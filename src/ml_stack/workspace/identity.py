@@ -191,22 +191,17 @@ class Registry:
                 "harness_state": harness_state,
                 "device": device,
                 "models": list(entry.get("models", [])),
-                "label_models": dict(entry.get("label_models", {})),
                 "created": float(entry.get("created", 0)), "presentation": dict(entry.get("presentation", {}))}
 
-    def model_of(self, name: str, label: str = "") -> tuple[str, str]:
-        """``(model, state)`` shown for ``name`` (and its helper ``label``): the label's own
-        model, else the identity's own, else its parent's marked inherited; ``("", "")`` when none."""
+    def model_of(self, name: str) -> tuple[str, str]:
+        """``(model, state)`` shown for ``name``: its own, else its parent's marked inherited;
+        ``("", "")`` when none."""
         agents = self._load()
         entry = agents.get(name, {})
-        if label and entry.get("label_models", {}).get(label):
-            return str(entry["label_models"][label]), CLAIMED
         if entry.get("model"):
-            return str(entry["model"]), INHERITED if label else str(entry.get("model_state") or CLAIMED)
+            return str(entry["model"]), str(entry.get("model_state") or CLAIMED)
         parent = agents.get(str(entry.get("parent") or (name.partition("/")[0] if "/" in name else "")), {})
-        if label and parent.get("label_models", {}).get(label):
-            return str(parent["label_models"][label]), CLAIMED
-        if parent.get("model") and (label or "/" in name):
+        if parent.get("model") and (entry.get("parent") or "/" in name):
             return str(parent["model"]), INHERITED
         return "", ""
 
@@ -283,10 +278,8 @@ class Registry:
                 agents[name]['device'] = device
                 self._save(agents)
 
-    def record_model(self, name: str, model: str, harness: str, state: str, *,
-                     label: str = "") -> tuple[str, str]:
-        """Write ``name``'s model (or its helper ``label``'s) and return the ``(model, state)``
-        it held before; appends to the history when the model or its state changed. No
+    def record_model(self, name: str, model: str, harness: str, state: str) -> tuple[str, str]:
+        """Write ``name``'s model and return the ``(model, state)`` it held before; appends to the history when the model or its state changed. No
         permission check here: callers decide who may."""
         if state not in (VERIFIED, CLAIMED):
             raise ValueError(f"a recorded model is {VERIFIED} or {CLAIMED}")
@@ -296,14 +289,6 @@ class Registry:
             entry = agents.get(name)
             if entry is None or entry.get("revoked"):
                 raise ValueError(f"no agent called {name}")
-            if label:
-                models = entry.setdefault("label_models", {})
-                models.pop(label, None)
-                while len(models) >= 20:
-                    models.pop(next(iter(models)))  # evict the oldest helper, never refuse a new one
-                models[label] = model
-                self._save(agents)
-                return "", ""
             before = (str(entry.get("model", "")), str(entry.get("model_state", "")))
             if not model:
                 entry["harness"] = harness

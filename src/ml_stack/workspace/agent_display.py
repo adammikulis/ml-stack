@@ -28,7 +28,7 @@ def readable_name(registry, name: str, model: str) -> str:
     return f"{session_name.family_word(model)}-{full[:width]}"
 
 
-def metadata(registry, name, label=''):
+def metadata(registry, name):
     """Derive parentage from the registry, never from arbitrary activity text."""
     info = registry.info(name)
     if info['role'] != AGENT:
@@ -38,12 +38,8 @@ def metadata(registry, name, label=''):
         registry.ensure_presentation(name)
         info = registry.info(name)
     parent = info['parent']
-    if parent:
-        display = f"{metadata(registry, parent)['display_name']} ({name.rpartition('/')[2]})"
-        kind = 'subagent'
-    else:
-        display = readable_name(registry, name, info.get('model', ''))
-        kind = info.get('presentation', {}).get('kind', 'unknown')
+    display = readable_name(registry, name, info.get('model', ''))
+    kind = 'subagent' if parent else info.get('presentation', {}).get('kind', 'unknown')
     if parent or kind != 'main':
         reason = 'not a main session'
     elif registry.role_of(name) != AGENT or not set(CAPS) <= set(info['can']):
@@ -51,12 +47,13 @@ def metadata(registry, name, label=''):
     else:
         reason = tier_of(*registry.model_of(name)).reason
     eligible = not reason
-    if label:
-        display = f"{display} ({label})"
-        kind = 'helper' if label in info.get('label_models', {}) else kind
-        eligible, reason = False, 'a helper label is not a main session'
     return {'display_name': display, 'session_kind': kind, 'coordinator_eligible': eligible,
-            'coordinator_reason': reason}
+            'coordinator_reason': reason, 'spawned_by': parent}
+
+
+def spoken(shown: dict) -> str:
+    """How a person reads an agent: its unique name, and who spawned it when a subagent."""
+    return f"{shown['display_name']} (spawned by {shown['spawned_by']})" if shown.get('spawned_by') else shown['display_name']
 
 
 def vacancy_notice(rows) -> str:

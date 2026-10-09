@@ -145,6 +145,15 @@ class RemoteWorkspace:
         path = tokens.store(self.base, child, str(result["token"]))
         return {"id": child, "token_file": str(path), "expires": result["expires"]}
 
+    def spawn(self, parent: str, harness: str, session: str, model: str = "") -> dict:
+        """Register a native subagent session as the selected parent's child; its token is stored privately."""
+        result = self.call("spawn", self.token(agent=parent), harness, session, model)
+        if result.get("parent") != parent:
+            raise Denied("spawn returned another parent")
+        if result.get("token"):
+            tokens.store(self.base, result["id"], str(result["token"]))
+        return {"id": result["id"], "parent": parent}
+
     def self_revoke(self, name: str) -> dict:
         """Revoke the selected agent's own capability and remove its private token file."""
         result = self.call("revoke_self", self.token(agent=name))
@@ -153,9 +162,9 @@ class RemoteWorkspace:
         (tokens.directory(self.base) / name.replace("/", "~")).unlink()
         return result
 
-    def native_reserve(self, name: str, resources: list, label: str = "") -> list:
+    def native_reserve(self, name: str, resources: list, note: str = "") -> list:
         """Atomically reserve project areas and branches for the selected worker."""
-        return self.call("native.reserve", self.token(agent=name), resources, label=label)
+        return self.call("native.reserve", self.token(agent=name), resources, note=note)
 
     def native_release(self, name: str, kind: str, relativekey: str) -> dict:
         """Release the selected worker's project resource."""

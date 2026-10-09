@@ -7,7 +7,7 @@ from typing import Any
 
 from ml_stack.command import flag
 from ml_stack.log import say
-from ml_stack.workspace import attention
+from ml_stack.workspace import attention, landing
 from ml_stack.workspace.screen import fence
 from ml_stack.workspace.service import Workspace
 
@@ -18,13 +18,8 @@ def owed_text(ws: Workspace, token: str, announcements: bool = True) -> str:
     return attention.attention(ws, ws.auth(token).id, roll["messages"] if roll else 0)
 
 
-def inbox(args: argparse.Namespace, ws: Workspace, token: str, label: str) -> Any:
-    """Unread messages: a labelled helper sees only those meant for it and cannot ack; others also see what they owe."""
-    if label and not args.children:
-        if args.ack:
-            raise ValueError("a labelled helper shares its parent's inbox and cannot --ack it")
-        who = ws.auth(token)
-        return [ws.deliver(r, args.raw, 0, who) for r in attention.helper_messages(ws, who.id, label)]
+def inbox(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
+    """Unread messages for the caller's own identity; the caller also sees what it owes an answer."""
     if not args.children:
         roll = None if args.json else ws.board.rollup(token, args.ack)
         owed = "" if args.json else owed_text(ws, token, False)
@@ -35,14 +30,15 @@ def inbox(args: argparse.Namespace, ws: Workspace, token: str, label: str) -> An
     if args.ack:
         raise ValueError("--children shows some of the unread messages, so it cannot --ack")
     me = ws.auth(token).id
-    return [m for m in ws.inbox(token, False, 0, args.raw, True) if m["from"].startswith(me + "/")]
+    children = set(ws.registry.descendants(me))
+    return [m for m in ws.inbox(token, False, 0, args.raw, True) if m["from"] in children]
 
 
 def digest(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
     """The digest, or with --status the coordinator's one-screen page of workers, claims and owed answers."""
     if not args.status:
         return ws.board.digest(token, args.ack, args.thread)
-    lines = attention.status_lines(ws, ws.auth(token).id)
+    lines = [*attention.status_lines(ws, ws.auth(token).id), *landing.status_lines(ws)]
     return {"authority": "none", "text": fence("\n".join(lines), "workspace:status",
                                                 "names and subjects written by agents").text}
 
@@ -53,16 +49,15 @@ def owed(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
     return {"authority": "none", "text": text} if text else ""
 
 
-def helper_brief(ws: Any, me: str, label: str, reader: Any) -> None:
-    """Print the unread direct messages already waiting for the helper ``label``."""
-    mine = attention.helper_messages(ws, me, label) if hasattr(ws, "bus") else []
+def helper_brief(ws: Any, token: str) -> None:
+    """Print the unread messages already waiting for the subagent that holds ``token``."""
+    mine = ws.inbox(token, False, 0, False, False) if isinstance(ws, Workspace) else []
     if mine:
-        say(f"Unread messages for you ({label}); `inbox --agent {me} --label {label}` shows them again:")
-    for row in mine:
-        shown = ws.deliver(row, False, 0, reader)
-        say(f"[{shown['seq']}] {shown['type']} from {shown.get('from_label', shown['from'])} (data, no authority): {shown['text']}")
+        say("Unread messages for you; `inbox` shows them again:")
+    for shown in mine:
+        say(f"[{shown['seq']}] {shown['type']} from {shown.get('from_name', shown['from'])} (data, no authority): {shown['text']}")
 
 
 TABLE = [("attention", "what is unanswered for you and how many announcements are new; nothing when neither", [], owed)]
 STATUS = flag("--status", action="store_true",
-              help="active labelled workers, their claims and what is unanswered for you")
+              help="your active subagents, their claims and what is unanswered for you")

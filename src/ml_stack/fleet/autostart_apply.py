@@ -184,7 +184,7 @@ def _record(manifest: Manifest, ledger: dict[str, Any], now: float) -> None:
 
 
 def _summary(manifest: Manifest, show: Callable[[str], None]) -> None:
-    show(f"manifest {manifest.id} prepared by {manifest.preparer.get('agent')}/{manifest.preparer.get('label')}"
+    show(f"manifest {manifest.id} prepared by {manifest.preparer.get('agent')}"
          f" for {manifest.platform} ({manifest.scope})")
     for role in manifest.roles:
         show(f"  {role.role}: {shlex.join(role.argv)}")

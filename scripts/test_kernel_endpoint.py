@@ -5,6 +5,7 @@ import json
 import os
 import socket
 import stat
+import time
 from pathlib import Path
 
 
@@ -29,7 +30,13 @@ def verify_socket(path: str, expected) -> None:
         raise PermissionError("test confinement: endpoint identity changed")
 
 
-def connection(endpoint: str, identity: str | None = None) -> socket.socket:
+PATIENCE = 120.0
+"""Seconds a caller waits for a busy admission server before it gives up."""
+ATTEMPT = 5.0
+"""Seconds one connect may take; a full accept queue shows up as a connect that times out."""
+
+
+def open_connection(endpoint: str, identity: str | None, attempt: float) -> socket.socket:
     if endpoint.startswith("unix:"):
         path = endpoint[5:]
         if identity is None:
@@ -40,7 +47,7 @@ def connection(endpoint: str, identity: str | None = None) -> socket.socket:
         verify_socket(path, value)
         stream = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         try:
-            stream.settimeout(5)
+            stream.settimeout(attempt)
             stream.connect(path)
             verify_socket(path, value)
             return stream
@@ -48,4 +55,23 @@ def connection(endpoint: str, identity: str | None = None) -> socket.socket:
             stream.close()
             raise
     host, port = endpoint.rsplit(":", 1)
-    return socket.create_connection((host, int(port)), timeout=5)
+    return socket.create_connection((host, int(port)), timeout=attempt)
+
+
+def connection(endpoint: str, identity: str | None = None, *, patience: float = PATIENCE,
+               attempt: float = ATTEMPT) -> socket.socket:
+    """Connect to an admission endpoint, waiting for a busy server up to ``patience`` seconds.
+
+    Only a connect that times out is retried (a full accept queue); a refusal means nothing is
+    listening and a failed identity check is a refusal of the endpoint, and both fail at once."""
+    deadline = time.monotonic() + patience
+    delay = 0.1
+    while True:
+        try:
+            return open_connection(endpoint, identity, attempt)
+        except TimeoutError as exc:
+            if time.monotonic() + delay >= deadline:
+                raise TimeoutError(f"the test admission endpoint {endpoint} accepted no connection in "
+                                   f"{patience:g} s: the queue of runs ahead is too long") from exc
+            time.sleep(delay)
+            delay = min(delay * 2, 2.0)

@@ -173,7 +173,7 @@ says:
 | recorded | from |
 |---|---|
 | reason | `ml-stack-serve up MODEL --for 'text'`; the `--for` of `ml-stack-claude`, `ml-stack-codex`, `ml-stack-chat` and `ml-stack-workspace agent start`; `$ML_STACK_LEASE_FOR` (which leads the reason when the caller also gives one); the reason an in-repo caller passes (`broker_wire.lease(..., reason=)`, `ServerManager.lease(..., reason=)`, `serve(..., reason=)`). A lease with none reads `(no reason given)`. |
-| requester | the workspace agent label (`$ML_STACK_WORKSPACE_LABEL`) when one is set, else the program that took the lease |
+| requester | the workspace agent name (`$ML_STACK_WORKSPACE_AGENT`) when one is set, else the program that took the lease |
 | process | the connecting pid and its start time, and the command lines of it and up to three parents, with tokens, keys and `--password`-style values masked |
 | place | the working directory and the git worktree and branch it sits in |
 | time | when the lease was taken |

@@ -17,10 +17,10 @@ class NotAuthorized(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class Identity:
-    """The session a guard acts in and, for a subagent, its label; a label never widens what the parent holds."""
+    """The session a guard acts in and, for a subagent, its own unique name; a name never widens what the parent holds."""
 
     session_id: str
-    label: str = ""
+    agent: str = ""
 
 
 def live(kind: str, target: str | None, identity: Identity, *, log: EventLog | None = None,
@@ -45,7 +45,7 @@ def consume(kind: str, target: str, identity: Identity, *, log: EventLog | None 
             if not found:
                 raise NotAuthorized(f"no live {kind} authorization for {target} in this session")
             chosen = min(found, key=lambda a: a.ts)
-            person_record.mark_used(log, chosen.id, by=identity.label or "main", target=target)
+            person_record.mark_used(log, chosen.id, by=identity.agent or "main", target=target)
             return chosen.id
     except (person_store.Unreadable, OSError, ValueError) as error:
         raise NotAuthorized(f"the person record is unavailable: {error}") from error

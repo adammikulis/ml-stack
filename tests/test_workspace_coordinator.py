@@ -189,13 +189,13 @@ def test_existing_invitation_enrolls_remote_agent_without_person_credentials(sha
 
 def test_declared_cli_arguments_roundtrip_without_credentials(shared):
     args = cli.COMMANDS.parser().parse_args(['send', 'bob', 'status', 'Progress', '--agent', 'alice',
-                                             '--label', 'helper', '--request-id', 'a' * 32])
+                                             '--request-id', 'a' * 32])
     from ml_stack.workspace.coordinator_client import argv_for
     options = next(options for name, _help, options, _fn in cli.TABLE if name == args.cmd)
     argv = argv_for(args, [*cli.COMMON, *options])
     assert '--agent' not in argv and '--token-file' not in argv and '--request-id' not in argv
     got = shared.remote.command(argv, shared.alice, request_id=args.request_id)
-    assert got['from'] == 'alice' and got['from_label'].endswith(' (helper)')
+    assert got['from'] == 'alice' and got['from_name'] == got['from_name'].strip()
 
 
 def test_installed_cli_on_second_device_reads_shared_state_without_local_fallback(shared, installed_metadata):

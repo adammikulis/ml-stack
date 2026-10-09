@@ -26,7 +26,7 @@ matcher = ".*"
 
 [[hooks.PostToolUse.hooks]]
 type = "command"
-command = "python -m ml_stack.harnesshook post --label codex"
+command = "python -m ml_stack.harnesshook post --agent codex"
 timeout = 30
 
 [hooks.state]
@@ -82,7 +82,7 @@ def test_codex_hooks_keep_every_other_setting_and_do_not_double_the_launcher_nud
     assert data["model"] == "gpt-6.1-sol" and data["agents"] == {"max_threads": 32}
     assert commands(data, "Stop") == ["ml-stack-workspace nudge --agent codex --hook stop"]
     assert commands(data, "UserPromptSubmit") == ["ml-stack-workspace nudge --agent codex --hook prompt"]
-    assert commands(data, "PostToolUse") == ["python -m ml_stack.harnesshook post --label codex"]
+    assert commands(data, "PostToolUse") == ["python -m ml_stack.harnesshook post --agent codex"]
     agent_hooks.install_codex(path)
     assert path.read_text() == text
 

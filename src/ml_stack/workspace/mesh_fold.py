@@ -21,7 +21,7 @@ from ml_stack.workspace.screen import Refused
 
 __all__ = ["apply", "message_payload", "note_payload", "replicated"]
 
-MESSAGE_KEYS = frozenset({"type", "from", "role", "to", "subject", "body", "label", "model",
+MESSAGE_KEYS = frozenset({"type", "from", "role", "to", "subject", "body", "model",
                           "model_state", "reply_jid", "thread_jid"})
 NOTE_KEYS = frozenset({"nkind", "title", "body", "source", "tags", "verify_cmd", "ttl_s", "author",
                        "role", "supersedes_jids"})
@@ -142,21 +142,20 @@ def _message(ws, row: dict[str, Any], jid: str, views: _Views) -> int:
     text = _text(body.get("body"), "the body", limits.body_bytes)
     foreign = row["origin"] != ws.mesh.origin
     who = _sender(ws, row, body.get("from")) if foreign else Identity(str(body["from"]), str(body["role"]))
-    qid, flags, model, state, label = "", [], "", "", ""
+    qid, flags, model, state = "", [], "", ""
     if foreign:
         ws._screen(who, "the message", limits.body_bytes, subject, text)
         qid, flags = ws._hold(who, "message", f"{who.id}->{to}", subject, text)
         subject, text = ("", PLACEHOLDER.format(qid=qid, why=", ".join(flags))) if qid else (subject, text)
     else:
         model, state = _line(body.get("model", ""), "the model", 200), _line(body.get("model_state", ""), "the state", 40)
-        label = _line(body.get("label", ""), "the label", 40)
     parent_seq = int(views.messages.get(body.get("reply_jid", ""), 0))
     parent = ws.bus.get(parent_seq) if parent_seq else None
     parent = parent if parent and parent["to"] == to else None
     made = ws.bus.append({
         "type": kind, "from": who.id, "role": who.role, "to": to, "subject": subject, "body": text,
         "reply_to": parent["seq"] if parent else 0, "thread": (parent.get("thread") or parent["seq"]) if parent else 0,
-        "label": label, "mentions": [], "held": qid, "flags": flags, "expires": 0.0, "model": model,
+        "mentions": [], "held": qid, "flags": flags, "expires": 0.0, "model": model,
         "model_state": state, "jid": jid, "idem": row["idem"]})
     wake.signal(ws.base / "wake", ws.board.wake_names(made))
     return int(made["seq"])

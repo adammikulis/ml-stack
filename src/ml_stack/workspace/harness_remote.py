@@ -125,7 +125,7 @@ def reserve(remote, who, required, fields, *, branch_only=False):
     for kind, key in physical:
         if kind in ('file', 'worktree'):
             target = Path(key)
-            worktree_lifecycle.remember(remote.base, who.id, '',
+            worktree_lifecycle.remember(remote.base, who.id,
                                         str(target.parent if target.is_file() else target))
 
 
@@ -222,7 +222,7 @@ def cli_command(remote, token, args):
             if not claim or claim['owner'] != principal.id:
                 raise Denied('cleanup requires the live checkout claim of this worker')
             return worktree_lifecycle.cleanup(remote.base, who.id, target, store, claim_owner=principal.id)
-        return worktree_lifecycle.pending(remote.base, who.id, args.label)
+        return worktree_lifecycle.pending(remote.base, who.id)
     if args.cmd in ('announce', 'send'):
         require_clean(remote, who)
         return None

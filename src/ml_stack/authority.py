@@ -6,6 +6,7 @@ import json
 import os
 import time
 from collections.abc import Iterable, Mapping
+from pathlib import Path
 from typing import Any
 
 from ml_stack import home
@@ -19,7 +20,6 @@ DELEGATED = "delegated"
 PERSON = "person"
 FLOOR_ENV = "ML_STACK_AUTHORITY_FLOOR"
 AGENT_ENV = "ML_STACK_WORKSPACE_AGENT"
-LABEL_ENV = "ML_STACK_WORKSPACE_LABEL"
 DELEGATING = ("CLAUDECODE", "ML_STACK_AGENT")
 
 GATES: dict[str, str] = {
@@ -127,6 +127,20 @@ def set_state(names: Iterable[str], new: str, *, by: str, project: str = "",
     return changes
 
 
+def workspace_helper(name: str) -> bool:
+    """Whether the workspace registry records ``name`` as a subagent (an identity with a parent).
+    An unreadable registry counts as one: a delegated pass fails closed."""
+    if not name:
+        return False
+    named = os.environ.get("ML_STACK_WORKSPACE_HOME")
+    base = Path(named).expanduser() if named else home.state("workspace")
+    try:
+        agents = read_json(base / "agents.json", {}).get("agents", {})
+        return bool(agents.get(name, {}).get("parent"))
+    except (OSError, ValueError, AttributeError):
+        return True
+
+
 def require(gate: str, action: str, terminal: tuple[bool, bool] | None = None,
             env: Mapping[str, str] | None = None, *, project: str = "") -> str:
     """Pass a person at a terminal, or a lead agent when ``gate`` is delegated; returns who passed.
@@ -139,8 +153,8 @@ def require(gate: str, action: str, terminal: tuple[bool, bool] | None = None,
     if not marker:
         require_person(action, terminal, env)
         return PERSON
-    who, tag = found.get(AGENT_ENV, ""), found.get(LABEL_ENV, "")
-    if tag or "/" in who:
+    who = found.get(AGENT_ENV, "")
+    if "/" in who or workspace_helper(who):
         raise HumanRequired(f"{action} is delegated to the lead agent, not a helper")
     _log({"event": "authority.use", "gate": gate, "action": action, "agent": who or marker,
           "project": project})

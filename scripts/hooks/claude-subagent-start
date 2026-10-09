@@ -34,19 +34,32 @@ def definition_model(event: dict) -> str:
     return ""
 
 
-def workspace_brief(event: dict) -> str:
-    label = workspace_hook.label_of(event)
-    environment = workspace_hook.session_environment(event, "SubagentStart")
-    if environment is None:
-        return ""
+def spawn(event: dict) -> bool:
+    """Ask the board to register this subagent as a child of whoever started it; the board names it."""
+    agent = str(event.get("agent_id") or "")
+    if not agent:
+        workspace_hook.warning("SubagentStart", "the event has no agent_id; the subagent cannot be given its own name")
+        return False
+    parent = workspace_hook.parent_environment(event, "SubagentStart")
+    if parent is None:
+        return False
+    command = ["ml-stack-workspace", "spawn", "--session", agent, "--harness", "claude-code"]
     model = definition_model(event)
     if model:
-        workspace_hook.run(["ml-stack-workspace", "hello-model", label, model],
-                           "SubagentStart", environment=environment)
-    purpose = " ".join(str(event.get("description") or event.get("agent_type") or "subagent").split())[:150]
-    joined = workspace_hook.run(["ml-stack-workspace", "announce", "joined", f"{label}: {purpose}",
-                                 "--label", label], "SubagentStart", environment=environment)
-    done = workspace_hook.run(["ml-stack-workspace", "brief", label, "--registered"],
+        command += ["--model", model]
+    return workspace_hook.run(command, "SubagentStart", environment=parent) is not None
+
+
+def workspace_brief(event: dict) -> str:
+    """Register the subagent as its own identity, announce it as itself and return its brief."""
+    if not spawn(event):
+        return ""
+    environment = workspace_hook.own_environment(event, "SubagentStart")
+    if environment is None:
+        return ""
+    purpose = " ".join(str(event.get("description") or event.get("agent_type") or "subagent").split())[:190]
+    workspace_hook.run(["ml-stack-workspace", "announce", "joined", purpose], "SubagentStart", environment=environment)
+    done = workspace_hook.run(["ml-stack-workspace", "brief", "--registered"],
                               "SubagentStart", environment=environment)
     return done.stdout.strip() if done else ""
 

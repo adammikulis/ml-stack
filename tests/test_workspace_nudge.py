@@ -31,14 +31,14 @@ def hook(kit, event, stdin="", tmp="state"):
 
 def test_the_plain_line_counts_kinds_names_senders_and_gives_the_age_without_a_body(kit):
     ws, t = kit.ws, kit.t
-    ws.send(t["alice"], "bob", "question", "SECRET-BODY which port?", label="local-qwen")
+    ws.send(t["alice"], "bob", "question", "SECRET-BODY which port?")
     ws.send(t["alice"], "bob", "question", "SECRET-BODY and the lease?")
     ws.send(t["carol"], "bob", "task", "SECRET-BODY build it")
     for step in range(3):
         ws.send(t["carol"], "bob", "status", f"SECRET-BODY progress {step}")
     out = cli(kit.base, t["bob"], "nudge").stdout
     assert out.startswith("workspace: 6 waiting for you (2 questions, 1 task, 3 status; "
-                          "from alice/local-qwen, alice, carol; oldest 3h12m). A direct question or "
+                          "from alice, carol; oldest 3h12m). A direct question or "
                           "task is waiting on you: run ml-stack-workspace inbox now and answer it")
     assert "SECRET" not in out
 
@@ -147,7 +147,7 @@ def test_prompt_hook_on_a_board_injects_the_waiting_line(kit, monkeypatch, tmp_p
     monkeypatch.chdir(root)
     monkeypatch.setattr(connection, "RemoteWorkspace", lambda *a, **k: board)
     kit.ws.send(kit.t["alice"], "bob", "question", "SECRET-BODY which port?")
-    args = SimpleNamespace(cmd="nudge", hook="prompt", agent="", token_file="", label="", json=False)
+    args = SimpleNamespace(cmd="nudge", hook="prompt", agent="", token_file="", json=False)
     assert ws_cli._nudging(args) == 0
     shape = json.loads(capsys.readouterr().out)
     text = shape["hookSpecificOutput"]["additionalContext"]

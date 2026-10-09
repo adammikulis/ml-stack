@@ -108,26 +108,30 @@ def test_unavailable_workspace_is_nonblocking_with_redacted_reason(commands, mon
 def test_missing_workspace_executable_is_nonblocking_and_explained(commands, name, tmp_path):
     directory, _ = commands
     (directory / 'ml-stack-workspace').unlink()
-    done = invoke(name, {'model': 'claude-sonnet-4-6', 'cwd': str(tmp_path), 'session_id': 'native-missing-cli'})
+    done = invoke(name, {'model': 'claude-sonnet-4-6', 'cwd': str(tmp_path), 'session_id': 'native-missing-cli',
+                         'agent_id': 'abc123'})
     assert done.returncode == 0 and 'ml-stack-workspace' in done.stderr and 'No such file' in done.stderr
 
 
 def test_subagent_event_includes_brief_and_actual_primary_branch_rules(commands, tmp_path):
     repository = tmp_path / 'project'
     git.run(['init', '-b', 'development', str(repository)])
+    child = session_name.assign(tmp_path / 'names', 'claude-haiku-4-5', 'claude-code', 'abcdef12345')
     done = invoke('claude-subagent-start', {'agent_type': 'Explore', 'agent_id': 'abcdef12345', 'session_id': 'native-parent', 'cwd': str(repository)})
     assert done.returncode == 0 and not done.stderr
     output = json.loads(done.stdout)['hookSpecificOutput']
     assert output['hookEventName'] == 'SubagentStart'
     context = output['additionalContext']
-    assert 'Authenticated parent brief: hello-model' in context
+    assert 'Authenticated parent brief' in context
     assert f'primary checkout {repository.resolve()} is on the development branch development' in context
     assert 'Acquire authenticated claims before mutation' in context and 'separate sibling worktrees' in context
     records = json.loads(commands[1].read_text())
     assert [record['argv'] for record in records] == [
-        ['announce', 'joined', 'explore-abcdef: Explore', '--label', 'explore-abcdef'],
-        ['brief', 'explore-abcdef', '--registered']]
-    assert all(record['session'] == 'native-parent' and record['harness'] == 'claude-code' for record in records)
+        ['spawn', '--session', 'abcdef12345', '--harness', 'claude-code'],
+        ['announce', 'joined', 'Explore'],
+        ['brief', '--registered']]
+    assert records[0]['session'] == 'native-parent' and records[0]['harness'] == 'claude-code'
+    assert [record['agent'] for record in records[1:]] == [child, child]
 
 
 @pytest.mark.parametrize('stage', ['SessionStart', 'SubagentStart'])
@@ -194,13 +198,15 @@ def test_actual_hooks_record_claimed_metadata_and_authenticated_subagent_brief(t
                                               'session_id': 'native-real-1'})
     assert brief.returncode == 0 and not brief.stderr
     context = json.loads(brief.stdout)['hookSpecificOutput']['additionalContext']
-    assert f'--agent {me} --label explore-abcdef' in context
-    assert '--agent claude ' not in context
+    child = session_name.lookup(tmp_path / 'ws', 'claude-code', 'abcdef12345')
+    assert re.fullmatch(r'claude-[0-9a-f]{6}', child) and child != me
+    assert f'run every workspace command with `--agent {child}`' in context
+    assert f'spawned by {me}' in context and '--label' not in context
     assert 'Your registration, model and the joined and done announcements are recorded for you' in context
     assert 'Keep the main session ' + me + ' as central coordinator' in context
-    assert 'Labels never grant rights' in context
-    assert ws.model_of(me, 'explore-abcdef') == ('claude-sonnet-4-6', 'inherited')
-    assert not ws.registry.role_of(me + '/explore-abcdef')
+    assert 'A name grants no rights' in context
+    assert ws.registry.info(child)['parent'] == me
+    assert ws.model_of(child) == ('claude-sonnet-4-6', 'inherited')
     assert 'Acquire authenticated claims before mutation' in context
 
 
@@ -265,6 +271,7 @@ def test_invalid_native_session_does_not_export_or_register(commands, tmp_path, 
 
 
 def test_subagent_stop_records_transcript_model_and_announces_done(commands, tmp_path):
+    session_name.assign(tmp_path / 'names', 'claude-haiku-4-5', 'claude-code', 'abcdef12345')
     transcript = tmp_path / 'agent.jsonl'
     transcript.write_text('{"message": {"role": "user"}}\n{"message": {"model": "claude-haiku-4-5"}}\n')
     done = invoke('claude-subagent-stop', {'agent_type': 'Explore', 'agent_id': 'abcdef12345',
@@ -273,5 +280,6 @@ def test_subagent_stop_records_transcript_model_and_announces_done(commands, tmp
     assert done.returncode == 0 and not done.stderr
     records = json.loads(commands[1].read_text())
     assert [record['argv'] for record in records] == [
-        ['hello-model', 'explore-abcdef', 'claude-haiku-4-5'],
-        ['announce', 'done', 'explore-abcdef: finished', '--label', 'explore-abcdef']]
+        ['whoami', '--model', 'claude-haiku-4-5', '--harness', 'claude-code'],
+        ['announce', 'done', 'finished'],
+        ['retire']]

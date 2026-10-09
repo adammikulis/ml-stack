@@ -162,4 +162,4 @@ def reserve(name, args, cwd, actor, roots):
         for kind, key in required:
             if kind in ('file', 'worktree'):
                 target = Path(key)
-                worktree_lifecycle.remember(ws.base, who.id, '', str(target.parent if target.is_file() else target))
+                worktree_lifecycle.remember(ws.base, who.id, str(target.parent if target.is_file() else target))

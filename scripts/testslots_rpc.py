@@ -83,6 +83,7 @@ def _write(stream, value: dict) -> None:
 
 
 class Admission(socketserver.ThreadingTCPServer):
+    request_queue_size = 128  # socketserver's default of 5 drops connects when many runs ask at once
     allow_reuse_address = True
     daemon_threads = False
     block_on_close = False

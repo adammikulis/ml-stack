@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A SubagentStop hook: records the subagent's model from its transcript and announces that it finished (never its last chat line)."""
+"""A SubagentStop hook: records the subagent's model from its transcript, announces that it finished as itself (never its last chat line) and retires its identity."""
 
 from __future__ import annotations
 
@@ -42,21 +42,22 @@ def main() -> int:
     event = workspace_hook.event("SubagentStop")
     if event is None:
         return 0
-    environment = workspace_hook.session_environment(event, "SubagentStop")
+    environment = workspace_hook.own_environment(event, "SubagentStop")
     if environment is None:
         return 0
-    label = workspace_hook.label_of(event)
     path = event.get("agent_transcript_path") or ""
     model = transcript_model(str(path)) if path else ""
     if model:
-        workspace_hook.run(["ml-stack-workspace", "hello-model", label, model],
+        workspace_hook.run(["ml-stack-workspace", "whoami", "--model", model, "--harness", "claude-code"],
                            "SubagentStop", environment=environment)
     place = checkout_note(event)
-    said = workspace_hook.run(["ml-stack-workspace", "announce", "done", f"{label}: finished{place}"[:200],
-                               "--label", label], "SubagentStop", environment=environment)
+    said = workspace_hook.run(["ml-stack-workspace", "announce", "done", f"finished{place}"[:200]],
+                              "SubagentStop", environment=environment)
     if said is None:
-        workspace_hook.run(["ml-stack-workspace", "announce", "milestone", f"{label}: stopped, done refused{place}"[:200],
-                            "--label", label], "SubagentStop", environment=environment)
+        workspace_hook.run(["ml-stack-workspace", "announce", "milestone", f"stopped, done refused{place}"[:200]],
+                           "SubagentStop", environment=environment)
+        return 0
+    workspace_hook.run(["ml-stack-workspace", "retire"], "SubagentStop", environment=environment)
     return 0
 
 

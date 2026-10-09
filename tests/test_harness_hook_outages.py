@@ -18,7 +18,7 @@ def test_post_outage_does_not_reverse_a_completed_tool(monkeypatch, capsys):
     monkeypatch.setattr(harnesshook, '_reader_run', lambda *args, **kwargs:
                         SimpleNamespace(returncode=1, stdout='', stderr='connection refused'))
     out = io.StringIO()
-    assert harnesshook.run(['post', '--label', 'worker', '--root', '/project'], io.StringIO('{}'), out) == 0
+    assert harnesshook.run(['post', '--agent', 'worker', '--root', '/project'], io.StringIO('{}'), out) == 0
     context = json.loads(out.getvalue())['hookSpecificOutput']['additionalContext']
     assert 'connection refused' in context
     assert 'connection refused' in capsys.readouterr().err
@@ -118,7 +118,7 @@ def test_post_checkpoint_outage_preserves_pending_message_alert(monkeypatch):
 
     monkeypatch.setattr(harnesshook, 'nudge', pending)
     out = io.StringIO()
-    assert harnesshook.run(['post', '--label', 'worker', '--root', '/project'], io.StringIO('{}'), out) == 0
+    assert harnesshook.run(['post', '--agent', 'worker', '--root', '/project'], io.StringIO('{}'), out) == 0
     context = json.loads(out.getvalue())['hookSpecificOutput']['additionalContext']
     assert 'connection refused' in context
     assert '1 waiting for you; run inbox' in context

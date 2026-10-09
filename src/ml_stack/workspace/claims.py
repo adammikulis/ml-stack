@@ -156,6 +156,8 @@ class Claims:
             now = self.clock()
             made = {"kind": kind, "key": key, "owner": who.id, "pid": int(pid), "since": now,
                     "expires": now + (ttl_s or self.ttl_s), "note": note[:200]}
+            if who.parent:
+                made["parent"] = who.parent
             claims[f"{kind}:{key}"] = made
             self._save(claims)
             if self.on_stolen:
@@ -290,7 +292,7 @@ class Claims:
                 self._save(claims if completed else before)
 
     def release(self, who: Identity, kind: str, key: str) -> dict[str, Any]:
-        """Give up a claim. Its owner, a lead or a human may."""
+        """Give up a claim. Its owner, the parent of a spawned subagent that owns it, or a human may."""
         key = normal(kind, key)
         with held(self.lock):
             claims = self._load()
@@ -298,7 +300,7 @@ class Claims:
             found = claims.get(f"{kind}:{key}")
             if found is None:
                 raise ValueError(f"{kind} {key} is not claimed")
-            if found["owner"] != who.id and who.role == AGENT:
+            if found["owner"] != who.id and who.role == AGENT and found.get("parent") != who.id:
                 raise Denied(f"{kind} {key} belongs to {found['owner']}")
             claims.pop(f"{kind}:{key}")
             self._save(claims)

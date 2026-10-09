@@ -79,27 +79,27 @@ def launched(args, harness, served):
                       'event': 'LauncherStart', 'fields': fields})
 
 
-def send(document, label, root, base=None):
+def send(document, agent, root, base=None):
     """Send metadata through the launcher's saved authenticated workspace identity."""
-    canonical = harness_remote.context(label, root, [root], require_claim=False)
+    canonical = harness_remote.context(agent, root, [root], require_claim=False)
     if canonical:
         remote, who = canonical
         return remote.call('record_execution_profile', remote.token(agent=who.id), document)
     ws = Workspace(base)
-    token = tokens.load(ws.base, label)
+    token = tokens.load(ws.base, agent)
     who = ws.auth(token)
-    if who.id != label:
+    if who.id != agent:
         raise ValueError('metadata requires the saved launcher identity')
     return ws.record_execution_profile(token, document)
 
 
-def notify(payload, label, root):
+def notify(payload, agent, root):
     """Record reported hook metadata and emit a redacted warning on failure."""
     try:
         document = metadata(payload)
         if document is not None:
             document['fields'].update(runtime_facts())
-            send(_document(document), label, root)
+            send(_document(document), agent, root)
     except (OSError, ValueError, TypeError, RuntimeError, HTTPException) as error:
         sys.stderr.write(f'execution metadata unavailable: {hook_diagnostics.reason(error)}\n')
 
@@ -113,7 +113,7 @@ def run(argv=None, stdin=None):
     """Read one bounded metadata notification and always return success."""
     parser = _Parser()
     parser.add_argument('event', choices=('observe',))
-    parser.add_argument('--label', required=True)
+    parser.add_argument('--agent', required=True)
     parser.add_argument('--root', required=True)
     parser.add_argument('--role')
     parser.add_argument('--wait')
@@ -122,7 +122,7 @@ def run(argv=None, stdin=None):
         body = (stdin or sys.stdin).read(MAX_INPUT + 1)
         if len(body) > MAX_INPUT:
             raise ValueError('execution metadata input exceeds its size limit')
-        notify(json.loads(body or '{}'), args.label, Path(args.root))
+        notify(json.loads(body or '{}'), args.agent, Path(args.root))
     except (OSError, ValueError, TypeError, RuntimeError, HTTPException) as error:
         sys.stderr.write(f'execution metadata unavailable: {hook_diagnostics.reason(error)}\n')
     return 0

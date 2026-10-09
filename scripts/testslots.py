@@ -279,7 +279,7 @@ def _agent_from_env() -> dict[str, str]:
         data = json.loads(os.environ.get("DEV_TEST_AGENT", ""))
     except ValueError:
         return {}
-    return {k: str(data[k]) for k in ("id", "label", "parent", "job") if isinstance(data, dict) and data.get(k)}
+    return {k: str(data[k]) for k in ("id", "parent", "job") if isinstance(data, dict) and data.get(k)}
 
 
 def _request(want: int, minimum: int | None, label: str, run_class: str) -> tuple[int, int, dict]:
@@ -459,7 +459,7 @@ def _who(slot: dict) -> str:
     agent = slot.get("agent")
     if not agent:
         return slot["label"]
-    return f"{agent['id']}{'/' + agent['label'] if agent.get('label') else ''} ({slot['label']})"
+    return f"{agent['id']} ({slot['label']})"
 
 
 if __name__ == "__main__":

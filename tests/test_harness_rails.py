@@ -90,7 +90,7 @@ class TestPolicy:
 class TestHook:
     def _rail(self, **over):
         return harnesshook.Rail("approve-first", "local-test", ("/w",), (), 5.0) if not over \
-            else harnesshook.Rail(**{"role": "approve-first", "label": "local-test", "roots": ("/w",), **over})
+            else harnesshook.Rail(**{"role": "approve-first", "agent": "local-test", "roots": ("/w",), **over})
 
     def test_a_safe_call_is_allowed_and_nothing_is_raised(self):
         inbox = requests.Inbox(memory=True)
@@ -170,7 +170,7 @@ class TestSessionFiles:
         tree.mkdir()
         files = harnessing.session_files(tree)
         try:
-            pre = harnessing.hook_command("pre", role="approve-first", label="l", root=tree,
+            pre = harnessing.hook_command("pre", role="approve-first", agent="l", root=tree,
                                           protect=harnessing.protected_paths(files))
             path = files.write("settings.json", claude.settings(pre, "post-cmd", harnessing.WAIT_S))
             files.lock()
@@ -206,7 +206,7 @@ class TestSessionFiles:
 
     def test_the_hook_command_names_this_interpreter_and_quotes_its_paths(self, tmp_path):
         odd = tmp_path / "a dir"
-        cmd = harnessing.hook_command("pre", role="plan-and-go", label="x y", root=odd, protect=["/p q"])
+        cmd = harnessing.hook_command("pre", role="plan-and-go", agent="x y", root=odd, protect=["/p q"])
         if os.name == "nt":
             script = _command_text(cmd)
             assert script.startswith("& '" + sys.executable + "'")
@@ -218,7 +218,7 @@ class TestSessionFiles:
     def test_generated_hook_executes_with_quoted_project_paths(self, tmp_path):
         odd = tmp_path / "a dir & user's project"
         odd.mkdir()
-        cmd = harnessing.hook_command("pre", role="read-only", label="x y", root=odd, protect=[])
+        cmd = harnessing.hook_command("pre", role="read-only", agent="x y", root=odd, protect=[])
         payload = {"tool_name": "Read", "tool_input": {"file_path": str(odd / "source.py")}, "cwd": str(odd)}
         done = subprocess.run(cmd if os.name == "nt" else shlex.split(cmd), input=json.dumps(payload),
                               capture_output=True, text=True, timeout=60, check=False,
@@ -285,7 +285,7 @@ class TestLaunch:
     @pytest.fixture(autouse=True)
     def _quiet(self, monkeypatch, tmp_path):
         monkeypatch.setattr(codex.tokens, "load", lambda base, agent: "assigned-test-seat")
-        monkeypatch.setattr(harnessid, "invite", lambda name, project, parent, say, **kwargs: harnessid.Seat(name, parent, base=tmp_path / "workspace"))
+        monkeypatch.setattr(harnessid, "invite", lambda name, project, parent, say, **kwargs: harnessid.Seat(name, base=tmp_path / "workspace"))
         monkeypatch.setattr(harnessid, "announce", lambda *a, **k: True)
         monkeypatch.setattr(claude, "alias_of", lambda url, model: "qwen-27b")
         monkeypatch.setattr(codex, "alias_of", lambda url, model: "qwen-27b")
@@ -366,9 +366,9 @@ class TestWorkspaceCommands:
     def test_a_hostile_label_is_one_argument_and_never_a_shell_line(self, tmp_path, monkeypatch):
         exe = self._fake_workspace(tmp_path, monkeypatch)
         hostile = "x; touch /tmp/pwned $(id) `id`"
-        assert harnessid.announce(harnessid.Seat(hostile, "claude"), "t", lambda _: None)
+        assert harnessid.announce(harnessid.Seat(hostile), "t", lambda _: None)
         argv = Path(f"{exe}.argv").read_text().splitlines()
-        assert argv == ["announce", "joined", "t", "--agent", "claude", "--label", hostile]
+        assert argv == ["announce", "joined", "t", "--agent", hostile]
         seen = []
         def run(command, **kwargs):
             seen.append((command, kwargs))
@@ -384,7 +384,7 @@ class TestWorkspaceCommands:
     def test_a_failed_announcement_identifies_the_workspace_trust_check(self, monkeypatch):
         said = []
         monkeypatch.setenv("PATH", "/nonexistent")
-        assert harnessid.announce(harnessid.Seat("l", "claude"), "t", said.append) is False
+        assert harnessid.announce(harnessid.Seat("l"), "t", said.append) is False
         assert "selected authority and device trust" in said[0]
 
 
@@ -445,7 +445,7 @@ class TestSeat:
         assert Workspace(seat.base).registry.info(seat.name)["model_state"] == "claimed"
         monkeypatch.setenv("CLAUDECODE", "1")
         assert seat.record_model("other", "codex") is True
-        assert harnessid.Seat("x", "p").record_model("m", "codex") is False
+        assert harnessid.Seat("x").record_model("m", "codex") is False
 
     def test_ending_the_session_keeps_identity_and_removes_harness_files(self, person, monkeypatch, tmp_path):
         from ml_stack.workspace import Workspace, tokens
@@ -561,7 +561,7 @@ class TestCodingAgent:
         monkeypatch.setattr(codex, "alias_of", lambda url, model: "qwen-27b")
         monkeypatch.setattr(harnessid, "announce", lambda *a, **k: True)
         monkeypatch.setattr(harnessid, "invite", lambda name, project, parent, say, *, claim: seen.update(
-            name=name, project=project, claim=claim) or harnessid.Seat(name, parent, base=tmp_path / "workspace"))
+            name=name, project=project, claim=claim) or harnessid.Seat(name, base=tmp_path / "workspace"))
         binary = tmp_path / "codex"
         binary.write_text("#!/bin/sh\n")
         (tmp_path / "proj").mkdir()

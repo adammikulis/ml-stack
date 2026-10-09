@@ -28,7 +28,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, NamedTuple
 
-from ml_stack import home, sentinel
+from ml_stack import home, keystore_guard, person, sentinel
 from ml_stack.files import read_json, write_json
 from ml_stack.lock import Busy, only_one
 from ml_stack.log import warn
@@ -45,7 +45,7 @@ ENV_NONINTERACTIVE = "ML_STACK_NONINTERACTIVE"
 ENV_NO_REAL = "ML_STACK_NO_REAL_KEYSTORE"
 """Set by the test suite for itself and every process it starts: the machine's own keystore is
 treated as absent, so a test child can never store or prompt for a Keychain item."""
-REAL_BACKENDS = ("keyring.backends.macOS", "keyring.backends.SecretService",
+REAL_BACKENDS = ("keyring.backends.macOS", "keyring.backends.SecretService", "keyring.backends.libsecret",
                  "keyring.backends.Windows", "keyring.backends.kwallet")
 UNLOCK_COMMAND = "ml-stack-security unlock"
 READ_CEILING = 600
@@ -134,14 +134,14 @@ def _desktop() -> bool:
     if sys.platform == "darwin":
         return not os.environ.get("SSH_CONNECTION") and os.environ.get("XPC_SERVICE_NAME", "0") in ("0", "")
     if sys.platform == "win32":
-        return True
+        return not keystore_guard.service_session()
     return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
 
 
 def interactive() -> bool:
-    """Whether a person could answer an OS prompt: a terminal or a desktop session, and
-    ``ML_STACK_NONINTERACTIVE`` unset."""
-    if os.environ.get(ENV_NONINTERACTIVE):
+    """Whether a person could answer an OS prompt: a terminal or a desktop session, and no agent
+    marker (``ML_STACK_NONINTERACTIVE``, ``ML_STACK_AGENT``, ``CLAUDECODE``) set."""
+    if person.marked():
         return False
     try:
         if sys.stdin.isatty():
@@ -200,6 +200,8 @@ class Keystore:
 
     def _ensure_dir(self) -> None:
         self.directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if os.name == "posix":
+            self.directory.chmod(0o700)
         human.protect(self.directory)
 
     def _doc(self, name: str) -> dict[str, Any]:
@@ -266,6 +268,9 @@ class Keystore:
             usable = float(getattr(keyring.get_keyring(), "priority", 0)) > 0
         except (keyring.errors.KeyringError, AttributeError, TypeError, ValueError, OSError):
             usable = False
+        why = keystore_guard.unsafe_backend(keyring.get_keyring()) if usable else ""
+        if why:
+            raise KeystoreUnavailable(f"ml-stack will not keep its key in this keyring backend: {why}")
         if usable and os.environ.get(ENV_NO_REAL) and is_real(keyring.get_keyring()):
             raise KeystoreUnavailable(f"the machine's own keystore is switched off ({ENV_NO_REAL})")
         if not usable:
@@ -346,12 +351,16 @@ class Keystore:
         ring = self._ring()
         self._spend(kind, purpose)
         self._tell()
+        person_here = self._is_interactive()
+        if not person_here:
+            keystore_guard.forbid_prompts()
         try:
-            out = work(ring)
+            out = keystore_guard.bounded(lambda: work(ring), keystore_guard.PERSON_WAIT_S if person_here
+                                         else keystore_guard.BACKGROUND_WAIT_S)
         except ring.errors.PasswordDeleteError:
             self._event(kind, purpose, "absent")
             return None
-        except (ring.errors.KeyringError, OSError) as exc:
+        except (ring.errors.KeyringError, OSError, TimeoutError) as exc:
             raise self._latch(purpose, exc) from exc
         self._event(kind, purpose, "absent" if kind == "read" and out is None else "ok")
         if kind == "read":
@@ -383,6 +392,11 @@ class Keystore:
                 if not (person or self._is_interactive()):
                     raise KeystoreLocked("ml-stack has no encryption key for this background process. "
                                          f"A person runs `{UNLOCK_COMMAND}` once in a terminal.")
+                if not person and self._doc("provisioned.json").get("at"):
+                    raise KeystoreMissing("the OS keystore no longer holds the key ml-stack made here, so "
+                                          "everything wrapped under it stays locked; ml-stack will not make a "
+                                          f"second one by itself. Restore the item, or `{UNLOCK_COMMAND}` "
+                                          "to start over.")
                 key = os.urandom(32)
                 stored = "v1:" + base64.b64encode(key).decode()
                 self._call("create", purpose, lambda r: r.set_password(SERVICE, self.account, stored))

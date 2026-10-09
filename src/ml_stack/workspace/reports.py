@@ -10,7 +10,7 @@ from ml_stack.workspace.screen import injection_markers
 WINDOW_S = 60.0
 KINDS = frozenset({'status', 'done', 'milestone', 'blocked'})
 UNMETERED = frozenset({'joined', 'done'})  # starting and finishing are never rate limited
-FIELDS = ('from', 'role', 'label', 'to', 'type', 'subject', 'reply_to', 'thread',
+FIELDS = ('from', 'role', 'to', 'type', 'subject', 'reply_to', 'thread',
           'body', 'model', 'model_state', 'report_ttl_s')
 
 
@@ -34,8 +34,8 @@ def emit(ws, who, row: dict, *, announce: bool, ttl_s: float):
         authenticated = ws._message_sender(who)
         ws._message_rights(who, row, announce)
         if authenticated and who.role != HUMAN and row["type"] == "done":
-            worktree_lifecycle.require_clean(ws.base, who.id, row["label"], exact=True)
-        row['model'], row['model_state'] = ('', '') if who.role == HUMAN else ws.registry.model_of(who.id, row['label'])
+            worktree_lifecycle.require_clean(ws.base, who.id)
+        row['model'], row['model_state'] = ('', '') if who.role == HUMAN else ws.registry.model_of(who.id)
         if report and authenticated and not injection_markers(row['subject'] + '\n' + row['body']):
             row['report_ttl_s'] = ttl_s
             if previous := duplicate(ws, row):

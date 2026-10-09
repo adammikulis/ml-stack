@@ -303,7 +303,7 @@ presence interval = 90 s). The holder renews on each presence touch, so renewal 
 4. Model tier is not the lowest tier of its vendor family and the model id matches the tier
    table (section 5). Fail closed.
 5. No `revoked` coordinator designation by the person (section 4.3).
-6. Not a subagent, helper label or transient (`label_models`, `agent_display.py:44-48`).
+6. Not a subagent (an identity with a `parent`) or transient (`agent_display.py`).
 
 `coordinator_eligible` in `agent_display.metadata` becomes this computed value (it takes the
 presence and tier table as inputs), replacing today's static `kind == 'main'`. Label and parent

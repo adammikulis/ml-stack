@@ -35,7 +35,7 @@ def incident(outcome: Outcome, stage: str) -> str:
     return found[1] if found else ""
 
 
-def announce(outcome: Outcome, previous: str, *, verb: str = "ensure", agent: str = "", label: str = "") -> bool:
+def announce(outcome: Outcome, previous: str, *, verb: str = "ensure", agent: str = "") -> bool:
     """Post one announcement for a switch, recovery or failure; True when the board took it."""
     if outcome.action in {"current", "busy", "held"}:
         return False
@@ -46,7 +46,7 @@ def announce(outcome: Outcome, previous: str, *, verb: str = "ensure", agent: st
     if kind == "blocked":
         found = incident(outcome, verb)
         text = f"{text} [diagnostic={found}]" if found else text
-    argv = ["announce", kind, text[:LIMIT], "--agent", who, *(["--label", label] if label else [])]
+    argv = ["announce", kind, text[:LIMIT], "--agent", who]
     with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
         try:
             return cli.main(argv) == 0
