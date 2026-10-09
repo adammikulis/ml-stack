@@ -33,7 +33,7 @@ _WHERE = {
     "Beacon": "discovery",
     "DEFAULT_CLUSTER": "discovery",
     "DiscoveryError": "discovery",
-    "MIN_PASSPHRASE": "discovery",
+    "MIN_JOIN_LENGTH": "discovery",
     "cluster_group": "discovery",
     "create_cluster_key": "discovery",
     "derive_token": "discovery",
@@ -94,7 +94,7 @@ Endpoint: Any
 Getting: Any
 Job: Any
 JobRunner: Any
-MIN_PASSPHRASE: Any
+MIN_JOIN_LENGTH: Any
 Message: Any
 Model: Any
 ModelError: Any
@@ -150,7 +150,7 @@ targets: Any
 __all__ = [
     'BENCH_KIND',
     'DEFAULT_CLUSTER',
-    'MIN_PASSPHRASE',
+    'MIN_JOIN_LENGTH',
     'REPORT_GROUP',
     'Advertiser',
     'Beacon',

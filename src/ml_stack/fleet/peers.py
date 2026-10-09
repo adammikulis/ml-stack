@@ -15,7 +15,7 @@ from ml_stack.person import HumanRequired, require_person
 
 from . import launch_open, members_cli, recovery
 from .discovery import (
-    MIN_PASSPHRASE,
+    MIN_JOIN_LENGTH,
     DiscoveryError,
     cluster_group,
     create_cluster_key,
@@ -41,8 +41,8 @@ def _prompt_passphrase(confirm: bool) -> str:
     """Read a passphrase, with confirmation when creating a cluster."""
     while True:
         first = getpass.getpass("  Passphrase: ")
-        if len(first.strip()) < MIN_PASSPHRASE:
-            say(f"  The passphrase needs at least {MIN_PASSPHRASE} characters.")
+        if len(first.strip()) < MIN_JOIN_LENGTH:
+            say(f"  The passphrase needs at least {MIN_JOIN_LENGTH} characters.")
             continue
         if not confirm:
             return first

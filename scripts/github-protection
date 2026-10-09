@@ -21,7 +21,7 @@ ROOT = Path(__file__).resolve().parent.parent
 DOC = "docs/github-protection.md"
 WORKFLOWS = ROOT / ".github" / "workflows"
 ENVIRONMENT = "release"
-SECRET = "RELEASE_SIGNING_KEY"
+SIGNER = "RELEASE_SIGNING_KEY"
 
 PROTECTED = (
     ".github/", ".claude/", "packaging/", "SECURITY.md", "pyproject.toml", "budgets.json",
@@ -332,7 +332,7 @@ def check_environment(repo: str, owner: str) -> list[str]:
                                "the-release-environment"))
         else:
             out += environment_refs(repo)
-    out += check_secret_scope(repo)
+    out += check_entry_scope(repo)
     return out
 
 
@@ -353,20 +353,20 @@ def environment_refs(repo: str) -> list[str]:
     return out
 
 
-def secret_names(body) -> set[str]:
+def entry_names(body) -> set[str]:
     return {s.get("name") for s in (body or {}).get("secrets", [])}
 
 
-def check_secret_scope(repo: str) -> list[str]:
+def check_entry_scope(repo: str) -> list[str]:
     out: list[str] = []
     held = read(f"repos/{repo}/actions/secrets", "secret.read", "the-release-environment", out)
-    for name in sorted(secret_names(held)):
+    for name in sorted(entry_names(held)):
         out.append(finding("secret.repository", f"{name} is a repository secret, readable by "
                            "a workflow on any branch", "the-release-environment"))
     scoped = read(f"repos/{repo}/environments/{ENVIRONMENT}/secrets", "secret.read",
                   "the-release-environment", out)
-    if scoped is not None and SECRET not in secret_names(scoped):
-        out.append(finding("secret.environment", f"{SECRET} is not a secret of {ENVIRONMENT}",
+    if scoped is not None and SIGNER not in entry_names(scoped):
+        out.append(finding("secret.environment", f"{SIGNER} is not a secret of {ENVIRONMENT}",
                            "the-release-environment"))
     return out
 
