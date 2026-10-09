@@ -108,7 +108,7 @@ def adopt(member: Membership, path: Path | str | None = None) -> Membership:
 
 
 # -- the passphrase ------------------------------------------------------
-MIN_PASSPHRASE = 5
+MIN_JOIN_LENGTH = 5
 """Shortest passphrase accepted. It only ever goes through the join handshake, which a
 listener cannot test a guess against and which locks out a source that keeps failing."""
 
@@ -116,8 +116,8 @@ listener cannot test a guess against and which locks out a source that keeps fai
 def check_length(passphrase: str) -> str:
     """``passphrase`` stripped, or `DiscoveryError` when it is too short."""
     passphrase = passphrase.strip()
-    if len(passphrase) < MIN_PASSPHRASE:
-        raise DiscoveryError(f"The passphrase needs at least {MIN_PASSPHRASE} characters.")
+    if len(passphrase) < MIN_JOIN_LENGTH:
+        raise DiscoveryError(f"The passphrase needs at least {MIN_JOIN_LENGTH} characters.")
     return passphrase
 
 

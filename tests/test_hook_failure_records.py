@@ -24,15 +24,15 @@ def _record() -> dict:
 def test_failed_event_emits_same_reference_on_both_streams_without_input(monkeypatch, capsys):
     monkeypatch.setenv("PRIVATE_TOKEN", "fixture-private-token")
     out = io.StringIO()
-    secret = "fixture-private-token"
-    assert harnesshook.run(["post", "--unsupported", secret], io.StringIO("PRIVATE TOOL INPUT"), out) == 0
+    needle = "fixture-private-token"
+    assert harnesshook.run(["post", "--unsupported", needle], io.StringIO("PRIVATE TOOL INPUT"), out) == 0
     stderr = capsys.readouterr().err
     held = _record()
     assert held["stage"] == "options" and held["event"] == "post"
     assert held["id"] in stderr and held["id"] in out.getvalue()
     assert held["runtime"]["version"] and held["runtime"]["package"]
     assert "PRIVATE TOOL INPUT" not in json.dumps(held)
-    assert secret not in stderr + out.getvalue() + json.dumps(held)
+    assert needle not in stderr + out.getvalue() + json.dumps(held)
     assert "frames" in held and all("line" in frame and "code" not in frame for frame in held["frames"])
     assert hook_diagnostics.COMMAND.run([held["id"]]) == 0
     inspected = json.loads(capsys.readouterr().out)
