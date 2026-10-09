@@ -154,9 +154,9 @@ def test_frozen_collects_wheel_modules_and_dynamic_entrypoints(frozen_collector,
     assert (str(ROOT / "src/poolhouse/workspace/remote_host.py"), "poolhouse/workspace") in datas
     assert datas[-2:] == [("plugin-metadata", group) for group in calls]
     assert modules == [
-        "poolhouse", "poolhouse.bench.cli", "poolhouse.fleet.daemon", "poolhouse.ingest.cli",
-        "poolhouse.workspace.agent_routes", "poolhouse.workspace.remote_host",
-        "poolhouse.workspace.task_routes", "poolhouse.world", "plugin_provider.routes",
+        "plugin_provider.routes", "poolhouse", "poolhouse.bench.cli", "poolhouse.fleet.daemon",
+        "poolhouse.ingest.cli", "poolhouse.workspace.agent_routes", "poolhouse.workspace.remote_host",
+        "poolhouse.workspace.task_routes", "poolhouse.world",
     ]
 
 

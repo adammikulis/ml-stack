@@ -68,7 +68,7 @@ def test_the_default_home_of_the_key_is_the_keystore_and_no_file_holds_it(tmp_pa
     assert holds_secret(tmp_path, raw) == []
     assert keys.wrapped_path.exists() and not keys.file_path.exists()
     held = json.loads(keystore.read_text())
-    assert list(held) == [f"{signing.SERVICE}/{keystore_module.default().account}"]
+    assert list(held) == [f"{keystore_module.SERVICE}/{keystore_module.default().account}"]
     assert all(raw not in base64.b64decode(v[3:]) for v in held.values())
     assert (tmp_path / "state" / "signing.json").stat().st_mode & 0o077 == 0
     assert base64.b64decode(doc["public"]) == keys.public and doc["key_id"] == keys.key_id
@@ -148,7 +148,7 @@ def test_rotating_needs_a_person_and_the_old_key_announces_the_new_one(tmp_path,
     assert moved.value.new_public == keys.public
     assert mf.verify(raw, keys.public).key_id == keys.key_id      # once a person has pinned it
     held = json.loads(keystore.read_text())
-    assert list(held) == [f"{signing.SERVICE}/{keystore_module.default().account}"]   # only the master is in the keystore
+    assert list(held) == [f"{keystore_module.SERVICE}/{keystore_module.default().account}"]   # only the master is in the keystore
     assert keys.wrapped_path.exists()
     assert rec.of("onboard.signing.rotated")[0].severity == "warning"
 

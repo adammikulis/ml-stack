@@ -90,7 +90,7 @@ def test_scoped_readiness_and_uninstall_preserve_other_environment(monkeypatch, 
     assert entry['installed'] and entry['python_version'] == '3.12'
     assert environment.uninstall(['gym-drone'])['gym-drone']['ok']
     assert all(path == target.path for path, _ in calls)
-    assert calls[-1][1] == ['uninstall', '-y', 'poolhouse', 'pillow', 'pyflyt', 'stable-baselines3']
+    assert calls[-1][1] == ['uninstall', '-y', 'pillow', 'poolhouse', 'pyflyt', 'stable-baselines3']
 
 
 def test_managed_scope_is_rediscovered_after_settings_reload(isolated_routing, tmp_path):

@@ -44,7 +44,7 @@ class TestWav:
         standard = encode(pcm, sample_rate=16000)
         head, tail = standard[:36], standard[36:]  # split at the `data` chunk
 
-        software = b"poolhouse\x00\x00"  # NUL-terminated, word-aligned
+        software = b"poolhouse\x00"  # NUL-terminated, word-aligned
         info_body = b"INFOISFT" + struct.pack("<I", len(software)) + software
         listed = head + b"LIST" + struct.pack("<I", len(info_body)) + info_body + tail
 

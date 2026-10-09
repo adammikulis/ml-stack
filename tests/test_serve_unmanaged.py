@@ -186,7 +186,7 @@ def test_by_default_a_busy_port_with_an_unmanaged_server_is_left_alone(served, t
     assert info.port != fake.port and not info.adopted
     assert recorded_servers(tmp_path / "servers.json").get(fake.port) is None
     _, _, strict = lease_beside(tmp_path, fake.port, model="model.gguf", roam=False)
-    with pytest.raises(ServerFailed, match="Poolhouse did not start"):
+    with pytest.raises(ServerFailed, match="poolhouse did not start"):
         strict()
 
 

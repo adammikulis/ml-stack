@@ -16,7 +16,7 @@ from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from keyring.errors import KeyringError
 
-from poolhouse import home, keystore, memory, sentinel
+from poolhouse import home, keystore, legacy, memory, sentinel
 from poolhouse.fleet.onboard import manifest as mf
 from poolhouse.fleet.onboard.signing import SigningKeys
 from poolhouse.keystore import Keystore, Wires
@@ -578,9 +578,9 @@ def test_the_fleet_signing_key_moves_into_a_wrapped_file_and_the_old_item_goes(t
     keys = SigningKeys(tmp_path / "fleet", say=lambda _m: None)
     keys._write({"store": "keyring", "key_id": signer.key_id, "public": base64.b64encode(signer.public).decode(),
                  "created": 1.0, "rotations": [], "revoked": [], "confirm": False})
-    counting.set_password("poolhouse", keys.account, base64.b64encode(signer.private_raw()).decode())
+    counting.set_password(legacy.KEYCHAIN_SERVICE, keys.account, base64.b64encode(signer.private_raw()).decode())
     mf.verify(keys.sign([], serial=1), signer.public)
-    assert ("poolhouse", keys.account) not in counting.held
+    assert (legacy.KEYCHAIN_SERVICE, keys.account) not in counting.held
     assert json.loads(keys.meta_path.read_text())["store"] == "keystore" and keys.wrapped_path.exists()
     assert holds(signer.private_raw(), tmp_path, home.state()) == []
     mf.verify(keys.sign([], serial=2), signer.public)
@@ -591,17 +591,17 @@ def test_a_signing_key_move_cut_off_after_the_wrap_is_finished_by_the_next_call(
     keys = SigningKeys(tmp_path / "fleet", say=lambda _m: None)
     keys._write({"store": "keyring", "key_id": signer.key_id, "public": base64.b64encode(signer.public).decode(),
                  "created": 1.0, "rotations": [], "revoked": [], "confirm": False})
-    counting.set_password("poolhouse", keys.account, base64.b64encode(signer.private_raw()).decode())
+    counting.set_password(legacy.KEYCHAIN_SERVICE, keys.account, base64.b64encode(signer.private_raw()).decode())
     counting.refuse, counting.refuse_ops = KeyringError, {"delete"}
     with pytest.raises(Exception, match="declined"):
         keys.sign([], serial=1)
-    assert keys.wrapped_path.exists() and ("poolhouse", keys.account) in counting.held
+    assert keys.wrapped_path.exists() and (legacy.KEYCHAIN_SERVICE, keys.account) in counting.held
     assert json.loads(keys.meta_path.read_text())["store"] == "keyring"
     counting.refuse = None
     keystore.default()._denied = ""
     (home.state("keystore") / "denied.json").unlink()
     mf.verify(keys.sign([], serial=2), signer.public)
-    assert ("poolhouse", keys.account) not in counting.held
+    assert (legacy.KEYCHAIN_SERVICE, keys.account) not in counting.held
     assert json.loads(keys.meta_path.read_text())["store"] == "keystore"
 
 

@@ -58,7 +58,7 @@ PROSE = re.compile(r"(?<![\w./~$-])ml-stack(?![\w/.-]|\.\w)")
 
 ARTICLE = re.compile(r"\b([Aa])n (poolhouse|Poolhouse|POOLHOUSE)\b")
 
-SENTENCE = re.compile(r"""(["'])poolhouse (?=(?:is|will|needs|has|did|changed|assistant)\b)""")
+SENTENCE = re.compile(r"""(["'])poolhouse (?=(?:is|will|needs|has|changed)\b)""")
 """A message that opens with the name and a verb: a sentence, so the name takes a capital."""
 
 EXCLUDED = (

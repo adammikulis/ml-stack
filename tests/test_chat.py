@@ -325,7 +325,7 @@ def test_resume_continues_the_last_chat_with_a_fresh_system_prompt():
     chat_, model, _, _ = session(["8099"], session=again)
     chat_.turn("which port?")
     sent = model.seen[0]
-    assert sent[0]["role"] == "system" and "Poolhouse assistant" in sent[0]["content"]
+    assert sent[0]["role"] == "system" and "poolhouse assistant" in sent[0]["content"]
     assert "the port is 8099" in " ".join(str(m["content"]) for m in sent)
 
 
@@ -466,7 +466,7 @@ def test_dry_run_prints_the_prompt_and_the_tools():
     out = io.StringIO()
     assert run_main(["--dry-run"], "", out) == 0
     text = out.getvalue()
-    assert "Poolhouse assistant" in text and "serve_up(" in text and "release_" not in text
+    assert "poolhouse assistant" in text and "serve_up(" in text and "release_" not in text
 
 
 def test_no_model_anywhere_ends_with_what_to_pull(monkeypatch):

@@ -817,7 +817,7 @@ class TestServingBeside:
     def test_a_caller_that_needs_that_port_still_gets_the_refusal(self, serving, tmp_path):
         instance = serving("somethingelse.gguf")
         held = self.manager(tmp_path, [])
-        with pytest.raises(ServerFailed, match="Poolhouse did not start"):
+        with pytest.raises(ServerFailed, match="poolhouse did not start"):
             held.lease(ServerSpec(model=tmp_path / "mine.gguf", port=instance.port), roam=False)
 
     def test_it_refuses_when_the_machine_has_no_room(self, serving, tmp_path, monkeypatch):
@@ -827,7 +827,7 @@ class TestServingBeside:
         instance = serving("somethingelse.gguf")
         monkeypatch.setattr("poolhouse.serve.manager.free_memory", lambda: 1024)
         held = self.manager(tmp_path, [])
-        with pytest.raises(ServerFailed, match="Poolhouse did not start"):
+        with pytest.raises(ServerFailed, match="poolhouse did not start"):
             held.lease(ServerSpec(model=big, port=instance.port))
 
 
