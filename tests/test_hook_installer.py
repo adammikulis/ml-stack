@@ -28,5 +28,5 @@ def test_installed_hook_runs_in_git_and_preserves_foreign_hook(tmp_path):
     assert clean.returncode == 0, clean.stderr
     (repo / "pending").write_text("pending")
     dirty = subprocess.run(command, cwd=repo, env=env, text=True, capture_output=True)
-    assert dirty.returncode != 0
+    assert dirty.returncode == 0, "a dirty tree is reported and never blocks a push"
     assert "uncommitted changes" in dirty.stderr

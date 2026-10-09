@@ -70,10 +70,11 @@ class FakeDaemon:
     `join` started would do, without the daemon."""
 
     def __init__(self, port: int, key: bytes, udp: int, name: str = "larch",
-                 machine: str = "") -> None:
+                 **more: object) -> None:
+        """``more`` may carry ``machine`` (an id) and ``device`` (what the beacon reports)."""
         self.name = name
-        machine = machine or f"id-{name}"
-        device = dict(DEVICE)
+        machine = more.get("machine") or f"id-{name}"
+        device = dict(more.get("device") or DEVICE)
 
         class H(BaseHTTPRequestHandler):
             def do_GET(self_) -> None:
