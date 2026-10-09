@@ -50,8 +50,8 @@ def log_of(state):
     return person_store.open_log(state / "person")
 
 
-def consume_now(state, repo, sha="", session=SESSION, label=""):
-    return person_auth.consume("release-main", target(repo, sha), Identity(session, label), log=log_of(state))
+def consume_now(state, repo, sha="", session=SESSION, agent=""):
+    return person_auth.consume("release-main", target(repo, sha), Identity(session, agent), log=log_of(state))
 
 
 def test_the_pinned_versions_name_the_release_the_shapes_were_read_from():
@@ -276,11 +276,11 @@ def test_the_single_use_replay_and_other_sessions_are_refused(world):
         consume_now(state, repo)
 
 
-def test_a_labelled_subagent_acts_as_its_parent_and_the_use_names_it(world):
+def test_a_named_subagent_acts_as_its_parent_and_the_use_names_it(world):
     tmp, state, repo = world
     approve(tmp, state, repo)
-    assert consume_now(state, repo, label="branch-worker-ab12") == authorized(state)[0]["id"]
-    assert rows(state)[-1]["by"] == "branch-worker-ab12"
+    assert consume_now(state, repo, agent="claude-ab12cd") == authorized(state)[0]["id"]
+    assert rows(state)[-1]["by"] == "claude-ab12cd"
 
 
 def test_expiry_is_fifteen_minutes(world):
