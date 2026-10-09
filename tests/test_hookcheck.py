@@ -16,8 +16,10 @@ import pytest
 from ml_stack import doctor, hookcheck
 from ml_stack.checks import ask
 
+pytest_plugins = ["node_kit"]
+
 ROOT = Path(__file__).resolve().parent.parent
-NAMES = ("pre-commit", "commit-msg", "pre-push", "post-merge", "claude-bash-guard")
+NAMES = ("pre-commit", "commit-msg", "pre-push", "post-merge", "post-commit", "claude-bash-guard")
 
 
 @pytest.fixture(autouse=True)
@@ -165,9 +167,9 @@ def test_the_doctor_finding_offers_only_the_installer_and_leaves_config_for_a_pe
 # -- the SessionStart hook ------------------------------------------------------------
 
 @pytest.fixture
-def session(tmp_path, repo):
-    """The SessionStart hook of a repository that holds a copy of the real hook scripts."""
-    for name in ("claude-session-start", "workspace_hook.py"):
+def session(tmp_path, repo, workspace_node):
+    """The SessionStart hook of a repository that holds a copy of the real hook scripts, run against a real node."""
+    for name in ("claude-session-start", "workspace_hook.py", "tree_watch.py"):
         shutil.copy(ROOT / "scripts" / "hooks" / name, repo / "scripts" / "hooks" / name)
     (repo / "src").symlink_to(ROOT / "src")
     git(repo, "add", "scripts")
@@ -179,8 +181,7 @@ def session(tmp_path, repo):
     fake.write_text(f"#!{sys.executable}\nimport json, sys\n"
                     f"open({str(calls)!r}, 'a').write(json.dumps(sys.argv[1:]) + '\\n')\nprint('inbox line')\n")
     fake.chmod(0o700)
-    env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", "ML_STACK_HOME": str(tmp_path / "state"),
-           "ML_STACK_RUNTIME_ENSURE": "off", "PYTHONPATH": str(ROOT / "src")}
+    env = workspace_node.env(extra={"PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", "ML_STACK_RUNTIME_ENSURE": "off"})
 
     def start():
         return subprocess.run([sys.executable, str(repo / "scripts" / "hooks" / "claude-session-start")],
@@ -199,7 +200,7 @@ def test_a_healthy_repository_adds_no_board_line_and_no_context_line(session):
     assert done.returncode == 0 and "git hooks" not in done.stdout and announced() == []
 
 
-def test_broken_hooks_are_announced_once_and_shown_to_the_agent_every_time(session, repo, tmp_path):
+def test_broken_hooks_are_announced_once_and_shown_to_the_agent_every_time(session, repo, tmp_path, workspace_node):
     start, announced = session
     git(repo, "config", "core.hooksPath", str(tmp_path / "gone"))
     first = start()
@@ -214,7 +215,7 @@ def test_broken_hooks_are_announced_once_and_shown_to_the_agent_every_time(sessi
     git(repo, "config", "core.hooksPath", str(tmp_path / "gone"))
     start()
     assert len(announced()) == 2
-    recorded = json.loads(next((tmp_path / "state" / "hookcheck").glob("*.json")).read_text())
+    recorded = json.loads(next((workspace_node.state.parent / "hookcheck").glob("*.json")).read_text())
     assert recorded["version"] == 1
 
 

@@ -91,8 +91,8 @@ SessionStart hook.
 Subagents disclose their authenticated parent and task, remain bounded helpers, and hand ready
 work back to the main session; they do not elect themselves coordinator. An authorized handoff
 may nominate an eligible main session. Readable labels never add permissions or alter device
-workspace authority. Register main-session presentation through the authenticated
-`ml-stack-workspace main-session --agent ID` flow; subagent briefs use the actual parent identity.
+workspace authority. The SessionStart hook registers the main session on the node, which names it;
+subagent briefs use the actual parent identity.
 
 **The lowest tier never coordinates.** The lowest model tier a vendor offers (Haiku, Luna and the
 like) is never a coordinator or eligible for promotion to one. A model that is not listed in the
@@ -373,6 +373,13 @@ it; if one is, leave it and say so. Never use `--force` to bypass those checks. 
 branch with `git branch -d`, prune the registrations, and confirm with `git worktree list` that
 the path is gone. Report the landed commit and cleanup result. A passing test, commit, or
 handoff alone does not finish the task.
+
+`scripts/worktrees` shows every tree with its owner. An *orphan* is a tree whose owner stopped
+more than the grace ago (2 hours by default) and which still holds work nobody landed, bundled
+or abandoned; before the grace passes it is "finished, waiting to land". A tree whose owner is
+running, or whose owner is unknown and younger than the grace, is never an orphan, and only
+orphans fail the `orphan-trees` gate. Decide one with `scripts/worktrees close TREE --landed`,
+`--bundle` or `--abandon 'reason'`.
 
 This applies to documentation, investigations that created a worktree, cancelled tasks and
 subagents too. If work must remain, name the path, branch, pending work and responsible agent

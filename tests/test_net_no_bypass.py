@@ -44,6 +44,14 @@ ALLOWED: dict[str, str] = {
     "fleet/join.py": "joins a fleet peer",
     "fleet/chat.py": "chat with a fleet peer",
     "fleet/launch.py": "the local daemon's health",
+    "fleet/autostart_apply.py": "waits on the health URL the autostart plan recorded: the daemon on 127.0.0.1",
+    "fleet/daemon_control.py": "asks the running daemon on its own loopback port to be replaced; "
+                               "any other endpoint is refused",
+    "fleet/launch_open.py": "asks the recorded daemon on 127.0.0.1 for a one-use launch ticket",
+    "fleet/wsl_ui.py": "relays stdio to the daemon through a Linux loopback connection",
+    "http_cancel.py": "cancellable sockets under ml_stack.http; it is the guarded client's own plumbing",
+    "train/recipes/tool_calls_mlx.py": "resolves a base model already on disk (local_files_only=True); "
+                                       "it downloads nothing",
     "fleet/ui.py": "a /metrics address a person typed into the fleet view (needs a session)",
     "serve/broker_wire.py": "the lease broker on loopback",
     "serve/escalation.py": "a model server's slots on loopback",

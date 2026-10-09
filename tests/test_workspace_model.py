@@ -14,6 +14,7 @@ from ml_stack.workspace import Denied, onboard, tokens
 from ml_stack.workspace.identity import Registry
 from ml_stack.workspace.modelid import clean_harness, clean_model
 
+pytest_plugins = ["node_kit"]
 PERSON = {"terminal": (True, True), "env": {}}
 HOSTILE = ["a\nb", "a\u202eb", "<b>x</b>", "x" * 81, "a b", "-lead", "a;rm", "x`y`", "a\x00b",
            "\uff41\uff42", "model\u2028x"]
@@ -111,10 +112,6 @@ def test_an_agent_cannot_verify_itself_or_overwrite_a_verified_model_or_set_anot
     ws.claim_model(kit.tokens["bob"], "gpt-5.1")
     assert ws.model_of("bob") == ("gpt-5.1", "claimed")
     assert ws.model_of("alice") == ("claude-sonnet-5-5", "verified")
-    done = cli(kit.base, kit.tokens["bob"], "whoami", "--model", "gpt-5.2", "--json")
-    assert done.returncode == 0 and json.loads(done.stdout)["model_state"] == "claimed"
-    assert ws.model_of("alice")[0] == "claude-sonnet-5-5"
-    assert cli(kit.base, kit.tokens["bob"], "whoami", "--model", "x y").returncode != 0
 
 
 def test_a_claimed_model_changes_no_right(kit):
@@ -143,18 +140,10 @@ def test_the_model_shows_in_headers_listings_board_json_and_the_activity_fields(
     assert "(gpt-5.1, claimed)" in sent["text"].splitlines()[1]
     got = ws.inbox(kit.tokens["bob"])[0]
     assert got["from_model"] == "gpt-5.1"
-    run = cli(kit.base, kit.tokens["bob"], "inbox")
-    assert re.search(r"question from .+ \(gpt-5\.1, claimed\)", run.stdout)
     ws.send(kit.tokens["bob"], "alice", "answer", "this one")
-    assert re.search(r"from .+ \(claude-sonnet-5-5, verified\)", cli(kit.base, kit.tokens["alice"], "inbox").stdout)
     rows = {r["id"]: r for r in ws.registered()}
     assert (rows["alice"]["model"], rows["alice"]["model_state"]) == ("gpt-5.1", "claimed")
     assert (rows["bob"]["model"], rows["bob"]["model_state"]) == ("claude-sonnet-5-5", "verified")
-    listing = cli(kit.base, kit.tokens["alice"], "agents").stdout
-    assert re.search(r"  agent  gpt-5\.1, claimed  codex", listing)
-    assert re.search(r"  agent  claude-sonnet-5-5, verified", listing)
-    status = json.loads(cli(kit.base, kit.tokens["alice"], "status", "--json").stdout)
-    assert {r["id"]: r["model"] for r in status["registered"]}["alice"] == "gpt-5.1"
     dm = ws.board.dm(kit.tokens["alice"], "bob")
     assert {m["from_model"] for m in dm if m["from"] == "alice"} == {"gpt-5.1"}
     page = ws.board.ui_dm(kit.owner, "alice", "bob")
@@ -163,6 +152,18 @@ def test_the_model_shows_in_headers_listings_board_json_and_the_activity_fields(
     assert ws.who_owns("branch", "x")["owner_model"] == "gpt-5.1" and claimed
     audit = [r for r in ws.audit_log.rows() if r["event"] == "message" and r["who"] == "alice"]
     assert audit[-1]["model"] == "gpt-5.1" and audit[-1]["verified"] is False
+
+
+def test_a_node_session_claims_a_model_through_whoami_and_it_shows_in_the_inbox_and_the_listing(workspace_node):
+    node = workspace_node
+    alice, bob = node.member("alice", model="gpt-5.1", harness="codex"), node.member("bob")
+    node.session(alice).post(bob.name, "question", "which tree?")
+    done = node.cli("whoami", "--model", "gpt-5.2", "--json", who=bob)
+    assert done.returncode == 0 and json.loads(done.stdout)["model_state"] == "claimed"
+    assert node.cli("whoami", "--model", "x y", who=bob).returncode != 0
+    assert re.search(r"question from .+ \(gpt-5\.1, claimed\)", node.cli("inbox", who=bob).stdout)
+    listing = node.cli("agents", who=alice).stdout
+    assert re.search(r"gpt-5\.1, claimed", listing) and re.search(r"gpt-5\.2, claimed", listing)
 
 
 def test_a_message_keeps_the_model_it_was_sent_under_and_a_swap_is_announced_with_history(kit):

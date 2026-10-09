@@ -145,3 +145,24 @@ def test_a_response_header_with_a_line_break_is_refused():
     with pytest.raises(ValueError):
         write(handler, 200, b"", "text/plain", {"X-A": "ok\r\nSet-Cookie: x=1"})
     assert all("\n" not in value for _, value in handler.sent)
+
+
+def test_a_content_type_with_a_line_break_is_refused():
+    import pytest
+
+    from ml_stack.fleet.routes import write
+
+    class Handler:
+        command = "GET"
+
+        def __init__(self):
+            self.sent = []
+
+        def send_response(self, code): ...
+        def send_header(self, key, value): self.sent.append((key, value))
+        def end_headers(self): ...
+
+    handler = Handler()
+    with pytest.raises(ValueError):
+        write(handler, 200, b"", "text/plain\r\nSet-Cookie: x=1")
+    assert handler.sent == []

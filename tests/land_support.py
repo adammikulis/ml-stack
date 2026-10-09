@@ -65,6 +65,13 @@ class Project:
                     "ML_STACK_TEST_KEYRING": str(base / "keyring.json"),
                     "PYTHONPATH": os.pathsep.join((str(ROOT / "tests"), os.environ.get("PYTHONPATH", "")))}
 
+        # The runner records its passes in the activity log, which a background process may write
+        # only once a person has provisioned the keystore; a headless runner has no person to ask.
+        subprocess.run([sys.executable, "-c",
+                        "from ml_stack import keystore\nkeystore.interactive = lambda: True\n"
+                        "keystore.default().provision()\n"],
+                       env=self.env, check=True, capture_output=True)
+
     @staticmethod
     def write(where: Path, rel: str, text: str) -> None:
         """Write ``text`` to ``rel`` under ``where``."""

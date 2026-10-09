@@ -45,11 +45,11 @@ def shell_sites() -> list[str]:
 
 
 def test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line():
-    assert shell_sites() == ["checks.py:65"]
+    assert shell_sites() == []
 
 
 def finding(marker: Path) -> checks.Finding:
-    return checks.Finding(name="x", good=False, said="broken", fix=f"touch {marker}")
+    return checks.Finding(name="x", good=False, said="broken", fix=["touch", str(marker)])
 
 
 def test_the_only_shell_line_is_one_the_person_was_shown_and_confirmed(tmp_path, monkeypatch):

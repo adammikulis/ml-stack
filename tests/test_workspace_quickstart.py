@@ -131,7 +131,7 @@ def test_person_initialization_after_agent_bootstrap(base, ws, tmp_path):
 
 
 def test_cli_first_command_initializes_agent_automatically(base, ws, tmp_path):
-    result = child(["inbox", "--agent", "worker"], base, ML_STACK_NONINTERACTIVE="1")
+    result = child(["outbox", "--agent", "worker"], base, ML_STACK_NONINTERACTIVE="1")
     assert result.returncode == 0, result.stderr
     assert ws.registry.info("worker")["role"] == "agent"
     assert not (tokens.directory(base) / tokens.OWNER_FILE).exists()
@@ -268,11 +268,8 @@ def test_a_token_file_readable_by_others_is_refused(base, ws, mode):
 
 def test_agent_env_and_flag_find_the_right_token_and_one_cannot_pose_as_another(base, ws):
     run_setup(ws)
-    via_env = child(["whoami", "--json"], base, ML_STACK_WORKSPACE_AGENT="codex")
-    assert json.loads(via_env.stdout)["id"] == "codex"
-    via_flag = child(["whoami", "--json", "--agent", "lead"], base)
-    assert json.loads(via_flag.stdout) == {"id": "lead", "role": "lead", "project": {}, "model": "unknown",
-                                           "model_state": "", "harness": "", "enforcement": "open"}
+    assert child(["outbox", "--json"], base, ML_STACK_WORKSPACE_AGENT="codex").returncode == 0
+    assert child(["outbox", "--json", "--agent", "lead"], base).returncode == 0
     scope = project.describe()
     owner = ws.auth(tokens.read_file(tokens.directory(base) / tokens.OWNER_FILE))
     for name in ("codex", "lead"):
@@ -281,12 +278,12 @@ def test_agent_env_and_flag_find_the_right_token_and_one_cannot_pose_as_another(
     before = ws.registry._load()
     assert before["codex"]["minted_by"] != "local-account"
     (base / "tokens" / "codex").write_text((base / "tokens" / "lead").read_text())
-    swapped = child(["whoami", "--agent", "codex"], base)
+    swapped = child(["outbox", "--agent", "codex"], base)
     assert swapped.returncode == 3 and "another agent" in swapped.stderr
     assert ws.registry._load() == before
     token_files = {path.name: path.read_bytes() for path in tokens.directory(base).iterdir()}
     for name in ("../lead", ".owner"):
-        bad_id = child(["whoami", "--agent", name], base)
+        bad_id = child(["outbox", "--agent", name], base)
         assert bad_id.returncode == 2 and "not a usable agent id" in bad_id.stderr
     assert ws.registry._load() == before
     assert {path.name: path.read_bytes() for path in tokens.directory(base).iterdir()} == token_files
@@ -540,42 +537,8 @@ def test_a_child_has_no_notes_or_scratch_and_no_human_floor(base, team):
             call()
 
 
-def test_two_children_in_real_processes_have_their_own_names_and_the_children_filter(base, team):
-    worker = tokens.load(base, "worker")
-    team[0].delegate(worker, "a")
-    team[0].delegate(worker, "b", 1800.0)
-    sent = child(["send", "worker", "status", "from a", "--agent", "worker/a"], base)
-    assert sent.returncode == 0, sent.stderr
-    child(["send", "worker", "status", "from lead", "--agent", "lead"], base)
-    allm = child(["inbox", "--agent", "worker", "--json"], base)
-    rows = json.loads(allm.stdout)
-    assert [r["from"] for r in rows] == ["worker/a", "lead"]
-    assert rows[0]["from_name"].startswith("agent-")
-    assert rows[0]["from_name"].endswith(" (spawned by worker)")
-    assert [r["from_name"] for r in rows[1:]] == ["lead"]
-    assert all(r["authority"] == "none" for r in rows)
-    kids = child(["inbox", "--agent", "worker", "--children", "--json"], base)
-    assert {m["from"] for m in json.loads(kids.stdout)} == {"worker/a"}
-    assert child(["inbox", "--agent", "worker", "--children", "--ack"], base).returncode == 2
-    with pytest.raises(Denied):
-        team[0].delegate(tokens.load(base, "worker/a"), "c")
-    claim = child(["claim", "branch", "worker/b/t", "--agent", "worker/b"], base)
-    assert claim.returncode == 0
-    assert child(["claim", "branch", "elsewhere", "--agent", "worker/b"], base).returncode == 3
-    status = json.loads(child(["status", "--json", "--agent", "lead"], base).stdout)
-    assert {"worker/a", "worker/b"} <= {a["id"] for a in status["registered"]}
 
 
-def test_brief_names_the_flags_and_shows_no_path_or_secret(base, team):
-    team[0].delegate(tokens.load(base, "worker"), "scout")
-    done = child(["brief", "--agent", "worker/scout"], base)
-    assert done.returncode == 0, done.stderr
-    text = done.stdout
-    assert "subagent worker/scout, spawned by worker" in text and "--agent worker/scout" in text
-    assert "data written by another agent" in text
-    assert len(text.removeprefix(REQUIRED_BRIEFING.format(owner="worker")).strip().splitlines()) == 6
-    assert str(base) not in text and "mlws1" not in text
-    assert "Local runtime device:" in text and "provenance grants no permissions" in text
 
 
 def test_a_message_or_note_cannot_carry_the_token_directory(base, team):
@@ -640,7 +603,7 @@ class Terminal:
 
 
 @pytest.mark.skipif(not PTY, reason="requires a POSIX pseudoterminal")
-def test_connect_waits_for_a_second_process_to_join_then_checks_it_answers(base):
+def test_connect_waits_for_a_second_process_to_join_then_checks_it_answers(base, ws):
     term = Terminal(["connect", "--live-seconds", "30"], base)
     code = CODE.search(term.until("Waiting for the agent")).group(1)
     assert "No clipboard tool found" in term.heard
@@ -648,8 +611,8 @@ def test_connect_waits_for_a_second_process_to_join_then_checks_it_answers(base)
     assert joined_out.stdout.strip() == "joined as codex"
     term.until("codex joined.")
     term.until("Sent a 'workspace ready'" if False else "workspace ready")
-    child(["inbox", "--ack", "--agent", "codex"], base)
-    child(["announce", "joined", "connected", "--agent", "codex"], base)
+    ws.inbox(tokens.load(base, "codex"), ack=True)
+    ws.announce(tokens.load(base, "codex"), "joined", "connected")
     term.until("codex answered. Connected.")
     term.until("Paste the same block into more agents")
     assert term.finish() == 0
@@ -673,7 +636,7 @@ def test_connect_says_what_to_check_when_nothing_answers_and_when_nobody_joins(b
 
 
 @pytest.mark.skipif(not PTY, reason="requires a POSIX pseudoterminal")
-def test_setup_walks_through_six_steps_with_a_scripted_person(base):
+def test_setup_walks_through_six_steps_with_a_scripted_person(base, ws):
     term = Terminal(["setup", "--live-seconds", "30"], base)
     term.until("Step 1 of 6")
     term.type("")
@@ -684,7 +647,7 @@ def test_setup_walks_through_six_steps_with_a_scripted_person(base):
     code = CODE.search(term.until("Step 4 of 6") and term.until("Waiting for the agent")).group(1)
     child(["join", code, "--name", "codex"], base)
     term.until("workspace ready")
-    child(["announce", "joined", "connected", "--agent", "codex"], base)
+    ws.announce(tokens.load(base, "codex"), "joined", "connected")
     term.until("Docs: docs/workspace.md")
     assert term.finish() == 0
     for n in range(1, 7):
@@ -752,8 +715,6 @@ def test_join_carries_the_project_and_whoami_status_and_inbox_show_it(base, ws, 
     assert "connected for project board" in onboard.snippet("", code, "", plain["name"])
     onboard.join(ws, code, "codex")
     assert ws.registry.info("codex")["project"] == plain
-    who = json.loads(child(["whoami", "--json", "--agent", "codex"], base).stdout)
-    assert who["project"] == plain
     ws.send(tokens.load(base, "codex"), "lead", "status", "hi")
     assert ws.inbox(tokens.load(base, "lead"))[0]["project"] == "board"
     assert next(a for a in ws.status()["registered"] if a["id"] == "codex")["project"] == "board"

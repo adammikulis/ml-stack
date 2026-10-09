@@ -202,7 +202,7 @@ def _requests(directory: Path) -> Requests:
 
 
 def cmd_nearby(args: argparse.Namespace) -> int:
-    transport = near.UdpTransport(bind=args.bind, port=args.port,
+    transport = near.UdpTransport(bind=args.bind or None, port=args.port,
                                   group=None if args.bind else near.DEFAULT_GROUP)
     try:
         found = near.Browser(transport).listen(args.timeout)
@@ -275,7 +275,7 @@ def cmd_listen(args: argparse.Namespace) -> int:
     transport = near.UdpTransport(port=0 if where else args.announce_port,
                                   destinations=where or None,
                                   group=None if where else near.DEFAULT_GROUP,
-                                  bind="127.0.0.1" if where else "")
+                                  bind="127.0.0.1" if where else None)
     with PairingServer(requests, ident, Hooks(grant, tell, learned), address=(host, args.port)) as server:
         announcer = near.Announcer(transport, near.Presence(
             socket.gethostname()[:40], socket.gethostname()[:60],

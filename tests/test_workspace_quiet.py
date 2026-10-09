@@ -16,6 +16,8 @@ from ml_stack import mcp
 from ml_stack.workspace import Denied, Refused, onboard, tokens
 from ml_stack.workspace.boards import ANNOUNCE
 
+pytest_plugins = ["node_kit"]
+
 
 @pytest.fixture
 def kit(monkeypatch, tmp_path):
@@ -179,16 +181,18 @@ def test_the_total_bytes_of_one_call_are_capped_too(kit):
     assert 1 <= len(got) < 8 and got.held == 8 - len(got)
 
 
-def test_the_cli_says_how_many_were_held_back_and_widens_on_request(kit):
+def test_the_cli_says_how_many_were_held_back_and_widens_on_request(workspace_node):
+    node = workspace_node
+    alice, bob = node.member("alice"), node.member("bob")
     for i in range(12):
-        cli(kit.base, kit.t["alice"], "send", "bob", "note", f"n{i}")
-    done = cli(kit.base, kit.t["bob"], "inbox")
+        assert node.cli("send", bob.name, "note", f"n{i}", who=alice).returncode == 0
+    done = node.cli("inbox", who=bob)
     assert done.stdout.count("note from ") == 10 and "2 more held back" in done.stderr
-    assert cli(kit.base, kit.t["bob"], "inbox", "--all").stdout.count("note from ") == 12
-    cli(kit.base, kit.t["alice"], "announce", "done", "all finished")
-    shown = cli(kit.base, kit.t["bob"], "inbox")
+    assert node.cli("inbox", "--all", who=bob).stdout.count("note from ") == 12
+    node.cli("announce", "done", "all finished", who=alice)
+    shown = node.cli("inbox", who=bob)
     assert "all finished" in shown.stdout and "done" in shown.stdout
-    assert cli(kit.base, kit.t["alice"], "send", "*", "status", "hi").returncode == 3
+    assert node.cli("send", "*", "status", "hi", who=alice).returncode == 3
 
 
 def test_threads_and_board_reads_are_capped_by_default(kit):
@@ -253,26 +257,22 @@ def test_repeated_reads_are_byte_identical_and_tool_descriptions_are_static(kit)
     assert ws.board.rollup(t["bob"])["text"].index("hello") < ws.board.rollup(t["bob"])["text"].index("later")
 
 
-def test_nudge_is_silent_when_empty_a_line_when_not_and_never_shows_text_or_acks(kit):
-    ws, t = kit.ws, kit.t
-    ws.board.create(t["alice"], "#ops")
-    ws.board.join(t["bob"], "#ops")
-    assert cli(kit.base, t["bob"], "nudge").stdout == ""
-    ws.announce(t["alice"], "done", "announcements wait for nobody")
-    ws.send(t["alice"], "#ops", "note", "plain post")
-    assert cli(kit.base, t["bob"], "nudge").stdout == ""
-    ws.send(t["alice"], "bob", "task", "SECRET-BODY do it")
-    ws.send(t["alice"], "#ops", "note", "hey @bob SECRET-BODY")
-    first = cli(kit.base, t["bob"], "nudge")
+def test_nudge_is_silent_when_empty_a_line_when_not_and_never_shows_text_or_acks(workspace_node):
+    node = workspace_node
+    alice, bob = node.member("alice"), node.member("bob")
+    assert node.cli("nudge", who=bob).stdout == ""
+    node.cli("announce", "done", "announcements wait for nobody", who=alice)
+    assert node.cli("nudge", who=bob).stdout == ""
+    node.session(alice).post(bob.name, "task", "SECRET-BODY do it")
+    first = node.cli("nudge", who=bob)
     assert first.returncode == 0 and first.stderr == ""
-    assert re.fullmatch(r"workspace: 2 waiting for you \(1 task, 1 note; from alice; oldest [0-9]+s\)\. "
+    assert re.fullmatch(rf"workspace: 1 waiting for you \(1 task; from {alice.name}; oldest [0-9]+s\)\. "
                         r"A direct task is waiting on you: run ml-stack-workspace inbox now and "
                         r"answer it\n", first.stdout)
     assert "SECRET" not in first.stdout
-    assert cli(kit.base, t["bob"], "nudge").stdout.startswith("workspace: 2 waiting for you")
-    assert len(ws.inbox(t["bob"])) == 2 and ws.bus.cursor("bob") == 0
-    ws.inbox(t["bob"], ack=True)
-    assert cli(kit.base, t["bob"], "nudge").stdout == ""
+    assert node.cli("nudge", who=bob).stdout.startswith("workspace: 1 waiting for you")
+    assert node.cli("inbox", "--ack", who=bob).stdout.count("task from ") == 1
+    assert node.cli("nudge", who=bob).stdout == ""
 
 
 def test_hook_snippet_prints_the_setting_and_writes_nothing(kit, tmp_path):

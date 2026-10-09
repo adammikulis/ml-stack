@@ -10,6 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import rules_loader
+import tree_watch
 import workspace_hook
 
 
@@ -58,6 +59,8 @@ def workspace_brief(event: dict) -> str:
     if environment is None:
         return ""
     purpose = " ".join(str(event.get("description") or event.get("agent_type") or "subagent").split())[:190]
+    tree_watch.started("SubagentStart", str(event.get("cwd") or ""),
+                       environment.get("ML_STACK_WORKSPACE_AGENT", ""), purpose)
     workspace_hook.run(["ml-stack-workspace", "announce", "joined", purpose], "SubagentStart", environment=environment)
     done = workspace_hook.run(["ml-stack-workspace", "brief", "--registered"],
                               "SubagentStart", environment=environment)

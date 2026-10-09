@@ -4,7 +4,6 @@ import re
 import pytest
 from workspace_kit import Kit, clean_env
 
-from ml_stack.workspace import tokens
 from ml_stack.workspace.agent_display import metadata
 from ml_stack.workspace.identity import Denied
 
@@ -86,8 +85,6 @@ def test_presented_agents_children_and_internal_senders_are_read_only(kit, monke
 def test_registration_preserves_model_and_rights_and_refuses_child(host):
     from test_workspace_remote import call, joined
 
-    from ml_stack.workspace.coordinator_calls import READS, WRITES
-
     first = joined(host, name='codex-first')
     before = call(host, first, 'whoami')[1]['result']
     code, shown = call(host, first, 'register_session', device={'os': 'macOS', 'hostname': 'test'})
@@ -101,22 +98,6 @@ def test_registration_preserves_model_and_rights_and_refuses_child(host):
     assert call(host, first, 'register_session')[1]['result'] == shown
     child = call(host, first, 'delegate', 'review')[1]['result']
     assert call(host, child, 'register_session')[0] == 403
-    assert 'main-session' in WRITES and 'main-session' not in READS
-
-
-def test_brief_names_the_spawned_subagent_and_its_registered_parent(kit, monkeypatch, capsys):
-    from types import SimpleNamespace
-
-    from ml_stack.workspace import cli
-
-    token = kit.agent('codex-session')
-    made = kit.ws.spawn(token, 'codex', 'review-thread')
-    child = tokens.load(kit.base, made['id'])
-    monkeypatch.setattr(cli, '_context', lambda args: (kit.ws, child))
-    cli._brief(SimpleNamespace(agent=made['id'], registered=False), None)
-    output = capsys.readouterr().out
-    assert f"subagent {made['id']}, spawned by codex-session" in output and '--label' not in output
-    assert 'do not elect yourself coordinator' in output
 
 
 def test_unknown_ordinals_do_not_collide_after_device_metadata_arrives(kit):
@@ -144,30 +125,6 @@ def test_expired_and_restricted_main_have_no_coordinator_eligibility(kit):
     with pytest.raises(Denied, match='claim'):
         kit.ws.register_session(token)
     assert not metadata(kit.ws.registry, 'codex-restricted')['coordinator_eligible']
-
-
-def test_cli_main_session_uses_mutation_rpc(host, monkeypatch, capsys):
-    from types import SimpleNamespace
-
-    from test_workspace_remote import call, joined
-
-    from ml_stack.workspace import cli, project_connection
-
-    agent = joined(host, name='codex-cli')
-
-    def invoke(operation, token, *args, **kwargs):
-        assert token == agent['token']
-        code, result = call(host, agent, operation, *args, **kwargs)
-        assert code == 200, result
-        return result['result']
-
-    workspace = project_connection.BoardWorkspace(SimpleNamespace(call=invoke), agent['token'])
-    monkeypatch.setattr(cli, '_project_connection', lambda: {'host': 'board'})
-    monkeypatch.setattr(cli, '_context', lambda args, connection: (workspace, agent['token']))
-    handler = next(entry[3] for entry in cli.TABLE if entry[0] == 'main-session')
-    args = SimpleNamespace(cmd='main-session', json=True, request_id='', harness='codex')
-    assert cli._runner(handler)(args) == 0
-    assert '"session_kind": "main"' in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("model,harness,expected", [

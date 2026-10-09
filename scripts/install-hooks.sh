@@ -26,7 +26,7 @@ set -e
 cd "$(git rev-parse --show-toplevel)"
 hooks="$(git rev-parse --git-common-dir)/hooks"
 mkdir -p "$hooks"
-for pair in "pre-commit pre-commit" "commit-msg commit-msg" "pre-push pre-push" "post-merge post-merge"; do
+for pair in "pre-commit pre-commit" "commit-msg commit-msg" "pre-push pre-push" "post-merge post-merge" "post-commit post-commit"; do
     hook=${pair% *}
     script=${pair#* }
     dst="$hooks/$hook"

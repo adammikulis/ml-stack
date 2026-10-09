@@ -51,6 +51,14 @@ def metadata(registry, name):
             'coordinator_reason': reason, 'spawned_by': parent}
 
 
+def describe(agent) -> dict:
+    """The presentation of an agent the node lists: its name, whether it is a main session or a subagent, and
+    whether it may coordinate (a subagent never; a main session by its model's tier)."""
+    reason = 'not a main session' if agent.parent else tier_of(agent.model, agent.model_state).reason
+    return {'display_name': agent.name, 'session_kind': 'subagent' if agent.parent else 'main',
+            'coordinator_eligible': not reason, 'coordinator_reason': reason, 'spawned_by': agent.parent}
+
+
 def spoken(shown: dict) -> str:
     """How a person reads an agent: its unique name, and who spawned it when a subagent."""
     return f"{shown['display_name']} (spawned by {shown['spawned_by']})" if shown.get('spawned_by') else shown['display_name']

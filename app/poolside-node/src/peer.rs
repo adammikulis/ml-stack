@@ -65,13 +65,16 @@ pub fn take_policy(node: &mut Node, v: &Value) -> Result<()> {
 
 fn hello(node: &Node, standing: Standing) -> Value {
     let boards: Vec<&String> = if standing == Standing::Active { node.boards.keys().collect() } else { Vec::new() };
-    json!({"pool": node.members.id, "policy": node.members.policy.name(), "fingerprint": node.cert.fingerprint(),
+    json!({"pool": node.members.id, "policy": node.members.policy.name(), "fingerprint": node.cert.fingerprint(), "project": node.members.project,
            "board_fingerprint": crate::device::fingerprint(&node.key), "member": standing == Standing::Active, "boards": boards})
 }
 
-fn join_open(node: &mut Node, der: &[u8], req: &Value) -> Result<Value> {
+fn join_open(node: &mut Node, der: &[u8], req: &Value, ip: IpAddr) -> Result<Value> {
     if node.members.policy != Policy::Open {
         return Err(Error::Denied("this pool takes a device only through a pairing code".into()));
+    }
+    if !crate::netif::on_segment(ip) {
+        return Err(Error::Denied("this pool takes a device without a code only from its own network".into()));
     }
     let name = req.get("name").and_then(Value::as_str).unwrap_or("");
     node.enrol_device(der, name, "open")?;
@@ -130,7 +133,7 @@ fn push(node: &mut Node, bfp: &str, req: &Value) -> Result<Value> {
 /// under the node's lock, so the check and the work see the same record.
 fn dispatch(net: &Net, node: &mut Node, der: &[u8], ip: IpAddr, req: &Value) -> Result<Value> {
     let fp = cert_fingerprint(der);
-    let result = answer(net, node, der, req)?;
+    let result = answer(net, node, der, ip, req)?;
     // A device that has just joined says which port it listens on; its address is where it called from.
     if matches!(req["op"].as_str(), Some("join_open" | "pair_confirm")) {
         if let Some(port) = req["port"].as_u64().and_then(|p| u16::try_from(p).ok()).filter(|p| *p > 0) {
@@ -140,7 +143,7 @@ fn dispatch(net: &Net, node: &mut Node, der: &[u8], ip: IpAddr, req: &Value) -> 
     Ok(result)
 }
 
-fn answer(net: &Net, node: &mut Node, der: &[u8], req: &Value) -> Result<Value> {
+fn answer(net: &Net, node: &mut Node, der: &[u8], ip: IpAddr, req: &Value) -> Result<Value> {
     let fp = cert_fingerprint(der);
     let standing = node.members.standing(&fp);
     if standing == Standing::Revoked {
@@ -150,7 +153,7 @@ fn answer(net: &Net, node: &mut Node, der: &[u8], req: &Value) -> Result<Value> 
     let op = text(req, "op")?;
     match (op, standing) {
         ("hello", _) => Ok(hello(node, standing)),
-        ("join_open", Standing::Unknown) => join_open(node, der, req),
+        ("join_open", Standing::Unknown) => join_open(node, der, req, ip),
         ("pair_exchange" | "pair_confirm", Standing::Unknown) => net.pairing_step(node, der, op, req),
         ("join_open" | "pair_exchange" | "pair_confirm", _) => Err(Error::Denied("this device is already a member".into())),
         (_, Standing::Unknown) => Err(Error::Denied("this device is not a member of the pool".into())),

@@ -141,7 +141,7 @@ def test_native_reservations_are_atomic_project_scoped_and_return_relative_keys(
     def request(agent, operation, *args, **kwargs):
         return host.answer(PROJECT, "board", {"agent_token": agent["token"], "operation": operation,
                            "args": list(args), "kwargs": kwargs}, admission=("dev", "c" * 64, True))
-    code, reply = request(first, "native.reserve", [["area", "src/item.py"], ["branch", "feature"]], label="native")
+    code, reply = request(first, "native.reserve", [["area", "src/item.py"], ["branch", "feature"]])
     assert code == 200, reply
     assert {row["key"] for row in reply["result"]} == {"src/item.py", "feature"}
     assert all(row["pid"] == 0 and row["owner"] == first["id"] for row in reply["result"])

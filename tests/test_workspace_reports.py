@@ -24,12 +24,12 @@ def test_duplicate_reports_reuse_seq_without_rate_audit_or_wake_writes(kit, monk
     from ml_stack.workspace import wake
     calls = []
     monkeypatch.setattr(wake, 'signal', lambda *args: calls.append(args))
-    first = kit.ws.send(kit.sender, 'receiver', 'status', 'Worker stopped', label='runtime')
+    first = kit.ws.send(kit.sender, 'receiver', 'status', 'Worker stopped')
     rows = kit.ws.audit_log.rows()
     woke = len(calls)
     kit.limits(sends_per_window=1, inbox_pending=1, unread_per_sender=1)
     for _ in range(10):
-        assert kit.ws.send(kit.sender, 'receiver', 'status', 'Worker stopped', label='runtime') == first
+        assert kit.ws.send(kit.sender, 'receiver', 'status', 'Worker stopped') == first
     assert len(calls) == woke and kit.ws.audit_log.rows() == rows
     assert kit.ws.rates.recent('reporter') == 1
     assert kit.ws.bus.log.verify().ok and len(kit.ws.bus.outbox('reporter')) == 1
@@ -37,9 +37,9 @@ def test_duplicate_reports_reuse_seq_without_rate_audit_or_wake_writes(kit, monk
 
 def test_announcement_duplicates_precede_announcement_quota_and_do_not_deadlock(kit):
     kit.limits(announce_per_window=1, sends_per_window=1)
-    first = kit.ws.announce(kit.sender, 'done', 'Worker stopped', label='runtime')
-    assert kit.ws.send(kit.sender, '*', 'done', 'Worker stopped', label='runtime') == first
-    second = kit.ws.announce(kit.sender, 'done', 'A different report', label='runtime')
+    first = kit.ws.announce(kit.sender, 'done', 'Worker stopped')
+    assert kit.ws.send(kit.sender, '*', 'done', 'Worker stopped') == first
+    second = kit.ws.announce(kit.sender, 'done', 'A different report')
     assert second != first
     assert len(kit.ws.bus.outbox('reporter')) == 2
 
@@ -54,7 +54,7 @@ def test_human_and_nonreport_messages_are_deliberate_repeats(kit):
 def test_exact_labels_destinations_subjects_threads_and_models_remain_distinct(kit):
     root1 = kit.ws.send(kit.receiver, 'reporter', 'question', 'First request')
     root2 = kit.ws.send(kit.receiver, 'reporter', 'question', 'Second request')
-    values = [{}, {'label': 'helper'}, {'subject': 'different'}, {'reply_to': root1['seq']},
+    values = [{}, {'subject': 'different'}, {'reply_to': root1['seq']},
               {'reply_to': root2['seq']}]
     rows = [kit.ws.send(kit.sender, 'receiver', 'status', 'Stopped', **value) for value in values]
     rows.append(kit.ws.send(kit.sender, 'owner', 'status', 'Stopped'))
@@ -138,7 +138,7 @@ while not Path(sys.argv[2]).exists():
     if time.monotonic() > until: raise RuntimeError('race barrier timed out')
     time.sleep(.01)
 import os
-row = Workspace().send(os.environ['ML_STACK_WORKSPACE_TOKEN'], 'receiver', 'status', 'Worker stopped', label='runtime')
+row = Workspace().send(os.environ['ML_STACK_WORKSPACE_TOKEN'], 'receiver', 'status', 'Worker stopped')
 print(json.dumps({'seq': row['seq']}))
 '''
     ready = [tmp_path / f'ready-{index}' for index in range(2)]

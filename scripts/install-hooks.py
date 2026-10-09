@@ -5,7 +5,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-HOOKS = ("pre-commit", "commit-msg", "pre-push", "post-merge")
+HOOKS = ("pre-commit", "commit-msg", "pre-push", "post-merge", "post-commit")
 MARKER = "# ml-stack managed hook"
 
 

@@ -1,5 +1,6 @@
 """Project-scoped agent authentication across a fleet transport."""
 
+import base64
 import socket
 import threading
 from contextlib import contextmanager
@@ -19,7 +20,7 @@ from ml_stack.fleet.pool_roster import Pool
 from ml_stack.fleet.projects import ProjectRegistry
 from ml_stack.fleet.remote import Peer
 from ml_stack.http import Server, ServerError, request_json
-from ml_stack.workspace import cli, project_connection, remote as remote_module, tokens
+from ml_stack.workspace import cli, project_connection, remote as remote_module, render, tokens
 from ml_stack.workspace.identity import AGENT, HUMAN, LEAD, Denied
 from ml_stack.workspace.remote import RemoteWorkspace
 from ml_stack.workspace.remote_host import WorkspaceHost
@@ -64,7 +65,7 @@ def test_agent_connect_selects_explicit_project_instead_of_current_board(tmp_pat
     monkeypatch.setattr(cli, "_context", lambda args, connection: (board_ws, "session")
                         if connection is target else pytest.fail("wrong board"))
     results = []
-    monkeypatch.setattr(cli, "_show", lambda args, result: results.append(result))
+    monkeypatch.setattr(render, "show", lambda args, result: results.append(result))
     args = SimpleNamespace(agent="worker", project=str(requested), no_project=False,
                            one_agent=False, remote=False, code_only=False, name="", json=True)
     assert cli._bare(cli._connect)(args) == (3 if unavailable else 0)
@@ -119,7 +120,7 @@ def test_local_runner_discovers_authority_once(monkeypatch):
     monkeypatch.setattr(cli, "Workspace", LocalWorkspace)
     monkeypatch.setattr(cli, "_local_token", lambda args: "local-session")
     seen = []
-    assert cli._runner(lambda args, ws, token: seen.append((ws, token)))(SimpleNamespace(json=True, cmd="whoami")) == 0
+    assert cli._runner(lambda args, ws, token: seen.append((ws, token)))(SimpleNamespace(json=True, cmd="outbox")) == 0
     assert len(seen) == 1 and isinstance(seen[0][0], LocalWorkspace)
     assert seen[0][1] == "local-session"
     assert discoveries == [True]
@@ -138,7 +139,7 @@ def test_coordinator_runner_keeps_selected_authority(monkeypatch):
     monkeypatch.setattr(cli.coordinator_client, "argv_for", lambda *a: [])
     monkeypatch.setattr(cli, "_coordinator_token", lambda args, selected: "coordinator-session"
                         if selected is remote else pytest.fail("different coordinator"))
-    args = SimpleNamespace(cmd="whoami", json=True, request_id="")
+    args = SimpleNamespace(cmd="outbox", json=True, request_id="")
     assert cli._runner(lambda *a: pytest.fail("local dispatch"))(args) == 0
     assert calls == ["coordinator-session"]
     assert discoveries == [True]
@@ -327,6 +328,9 @@ def host(tmp_path):
             return SimpleNamespace(name="ml-stack", board_host="https://board.invalid:8770")
         def hosts(self, board_host):
             return board_host == "https://board.invalid:8770"
+        def list(self):
+            return [{"id": ident, "name": "ml-stack", "board_host": "https://board.invalid:8770"}
+                    for ident in (PROJECT, OTHER)]
         def workspace_base(self, project_id):
             self.get(project_id)
             return tmp_path / project_id
@@ -433,13 +437,20 @@ def test_signed_sealed_fleet_and_agent_capabilities_both_required(host, tmp_path
     files = tmp_path / "files"
     files.mkdir()
     runner = JobRunner(tmp_path / "jobs", files)
-    daemon = Daemon(runner, files, fleet_token)
+    from ml_stack import macauth
+    from ml_stack.fleet.onboard.requests import Device
+    from ml_stack.workspace import coordinator_client
+    secret = base64.urlsafe_b64encode(b"d" * 32).decode()
+    device = Device("d" * 64, "peer", "peer-host", "127.0.0.1", 1, mine=True, secret=secret)
+    daemon = Daemon(runner, files, fleet_token, devices=lambda: [device])
     daemon.projects = host.projects
     daemon.workspaces = host
     server = Server(("127.0.0.1", 0), make_handler(daemon))
     threading.Thread(target=server.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{server.server_port}"
     monkeypatch.setattr("ml_stack.workspace.remote.load_cluster_key", lambda path: key)
+    monkeypatch.setattr(coordinator_client, "_device_peer", lambda config: SimpleNamespace(
+        token=macauth.derive(base64.urlsafe_b64decode(secret))))
     try:
         remote = RemoteWorkspace(base, PROJECT)
         invite = host.invite(PROJECT)
@@ -453,7 +464,7 @@ def test_signed_sealed_fleet_and_agent_capabilities_both_required(host, tmp_path
         monkeypatch.chdir(project_root)
         args = SimpleNamespace(agent="", token_file="")
         board_ws, selected_token = cli._context(args)
-        board_ws.announce(selected_token, "joined", "Mac agent attached", "")
+        board_ws.announce(selected_token, "joined", "Mac agent attached")
         assert "Mac agent attached" in host.status(PROJECT)["messages"][0]["text"]
         with pytest.raises(ServerError):
             request_json(f"{base}/workspace/v1/projects/{PROJECT}/board",

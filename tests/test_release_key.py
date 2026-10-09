@@ -152,9 +152,13 @@ def test_gh_failing_leaves_the_keystore_and_signing_untouched(rk, monkeypatch, t
     assert _leftovers(tmp_path) == []
 
 
-def test_a_missing_gh_is_named(rk, monkeypatch, capsys):
-    monkeypatch.setenv("PATH", str(Path(subprocess.run(["which", "ssh-keygen"], capture_output=True,
-                                                       text=True).stdout.strip()).parent))
+def test_a_missing_gh_is_named(rk, monkeypatch, capsys, tmp_path):
+    # Only ssh-keygen is on the path: the directory it lives in (/usr/bin on a CI runner) holds gh too.
+    only = tmp_path / "only-ssh-keygen"
+    only.mkdir()
+    keygen = subprocess.run(["which", "ssh-keygen"], capture_output=True, text=True).stdout.strip()
+    (only / "ssh-keygen").symlink_to(keygen)
+    monkeypatch.setenv("PATH", str(only))
     assert rk.main(["create"], TTY) == 1
     assert "gh is not installed" in capsys.readouterr().err
     assert credentials.get(rk.ITEM) is None

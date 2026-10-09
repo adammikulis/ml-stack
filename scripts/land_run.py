@@ -14,6 +14,7 @@ import land_check as lc
 import land_git as lg
 import land_plan
 
+from ml_stack import trees
 from ml_stack.activity.gate import tree_hash
 
 UNION_FILES = {"HANDOFF.md"}
@@ -227,6 +228,8 @@ def create(root: Path, target: str, order: list[str]) -> Batch:
     wt = root.parent / f"{root.name}-land-{stamp}"
     branch = f"land/{stamp}"
     lg.git(root, "worktree", "add", "-b", branch, str(wt), base)
+    with contextlib.suppress(RuntimeError, OSError):   # the registry never stops a landing
+        trees.claim(root, wt, "land", time.time(), {"purpose": "integration batch"})
     return Batch(root, target, base, wt, branch, order)
 
 

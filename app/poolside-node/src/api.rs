@@ -19,17 +19,17 @@ const FORBIDDEN: [&str; 9] = ["sender", "name", "parent", "label", "from", "auth
 
 fn params_for(method: &str) -> Option<&'static [&'static str]> {
     Some(match method {
-        "hello" | "whoami" | "status" | "shutdown" | "links" => &[],
+        "hello" | "status" | "shutdown" | "links" => &[],
         "register" => &["model", "harness", "session"],
         "post" => &["kind", "idem", "fields"],
-        "read" => &["since", "kind", "channel", "sender", "limit"],
-        "claim" | "release" => &["target", "note"],
+        "read" => &["since", "kind", "channel", "by", "limit", "inbox", "with"],
         "link" => &["to", "channels", "mode"],
         "unlink" => &["id"],
         "project_add" | "source_add" => &["id", "kind", "path"],
         "project_list" => &[],
         "project_resolve" => &["path"],
-        m => return crate::poolapi::params(m).or_else(|| crate::lease::rpc::params_for(m)),
+        m => return crate::poolapi::params(m).or_else(|| crate::lease::rpc::params_for(m)).or_else(|| crate::sessions::params_for(m))
+            .or_else(|| crate::claims::params_for(m)).or_else(|| crate::notes::params_for(m)),
     })
 }
 
@@ -60,12 +60,18 @@ fn read(node: &mut Node, token: &str, board: &str, p: &Map<String, Value>) -> Re
         Some(v) => serde_json::from_value(v.clone()).map_err(|_| Error::Invalid("since maps origins to sequence numbers".into()))?,
     };
     let limit = p.get("limit").and_then(Value::as_u64).map_or(READ_DEFAULT, |n| (n as usize).clamp(1, READ_MAX));
-    let (kind, channel, sender) = (str_of(p, "kind")?, str_of(p, "channel")?, str_of(p, "sender")?);
+    let (kind, channel, sender, with) = (str_of(p, "kind")?, str_of(p, "channel")?, str_of(p, "by")?, str_of(p, "with")?);
+    let inbox = p.get("inbox").and_then(Value::as_bool).unwrap_or(false);
+    let me = access.actor.as_str();
     let mut out = Vec::new();
     for e in node.view(board)? {
         let kind_name = serde_json::to_value(e.kind)?;
+        let to = e.fields.get("to").and_then(Value::as_str).unwrap_or("");
+        let direct = e.channel == crate::fold::DIRECT;
         let wanted = e.seq > cursor.get(&e.origin).copied().unwrap_or(0)
-            && access.channels.as_ref().is_none_or(|c| c.contains(&e.channel))
+            && access.channels.as_ref().is_none_or(|c| c.contains(&e.channel)) && e.readable_by(me)
+            && (!inbox || direct && to == me)
+            && (with.is_empty() || direct && (e.sender == with && to == me || e.sender == me && to == with))
             && (kind.is_empty() || kind_name == kind) && (channel.is_empty() || e.channel == channel)
             && (sender.is_empty() || e.sender == sender);
         if wanted && out.len() < limit {
@@ -84,13 +90,13 @@ fn post(node: &mut Node, token: &str, board: &str, p: &Map<String, Value>) -> Re
     };
     let fields = p.get("fields").and_then(Value::as_object).ok_or_else(|| Error::Invalid("fields is an object".into()))?;
     refuse_identity(fields)?;
-    let fields = if kind == Kind::Message && !fields.contains_key("to") {
-        let mut f = fields.clone();
-        f.insert("to".into(), json!(crate::fold::GENERAL));
-        f
-    } else {
-        fields.clone()
-    };
+    let mut fields = fields.clone();
+    if kind == Kind::Message && !fields.contains_key("to") {
+        fields.insert("to".into(), json!(crate::fold::GENERAL));
+    }
+    if kind == Kind::Note {
+        crate::notes::resolve_supersedes(node, board, &mut fields)?;
+    }
     node.post(token, board, kind, &fields, str_of(p, "idem")?)
 }
 
@@ -154,16 +160,17 @@ fn dispatch(node: &mut Node, method: &str, board: &str, token: &str, p: &Map<Str
                              "pid": std::process::id(), "fingerprint": node.fingerprint()})),
         "register" => node.register(board, (!token.is_empty()).then_some(token), str_of(p, "model")?, str_of(p, "harness")?, str_of(p, "session")?),
         "status" => status(node, token, board),
-        "whoami" => node.access(token, board, false).map(|a| json!({"name": a.actor, "board": a.holder.board, "target": board})),
         "post" => post(node, token, board, p),
         "read" => read(node, token, board, p),
-        "claim" | "release" => node.claim(token, board, str_of(p, "target")?, str_of(p, "note")?, method == "release"),
         "link" | "unlink" => link(node, token, board, p, method == "link"),
         "project_add" | "source_add" => project(node, method, token, p),
         "project_list" => Ok(json!(node.projects.all())),
         "project_resolve" => node.projects.resolve(str_of(p, "path")?).map(|p| json!({"board": p.id})),
         m if crate::poolapi::handles(m) => crate::poolapi::dispatch(node, m, token, p),
         m if crate::lease::rpc::METHODS.contains(&m) => crate::lease::rpc::call(node, m, board, token, p),
+        m if crate::sessions::METHODS.contains(&m) => crate::sessions::call(node, m, board, token, p),
+        m if crate::claims::METHODS.contains(&m) => crate::claims::call(node, m, board, token, p),
+        m if crate::notes::METHODS.contains(&m) => crate::notes::call(node, m, board, token, p),
         "links" => node.access(token, board, false).map(|_| json!(node.links.all().iter().filter(|l| l.from == board || l.to == board).collect::<Vec<_>>())),
         "shutdown" => node.access(token, board, false).map(|_| {
             node.stop.store(true, Ordering::SeqCst);
@@ -221,5 +228,12 @@ pub fn parse(request: &Value) -> Result<Call> {
 
 fn run(node: &mut Node, request: &Value) -> Result<Value> {
     let c = parse(request)?;
-    dispatch(node, &c.method, &c.board, &c.token, &c.params)
+    let done = dispatch(node, &c.method, &c.board, &c.token, &c.params)?;
+    if let Some(holder) = node.tokens.resolve(&c.token).cloned() {
+        // a retired session's token is gone by now, so it is never marked active again
+        let hosted = node.host(&holder.board)?;
+        let now = hosted.board.now_ms();
+        hosted.names.touch(&holder.name, now)?;
+    }
+    Ok(done)
 }

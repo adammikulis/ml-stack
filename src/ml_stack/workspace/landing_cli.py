@@ -30,7 +30,7 @@ TABLE = [
      lambda a, w, t: landing.request(w, t, {"branch": a.branch, "sha": a.sha, "selectors": a.selectors,
                                             "replaces": a.replaces, "target": a.target})),
     ("land-review",
-     "independently review a land-request at its exact SHA (you cannot review your own or a delegate's)",
+     "independently review a land-request at its exact SHA (you cannot review your own or your subagent's)",
      [flag("id", metavar="REQUEST"), flag("sha", help="the full SHA you reviewed; must equal the request's"),
       flag("--verdict", choices=("accept", "reject"), default="accept")],
      lambda a, w, t: landing.review(w, t, a.id, a.sha, a.verdict)),

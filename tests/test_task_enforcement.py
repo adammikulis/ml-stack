@@ -115,7 +115,7 @@ def test_the_modes_are_per_project(board):
     assert enforcement.mode(board.ws, {}) == 'open'
 
 
-def test_cli_promote_demote_check_and_whoami(board):
+def test_cli_promote_demote_and_check(board):
     from workspace_kit import cli
     token = board.parent
     run = cli(board.ws.base, token, 'enforcement', 'check', '--project', 'p', '--json')
@@ -127,15 +127,3 @@ def test_cli_promote_demote_check_and_whoami(board):
     assert json.loads(cli(board.ws.base, token, 'enforcement', '--project', 'p', '--json').stdout)['mode'] == 'strict'
     demoted = json.loads(cli(board.ws.base, token, 'enforcement', 'demote', '--project', 'p', '--json').stdout)
     assert demoted['mode'] == 'open' and demoted['from'] == 'strict'
-    assert json.loads(cli(board.ws.base, token, 'whoami', '--json').stdout)['enforcement'] == 'open'
-
-
-def test_whoami_reports_unavailable_when_the_board_exposes_no_enforcement_mode():
-    from ml_stack.workspace import enforcement_cli, project_connection
-
-    class BoardClient:
-        def __getattr__(self, name):
-            return getattr(project_connection.Operations(self), name)
-
-    assert enforcement_cli._mode_or_unavailable(BoardClient(), {'key': 'p'}) == 'unavailable'
-    assert enforcement_cli._mode_or_unavailable(BoardClient(), None) == 'unavailable'

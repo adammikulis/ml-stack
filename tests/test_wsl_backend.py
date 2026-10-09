@@ -16,6 +16,7 @@ import pytest
 from ml_stack.fleet import wsl
 from ml_stack.platform import launch
 from ml_stack.sandbox import run
+from ml_stack.sandbox.backend import SandboxUnavailable
 from ml_stack.sandbox.bubblewrap import Bubblewrap
 from ml_stack.sandbox.policies import runtime_reads, system_env
 from ml_stack.sandbox.policy import Limits, Net, Policy
@@ -296,9 +297,12 @@ print('isolated')
         policy = Policy("test", read=(*runtime_reads(), str(allowed)),
                         exec=(os.path.realpath(sys.executable),), net=Net.deny(),
                         env=system_env(), limits=Limits(wall_seconds=5))
-        result = run([os.path.realpath(sys.executable), "-c", script, str(allowed / "readable"),
-                      str(outside), str(listener.getsockname()[1])], policy,
-                     cwd=str(allowed), via=Bubblewrap(), diagnose="never")
+        try:
+            result = run([os.path.realpath(sys.executable), "-c", script, str(allowed / "readable"),
+                          str(outside), str(listener.getsockname()[1])], policy,
+                         cwd=str(allowed), via=Bubblewrap(), diagnose="never")
+        except SandboxUnavailable as error:  # a container runner may refuse the network namespace
+            pytest.skip("bubblewrap cannot build its namespaces here: " + str(error))
         assert result.ok, result.stderr
         assert result.stdout.strip() == "isolated"
 

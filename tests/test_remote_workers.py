@@ -318,8 +318,11 @@ def _rotate_cluster(state, group=CLUSTER):
     key = base64.urlsafe_b64encode(bytes(reversed(range(32)))).rstrip(b'=')
     state.keyfile.write_bytes(key)
     _write_memberships([Membership(group, key, mode='dev')], state.keyfile)
+    pool = Pool(state.keyfile)
     for peer in state.peers:
         peer.token = derive_token(key)
+        pool.enrol(group, peer.beacon.cert, peer.beacon.name, 'test')
+    pool.enrol(group, tls.local().beacon, 'client', 'test')
     return hashlib.sha256(key).hexdigest()
 
 

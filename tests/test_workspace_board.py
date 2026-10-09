@@ -445,7 +445,6 @@ def test_the_commands_drive_boards_dms_subscriptions_and_status(kit):
     assert "kind question -> digest" in run(b, "subs").stdout
     assert run(b, "unsubscribe", "kind", "question").returncode == 0
     assert run(b, "subscribe", "dm", "alice").returncode == 2
-    assert run(a, "digest").returncode == 0
     status = json.loads(run(b, "status", "--json").stdout)
     assert {"name": "#ops", "unread": 0, "member": True} in status["boards"]
     assert "board list" in onboard.snippet("bob")

@@ -59,9 +59,9 @@ def _read(recv: Callable[[int], bytes], count: int) -> bytes:
     return data
 
 
-def _exchange_socket(state: Path, frame: bytes) -> bytes:
+def _exchange_socket(state: Path, frame: bytes, timeout: float) -> bytes:
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as stream:
-        stream.settimeout(TIMEOUT_S)
+        stream.settimeout(timeout)
         stream.connect(str(socket_path(state)))
         stream.sendall(frame)
         return _reply(stream.recv)
@@ -74,8 +74,8 @@ def _reply(recv: Callable[[int], bytes]) -> bytes:
     return _read(recv, size)
 
 
-def _talk_pipe(state: Path, frame: bytes, out: dict) -> None:
-    name, until = pipe_name(state), time.monotonic() + TIMEOUT_S
+def _talk_pipe(state: Path, frame: bytes, out: dict, timeout: float) -> None:
+    name, until = pipe_name(state), time.monotonic() + timeout
     try:
         while True:
             try:
@@ -92,12 +92,12 @@ def _talk_pipe(state: Path, frame: bytes, out: dict) -> None:
         out["error"] = exc
 
 
-def _exchange_pipe(state: Path, frame: bytes) -> bytes:
-    """A pipe read has no timeout, so the exchange runs in a thread that is given ``TIMEOUT_S`` and then abandoned."""
+def _exchange_pipe(state: Path, frame: bytes, timeout: float) -> bytes:
+    """A pipe read has no timeout, so the exchange runs in a thread that is given ``timeout`` and then abandoned."""
     out: dict = {}
-    worker = threading.Thread(target=_talk_pipe, args=(state, frame, out), daemon=True)
+    worker = threading.Thread(target=_talk_pipe, args=(state, frame, out, timeout), daemon=True)
     worker.start()
-    worker.join(TIMEOUT_S)
+    worker.join(timeout)
     if worker.is_alive():
         raise TimeoutError("the node did not answer in time")
     if "error" in out:
@@ -105,13 +105,17 @@ def _exchange_pipe(state: Path, frame: bytes) -> bytes:
     return out["reply"]
 
 
+def exchange(state: Path, body: bytes, timeout: float = TIMEOUT_S) -> bytes:
+    """One framed request body to the node of ``state`` and the body of its reply."""
+    return (_exchange_pipe if is_windows() else _exchange_socket)(state, struct.pack(">I", len(body)) + body, timeout)
+
+
 def call(state: Path, method: str, params: dict | None = None, *, board: str = "", token: str = "") -> dict:
     """One request to the node of ``state``; the result, or OSError/ValueError when it is dead or refuses."""
     request = {"v": API_VERSION, "id": 1, "method": method, "params": params or {}}
     request.update({key: value for key, value in (("board", board), ("token", token)) if value})
     body = json.dumps(request).encode()
-    frame = struct.pack(">I", len(body)) + body
-    reply = json.loads((_exchange_pipe if is_windows() else _exchange_socket)(state, frame))
+    reply = json.loads(exchange(state, body))
     if reply.get("ok") is not True:
         raise ValueError(str((reply.get("error") or {}).get("message", "refused")))
     return reply["result"]

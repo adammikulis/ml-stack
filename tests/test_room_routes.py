@@ -48,7 +48,7 @@ def test_the_page_carries_the_slider_on_the_models_and_settings_screens(room):
     from ml_stack.fleet.page import render
 
     page = render()
-    assert page.count("<wired-memory>") == 2 and "Make room for this model" in page
+    assert page.count("<wired-memory>") == 2 and "Device memory controls" in page and "GPU memory" in page
     assert 'customElements.define("wired-memory"' in page
     assert "Keep this after restart" in page
     assert room.call("/ui/")[0] == 200
@@ -126,7 +126,16 @@ def test_a_model_name_with_shell_text_is_only_ever_a_lookup(room):
     assert room.ran.calls == []
 
 
-def test_the_plan_for_an_installed_model_comes_back_as_plain_numbers(room, tmp_path):
+def test_a_path_that_is_not_an_installed_model_is_never_read(room, tmp_path):
+    path = write_gguf(tmp_path / "m-Q4_K_M.gguf", dense())
+    status, body, _ = room.call(f"/ui/room?model={path}&ctx=8192")
+    assert status == 400 and "not installed" in body["error"]
+    status, body, _ = room.call("/ui/room?model=/etc/hosts&ctx=8192")
+    assert status == 400 and "not installed" in body["error"]
+
+
+def test_the_plan_for_an_installed_model_comes_back_as_plain_numbers(room, tmp_path, monkeypatch):
+    monkeypatch.setenv("ML_STACK_MODEL_PATHS", str(tmp_path))
     path = write_gguf(tmp_path / "m-Q4_K_M.gguf", dense())
     with path.open("ab") as f:
         f.truncate(2 * 1024**3)

@@ -2,42 +2,18 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ml_stack.workspace.boardapi import data_line
-from ml_stack.workspace.boards import ANNOUNCE
-from ml_stack.workspace.nudge import URGENT
-from ml_stack.workspace.screen import fence
 
-OWED_AFTER_S = 600.0
-LOOKBACK_S = 7 * 86400.0
+if TYPE_CHECKING:
+    from ml_stack.board.session import Session
+
+__all__ = ["ACTIVE_S", "age", "owed_lines", "status_lines", "workers"]
+
 ACTIVE_S = 12 * 3600.0
 SHOWN = 8
-
-
-def _mine(row: dict[str, Any], me: str) -> bool:
-    return row["kind"] == "msg" and row["from"] == me
-
-
-def _answered(row: dict[str, Any], later: list[dict[str, Any]], me: str) -> bool:
-    root = int(row.get("thread") or row["seq"])
-    return any(_mine(r, me) and (r["to"] == row["from"] or int(r.get("reply_to") or 0) == row["seq"]
-                                 or int(r.get("thread") or 0) == root) for r in later)
-
-
-def unanswered(ws, me: str, older_s: float = OWED_AFTER_S) -> list[dict[str, Any]]:
-    """Direct questions, tasks, handoffs and blocked notices to ``me`` older than ``older_s`` that ``me`` never answered; a request to a subagent is addressed to its own name and is not ``me``'s."""
-    now = ws.clock()
-    rows = [r for r in ws.bus.log.after(0) if r["kind"] == "msg" and r["ts"] > now - LOOKBACK_S]
-    owed = []
-    for position, row in enumerate(rows):
-        if (row["to"] != me or row["from"] == me or row["type"] not in URGENT or not ws.bus.live(row)
-                or now - row["ts"] < older_s):
-            continue
-        if not _answered(row, rows[position + 1:], me):
-            owed.append({"seq": row["seq"], "from": row["from"], "type": row["type"],
-                         "age_s": now - row["ts"], "subject": data_line(row["subject"] or row["body"], 60)})
-    return owed
+ANNOUNCEMENTS = "#announcements"
 
 
 def age(seconds: float) -> str:
@@ -53,37 +29,33 @@ def owed_lines(owed: list[dict[str, Any]]) -> list[str]:
     return [*lines, f"(+{len(owed) - SHOWN} more)"] if len(owed) > SHOWN else lines
 
 
-def attention(ws, me: str, announcements: int) -> str:
-    """The text a coordinator is shown: what it owes an answer and how many announcements are new; empty when neither."""
-    owed = unanswered(ws, me)
-    if not owed and not announcements:
-        return ""
-    lines = [f"Unanswered for you ({len(owed)}); answer with `ml-stack-workspace send AGENT answer TEXT --reply-to SEQ`:",
-             *owed_lines(owed)] if owed else []
-    if announcements:
-        lines.append(f"{announcements} new announcements (`ml-stack-workspace inbox` shows them).")
-    return fence("\n".join(lines), "workspace:attention", "requests written by agents").text
+def workers(s: Session) -> dict[str, Any]:
+    """The newest announcement of every live subagent below this session not yet done and heard from within ACTIVE_S."""
+    now = s.clock()
+    known = {a.name: a for a in s.agents()}
+    below: set[str] = set()
+    grew = True
+    while grew:
+        grew = False
+        for a in known.values():
+            if a.name not in below and (a.parent == s.name or a.parent in below):
+                below.add(a.name)
+                grew = True
+    last: dict[str, Any] = {}
+    for e in s.read(channel=ANNOUNCEMENTS).entries:
+        if e.sender in below and e.at_ms / 1000 > now - ACTIVE_S:
+            last[e.sender] = e
+    return {name: e for name, e in last.items() if e.fields.get("type") != "done"}
 
 
-def workers(ws, me: str, now: float) -> dict[str, dict[str, Any]]:
-    """The newest announcement of every live subagent below ``me`` not yet done and heard from within ACTIVE_S."""
-    below = set(ws.registry.descendants(me, live=True))
-    last: dict[str, dict[str, Any]] = {}
-    for r in ws.bus.log.after(0):
-        if r["kind"] == "msg" and r["to"] == ANNOUNCE and r["from"] in below and r["ts"] > now - ACTIVE_S:
-            last[r["from"]] = r
-    return {name: row for name, row in last.items() if row["type"] != "done"}
-
-
-def status_lines(ws, me: str) -> list[str]:
-    """One screen: active subagents, their last announcement age and claims, then what is unanswered for ``me``."""
-    now = ws.clock()
-    held = ws.claims.listing()
+def status_lines(s: Session, owed: list[dict[str, Any]]) -> list[str]:
+    """One screen: active subagents, their last announcement age and claims, then what is unanswered for the session."""
+    now = s.clock()
+    held = s.claims()
     lines = []
-    for name, row in sorted(workers(ws, me, now).items(), key=lambda kv: -kv[1]["ts"]):
-        mine = [f"{c['kind']}:{c['key']}" for c in held if c["owner"] == name]
-        lines.append(f"{name}: {row['type']} {age(now - row['ts'])} ago"
-                     f"{', claims ' + ', '.join(mine) if mine else ''}: {data_line(row['body'], 80)}")
-    owed = unanswered(ws, me)
+    for name, e in sorted(workers(s).items(), key=lambda kv: -kv[1].at_ms):
+        mine = [f"{c.kind}:{c.key}" for c in held if c.owner == name]
+        lines.append(f"{name}: {e.fields.get('type')} {age(now - e.at_ms / 1000)} ago"
+                     f"{', claims ' + ', '.join(mine) if mine else ''}: {data_line(e.text, 80)}")
     return [f"Active subagents ({len(lines)}):", *(lines or ["(none)"]),
-            f"Unanswered for {me} ({len(owed)}):", *(owed_lines(owed) or ["(none)"])]
+            f"Unanswered for {s.name} ({len(owed)}):", *(owed_lines(owed) or ["(none)"])]

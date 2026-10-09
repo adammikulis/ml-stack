@@ -73,13 +73,13 @@ def checkout(tmp_path):
 def test_remembering_an_unchanged_checkout_does_not_rewrite_the_store(tmp_path, checkout):
     base = tmp_path / "lifecycle"
     base.mkdir()
-    lifecycle.remember(base, "worker", "helper", str(checkout))
+    lifecycle.remember(base, "worker", str(checkout))
     database = base / "worktree-lifecycle.db"
     first = (database.stat().st_mtime_ns, database.read_bytes())
-    lifecycle.remember(base, "worker", "helper", str(checkout))
+    lifecycle.remember(base, "worker", str(checkout))
     assert (database.stat().st_mtime_ns, database.read_bytes()) == first
     (checkout / "more.py").write_text("x = 1\n")
     repo.git(checkout, "add", "more.py")
     repo.git(checkout, "commit", "-m", "chore: more")
-    lifecycle.remember(base, "worker", "helper", str(checkout))
+    lifecycle.remember(base, "worker", str(checkout))
     assert len(lifecycle.scopes(base, "worker")[0]["commits"]) == 2

@@ -632,9 +632,9 @@ class TestPassphrase:
             check_length(bad)
 
     def test_five_characters_and_surrounding_whitespace_are_accepted(self):
-        from ml_stack.fleet.discovery import MIN_PASSPHRASE, check_length
+        from ml_stack.fleet.discovery import MIN_JOIN_LENGTH, check_length
 
-        assert MIN_PASSPHRASE == 5
+        assert MIN_JOIN_LENGTH == 5
         assert check_length(f"  {'a' * 5}\n") == "aaaaa"
 
     def test_joining_writes_a_key_only_this_user_can_read(self, tmp_path):

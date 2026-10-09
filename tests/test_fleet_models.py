@@ -59,6 +59,14 @@ class TestFinding:
         assert store.find("qwen3") is not None
         assert store.find("llama") is None
 
+    def test_listed_takes_only_an_exact_name_from_the_listing(self, store, tmp_path):
+        held = a_model(tmp_path / "models", "Qwen3-4B-Instruct-Q4_K_M.gguf")
+        outside = a_model(tmp_path / "elsewhere", "stray.gguf")
+        assert store.listed(" Qwen3-4B-Instruct-Q4_K_M.gguf ").path == held
+        assert store.listed("qwen3") is None
+        assert store.listed(str(outside)) is None
+        assert store.listed(str(held)) is None
+
     def test_the_beacon_carries_names_and_sizes_only(self, store, tmp_path):
         a_model(tmp_path / "models")
         row = store.public()[0]

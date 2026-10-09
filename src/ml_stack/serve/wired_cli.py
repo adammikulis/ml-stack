@@ -104,6 +104,11 @@ def _number(args: argparse.Namespace, plan: wired.Plan | None) -> int | None:
 
 
 def _change(args: argparse.Namespace, plan: wired.Plan | None) -> int:
+    try:
+        wired_apply.require_person(_how())
+    except HumanRequired as no:
+        warn(f"refused: {no}")
+        return 3
     if platform.system() != "Darwin":
         warn("not changed: the wiring limit is a macOS setting")
         return 2
