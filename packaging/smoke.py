@@ -9,7 +9,7 @@ from pathlib import Path
 
 from playwright.sync_api import Page, sync_playwright
 
-TABS = ["Chat", "Cluster", "Fit", "Models", "Settings"]
+SCREENS = ["chat", "cluster", "fit", "models", "settings"]
 
 
 def launch_url(page: Page, base: str) -> str:
@@ -46,10 +46,13 @@ def first_run(page: Page, name: str, passphrase: str, group: str) -> None:
             page.fill("#n", name)
             press(page, "Continue")
         elif heading == "Clusters":
-            page.fill("#p1", passphrase)
-            page.fill("#g", group)
-            press(page, "Join")
-            page.wait_for_selector(f"#first-run .row b:text-is('{group}')")
+            if page.locator("#first-run button:text-is('Pair manually')").count():
+                press(page, "Pair manually")
+            page.select_option("#setup-cluster-action", "create")
+            page.fill("#setup-cluster-name", group)
+            page.fill("#setup-cluster-passphrase", passphrase)
+            press(page, "Create new pool")
+            page.wait_for_selector("#first-run .ok:has-text('Created')")
             press(page, "Continue")
         elif heading in ("What should this machine do?", "When you are not using it"):
             press(page, "Continue")
@@ -81,11 +84,11 @@ def sign_in(page: Page, passphrase: str) -> None:
     page.wait_for_selector("#cluster:not([hidden])")
 
 
-def every_tab(page: Page) -> None:
-    """Opens each tab and waits for its screen to show."""
-    for label in TABS:
-        page.click(f"nav.tabs a:text-is('{label}')")
-        page.wait_for_selector(f"#{label.lower()}:not([hidden])")
+def every_screen(page: Page) -> None:
+    """Goes to each screen by its route and waits for it to show."""
+    for route in SCREENS:
+        page.evaluate("route => { location.hash = route; }", route)
+        page.wait_for_selector(f"#{route}:not([hidden])")
         page.wait_for_load_state("networkidle")
 
 
@@ -113,7 +116,7 @@ def main() -> int:
             page.goto(launch_url(page, args.base))
             first_run(page, "ci-runner", args.passphrase, args.group)
             sign_in(page, args.passphrase)
-            every_tab(page)
+            every_screen(page)
         finally:
             if args.screenshot:
                 page.screenshot(path=args.screenshot, full_page=True)
