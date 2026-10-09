@@ -13,10 +13,8 @@ def add_to(built: runtime.Runtime, source: Path, commit: str, *, timeout: float 
     """Build the node from ``source``, install it in the runtime tree and start it once on a scratch state to see it answer.
 
     The cargo target directory is shared by every build on this machine, so a later commit compiles only what changed.
-    Returns the binary's record ({} on a platform with no node); raises when the build fails or the node does not answer.
+    Returns the binary's record; raises when the build fails or the node does not answer.
     """
-    if not node_binary.supported():
-        return {}
     binary = node_binary.build(source, cache=runtime.directory() / CACHE, timeout=timeout)
     record = node_binary.install(built.prefix, binary, commit=commit)
     node_launch.smoke(built.prefix)

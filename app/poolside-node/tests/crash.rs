@@ -1,4 +1,4 @@
-//! Two real node processes; one is killed with SIGKILL while it is taking rows from the other.
+//! Two real node processes; one is killed with SIGKILL (TerminateProcess on Windows) while it is taking rows from the other.
 
 mod kit;
 
@@ -41,8 +41,7 @@ impl Proc {
     }
 
     fn kill9(&mut self) {
-        // SAFETY: the pid is a child this test started.
-        unsafe { libc_kill(self.child.id() as i32) };
+        self.child.kill().unwrap();
         self.child.wait().unwrap();
     }
 
@@ -53,13 +52,6 @@ impl Proc {
     fn log_of(&self, origin: &str) -> PathBuf {
         self.state.path().join("boards").join("demo").join("log").join(format!("{origin}.jsonl"))
     }
-}
-
-unsafe fn libc_kill(pid: i32) {
-    extern "C" {
-        fn kill(pid: i32, sig: i32) -> i32;
-    }
-    kill(pid, 9);
 }
 
 impl Drop for Proc {

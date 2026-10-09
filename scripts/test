@@ -16,6 +16,7 @@
     scripts/test heavy     rewrite tests/heavy-modules.txt from the recorded test durations
     scripts/test submit TIER [PATH...]   start the same run in the background and print its job id
     scripts/test status [JOB] | wait JOB [--timeout S] | result JOB | cancel JOB
+    scripts/test farm --to DEVICE [--split] FILE...   run test files on a paired device (docs/test-farm.md)
 
 A tier run is a background job that the command follows; Ctrl-C cancels it. A run that names test
 files reuses an earlier pass of an unchanged file unless --no-reuse is given (docs/test-reuse.md).
@@ -55,6 +56,7 @@ import affected
 import gatescope
 import testhistory
 import testjobs
+import testphases
 import testprelude
 import testreuse_run
 import testreuse_store
@@ -187,7 +189,11 @@ def execute_run(command, environment, tier, record: OutputRecord):
     index = shown.index("-n")
     want = int(shown[index + 1])
     shown[index + 1] = "{workers}"
-    shown.extend(["-p", "testslots_pytest", "-p", "testdurations"])
+    shown.extend(["-p", "testslots_pytest", "-p", "testdurations", "-p", "testagentenv_pytest", "-p", "testphases"])
+    phases_fd, phases_name = tempfile.mkstemp(suffix=".phases.json")
+    os.close(phases_fd)
+    phases_file = Path(phases_name)
+    environment[testphases.PHASES_ENV] = phases_name
     order = None
     if "DEV_TEST_ORDER" not in environment:
         recorded = testhistory.load(testhistory.history_path(ROOT))
@@ -221,6 +227,10 @@ def execute_run(command, environment, tier, record: OutputRecord):
                    "(changed now: " + ", ".join(line[3:] for line in moved[:5] if line) + ")")
         status = 4
     wall = time.monotonic() - began
+    phases = testphases.read(phases_file)
+    phases_file.unlink(missing_ok=True)
+    if phases is not None:
+        print(testphases.line(phases), flush=True)
     if tier in ("full", "all") and not [a for a in command if a.startswith("tests/") or a == "-k"]:
         measured(command, junit, wall, load)
     kept = os.environ.get("DEV_TEST_JOB")
@@ -552,6 +562,9 @@ def follow(argv: list[str], args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     """Parse the tier and run it."""
     argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["farm"]:
+        import test_farm
+        return test_farm.main(argv[1:], ROOT)
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("tier", choices=[*FOREGROUND, "heavy", "record", "ratchet", *JOB_COMMANDS])

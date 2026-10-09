@@ -2,7 +2,7 @@
 
 One `poolside-node` runs per device. It holds the boards that device takes part in, gives every
 session one unique name per board, stamps every write from the session's token, and answers a
-local API on a Unix socket. It is the Rust crate `app/poolside-node` (lib and bin) in the cargo
+local API on a Unix socket (a named pipe on Windows). It is the Rust crate `app/poolside-node` (lib and bin) in the cargo
 workspace `app/`; the Tauri app (`app/src-tauri`) is the other member and depends on the lib.
 
 This is slices A and B1 of the node refactor: the crate (boards, identity, local socket, in-process
@@ -97,6 +97,18 @@ Frames are a 4-byte big-endian length (at most 1 MiB) and JSON. The socket is
 (Linux) or `getpeereid` (macOS) and a different uid gets one `denied` frame and is closed. One node
 per state directory: `node.lock` is held with `flock`; a stale socket from a killed node is replaced
 by the next one.
+
+**On Windows** the same frames and methods run over a named pipe, `\\.\pipe\poolside-node-<key>`, where `<key>` is the
+first 32 hex characters of the SHA-256 of the state directory's absolute path (backslashes, lower case, no `\\?\`
+prefix, no trailing separator; `sys::key_of` in Rust and `node_health.key_of` in Python, one test vector in both).
+The pipe is created with a protected DACL that grants the current user's SID alone (`D:P(A;;GA;;;<sid>)`),
+`PIPE_REJECT_REMOTE_CLIENTS`, and `FILE_FLAG_FIRST_PIPE_INSTANCE` so a second node (or any process squatting the name)
+cannot share it; `node.lock` is still taken first, with `LockFileEx` on the byte the Python `only_one` locks. The server
+reads the client's SID by impersonating it for one call (`ImpersonateNamedPipeClient`), so a different user gets the
+same `denied` frame as on Unix. The Rust client opens the pipe at identification level and checks that the process
+serving it runs as the same SID before it sends a token. The pipe is overlapped, so a read has the same 30 s timeout and
+the listener polls like the non-blocking socket. A pipe vanishes with its node: there is no stale file to replace.
+`socket_path(state)` and the `socket` field of `hello`/`status` hold the pipe name.
 
 Request `{"v":1, "id":…, "method":…, "board":…, "token":…, "params":{…}}`; reply
 `{"v":1,"id":…,"ok":true,"result":…}` or `{"ok":false,"error":{"code","message"}}` with codes
@@ -261,7 +273,7 @@ addresses and an unused UDP port for the beacon.
 ## Shipping and keeping it up
 
 The Python side of getting the node onto a device and keeping it there: `ml_stack.node_binary` (build, checksum,
-verify), `node_build` (into a runtime), `node_health` (the socket call), `node_supervise` (the restart loop) and
+verify; the binary is `poolside-node.exe` on Windows), `node_build` (into a runtime), `node_health` (the socket or pipe call), `node_supervise` (the restart loop) and
 `node_launch` (find, start, stop, swap, smoke; also `python -m ml_stack.node_launch ensure|status|stop|swap|supervise`).
 
 - **In the runtime.** `runtime ensure` builds the node from the same commit as the wheel (`cargo build --release
@@ -283,7 +295,14 @@ verify), `node_build` (into a runtime), `node_health` (the socket call), `node_s
   watches the pin and `selected.json`, so selecting a new runtime moves the node by itself; it gives up after five
   consecutive starts with no verified binary. It owns no service: the optional always-on form is any unit that runs
   `python -m ml_stack.node_launch supervise` (not wired into `fleet/autostart` roles yet).
-- **Crash-only.** The node is killed with SIGTERM or SIGKILL at any moment (`stop_node`); the next start reads the logs
+- **Stopping on Windows.** A detached process has no signal to receive and `os.kill(pid, SIGTERM)` is `TerminateProcess`,
+  so the node creates a named event `Local\poolside-node-stop-<key>` and the supervisor
+  `Local\mlstack-node-supervisor-stop-<key>` (both open to the current user alone, `ml_stack.win32`). `stop_node`,
+  `swap` and `smoke` set them first (the node leaves with exit code 0, the supervisor stops restarting), and only
+  terminate a node still running after the wait. Ctrl+C, Ctrl+Break and a console close stop a node run by hand the
+  same way (`SetConsoleCtrlHandler`); the supervisor takes `SIGBREAK` and `SIGINT`. `lock.pid_alive` asks the process
+  by handle on Windows, because `os.kill(pid, 0)` there is `CTRL_C_EVENT`.
+- **Crash-only.** The node is killed with SIGTERM or SIGKILL (`TerminateProcess` on Windows) at any moment (`stop_node`); the next start reads the logs
   on disk, cuts a torn tail, and every acknowledged entry and token is back. A real-process test posts, `kill -9`s, and
   reads everything again after the supervisor's restart.
 - **Upgrade.** One node owns a state directory (`flock`), so there is no second node answering on the same socket while
@@ -312,10 +331,32 @@ cargo test -p ml-stack-app                                   # the window; needs
 The workspace Cargo.lock is `app/Cargo.lock`, the build output `app/target/`. Crypto is
 `ed25519-dalek`, `sha2`, `hmac`, `rustls` (ring), `rcgen`, `x509-parser` and `spake2`; nothing is hand-rolled.
 
+## Windows
+
+What `sys` (`src/sys/{unix,win}`) does on each platform, so nothing else in the crate knows the difference:
+
+| | Unix | Windows |
+|---|---|---|
+| local API | socket file, mode 0600 | named pipe, protected DACL for the user's SID, remote clients refused, first instance exclusive |
+| who is calling | `SO_PEERCRED` / `getpeereid` | `ImpersonateNamedPipeClient` + token SID |
+| private directory | `mkdir` 0700 | `SetNamedSecurityInfoW`: protected DACL, the user's SID only, inherited by files (`private_file` is then a no-op) |
+| atomic replace | `rename` + directory fsync | `MoveFileExW(REPLACE_EXISTING \| WRITE_THROUGH)`; no directory flush exists |
+| log append | `O_APPEND`, `fsync` | the log seeks to the end before each write (an append-only handle cannot be cut back), `FlushFileBuffers` |
+| single instance, `start.lock` | `flock` | `LockFileEx` on byte 2^30, released when the holder dies |
+| lease liveness | pid + start time (`/proc`, `proc_pidinfo`), zombies count as dead | process handle + creation time + exit code; no zombies; a process this user may not inspect has start 0 and counts as alive |
+| start in the background | new process group | `DETACHED_PROCESS \| CREATE_NEW_PROCESS_GROUP` |
+| graceful stop | `shutdown` request, SIGTERM | `shutdown` request, the stop event, Ctrl+C / Ctrl+Break |
+
+`lease::types` accepts a drive path (`C:\x`, `C:/x`) or a UNC path as an absolute worktree or area claim, and compares
+claims with one separator and no case on a drive. The state directory is `%USERPROFILE%\.poolside\node` by default.
+Tests that need a socket path short enough for macOS use `kit::short_dir()`; `kit::kill_hard` is `kill -9` or `taskkill /F`.
+
 ## What is left
 
-- Windows: a named pipe for the local API (the crate is Unix only; file modes and `flock` are Unix calls), and so a
-  Windows node binary, its build in `runtime ensure` (skipped there) and its supervisor (`SIGTERM` handling).
+- Windows has been compiled (`cargo check --target x86_64-pc-windows-gnu --all-targets`, with a stand-in C compiler for
+  `ring`'s build script) but never run by the author; the first real run is the `windows` job in `ci.yml` and the
+  Windows step of `release-build.yml` (see "Windows" above). A pipe server owned by another user is refused by the Rust
+  client; the Python `hello` check opens the pipe at identification level and sends nothing secret.
 - Starting the node on a default port and the multicast group (`NetConfig::standard`) and a default sync
   interval; today the supervisor starts it with `run --state` only (extra flags after `--`), so the network is off.
 - The always-on form: a `fleet/autostart` role for `node_launch supervise` (a person-installed unit); a wheel
