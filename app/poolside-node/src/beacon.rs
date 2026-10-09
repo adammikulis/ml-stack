@@ -47,7 +47,7 @@ pub fn advertisable(ip: IpAddr) -> bool {
 
 fn signed_bytes(b: &Beacon) -> Vec<u8> {
     let mut out = SIGN_PREFIX.to_vec();
-    out.extend_from_slice(format!("{}\0{}\0{}\0{}\0{}\0", b.pool, b.fingerprint, b.addr, b.port, b.ts).as_bytes());
+    out.extend_from_slice(format!("{}\0{}\0{}\0{}\0{}\0{}\0{}\0", b.pool, b.fingerprint, b.addr, b.port, b.ts, b.project, b.lone).as_bytes());
     out.extend_from_slice(&b.public);
     out
 }
