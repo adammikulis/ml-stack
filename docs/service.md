@@ -13,11 +13,10 @@ Every claim carries a tag:
   not vendor pages, and move weekly; none is a benchmark or a forecast.
 - **[plan]** a proposal, not a fact.
 
-Two things the brief named do not exist on this tree. `docs/pool-encryption.md` and
-`docs/home-pool.md` are absent on `0.2dev` and in the two named sibling worktrees (only the
-`poolside-*` plan files are there). `model_work_attribution` and `work_dimensions` exist only on
-unlanded branches (commits `133dd374`, `03d09c55`; `feat/board-history-pages` and three more). Both
-are marked below. **[code]**
+`docs/pool-encryption.md` and `docs/home-pool.md` now sit beside this note and carry the pool's key
+model and device plan; the decisions of 2026-10-08 are in section 9.1. `model_work_attribution` and
+`work_dimensions` exist only on unlanded branches (commits `133dd374`, `03d09c55`;
+`feat/board-history-pages` and three more) and are marked below. **[code]**
 
 ## 1. Product definition
 
@@ -26,7 +25,7 @@ Two modes, one system.
 | | Private pool | Open market |
 |---|---|---|
 | Who | Devices of one person, family or team who already trust each other | Providers and consumers who have never met |
-| Trust | Pairing with a shared cluster key and pinned TLS [code] `fleet/tls.py`, [docs] `docs/fleet.md` | None assumed; every party untrusted |
+| Trust | Pairing with a shared cluster key and pinned TLS today [code] `fleet/tls.py`, [docs] `docs/fleet.md`; per-device keys and revocation replace the shared key [plan] `docs/pool-encryption.md` | None assumed; every party untrusted |
 | Money | None; runs are free, credits are a record [code] `reputation/economy.py` | Priced, settled, paid out |
 | Operator | Nobody; no host [docs] `docs/mesh-board.md` (design note, "nothing is implemented") | An operator for accounts, payments, abuse |
 | Workloads | Anything the owner runs | Only what survives an untrusted provider (section 4) |
@@ -379,6 +378,23 @@ Each is one question; the cost is what choosing it commits.
    `docs/poolside-refactor-plan.md` already plans a product rename); (c) a separate service brand
    over the open pool. Cost: the licence gives no trademark right, so a trademark search precedes
    any public use; a rename later touches every public surface.
+
+### 9.1 Decisions (2026-10-08)
+
+**Commercial direction: a real product from the start; section 5 is a checklist, not a gate.** Decided:
+the pool is built as a real product from the first phase, and the lawyer questions in section 5 are worked
+through as a checklist alongside the build rather than a gate that holds engineering until counsel has
+answered. The phases are 0 to 3 as in section 6, and a phase's own gate in that table still applies before
+leaving it (counsel's answer for the chosen jurisdiction is still a phase 2 gate before money moves).
+Rejected: treating the service as an experiment until the legal position is settled, because it would keep
+the verification, tenancy and accounting work unscheduled and the legal answers depend on what is built.
+
+**Ledger path: signed journals and verified accounting now; an operator Merkle log at phase 2; no own chain
+and no own token.** Decided, following 10.4: option 1 now, option 2 at phase 2, option 3 optional later,
+option 4 never. Rejected: a chain or token of our own (option 4), because verification (3.4) is the hard
+problem and no ledger solves it, and a token adds securities, money-transmission and custody exposure for no
+trust the Merkle log does not already give. Option 5 (a payout choice at phase 3) remains tied to the
+payment-rail question (question 2) and counsel.
 
 ## 10. Ledger options
 

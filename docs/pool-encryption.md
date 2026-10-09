@@ -75,15 +75,15 @@ reads backwards, behaviour is right: it refuses public addresses); every `http:/
 loopback or the explicit LAN project-host opt-in; every pinned context sets `CERT_REQUIRED`, loads only
 the pinned certificate and disables hostname checks on purpose. `TLSv1_2` as the minimum
 (`tls.py:179,189`, `pairing.py:284`, `bootstrap.py:53`) is not a bug: a P-256 certificate only gets ECDHE
-suites, and the phone sets 1.3 then 1.2. Raising it to 1.3 is an owner choice (question Q3).
+suites, and the phone sets 1.3 then 1.2. The owner has decided to raise the floor to 1.3 with mutual authentication (section 8.1).
 
 ## 3. Threat model
 
 | Adversary | In scope? | What defends today | What the plan adds |
 |---|---|---|---|
-| Passive LAN or Wi-Fi observer | In | Pinned TLS (ECDHE, forward secret at the TLS layer) + sealed bodies. Failure only with `ML_STACK_FLEET_TLS=off` or an `http://` LAN project host | Make TLS-off unattended-impossible; seal streams (slices 1, 2) |
+| Passive LAN or Wi-Fi observer | In | Pinned TLS (ECDHE, forward secret at the TLS layer) + sealed bodies. Failure only with `ML_STACK_FLEET_TLS=off` or an `http://` LAN project host | Remove TLS-off; seal streams (slices 1, 2b) |
 | Active malicious device on the LAN, not paired | In | Pinned certificates, no first-use trust; MAC with nonce; SPAKE2 pairing; `lan.py` | Nothing structural |
-| Malicious or compromised paired device (holds the cluster key) | In, partly. Today it can read and forge everything in the cluster | None: one shared key | Per-device keys, revocation, E2E to addressee (slices 2, 4, 5) |
+| Malicious or compromised paired device (holds the cluster key) | In, partly. Today it can read and forge everything in the cluster | None: one shared key | Per-device keys, revocation, E2E to addressee (slices 2, 2b, 4, 5) |
 | Network operator or overlay (Tailscale coordination server, relay) | In | Transport never trusted | Keep |
 | Stolen or lost powered-off disk | In | Memory, requests, reputation, activity, files, signing key are encrypted under the keystore | Encrypt the rest (slice 3) |
 | Stolen unlocked laptop or a live session | Out | Needs OS lock and disk encryption (FileVault, BitLocker, LUKS); the OS keystore releases the master to the logged-in user | State in `SECURITY.md` |
@@ -128,13 +128,14 @@ tests against real sockets and real files, not mocks (`AGENTS.md`).
 
 | # | Slice | Closes | Size | Depends on | Notes |
 |---|---|---|---|---|---|
-| 1 | **Make unencrypted impossible by default.** `ML_STACK_FLEET_TLS=off` refused unless loopback-only; `http://` project host refused unless a named flag; seal `/infer` streams and file chunks (framed AES-GCM, per-chunk nonce counter, AAD = request nonce and chunk index); pairing recovery file KDF parameters reviewed | passive observer in every configuration; streamed tokens | M | none | Sealing streams costs CPU at weight-transfer rates; measure on a 20 GB file before deciding to seal weights (private fine-tunes only) |
-| 2 | **Mutual TLS 1.3 with per-device pinned certificates** and a device membership record (device id, certificate fingerprint, status). `server_context` requests client certificate; request MAC covers the client certificate fingerprint. Cluster key stays for beacon sealing only | malicious paired device acting as another; revocation by device; MAC not tied to channel | L | 1 | Needs the signed membership log of `mesh-board.md:275` (`member-add`, revocation) or a simple host-signed list as step one |
+| 1 | **Make unencrypted impossible by default.** `ML_STACK_FLEET_TLS=off` and `http://` LAN project hosts removed (decision 8.1), loopback http only; seal `/infer` streams and file chunks (framed AES-GCM, per-chunk nonce counter, AAD = request nonce and chunk index); pairing recovery file KDF parameters reviewed | passive observer in every configuration; streamed tokens | M | none | Sealing streams costs CPU at weight-transfer rates; measure on a 20 GB file before deciding to seal weights (private fine-tunes only) |
+| 2 | **Per-device keys and identities, membership record and revocation** (decision 8.1). Each device has its own identity key and a device record (device id, certificate fingerprint, status) in a signed membership log (`mesh-board.md:275`, `member-add`, revocation) or a simple host-signed list as step one; request authority moves from the cluster key to these. Cluster key stays for beacon sealing only | malicious paired device acting as another; revocation by device | L | 1 | Precedes slice 2b: a certificate cannot be pinned to an identity that does not exist yet |
+| 2b | **Mutual TLS 1.3 with pinned per-device certificates** as the floor on every pool link. `server_context` requests the client certificate; request MAC covers the client certificate fingerprint; TLS 1.2 refused | MAC not tied to channel; downgrade | M | 2 | Android below API 29 is refused (decision 8.1) |
 | 3 | **Encrypt the plaintext stores** under keystore subkeys with `keystore.wrap` / the memory vault pattern: board graph, conversations, person log, job records and logs, workspace tokens, cluster key, TLS key. Headless: passphrase mode or a 0600 key file and an explicit "headless: weaker" row in `status` | stolen disk | M per store, L together | none; reuse `memory/vault.py` | Each store gets a migration (as `memory/migrate.py`). The cluster and TLS keys are the first two: move the file contents into a wrapped blob |
 | 4 | **End-to-end DMs and notes.** Payload encrypted to the addressee device's X25519 key (HPKE as in section 4), key published in the signed membership record; sender signs with its Ed25519 key. The host stores and relays ciphertext plus metadata (from, to, time, size, board). Group posts to a board stay readable by members: encrypt to a per-board key rotated on membership change | board host and relay learn nothing of DMs; compromised host | L | 2, a per-device Ed25519 identity (exists: `fleet/onboard/signing.py`) | Search, recall and agent reading of DMs happen on the addressee device only; the host cannot index them. Federated search of DMs is lost, by design |
-| 5 | **Per-pair sealing keys.** Replace "cluster key derives everything" with an X25519 key agreement between device certificates' keys (ephemeral on each connection), sealing stays AES-256-GCM, MAC key from the same agreement | forward secrecy and compartmentalisation for the sealed layer | M | 2 | With mutual TLS 1.3 this is partly redundant; do it only for traffic that crosses a relay or the board host |
-| 6 | **Journal replica at rest and mesh transport** (when the mesh lands): per-device journals signed with the device Ed25519 key (integrity), replica encrypted at rest with a keystore subkey (`mesh-board.md:450`), transport mTLS from slice 2, entries addressed to a device encrypted as in slice 4, entries all members read stay signed-only | the mesh nonexistent today; stolen disk | L, part of the mesh work | 2, 3 | Do not build the mesh transport before slices 2 and 3 |
-| 7 | **Rotation and revocation.** Revoking a device: signed record, peers refuse its certificate at the next handshake, per-board keys and the cluster beacon key rotated on the next membership change, device certs rotate on the existing 30 day renewal and the beacon carries the new one signed by the old. Key compromise runbook | stolen paired device | M | 2, 4 | Beacon key rotation breaks discovery for offline devices until they rejoin: accept, document |
+| 5 | **Per-pair sealing keys.** Replace "cluster key derives everything" with an X25519 key agreement between device certificates' keys (ephemeral on each connection), sealing stays AES-256-GCM, MAC key from the same agreement | forward secrecy and compartmentalisation for the sealed layer | M | 2b | With mutual TLS 1.3 this is partly redundant; do it only for traffic that crosses a relay or the board host |
+| 6 | **Journal replica at rest and mesh transport** (when the mesh lands): per-device journals signed with the device Ed25519 key (integrity), replica encrypted at rest with a keystore subkey (`mesh-board.md:450`), transport mTLS from slice 2b, entries addressed to a device encrypted as in slice 4, entries all members read stay signed-only | the mesh nonexistent today; stolen disk | L, part of the mesh work | 2, 2b, 3 | Do not build the mesh transport before slices 2, 2b and 3 |
+| 7 | **Rotation and revocation.** Revoking a device: signed record, peers refuse its certificate at the next handshake, per-board keys and the cluster beacon key rotated on the next membership change, device certs rotate on the existing 30 day renewal and the beacon carries the new one signed by the old. Key compromise runbook | stolen paired device | M | 2, 2b, 4 | Beacon key rotation breaks discovery for offline devices until they rejoin: accept, document |
 | 8 | **Hardware-backed keys where attended**: Secure Enclave (macOS), TPM 2.0 (Windows/Linux) for the device identity key, so the key cannot be copied off the disk. Windows uses CNG, macOS `kSecAttrTokenIDSecureEnclave` through `keyring` extension or `cryptography`'s lack of support is the dependency question | key copied by a same-user process (partially) | L | 2 | No vetted Python wrapper is already a dependency; may need a native helper. Not for the first release |
 
 What stays **signed-only**, and why encryption would add nothing: beacons' public half and presence
@@ -210,7 +211,7 @@ sandbox's key**, and never decrypted into anything the owner's tooling renders.
 - **Metadata the owner still sees:** which guest (name, certificate fingerprint), when each job
   started and ended, size in and out, CPU/GPU/memory use and exit status, which model was requested
   (model names are needed to schedule), the guest's IP address. The owner cannot hide this without
-  breaking scheduling and accounting. Owner decision Q2 narrows what the guest may see of the owner.
+  breaking scheduling and accounting. Open question Q1 narrows what the guest may see of the owner.
 - **Local-model requests.** The model server process (`llama-server`) holds the plaintext prompt and
   the generated tokens in its memory and KV cache, and the pool's `/infer` proxy sees them. Implication:
   a guest prompt is protected from the owner's UI, logs and other tenants but not from the owner as root,
@@ -278,22 +279,40 @@ ends the guest immediately at the next handshake and kills running jobs, discard
 
 ## 8. Owner-only decisions
 
-- **Q1.** Cluster-wide trust: keep the shared cluster key for beacon discovery only and move all request
-  authority to per-device keys (slice 2)? Options: (a) yes, per-device keys plus a membership record;
-  (b) keep the shared key and add per-pair sealing only; (c) neither, because pools are one person's
-  devices.
-- **Q2.** What may a guest see of the owner? Options: (a) only its own jobs and results; (b) plus the owner's
+Decisions taken on 2026-10-08 are in section 8.1. Two questions are open:
+
+- **Q1.** What may a guest see of the owner? Options: (a) only its own jobs and results; (b) plus the owner's
   device names, model names and free capacity (needed to pick where to send work); (c) plus board
   read access on channels the owner opens to guests.
-- **Q3.** TLS floor for pool links: (a) TLS 1.3 only on pool links (old Android phones, below API 29,
-  would be refused); (b) keep 1.2 with ECDHE-only suites.
-- **Q4.** Which guest level to build: (a) Level 1 only, with the stated limit; (b) Level 1 now and a
-  Level 2 spike on the devices that qualify; (c) no guests, friends bring their own pool.
-- **Q5.** DMs and notes: end-to-end to the addressee's device even though host-side search, summaries
-  and agent recall of them stop working? (a) yes; (b) per-board key only (members read, host cannot);
-  (c) not now.
-- **Q6.** A headless device with no keystore: (a) passphrase mode only (unattended start impossible);
+- **Q2.** A headless device with no keystore: (a) passphrase mode only (unattended start impossible);
   (b) 0600 key file with `status` marking the device "at rest: weak"; (c) refuse to hold secrets.
+
+### 8.1 Decisions (2026-10-08)
+
+**Per-device keys and identities replace the shared cluster key, with per-device revocation.** Decided: each
+device has its own key and identity, recorded in a signed membership record; request authority rests on
+those, and a device can be revoked alone. The cluster key stays, if at all, for beacon discovery only.
+Rejected: keeping the shared key and adding per-pair sealing only, because every paired device would still
+read and forge everything in the cluster and a lost device would mean re-keying all of them; and "pools are one
+person's devices, so neither", because a stolen phone or laptop is the likeliest event.
+
+**TLS 1.3 with mutual authentication and pinned per-device certificates is the floor.** Decided: pool links
+accept nothing below it, so `ML_STACK_FLEET_TLS=off` and `http://` LAN project hosts are removed (not
+flagged) in slice 1. Android devices below API 29 are refused. Rejected: TLS 1.2 with ECDHE-only suites,
+because it keeps a downgrade path for the benefit of old phones only. Order: the key model (slice 2) lands
+before certificate pinning (slice 2b); a pinned certificate has nothing to pin to until a device has its own
+identity.
+
+**Board DMs and notes are end-to-end encrypted to the addressee's device (HPKE).** Decided, accepting that
+host-side search, summaries and agent recall of DMs stop unless the addressee's device indexes them locally.
+Rejected: a per-board key only (the host cannot read, but every member can, which is not a DM), and "not
+now", because the board host is the likeliest compromised party and the DM store is the one that grows.
+
+**Guest privacy: build Level 1 now, Level 2 only if attestation hardware is bought.** Decided: Level 1 (no
+casual visibility to the owner, section 7.3) is built; Level 2 (section 7.4) waits for hardware both sides can
+verify, and slice G5 stays a spike. Rejected: "no guests, friends bring their own pool", because Level 1 is
+buildable now with its limit stated; and building Level 2 on devices that cannot attest, which would claim a
+guarantee nobody can check. The stated limit of Level 1 is that a determined owner can still read a guest's job.
 
 ## 9. Verification this audit did not do
 

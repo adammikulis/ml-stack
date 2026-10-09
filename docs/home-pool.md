@@ -257,7 +257,7 @@ untrusted certificate. The session cookie sets `Secure` only if asked, and sign-
 
 | option | HTTPS name | Phone sees | Breaks or limits |
 |---|---|---|---|
-| option A: the tailnet (`tailscale serve`, a certificate for the tailnet DNS name) | `host.tailnet-name.ts.net`, stable | Valid public-CA certificate, secure context | Needs the Tailscale app on the phone and every device and a Tailscale account; certificate issuance is transparent-log public (the machine name appears in CT logs); the daemon's `host_ok` refuses a Host that is a DNS name and a `serve` proxy arrives as loopback with that Host, so person routes stay refused until section 3 slice 4 changes the credential model [V `ui.py`, `person_session.py`]; the Android companion and invite refuse tailnet IPv4 (below) |
+| option A: the tailnet (`tailscale serve`, a certificate for the tailnet DNS name) | `host.tailnet-name.ts.net`, stable | Valid public-CA certificate, secure context | Needs the Tailscale app on the phone and every device and a Tailscale account; certificate issuance is transparent-log public (the machine name appears in CT logs); the daemon's `host_ok` refuses a Host that is a DNS name and a `serve` proxy arrives as loopback with that Host, so person routes stay refused until section 3 slice 4 changes the credential model [V `ui.py`, `person_session.py`]; the Android companion and invite refused tailnet IPv4 until the fix of 2026-10-08 (below) |
 | option B: a local certificate authority the phone trusts | a name the owner picks, needs local DNS or mDNS | Secure context once the CA is installed | iOS needs the profile installed and enabled as full trust, Android 11+ cannot trust a user CA for apps that do not opt in (the native app pins its own certificate and is unaffected); we would own a CA private key, an attack target and a security surface; the CA install is a person-only device setting; renewals and DNS are ours to run |
 | option C: plain LAN, no HTTPS trust | IP or `.local` | Not secure, or a warning page | No PWA install, no service worker, no web push, no camera in page, no WebAuthn, copy buttons fail; native Android app unaffected because it pins the certificate itself (`app/android` `PinnedHttps.java` [V]); the sign-in passphrase protection rests on the self-signed TLS only |
 
@@ -280,8 +280,8 @@ address is stored only after the certificate matched there.
   `source.is_private`; for `100.64.0.0/10` Python's `ipaddress` returns `is_private == False`
   (checked with `ipaddress.ip_address('100.101.1.2').is_private`), while `fd7a:115c:a1e0::/48` returns True.
   So the Android companion cannot enroll or connect over a tailnet IPv4 address today. A one-line widening
-  to `or in_tailnet(...)` (`fleet/onboard/lan.py:in_tailnet` [V]) fixes both; it is a code change and is not
-  made here.
+  to `or in_tailnet(...)` (`fleet/onboard/lan.py:in_tailnet` [V]) fixes both; made on 2026-10-08 (slice 1
+  now only adds the per-device route display).
 
 **(c) Install and `tailscale serve` are person-only system settings.** We prepare and check; the person
 installs. The pattern is `ml_stack.fleet.autostart`: `prepare` stages unit files and a manifest and installs
@@ -303,7 +303,7 @@ branch landed before the next starts. Dependencies name slice numbers.
 
 | # | Slice | Size | Needs | Builds on |
 |---|---|---|---|---|
-| 1 | Admit tailnet IPv4 in the companion and invite checks; `ml-stack-cluster devices` shows the route per device | S | none | `fleet/onboard/lan.py:in_tailnet`, `fleet/invites.py`, `companion_routes.py`; `tests/test_onboard_tailnet.py` |
+| 1 | `ml-stack-cluster devices` shows the route per device (tailnet IPv4 admission in the companion and invite checks is already fixed) | S | none | `fleet/onboard/lan.py:in_tailnet`, `fleet/invites.py`, `companion_routes.py`; `tests/test_onboard_tailnet.py` |
 | 2 | Device capability block in `Daemon.report()` (test capacity, platform key, checkouts, awake/asleep) and a `Requires` filter on it | S-M | none | `fleet/pool.py`, `fleet/daemon.py:report`, `scripts/testslots.py status` |
 | 3 | Board-fed landing queue: `workspace/landing.py`, `scripts/land submit`, `land watch --once`, `land run --entries` | M | none (single device) | `docs/landing-queue.md`; `scripts/land_*.py`; `workspace/task_integration.py` |
 | 4 | Phone person credential: device-key enrollment from the owner page, named capabilities, expiry, revoke, read-only status and board | M-L | 1 | `fleet/invites.py` `devices` and `_grant`, `companion_routes.py`, `docs/person-delegation.md` |
@@ -337,38 +337,43 @@ slice 9 completes it.
 
 ## 5. Owner-only decisions
 
-Each is one question, options with costs. None has been decided.
+Each open question is one question, options with costs. Decisions already taken are in section 5.1; the questions below are numbered again from 1 and none of them has been decided.
 
 1. **Phone client: PWA first, native Android first, or both?**
-   - PWA: one code base for every phone including iPhone, no store; needs HTTPS trust (question 2), a manifest,
+   - PWA: one code base for every phone including iPhone, no store; needs HTTPS trust (the Tailscale decision, section 5.1), a manifest,
      a service worker, and a phone view. Cost M-L plus the HTTPS setup.
    - Native Android first: the code exists with QR, pinning and biometric; the work is protocol capabilities
      (slices 4 and 8). No iPhone. Physical-device checks outstanding.
    - Both: the capability protocol (slice 4) is shared, the clients are separate. Cost is the sum.
    Prior question to you: which phone does the household use, Android, iPhone or both?
-2. **First transport for the phone: Tailscale, a local CA, or LAN-only?**
-   - Tailscale: valid HTTPS and a stable name with the least certificate machinery; costs a Tailscale account,
-     the app on every device, CT-log visibility of the machine name, and slice 1 plus slice 10. Also reaches the
-     phone from outside the home with no new open port, which is the only remote path the design covers.
-   - Local CA: no third party and works offline; costs a CA key to protect, a per-phone profile install,
-     local naming and renewal, all ours.
-   - LAN-only: nothing to install; no PWA install, push or in-page camera, and the native Android app is the
-     only polished phone client. Cheapest and safest to start.
-3. **Remote access off the home network at all?** No: the pool stays at home, tailnet slices are optional.
-   Yes via Tailscale: the same transport, the ACL is yours to write, and the phone credential's expiry becomes
+2. **Remote access off the home network at all?** No: the pool stays at home, tailnet slices are optional.
+   Yes via Tailscale (the transport decided in section 5.1): the ACL is yours to write, and the phone credential's expiry becomes
    more important. Not via any public port or Funnel in any option.
-4. **Which devices are always-on?** The coordinator device needs to be (it holds the board until the mesh
+3. **Which devices are always-on?** The coordinator device needs to be (it holds the board until the mesh
    exists); each always-on device needs the autostart install (a person action) and a decision on sleep. Cost of
    making a laptop the coordinator: the board vanishes when it sleeps; cost of a desk machine: its power draw.
-5. **May a phone approve things, or only watch and chat?** Approve/deny (slice 8) lets a phone answer the
+4. **May a phone approve things, or only watch and chat?** Approve/deny (slice 8) lets a phone answer the
    structured approval question for `release-main`; the cost is that a lost, unlocked phone holds that power
    until revoked. Options: watch and chat only; approve with a biometric prompt per approval; approve for a
    short window after unlock.
-6. **Push notifications through a third-party service (FCM or Web Push relays), or poll while the app is open?**
+5. **Push notifications through a third-party service (FCM or Web Push relays), or poll while the app is open?**
    Push costs a third party learning that events occur (not their content if we send only a tick); polling costs
    freshness.
-7. **Which device may run tests for which project, and may a runner be reached by an agent without a fresh
+6. **Which device may run tests for which project, and may a runner be reached by an agent without a fresh
    person grant each time?** Per-job grant is safest and slowest; a standing grant per device and project
    (expiring) is the middle; none is not acceptable for slice 5.
-8. **Does the NATS bundle get reviewed as a slice 6 transport, or is the pairwise journal design the only path?**
+7. **Does the NATS bundle get reviewed as a slice 6 transport, or is the pairwise journal design the only path?**
    Review costs a read of the parked branches; skipping costs nothing now and leaves the choice open.
+
+### 5.1 Decisions (2026-10-08)
+
+**Phone and browser HTTPS, and stable names: Tailscale first.** Decided: Tailscale is the first transport for
+the phone (valid HTTPS through `tailscale serve`, a stable tailnet name, reach from outside the home with no
+open port). It is transport only and never authority: a peer being on the tailnet grants nothing, the pinned
+certificate and the person credential still decide, and Funnel is never used. Installing Tailscale and running
+`tailscale serve` are person-only steps; the code prepares and verifies (slice 10) and never installs.
+Rejected: a local CA first, because it costs a CA key to protect, a per-phone profile install and our own
+naming and renewal for a benefit (no third party) the household does not need first; LAN-only first, because
+it leaves no PWA install, push or camera and makes the native Android app the only polished client. Both stay
+supported transports (section 4). Consequence for the order: slices 1 (tailnet IPv4 admitted) and 10 come
+before the PWA (slice 11), whose HTTPS is the tailnet certificate.
