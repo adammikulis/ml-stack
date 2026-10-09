@@ -144,6 +144,30 @@ comparative latency labels: Haiku 5.5 "Fastest", Sonnet 5.5 "Fast", Opus 5.5 "Mo
 (models overview). Anthropic claims Opus 5.5 costs about 40% less than Opus 5 on typical workloads and
 generates output over 30% faster (Opus 5.5 page).
 
+### 2.5 OSWorld 2.1 offline subset: accuracy against cost per attempt (owner's chart, 2026-10-08)
+
+Source: a chart the owner supplied (partial-credit score against cost per attempt in USD, log scale).
+The numbers below were read off the plot and are approximate, to about two points of accuracy and
+the nearest step of cost. It is a computer-use benchmark, not this repository's work.
+
+| model | effort | accuracy | cost per attempt |
+| --- | --- | --- | --- |
+| Haiku 5.5 | low | 42% | $0.07 |
+| Haiku 5.5 | medium | 53% | $0.12 |
+| Haiku 5.5 | high | 61% | $0.18 |
+| Haiku 5.5 | xhigh | 68% | $0.28 |
+| Haiku 5.5 | max | 72% | $0.60 |
+| Sonnet 5.5 | low | 58% | $0.68 |
+| Sonnet 5.5 | medium | 66% | $0.92 |
+| Sonnet 5.5 | high | 73% | $1.35 |
+| Sonnet 5.5 | xhigh | 81% | $2.20 |
+| Sonnet 5.5 | max | 84% | $5.50 |
+| Haiku 4.5 | default | 16% | $1.40 |
+
+Haiku 5.5 is cheaper than Sonnet 5.5 at every accuracy up to about 72%: xhigh beats Sonnet low and
+medium, and max matches Sonnet high at about 45% of its cost. Above 73% only Sonnet reaches.
+`CLAUDE.md`, "Subagent model order", sets the delegation rule from this.
+
 ## 3. What to launch when
 
 Cheapest adequate tier, using the repo order: Haiku 5.5 for read-only lookup and for ratchet-lowering with a named
