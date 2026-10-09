@@ -2609,6 +2609,7 @@ dependencies = [
  "socket2",
  "spake2",
  "tempfile",
+ "windows-sys 0.61.2",
  "x509-parser",
 ]
 

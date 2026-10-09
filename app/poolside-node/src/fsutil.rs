@@ -1,34 +1,23 @@
 //! Files that only their owner can read, written so a crash leaves the old or the new content.
 
-use std::fs::{self, File, OpenOptions};
+use std::fs::OpenOptions;
 use std::io::Write;
-use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::path::Path;
 
 use sha2::{Digest, Sha256};
 
 use crate::error::Result;
 
-/// Create ``path`` and its parents as directories only the owner can enter.
-pub fn private_dir(path: &Path) -> Result<()> {
-    fs::DirBuilder::new().recursive(true).mode(0o700).create(path)?;
-    fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
-    Ok(())
-}
+pub use crate::sys::{private_dir, sync_dir};
 
-/// Flush a directory so a new or renamed entry survives a crash.
-pub fn sync_dir(path: &Path) -> Result<()> {
-    File::open(path)?.sync_all()?;
-    Ok(())
-}
-
-/// Replace ``path`` with ``bytes`` through a synced temporary file, mode 0600.
+/// Replace ``path`` with ``bytes`` through a synced temporary file only the owner can read.
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     let tmp = path.with_extension("tmp");
-    let mut file = OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp)?;
+    let mut file = crate::sys::private_file(OpenOptions::new().write(true).create(true).truncate(true)).open(&tmp)?;
     file.write_all(bytes)?;
     file.sync_all()?;
-    fs::rename(&tmp, path)?;
+    drop(file);
+    crate::sys::replace_file(&tmp, path)?;
     if let Some(parent) = path.parent() {
         sync_dir(parent)?;
     }

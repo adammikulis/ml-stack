@@ -10,6 +10,25 @@ use serde_json::{json, Value};
 use std::path::Path;
 use tempfile::TempDir;
 
+/// A scratch directory whose path is short enough for a Unix socket inside it.
+pub fn short_dir() -> TempDir {
+    #[cfg(unix)]
+    return tempfile::Builder::new().prefix("pn").tempdir_in("/tmp").unwrap();
+    #[cfg(windows)]
+    return tempfile::Builder::new().prefix("pn").tempdir().unwrap();
+}
+
+/// End the process ``pid`` without letting it clean up (kill -9; `taskkill /F` on Windows).
+pub fn kill_hard(pid: u32) {
+    #[cfg(unix)]
+    {
+        // SAFETY: kill -9 of a node process the calling test started.
+        assert_eq!(unsafe { libc::kill(pid as i32, libc::SIGKILL) }, 0);
+    }
+    #[cfg(windows)]
+    assert!(std::process::Command::new("taskkill").args(["/F", "/PID"]).arg(pid.to_string()).output().unwrap().status.success());
+}
+
 pub fn key(seed: u8) -> SigningKey {
     SigningKey::from_bytes(&[seed; 32])
 }

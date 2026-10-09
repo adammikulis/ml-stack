@@ -19,7 +19,7 @@ use serde_json::json;
 fn state_dir(args: &[String]) -> PathBuf {
     match flag(args, "--state") {
         Some(dir) => PathBuf::from(dir),
-        None => PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".poolside").join("node"),
+        None => poolside_node::sys::home_dir().join(".poolside").join("node"),
     }
 }
 

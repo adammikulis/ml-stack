@@ -88,6 +88,21 @@ jobs:
       - run: python -m pip install --upgrade pip build
       - run: python packaging/build.py --bundle
 
+      # The node ships on every platform: built here, started under its supervisor on a scratch
+      # state directory (a named pipe on Windows) and stopped again.
+      - name: the node builds and starts under its supervisor
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          python packaging/build.py --node
+          if ($LASTEXITCODE -ne 0) { throw "the node did not build" }
+          if (-not (Get-ChildItem dist\node\poolside-node-*.exe)) { throw "no poolside-node.exe in dist/node" }
+          python -m pip install pytest pytest-xdist numpy psutil keyring cryptography pyyaml
+          $env:PYTHONPATH = "src"
+          python -m pytest tests/test_node_windows.py -q -n 0 -p no:cacheprovider
+          if ($LASTEXITCODE -ne 0) { throw "the Windows node tests failed" }
+
       # The headless binary is the daemon and page the window runs as its sidecar.
       - name: a browser to drive the page
         run: |

@@ -1,5 +1,6 @@
 //! Whether the process behind a lease is still the process that took it: the pid exists, is
-//! not a zombie, and started when it started at acquire time (a reused pid did not).
+//! not a zombie, and started when it started at acquire time (a reused pid did not). On Windows
+//! the start is the process's creation time and there are no zombies; a start of 0 is unknown.
 
 /// What the system says about a process.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -36,7 +37,12 @@ pub fn inspect(pid: u32) -> Option<Proc> {
     Some(Proc { start: ticks * 1000 / hz, zombie: rest.first() == Some(&"Z") })
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+#[cfg(windows)]
+pub fn inspect(pid: u32) -> Option<Proc> {
+    crate::sys::process_info(pid).map(|(start, _)| Proc { start, zombie: false })
+}
+
+#[cfg(all(unix, not(any(target_os = "macos", target_os = "linux"))))]
 pub fn inspect(pid: u32) -> Option<Proc> {
     // SAFETY: signal 0 only checks that the process exists.
     let found = unsafe { libc::kill(pid as i32, 0) } == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM);
@@ -54,6 +60,6 @@ pub fn is_alive(pid: u32, recorded_start: Option<u64>) -> bool {
     match inspect(pid) {
         None => false,
         Some(p) if p.zombie => false,
-        Some(p) => recorded_start.is_none_or(|s| s == p.start),
+        Some(p) => recorded_start.is_none_or(|s| p.start == 0 || s == p.start),
     }
 }

@@ -43,6 +43,8 @@ class Settings:
     follow releases. Empty is off, which is what a checkout starts as."""
     track_repo: str = ""
     """Where to follow that branch from (default: the public repository)."""
+    test_shards: bool = False
+    """Whether a paired device of this owner may send test shards to run here (docs/test-farm.md)."""
     update_channel: str = "stable"
     fetch_slots: int = 2
     autodownload_models: bool = True
@@ -157,7 +159,10 @@ def apply_preferences(settings: Settings, request: dict[str, Any]) -> str:
         return "Default output tokens must be null or a positive integer."
     if "download_sources" in request and request["download_sources"] not in ("internet", "lan", "both"):
         return "Choose Internet only, LAN only, or Both."
-    values = {key: request[key] for key in ("always_show_advanced", "chat_max_output_tokens", "download_sources")
+    if "test_shards" in request and not isinstance(request["test_shards"], bool):
+        return "Test shards must be on or off."
+    values = {key: request[key] for key in ("always_show_advanced", "chat_max_output_tokens", "download_sources",
+                                            "test_shards")
               if key in request}
     if "context" in request:
         try:

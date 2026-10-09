@@ -35,7 +35,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-from ml_stack import private_path
+from ml_stack import private_path, win32
 
 __all__ = ["Busy", "held_by", "only_one", "release", "rewriting", "take"]
 
@@ -192,6 +192,8 @@ def pid_alive(pid: int) -> bool:
     """Whether a process is running here. Asked, never assumed."""
     if pid <= 0:
         return False
+    if sys.platform == "win32":
+        return win32.process_alive(pid)  # os.kill(pid, 0) is CTRL_C_EVENT there, not a probe
     try:
         os.kill(pid, 0)
     except ProcessLookupError:

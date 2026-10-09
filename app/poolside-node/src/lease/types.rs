@@ -114,7 +114,7 @@ impl Resource {
                 }
                 match kind.as_str() {
                     "port" if !name.parse::<u32>().is_ok_and(|p| (1..65536).contains(&p)) => bad("a port is a number from 1 to 65535"),
-                    "worktree" | "area" if !name.starts_with('/') => bad("a worktree or area claim names an absolute path"),
+                    "worktree" | "area" if !is_absolute(name) => bad("a worktree or area claim names an absolute path"),
                     _ => Ok(()),
                 }
             }
@@ -139,7 +139,20 @@ impl Resource {
     }
 }
 
+/// A Unix path, a drive path (`C:\x`, `C:/x`) or a UNC path (`\\host\x`).
+fn is_absolute(name: &str) -> bool {
+    let b = name.as_bytes();
+    name.starts_with('/') || name.starts_with("\\\\") || (b.len() > 2 && b[0].is_ascii_alphabetic() && b[1] == b':' && matches!(b[2], b'/' | b'\\'))
+}
+
+/// A path with one separator, and no case on Windows drives, so `C:\X` and `c:/x` are one place.
+fn place(path: &str) -> String {
+    let path = path.replace('\\', "/");
+    if path.as_bytes().get(1) == Some(&b':') { path.to_lowercase() } else { path }
+}
+
 fn nested(a: &str, b: &str) -> bool {
+    let (a, b) = (place(a), place(b));
     let (a, b) = (a.trim_end_matches('/'), b.trim_end_matches('/'));
     a == b || a.starts_with(&format!("{b}/")) || b.starts_with(&format!("{a}/"))
 }

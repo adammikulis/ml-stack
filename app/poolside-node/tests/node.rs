@@ -71,14 +71,13 @@ fn every_write_is_stamped_from_the_token_and_a_forged_sender_is_refused() {
 
 #[test]
 fn the_token_is_stored_hashed_in_an_owner_only_file() {
-    use std::os::unix::fs::PermissionsExt;
     let dir = tempdir().unwrap();
     let mut n = node(dir.path());
     let (_, token) = session(&mut n, "demo", "a");
     let file = dir.path().join("tokens.json");
     assert!(!std::fs::read_to_string(&file).unwrap().contains(&token));
-    assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
-    assert_eq!(std::fs::metadata(dir.path()).unwrap().permissions().mode() & 0o777, 0o700);
+    assert!(poolside_node::sys::owner_only(&file));
+    assert!(poolside_node::sys::owner_only(dir.path()));
     drop(n);
     let mut n = node(dir.path());
     assert!(ok(post(&mut n, "demo", &token, "after restart"))["seq"].as_u64().is_some(), "a token survives a restart");

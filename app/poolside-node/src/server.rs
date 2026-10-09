@@ -1,7 +1,5 @@
-//! The Unix socket server: one node per state directory, one thread per connection.
+//! The local API server (a Unix socket, a Windows named pipe): one node per state directory, one thread per connection.
 
-use std::os::unix::fs::PermissionsExt;
-use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
@@ -14,20 +12,20 @@ use crate::error::{Error, Result};
 use crate::fsutil::private_dir;
 use crate::net::Net;
 use crate::node::Node;
-use crate::wire::{my_uid, peer_uid, read_frame, try_lock, write_frame, Lock};
+use crate::sys::{peer, try_lock, Listener, Lock, Principal, Stream};
+use crate::wire::{read_frame, write_frame};
 
-pub const SOCKET: &str = "node.sock";
 pub const INSTANCE_LOCK: &str = "node.lock";
 
-/// The socket path of the node whose state is ``state``.
+/// The socket path (on Windows the pipe name) of the node whose state is ``state``.
 pub fn socket_path(state: &Path) -> PathBuf {
-    state.join(SOCKET)
+    crate::sys::endpoint(state)
 }
 
 pub struct Server {
     node: Arc<Mutex<Node>>,
-    listener: UnixListener,
-    allowed_uid: u32,
+    listener: Listener,
+    allowed: Principal,
     net: Option<Arc<Net>>,
     _instance: Lock,
 }
@@ -38,17 +36,14 @@ impl Server {
         private_dir(state)?;
         let instance = try_lock(&state.join(INSTANCE_LOCK))?.ok_or_else(|| Error::Denied("a node already runs on this state directory".into()))?;
         let node = Node::open(state)?;
-        let path = socket_path(state);
-        let _ = std::fs::remove_file(&path);
-        let listener = UnixListener::bind(&path)?;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
-        listener.set_nonblocking(true)?;
-        Ok(Server { node: Arc::new(Mutex::new(node)), listener, allowed_uid: my_uid(), net: None, _instance: instance })
+        let listener = Listener::bind(state)?;
+        crate::sys::watch_stop(state, node.stop.clone());
+        Ok(Server { node: Arc::new(Mutex::new(node)), listener, allowed: Principal::me()?, net: None, _instance: instance })
     }
 
-    /// Only this user id may connect (tests use another to see the refusal).
-    pub fn allow_only(mut self, uid: u32) -> Server {
-        self.allowed_uid = uid;
+    /// Only this user may connect (tests use another to see the refusal).
+    pub fn allow_only(mut self, who: Principal) -> Server {
+        self.allowed = who;
         self
     }
 
@@ -67,10 +62,10 @@ impl Server {
         let stop = self.node.lock().map_err(|_| Error::Damaged("node poisoned".into()))?.stop.clone();
         while !stop.load(Ordering::SeqCst) {
             match self.listener.accept() {
-                Ok((stream, _)) => {
-                    let (node, uid, net) = (self.node.clone(), self.allowed_uid, self.net.clone());
+                Ok(stream) => {
+                    let (node, who, net) = (self.node.clone(), self.allowed.clone(), self.net.clone());
                     std::thread::spawn(move || {
-                        let _ = connection(stream, &node, uid, net.as_deref());
+                        let _ = connection(stream, &node, &who, net.as_deref());
                     });
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => std::thread::sleep(Duration::from_millis(10)),
@@ -81,10 +76,9 @@ impl Server {
     }
 }
 
-fn connection(mut stream: UnixStream, node: &Mutex<Node>, allowed: u32, net: Option<&Net>) -> Result<()> {
-    stream.set_nonblocking(false)?;
+fn connection(mut stream: Stream, node: &Mutex<Node>, allowed: &Principal, net: Option<&Net>) -> Result<()> {
     stream.set_read_timeout(Some(Duration::from_secs(30)))?;
-    if peer_uid(&stream)? != allowed {
+    if peer(&stream)? != *allowed {
         let refusal = json!({"v": API_VERSION, "id": null, "ok": false, "error": {"code": "denied", "message": "denied: another user"}});
         return write_frame(&mut stream, &refusal);
     }

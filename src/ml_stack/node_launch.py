@@ -17,13 +17,13 @@ import tempfile
 import time
 from pathlib import Path
 
-from ml_stack import jobs, node_binary, node_supervise, runtime
+from ml_stack import jobs, node_binary, node_supervise, runtime, win32
 from ml_stack.command import Group, flag
 from ml_stack.home import state as state_root
 from ml_stack.lock import Busy, held_by, only_one, pid_alive
 from ml_stack.log import say, warn
-from ml_stack.node_health import node_health
-from ml_stack.platform import start_process
+from ml_stack.node_health import node_health, node_stop_event, socket_path
+from ml_stack.platform import is_windows, private_dir, start_process
 
 START_LOCK = "start.lock"
 START_WAIT_S = 20.0
@@ -69,6 +69,7 @@ def ensure_node(state: Path | None = None, *, extra: list[str] | None = None, wa
     if (said := node_health(state)) is not None:
         return said
     state.mkdir(mode=0o700, parents=True, exist_ok=True)
+    private_dir(state)  # on Windows the mode above means nothing: this is the owner-only ACL
     node_supervise.resolve(state)
     deadline = time.monotonic() + wait_s
     try:
@@ -88,14 +89,23 @@ def ensure_node(state: Path | None = None, *, extra: list[str] | None = None, wa
 def stop_node(state: Path, *, wait_s: float = STOP_WAIT_S) -> bool:
     """Ask the node (and its supervisor) to exit and wait for it; True once nothing answers. Safe at any moment: state is on disk."""
     run = node_supervise.running(state)
-    for pid in (run.get("supervisor"), run.get("pid")):
-        if isinstance(pid, int) and pid_alive(pid):
-            os.kill(pid, signal.SIGTERM)
+    _ask_to_stop(state, run)
     if _until(time.monotonic() + wait_s, lambda: {} if node_health(state) is None and not supervised(state) else None) is not None:
         return True
     if isinstance(pid := run.get("pid"), int) and pid_alive(pid):
-        os.kill(pid, signal.SIGKILL)
+        os.kill(pid, getattr(signal, "SIGKILL", signal.SIGTERM))  # on Windows a SIGTERM is TerminateProcess
     return node_health(state) is None
+
+
+def _ask_to_stop(state: Path, run: dict) -> None:
+    """SIGTERM to the supervisor and the node; on Windows, where a detached process has no signal, their two stop events."""
+    if is_windows():
+        win32.signal_event(node_supervise.supervisor_stop_event(state))
+        win32.signal_event(node_stop_event(state))
+        return
+    for pid in (run.get("supervisor"), run.get("pid")):
+        if isinstance(pid, int) and pid_alive(pid):
+            os.kill(pid, signal.SIGTERM)
 
 
 def status(state: Path | None = None) -> dict:
@@ -105,7 +115,7 @@ def status(state: Path | None = None) -> dict:
     mine = said is not None and run.get("pid") == said.get("pid")
     return {"state": str(state), "healthy": said is not None, "supervised": supervised(state),
             "version": said.get("version", "") if said else "", "pid": said.get("pid", 0) if said else 0,
-            "socket": str(state / "node.sock"), "latency_ms": said.get("latency_ms") if said else None,
+            "socket": str(socket_path(state)), "latency_ms": said.get("latency_ms") if said else None,
             "uptime_s": round(time.time() - float(run.get("started_at", 0.0)), 1) if mine else None,
             "binary": run.get("binary", "") if mine else "", "sha256": run.get("sha256", "") if mine else "",
             "pinned": bool(node_supervise.pointer(state))}
@@ -124,11 +134,9 @@ def swap(state: Path | None = None, *, wait_s: float = SWAP_WAIT_S) -> dict:
     for a node that had none, then waits for a node of the new checksum to answer. Returns {action, detail}: current,
     idle (nothing was running; the next start uses the new binary), swapped or failed (the old binary runs again, or
     nothing was changed). One node owns a state directory, so the old node stops and the new one starts on the same socket
-    path; the board is its logs on disk and is read again at start.
+    (pipe) path; the board is its logs on disk and is read again at start.
     """
     state = state or default_state()
-    if not node_binary.supported():
-        return {"action": "none", "detail": "the node has no build for this platform yet"}
     try:
         prefix = runtime.selection_prefix()
         if prefix is None:
@@ -175,8 +183,7 @@ def smoke(prefix: Path, *, wait_s: float = START_WAIT_S) -> dict:
         try:
             said = _until(time.monotonic() + wait_s, lambda: node_health(state))
         finally:
-            child.terminate()
-            child.wait()
+            node_supervise.end(child, state)
     if said is None:
         raise NodeUnavailable(f"{binary} did not answer hello within {wait_s:.0f}s")
     return said
