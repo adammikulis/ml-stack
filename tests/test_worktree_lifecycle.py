@@ -348,8 +348,7 @@ def test_pretool_invalidates_old_cleanup_proof_when_tool_removes_its_final_commi
 
 
 def test_posttool_captures_final_commit_and_cleanup_proves_it_landed(setup, monkeypatch):
-    from ml_stack import harnesshook
-    from ml_stack.workspace import tokens
+    from ml_stack.workspace import notification_reader, tokens
 
     kit = setup
     claim(kit)
@@ -358,8 +357,8 @@ def test_posttool_captures_final_commit_and_cleanup_proves_it_landed(setup, monk
     repo.git(kit.checkout, 'add', 'source.py')
     repo.git(kit.checkout, 'commit', '-m', 'feat: captured final commit')
     commit = repo.git(kit.checkout, 'rev-parse', 'HEAD')
-    monkeypatch.setattr(harnesshook, 'nudge', lambda *_, **__: '')
-    harnesshook.post('worker', harnesshook.Rail('plan-and-go', 'worker', [str(kit.checkout)]))
+    # the post hook's notification reader checkpoints under the authenticated identity
+    notification_reader.checkpoint(kit.base, 'worker')
     assert commit in lifecycle.scopes(kit.base, 'worker')[0]['commits']
     with pytest.raises(Denied, match='commits outside'):
         lifecycle.cleanup(kit.base, 'worker', str(kit.checkout), kit.ws.claims)

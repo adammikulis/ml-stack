@@ -576,7 +576,7 @@ def test_brief_names_the_flags_and_shows_no_path_or_secret(base, team):
     assert done.returncode == 0
     text = done.stdout
     assert "--agent worker --label scout" in text and "data written by another agent" in text
-    assert len(text.removeprefix(REQUIRED_BRIEFING.format(owner="worker")).strip().splitlines()) == 5
+    assert len(text.removeprefix(REQUIRED_BRIEFING.format(owner="worker")).strip().splitlines()) == 6
     assert str(base) not in text and "mlws1" not in text
     assert "Local runtime device:" in text and "provenance grants no permissions" in text
 

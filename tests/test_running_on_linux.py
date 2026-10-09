@@ -60,6 +60,7 @@ def test_the_runner_installs_what_ci_installs():
                     "safetensors"):
         assert package in text, f"the container does not install {package}, and CI does"
     extras = re.search(r'-e "(\.\[[^\]]*\])"', install).group(1)
+    extras = extras.removeprefix('.')  # the container installs the checkout itself, so its list has no path
     assert f"EXTRAS='{extras}'" in text, f"the container does not install {extras}, and CI does"
     assert "spacy download en_core_web_sm" in text and "spacy download en_core_web_sm" in install
 
