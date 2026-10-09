@@ -195,6 +195,8 @@ ml-stack-store = "ml_stack.graph.store_cli:main"
 ml-stack-world = "ml_stack.world.cli:main"
 # documents read section by section into one graph, with what each cost
 ml-stack-ingest = "ml_stack.ingest:main"
+# set this device up to join a pool (firewall rules in one Windows prompt, the node, the join check): ml-stack device-setup --yes
+ml-stack-device-setup = "ml_stack.device_setup:main"
 # the long commands this machine has recorded: what is running, waiting on one, stopping it
 ml-stack-jobs = "ml_stack.jobs:main"
 # the other devices of the pool that take tests (scripts/test TIER --on DEVICE): platform, free slots, last result
