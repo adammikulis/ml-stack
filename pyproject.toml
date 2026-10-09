@@ -46,7 +46,7 @@ privacy = ["presidio-analyzer>=2.2.364", "spacy>=3.8"]
 # presidio over a transformers NER model rather than spaCy's own
 privacy-transformers = ["ml-stack[privacy]", "presidio-analyzer[transformers]>=2.2.364"]
 test = [
-    "ml-stack[agents,memory,store]", "distlib", "pip", "hatchling", "pytest>=9.1.1",
+    "ml-stack[agents,memory,store,arrays]", "distlib", "pip", "hatchling", "pytest>=9.1.1",
     "pytest-xdist>=3.8.0", "pytest-testmon>=2.2", "pyyaml>=6.0", "defusedxml>=0.7",
 ]
 

@@ -1,0 +1,39 @@
+#!/usr/bin/env python3
+"""Say whether this machine can do what you are about to do, and print the command that closes the gap.
+
+    scripts/preflight                  dev: the test suite (what scripts/test checks first)
+    scripts/preflight gate build       several purposes at once
+    scripts/preflight --all            every purpose
+
+Purposes: runtime (the installed library), dev (the test suite), gate (budgets, red-team
+coverage, the command reference, with the pinned ruff and pyright), build (the wheel and the app).
+Exits 0 when nothing is missing and 1 with the exact fix when something is. docs/environment.md
+is the table of what each needs.
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import envcheck  # noqa: E402
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("purposes", nargs="*", help="any of " + ", ".join(envcheck.PURPOSES) + "; default: dev")
+    parser.add_argument("--all", action="store_true", help="check every purpose")
+    args = parser.parse_args(argv)
+    try:
+        status, text = envcheck.report(list(envcheck.PURPOSES) if args.all else args.purposes or ["dev"])
+    except ValueError as exc:
+        parser.error(str(exc))
+    print(text, file=sys.stderr if status else sys.stdout)
+    return status
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

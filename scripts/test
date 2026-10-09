@@ -45,6 +45,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
+import envcheck  # stdlib only: it runs before the imports below, which need pytest and numpy
+
+_status, _text = envcheck.report(["dev", "gate"] if sys.argv[1:2] == ["gate"] else ["dev"])
+if _status:
+    raise SystemExit(_text)
+
 import affected
 import gatescope
 import testhistory
